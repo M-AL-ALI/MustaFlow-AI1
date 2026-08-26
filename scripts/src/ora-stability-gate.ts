@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +27,18 @@ interface CheckResult {
   exitCode?: number | null;
   output?: string;
   why: string;
+}
+
+interface GateCheckpoint {
+  semantics: "ora-stability-gate-checkpoint-v1";
+  profile: Profile;
+  requireClean: boolean;
+  head: string;
+  tree: string;
+  startedAt: string;
+  featureImpact: FeatureImpact;
+  results: CheckResult[];
+  completedCheckIds: string[];
 }
 
 interface OraFeature {
@@ -966,6 +978,8 @@ function parseArgs() {
   let requireClean = false;
   let list = false;
   let failFast = false;
+  let checkpointPath: string | null = null;
+  let maxChecks: number | null = null;
 
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i]!;
@@ -988,12 +1002,34 @@ function parseArgs() {
       reportPath = arg.slice("--report=".length);
     } else if (arg === "--report") {
       reportPath = process.argv[++i] ?? null;
+    } else if (arg.startsWith("--checkpoint=")) {
+      checkpointPath = arg.slice("--checkpoint=".length);
+    } else if (arg === "--checkpoint") {
+      checkpointPath = process.argv[++i] ?? null;
+    } else if (arg.startsWith("--max-checks=")) {
+      maxChecks = parsePositiveInteger("--max-checks", arg.slice("--max-checks=".length));
+    } else if (arg === "--max-checks") {
+      maxChecks = parsePositiveInteger("--max-checks", process.argv[++i]);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
 
-  return { profile, reportPath, requireClean, list, failFast };
+  if (maxChecks !== null && !checkpointPath) {
+    throw new Error("--max-checks requires --checkpoint so completed work cannot be lost");
+  }
+  if (checkpointPath && !requireClean) {
+    throw new Error("--checkpoint requires --require-clean so resumed evidence stays immutable");
+  }
+  return { profile, reportPath, requireClean, list, failFast, checkpointPath, maxChecks };
+}
+
+function parsePositiveInteger(name: string, value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer; got ${value}`);
+  }
+  return parsed;
 }
 
 function parseProfile(value: string | undefined): Profile {
@@ -1053,6 +1089,76 @@ function tail(value: string, maxLines = 80): string {
 function relevantChecks(profile: Profile): GateCheck[] {
   const groups = PROFILE_GROUPS[profile];
   return CHECKS.filter((check) => check.profiles.some((p) => groups.has(p)));
+}
+
+function currentGitIdentity(): { head: string; tree: string } {
+  const head = runShell("git rev-parse HEAD", 20_000);
+  const tree = runShell("git show -s --format=%T HEAD", 20_000);
+  if (head.exitCode !== 0 || tree.exitCode !== 0 || !head.output || !tree.output) {
+    throw new Error("Unable to bind release checkpoint to the current Git identity");
+  }
+  return { head: head.output.trim(), tree: tree.output.trim() };
+}
+
+function checkpointFile(checkpointPath: string): string {
+  if (!path.isAbsolute(checkpointPath)) {
+    throw new Error("Release checkpoint path must be absolute and outside the repository");
+  }
+  const absolute = path.resolve(checkpointPath);
+  const relative = path.relative(repoRoot, absolute);
+  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    throw new Error("Release checkpoint path must be outside the repository");
+  }
+  return absolute;
+}
+
+function writeCheckpoint(checkpointPath: string, checkpoint: GateCheckpoint): void {
+  const absolute = checkpointFile(checkpointPath);
+  const temporary = `${absolute}.tmp`;
+  mkdirSync(path.dirname(absolute), { recursive: true });
+  writeFileSync(temporary, `${JSON.stringify(checkpoint, null, 2)}\n`, "utf-8");
+  renameSync(temporary, absolute);
+}
+
+function loadCheckpoint(input: {
+  checkpointPath: string;
+  profile: Profile;
+  requireClean: boolean;
+  impact: FeatureImpact;
+  checks: GateCheck[];
+}): GateCheckpoint {
+  const absolute = checkpointFile(input.checkpointPath);
+  const parsed = JSON.parse(readFileSync(absolute, "utf-8")) as GateCheckpoint;
+  const identity = currentGitIdentity();
+  if (
+    parsed.semantics !== "ora-stability-gate-checkpoint-v1" ||
+    parsed.profile !== input.profile ||
+    parsed.requireClean !== input.requireClean ||
+    parsed.head !== identity.head ||
+    parsed.tree !== identity.tree
+  ) {
+    throw new Error("Release checkpoint identity does not match this gate invocation");
+  }
+  if (JSON.stringify(parsed.featureImpact) !== JSON.stringify(input.impact)) {
+    throw new Error("Release checkpoint feature impact does not match this gate invocation");
+  }
+  const expectedPrefix = input.checks
+    .slice(0, parsed.completedCheckIds.length)
+    .map((check) => check.id);
+  if (JSON.stringify(parsed.completedCheckIds) !== JSON.stringify(expectedPrefix)) {
+    throw new Error("Release checkpoint completed checks are not an ordered prefix");
+  }
+  const expectedResultCount = 3 + parsed.completedCheckIds.length;
+  if (parsed.results.length !== expectedResultCount) {
+    throw new Error("Release checkpoint result count does not match completed checks");
+  }
+  const expectedResultIds = ["git-commit", "git-clean", "feature-registry", ...expectedPrefix];
+  if (
+    JSON.stringify(parsed.results.map((result) => result.id)) !== JSON.stringify(expectedResultIds)
+  ) {
+    throw new Error("Release checkpoint results do not match completed checks");
+  }
+  return parsed;
 }
 
 function commandResult(check: GateCheck): CheckResult {
@@ -1321,7 +1427,8 @@ function listChecks(profile: Profile) {
 }
 
 async function main() {
-  const { profile, reportPath, requireClean, list, failFast } = parseArgs();
+  const { profile, reportPath, requireClean, list, failFast, checkpointPath, maxChecks } =
+    parseArgs();
   if (list) {
     listChecks(profile);
     return;
@@ -1332,20 +1439,82 @@ async function main() {
   console.log(`[ora-gate] Repo: ${repoRoot}`);
 
   const impact = featureImpact();
-  const results: CheckResult[] = [...gitInfo(requireClean), featureRegistryResult(impact, profile)];
-  for (const result of results) {
-    console.log(`[ora-gate] ${result.status.toUpperCase()} ${result.id}`);
-    if (result.status !== "pass" && result.output) console.log(result.output);
+  const checks = relevantChecks(profile);
+  const checkpointAbsolute = checkpointPath ? checkpointFile(checkpointPath) : null;
+  let checkpoint: GateCheckpoint | null = null;
+  let results: CheckResult[];
+  let completedCheckIds: string[];
+  let reportStartedAt = startedAt;
+
+  if (checkpointPath && checkpointAbsolute && existsSync(checkpointAbsolute)) {
+    checkpoint = loadCheckpoint({ checkpointPath, profile, requireClean, impact, checks });
+    const currentPreflight = gitInfo(requireClean);
+    if (currentPreflight.some((result) => result.status === "fail")) {
+      throw new Error("Release checkpoint resume preflight failed");
+    }
+    results = checkpoint.results;
+    completedCheckIds = checkpoint.completedCheckIds;
+    reportStartedAt = new Date(checkpoint.startedAt);
+    console.log(
+      `[ora-gate] Resume checkpoint: completed=${completedCheckIds.length} remaining=${checks.length - completedCheckIds.length}`,
+    );
+  } else {
+    results = [...gitInfo(requireClean), featureRegistryResult(impact, profile)];
+    completedCheckIds = [];
+    for (const result of results) {
+      console.log(`[ora-gate] ${result.status.toUpperCase()} ${result.id}`);
+      if (result.status !== "pass" && result.output) console.log(result.output);
+    }
+    if (checkpointPath && results.some((result) => result.status !== "pass")) {
+      throw new Error("Release checkpoint preflight must pass before evidence is persisted");
+    }
+    if (checkpointPath) {
+      const identity = currentGitIdentity();
+      checkpoint = {
+        semantics: "ora-stability-gate-checkpoint-v1",
+        profile,
+        requireClean,
+        head: identity.head,
+        tree: identity.tree,
+        startedAt: startedAt.toISOString(),
+        featureImpact: impact,
+        results,
+        completedCheckIds,
+      };
+      writeCheckpoint(checkpointPath, checkpoint);
+    }
   }
 
-  for (const check of relevantChecks(profile)) {
+  const remainingChecks = checks.slice(completedCheckIds.length);
+  const checksThisInvocation =
+    maxChecks === null ? remainingChecks : remainingChecks.slice(0, maxChecks);
+  for (const check of checksThisInvocation) {
     const result = commandResult(check);
     results.push(result);
+    completedCheckIds.push(check.id);
+    if (checkpointPath && checkpoint) {
+      checkpoint = { ...checkpoint, results, completedCheckIds };
+      writeCheckpoint(checkpointPath, checkpoint);
+    }
     if (failFast && result.status === "fail") break;
   }
 
+  const remainingCount = checks.length - completedCheckIds.length;
+  if (remainingCount > 0) {
+    console.log(
+      `[ora-gate] CHECKPOINTED: completed=${completedCheckIds.length} remaining=${remainingCount}; rerun the same command to continue`,
+    );
+    return;
+  }
+
   const finishedAt = new Date();
-  const report = renderReport({ profile, results, startedAt, finishedAt, featureImpact: impact });
+  const report = renderReport({
+    profile,
+    results,
+    startedAt: reportStartedAt,
+    finishedAt,
+    featureImpact: impact,
+  });
   if (reportPath) {
     const absolute = path.resolve(repoRoot, reportPath);
     mkdirSync(path.dirname(absolute), { recursive: true });

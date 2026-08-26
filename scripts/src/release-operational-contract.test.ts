@@ -27,6 +27,19 @@ assert.equal(
 );
 assert.equal(gateSource.includes("--minWorkers"), false);
 
+for (const checkpointGuard of [
+  "ora-stability-gate-checkpoint-v1",
+  "--max-checks requires --checkpoint",
+  "--checkpoint requires --require-clean",
+  "Release checkpoint path must be outside the repository",
+  "Release checkpoint identity does not match this gate invocation",
+  "Release checkpoint completed checks are not an ordered prefix",
+  "[ora-gate] CHECKPOINTED:",
+  "renameSync(temporary, absolute)",
+]) {
+  assert.ok(gateSource.includes(checkpointGuard), `missing checkpoint guard: ${checkpointGuard}`);
+}
+
 const vitestCommands = [...gateSource.matchAll(/command:\s*(?:`([^`]*)`|"([^"]*)")/gs)]
   .map((match) => match[1] ?? match[2] ?? "")
   .filter((command) => command.includes("vitest run"));
