@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   RUFLO_MAX_MESSAGE_BYTES,
   buildSanitizedRufloEnvironment,
@@ -50,7 +51,8 @@ export class RufloMcpProcessClient implements RufloToolTransport {
     const safePaths = resolveRufloSafePaths(this.repositoryRoot);
     const environment = buildSanitizedRufloEnvironment(safePaths);
     const proxyPath = resolve(this.repositoryRoot, "scripts/src/ruflo-mcp-proxy.ts");
-    const child = spawn(process.execPath, ["--import", "tsx", proxyPath], {
+    const tsxLoader = fileURLToPath(import.meta.resolve("tsx"));
+    const child = spawn(process.execPath, ["--import", tsxLoader, proxyPath], {
       cwd: this.repositoryRoot,
       env: environment,
       stdio: ["pipe", "pipe", "pipe"],
