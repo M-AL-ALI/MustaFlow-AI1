@@ -24,6 +24,8 @@ const containerSource = readSource("artifacts/api-server/src/lib/container.ts");
 const previewTabSource = readSource(
   "artifacts/mustaflow/src/pages/projects/components/preview-tab.tsx",
 );
+const projectPageSource = readSource("artifacts/mustaflow/src/pages/projects/[id].tsx");
+const containerRoutesSource = readSource("artifacts/api-server/src/routes/containers.ts");
 const builderSource = readSource("artifacts/api-server/src/lib/builder.ts");
 const agentLoopSource = readSource("artifacts/api-server/src/lib/agent-loop.ts");
 
@@ -223,6 +225,28 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(previewTabSource).toContain(
       "const src = webContainerLive ? wc.previewUrl! : previewSrc",
     );
+  });
+
+  it("does not render a raw agentic preview response before provider liveness is proven", () => {
+    expect(projectPageSource).toContain(
+      'if (st === "running" || st === "starting") void refreshContainerStatus()',
+    );
+    const fallback = previewTabSource.indexOf("if (agenticPreviewUnavailable)");
+    const iframe = previewTabSource.indexOf("<iframe", fallback);
+    expect(fallback).toBeGreaterThan(-1);
+    expect(iframe).toBeGreaterThan(fallback);
+    expect(previewTabSource).toContain('data-testid="agentic-preview-unavailable"');
+  });
+
+  it("checks provider truth before a wake claim and resumes the durable sealed release", () => {
+    const liveCheck = containerRoutesSource.indexOf(
+      "const liveStatus = await getContainerStatus(project.containerId)",
+    );
+    const runningClaim = containerRoutesSource.indexOf('containerStatus: "running"', liveCheck);
+    const sealedResume = containerRoutesSource.indexOf("resumeAcceptedProjectPreview({");
+    expect(liveCheck).toBeGreaterThan(-1);
+    expect(runningClaim).toBeGreaterThan(liveCheck);
+    expect(sealedResume).toBeGreaterThan(runningClaim);
   });
 
   it("test preview uses bounded background installs instead of direct npm install", () => {

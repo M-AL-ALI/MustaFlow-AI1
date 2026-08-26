@@ -1449,10 +1449,47 @@ export class CloudflareRuntimeProvider
         "Accepted sealed release does not target the project preview runtime",
       );
     }
-    const current = await this.zeroGenerationRuntimeDescriptor(
-      release.sourceRuntimeIdentity,
-      input.projectId,
-    );
+    const expectedIdentity = await deriveRuntimeIdentity({
+      namespace: this.config.deploymentNamespace,
+      projectId: input.projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    if (release.sourceRuntimeIdentity !== expectedIdentity) {
+      throw new CloudflareRuntimeControlError(
+        409,
+        "sealed_release_runtime_mismatch",
+        false,
+        "Accepted sealed release does not match the deterministic project preview runtime",
+      );
+    }
+    let current = await this.zeroGenerationRuntimeDescriptorForProject(input.projectId);
+    if (current === null) {
+      const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
+      const ensured = await this.descriptorRequest(
+        locator,
+        "PUT",
+        "",
+        {
+          locator,
+          expectedDeploymentVersion,
+          manifest: release.manifest,
+        },
+        this.operationOptions(
+          "runtime.ensure",
+          RUNTIME_CONTROL_OPERATION_BOUND_MS,
+          "runtime_ensure_timeout",
+          "runtime_ensure_cancelled",
+          input,
+        ),
+      );
+      current = {
+        identity: ensured.identity,
+        manifestRevision: ensured.manifestRevision,
+        status: ensured.status,
+        endpoint: ensured.endpoint,
+      };
+    }
     if (
       current.identity !== release.sourceRuntimeIdentity ||
       current.manifestRevision !== release.manifest.revision

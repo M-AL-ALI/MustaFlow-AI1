@@ -27,6 +27,14 @@ import { subscribeContainerLogs, type ContainerLogPayload } from "../lib/event-b
 import { getContainerSecretMap } from "../lib/container-secrets";
 import { logger } from "../lib/logger";
 import { deriveConfiguredPreviewAccess } from "../lib/preview-access";
+import {
+  resumeAcceptedProjectPreview,
+  SealedPreviewResumeError,
+} from "../lib/sealed-preview-resume";
+import {
+  isZeroSealedGenerationTarget,
+  resolveZeroGenerationTarget,
+} from "../lib/zero-sealed-generation";
 
 const router: IRouter = Router();
 
@@ -115,20 +123,77 @@ router.post(
       return;
     }
 
-    if (project.containerStatus === "running") {
-      res.json({
-        containerId: project.containerId,
-        containerStatus: "running",
-        containerUrl: project.containerUrl,
-        previewAccess: deriveConfiguredPreviewAccess(
+    if (project.containerStatus === "running" && project.containerId) {
+      try {
+        const liveStatus = await getContainerStatus(project.containerId);
+        if (liveStatus === "running") {
+          res.json({
+            containerId: project.containerId,
+            containerStatus: "running",
+            containerUrl: project.containerUrl,
+            previewAccess: deriveConfiguredPreviewAccess(
+              {
+                runtimeId: project.containerId,
+                runtimeStatus: "running",
+              },
+              tenantRuntimeProvider.providerId,
+            ),
+          });
+          return;
+        }
+      } catch (error) {
+        logger.warn({ error, projectId }, "Preview runtime status check failed before wake");
+        res.status(503).json({
+          error: "We could not check the preview just now. Please try again.",
+          code: "preview_status_unavailable",
+        });
+        return;
+      }
+    }
+
+    if (isZeroSealedGenerationTarget(resolveZeroGenerationTarget(process.env))) {
+      try {
+        const runtime = await resumeAcceptedProjectPreview({
+          projectId,
+          provider: tenantRuntimeProvider,
+        });
+        await db
+          .update(projectsTable)
+          .set({
+            containerId: runtime.identity,
+            containerStatus: runtime.status,
+            containerUrl: runtime.endpoint,
+          })
+          .where(eq(projectsTable.id, projectId));
+        res.json({
+          containerId: runtime.identity,
+          containerStatus: runtime.status,
+          containerUrl: runtime.endpoint,
+          previewAccess: deriveConfiguredPreviewAccess(
+            { runtimeId: runtime.identity, runtimeStatus: runtime.status },
+            tenantRuntimeProvider.providerId,
+          ),
+        });
+        return;
+      } catch (error) {
+        const missingRelease =
+          error instanceof SealedPreviewResumeError &&
+          error.code === "sealed_preview_release_missing";
+        req.log.warn(
           {
-            runtimeId: project.containerId,
-            runtimeStatus: "running",
+            projectId,
+            code: error instanceof SealedPreviewResumeError ? error.code : "preview_resume_failed",
           },
-          tenantRuntimeProvider.providerId,
-        ),
-      });
-      return;
+          "Sealed preview resume failed",
+        );
+        res.status(missingRelease ? 409 : 503).json({
+          error: missingRelease
+            ? "This preview needs a fresh build before it can be opened."
+            : "The preview could not be woken yet. Please try again.",
+          code: missingRelease ? "preview_rebuild_required" : "preview_resume_unavailable",
+        });
+        return;
+      }
     }
 
     req.log.info({ projectId }, "Provisioning container");

@@ -59,6 +59,7 @@ import {
   getPreviewAddress,
   getServerPreviewBadge,
   hasServerPreviewAccess,
+  presentAgenticPreviewUnavailable,
 } from "@/lib/preview-access-ui";
 import {
   fetchWorkspaceReadinessReceipt,
@@ -164,6 +165,8 @@ type PreviewTabProps = {
   previewAccess?: PreviewAccess;
   /** Called when user clicks "Wake container" from the preview overlay. */
   onStartContainer?: () => void;
+  /** Re-check provider truth without mutating runtime state. */
+  onRefreshContainerStatus?: () => void;
   /** Most recent build report — used to populate the mobile readiness panel. */
   latestReport?: ReadinessReport | null;
   /** Switch to the Secrets / Tools panel so the user can fill in missing keys. */
@@ -229,6 +232,7 @@ export function PreviewTab({
   containerUrl,
   previewAccess,
   onStartContainer,
+  onRefreshContainerStatus,
   latestReport,
   onJumpToSecrets,
   onNavigateToTestEnv,
@@ -912,6 +916,7 @@ export function PreviewTab({
   // to Vite HMR, while dependency/config changes trigger their precise actions.
   const isAgentic = project.builderMode === "agentic";
   const serverPreviewLive = isAgentic && hasServerPreviewAccess(previewAccess);
+  const agenticPreviewUnavailable = isAgentic && !serverPreviewLive;
   const webContainerLive =
     isReactVite && !serverPreviewLive && wc.status === "ready" && wc.previewUrl != null;
 
@@ -1143,6 +1148,33 @@ export function PreviewTab({
   // at the WC-provided URL (no sandbox needed — WC handles its own isolation).
   // For static-html projects, the existing DB-served preview route is used.
   const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => {
+    if (agenticPreviewUnavailable) {
+      const presentation = presentAgenticPreviewUnavailable(containerStatus);
+      const action = presentation.action === "wake" ? onStartContainer : onRefreshContainerStatus;
+      return (
+        <div
+          className={cn(
+            "flex h-full w-full items-center justify-center bg-[#0d0f17] px-6 text-center",
+            extraClass,
+          )}
+          style={extraStyle}
+          data-testid="agentic-preview-unavailable"
+        >
+          <div className="flex max-w-sm flex-col items-center gap-3">
+            <ServerCrash className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">{presentation.title}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{presentation.message}</p>
+            </div>
+            {presentation.actionLabel && action && (
+              <Button type="button" size="sm" onClick={action}>
+                {presentation.actionLabel}
+              </Button>
+            )}
+          </div>
+        </div>
+      );
+    }
     const src = webContainerLive ? wc.previewUrl! : previewSrc;
     return (
       <iframe

@@ -1441,7 +1441,26 @@ export default function ProjectWorkspacePage() {
   const [containerStarting, setContainerStarting] = useState(false);
   const containerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Seed container state from project data once loaded
+  const refreshContainerStatus = useCallback(async () => {
+    if (!containerLayerConfigured) return null;
+    try {
+      const data = await getContainerStatus(projectId);
+      if (!data) return null;
+      const nextStatus = (data.containerStatus ?? "stopped") as ContainerStatus;
+      setContainerStatus(nextStatus);
+      setContainerUrl(data.containerUrl ?? null);
+      setPreviewAccess(data.previewAccess ?? "unavailable");
+      return nextStatus;
+    } catch {
+      setContainerStatus("error");
+      setContainerUrl(null);
+      setPreviewAccess("unavailable");
+      return null;
+    }
+  }, [containerLayerConfigured, projectId]);
+
+  // Seed the UI from project data, then verify any claimed live state against
+  // provider truth. The stored row is not a liveness receipt.
   useEffect(() => {
     if (!project) return;
     const st = (project as { containerStatus?: string }).containerStatus;
@@ -1449,7 +1468,8 @@ export default function ProjectWorkspacePage() {
     const url = (project as { containerUrl?: string | null }).containerUrl;
     setContainerUrl(url ?? null);
     setPreviewAccess((project as { previewAccess?: PreviewAccess }).previewAccess ?? "unavailable");
-  }, [project]);
+    if (st === "running" || st === "starting") void refreshContainerStatus();
+  }, [project, refreshContainerStatus]);
 
   // Poll container status when starting
   useEffect(() => {
@@ -1457,13 +1477,9 @@ export default function ProjectWorkspacePage() {
     if (containerStatus === "starting" || containerStarting) {
       if (containerPollRef.current) return;
       containerPollRef.current = setInterval(() => {
-        getContainerStatus(projectId)
-          .then((data) => {
-            if (!data) return;
-            const newStatus = (data.containerStatus ?? "stopped") as ContainerStatus;
-            setContainerStatus(newStatus);
-            setContainerUrl(data.containerUrl ?? null);
-            setPreviewAccess(data.previewAccess ?? "unavailable");
+        refreshContainerStatus()
+          .then((newStatus) => {
+            if (!newStatus) return;
             if (newStatus === "running") {
               setContainerStarting(false);
               if (containerPollRef.current) {
@@ -1486,7 +1502,7 @@ export default function ProjectWorkspacePage() {
         containerPollRef.current = null;
       }
     };
-  }, [containerStatus, containerStarting, projectId, containerLayerConfigured]);
+  }, [containerStatus, containerStarting, refreshContainerStatus, containerLayerConfigured]);
 
   const handleStartContainer = useCallback(() => {
     if (!containerLayerConfigured) return;
@@ -5281,6 +5297,9 @@ export default function ProjectWorkspacePage() {
                   containerUrl={containerUrl}
                   previewAccess={previewAccess}
                   onStartContainer={handleStartContainer}
+                  onRefreshContainerStatus={() => {
+                    void refreshContainerStatus();
+                  }}
                   latestReport={(() => {
                     const latest = [...(messages ?? [])].reverse().find((m) => {
                       const p = m.plan as ChatPlanPayload | null | undefined;
