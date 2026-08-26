@@ -66,6 +66,37 @@ export type MemoryReconciliationResult = {
   evidenceIdentitySha256: string;
 };
 
+export const PROJECT_MEMORY_RECONCILIATION_SUMMARY_SEMANTICS =
+  "zero-project-memory-reconciliation-summary-v1" as const;
+export const PROJECT_MEMORY_RECONCILIATION_STATUSES = [
+  "current",
+  "review-needed",
+  "limited",
+  "empty",
+] as const;
+export type ProjectMemoryReconciliationStatus =
+  (typeof PROJECT_MEMORY_RECONCILIATION_STATUSES)[number];
+
+export type ProjectMemoryReconciliationSurfaceSummary = {
+  surfaceId: MemorySurfaceId;
+  status: Exclude<ProjectMemoryReconciliationStatus, "empty">;
+  confirmed: number;
+  stale: number;
+  unverifiable: number;
+};
+
+export type ProjectMemoryReconciliationSummary = {
+  semantics: typeof PROJECT_MEMORY_RECONCILIATION_SUMMARY_SEMANTICS;
+  status: ProjectMemoryReconciliationStatus;
+  observedAt: string | null;
+  counts: {
+    confirmed: number;
+    stale: number;
+    unverifiable: number;
+  };
+  surfaces: readonly ProjectMemoryReconciliationSurfaceSummary[];
+};
+
 export class MemoryReconciliationContractError extends Error {
   readonly name = "MemoryReconciliationContractError";
 
@@ -280,4 +311,54 @@ export function reconcileMemoryRecords(
         `${right.surfaceId}:${right.memoryRecordIdentitySha256}`,
       ),
     );
+}
+
+function statusForCounts(input: {
+  confirmed: number;
+  stale: number;
+  unverifiable: number;
+}): Exclude<ProjectMemoryReconciliationStatus, "empty"> {
+  if (input.stale > 0) return "review-needed";
+  if (input.unverifiable > 0) return "limited";
+  return "current";
+}
+
+/**
+ * Builds the bounded, content-free projection used by Zero and the project UI.
+ * Raw memory text, row identifiers, checks, and evidence hashes stay server-side.
+ */
+export function summarizeProjectMemoryReconciliation(
+  results: readonly MemoryReconciliationResult[],
+): ProjectMemoryReconciliationSummary {
+  const counts = { confirmed: 0, stale: 0, unverifiable: 0 };
+  const bySurface = new Map<MemorySurfaceId, typeof counts>();
+  let observedAt: string | null = null;
+
+  for (const result of results) {
+    counts[result.verdict] += 1;
+    const surfaceCounts = bySurface.get(result.surfaceId) ?? {
+      confirmed: 0,
+      stale: 0,
+      unverifiable: 0,
+    };
+    surfaceCounts[result.verdict] += 1;
+    bySurface.set(result.surfaceId, surfaceCounts);
+    if (observedAt === null || result.observedAt > observedAt) observedAt = result.observedAt;
+  }
+
+  const surfaces = [...bySurface.entries()]
+    .map(([surfaceId, surfaceCounts]) => ({
+      surfaceId,
+      status: statusForCounts(surfaceCounts),
+      ...surfaceCounts,
+    }))
+    .sort((left, right) => left.surfaceId.localeCompare(right.surfaceId));
+
+  return {
+    semantics: PROJECT_MEMORY_RECONCILIATION_SUMMARY_SEMANTICS,
+    status: results.length === 0 ? "empty" : statusForCounts(counts),
+    observedAt,
+    counts,
+    surfaces,
+  };
 }

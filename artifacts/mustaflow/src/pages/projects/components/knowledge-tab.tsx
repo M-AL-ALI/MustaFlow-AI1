@@ -8,7 +8,8 @@ import {
 } from "@workspace/api-client-react";
 import type { KnowledgeEntry, KnowledgeInput } from "@workspace/api-client-react";
 import { useClerkUser } from "@/lib/clerk-safe";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { authFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -620,6 +621,82 @@ function NewEntryForm({
   );
 }
 
+type MemoryHealthResponse = {
+  semantics: "zero-project-memory-reconciliation-summary-v1";
+  status: "current" | "review-needed" | "limited" | "empty";
+  observedAt: string | null;
+  counts: { confirmed: number; stale: number; unverifiable: number };
+};
+
+function MemoryHealthPanel({ projectId }: { projectId: number }) {
+  const query = useQuery({
+    queryKey: ["project-memory-health", projectId],
+    enabled: projectId > 0,
+    queryFn: async (): Promise<MemoryHealthResponse> => {
+      const response = await authFetch(`/api/knowledge/reconciliation?projectId=${projectId}`);
+      if (!response.ok) throw new Error("memory_health_unavailable");
+      return response.json() as Promise<MemoryHealthResponse>;
+    },
+    staleTime: 30_000,
+  });
+
+  const status = query.data?.status;
+  const needsReview = status === "review-needed";
+  const limited = status === "limited" || query.isError;
+  const current = status === "current";
+  const message = needsReview
+    ? "Some saved context no longer matches the app. Zero is withholding it; edit or archive the affected entries below, then check again."
+    : limited
+      ? "Some saved context could not be verified. Zero will rely on the current app instead of uncertain summaries."
+      : status === "empty"
+        ? "There is no saved app context to check yet."
+        : current
+          ? "Saved app context matches the project evidence the platform can verify."
+          : "Checking saved context against the current app…";
+
+  return (
+    <div
+      data-testid="memory-health-panel"
+      className={cn(
+        "rounded-lg border px-3 py-2",
+        needsReview
+          ? "border-yellow-500/30 bg-yellow-500/10"
+          : limited
+            ? "border-border bg-muted/40"
+            : "border-green-500/25 bg-green-500/5",
+      )}
+    >
+      <div className="flex items-start gap-2">
+        {query.isFetching ? (
+          <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+        ) : needsReview || limited ? (
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-yellow-400" />
+        ) : (
+          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-400" />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-medium text-foreground">Memory health</p>
+          <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">{message}</p>
+          {query.data && query.data.status !== "empty" ? (
+            <p className="mt-1 text-[9px] text-muted-foreground/70">
+              {query.data.counts.confirmed} current · {query.data.counts.stale} needs review ·{" "}
+              {query.data.counts.unverifiable} not verifiable
+            </p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={() => void query.refetch()}
+          disabled={query.isFetching}
+          className="shrink-0 text-[10px] font-medium text-primary hover:underline disabled:opacity-50"
+        >
+          Check again
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function KnowledgeTab({ projectId }: { projectId: number }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -776,6 +853,8 @@ export function KnowledgeTab({ projectId }: { projectId: number }) {
             )}
           </div>
         </div>
+
+        <MemoryHealthPanel projectId={projectId} />
 
         {/* Search */}
         <div className="relative">

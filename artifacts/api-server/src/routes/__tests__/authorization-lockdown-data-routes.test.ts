@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   testDatabaseUrl: (process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test"),
   checkProjectAccess: vi.fn(),
   listAccessibleProjectIds: vi.fn(),
+  readProjectMemoryReconciliationSummary: vi.fn(),
   selectedRows: [] as unknown[],
 }));
 
@@ -25,6 +26,9 @@ vi.mock("@workspace/db", async (importOriginal) => {
 });
 
 vi.mock("../../lib/adminAuth", () => ({ isAdminUser: vi.fn(async () => false) }));
+vi.mock("../../lib/memory-reconciliation-reader", () => ({
+  readProjectMemoryReconciliationSummary: mocks.readProjectMemoryReconciliationSummary,
+}));
 vi.mock("../../lib/embeddings", () => ({
   buildEmbeddingInput: vi.fn(() => ""),
   generateEmbedding: vi.fn(async () => null),
@@ -49,6 +53,13 @@ describe("authorization lockdown: data routes reject hostile resource identifier
     mocks.selectedRows = [];
     mocks.checkProjectAccess.mockResolvedValue("not_member");
     mocks.listAccessibleProjectIds.mockResolvedValue([]);
+    mocks.readProjectMemoryReconciliationSummary.mockResolvedValue({
+      semantics: "zero-project-memory-reconciliation-summary-v1",
+      status: "current",
+      observedAt: "2026-08-25T23:00:00.000Z",
+      counts: { confirmed: 2, stale: 0, unverifiable: 0 },
+      surfaces: [],
+    });
   });
 
   it("scopes GET /activity to projects accessible to the requesting user", async () => {
@@ -66,6 +77,35 @@ describe("authorization lockdown: data routes reject hostile resource identifier
 
     expect(response.status).toBe(404);
     expect(mocks.checkProjectAccess).toHaveBeenCalledWith("requesting-user", 991, "viewer");
+  });
+
+  it("denies the memory-health read for another user's project without revealing it", async () => {
+    const router = (await import("../knowledge")).default;
+    const response = await request(appFor(router)).get("/knowledge/reconciliation?projectId=991");
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Project not found" });
+    expect(mocks.checkProjectAccess).toHaveBeenCalledWith("requesting-user", 991, "viewer");
+    expect(mocks.readProjectMemoryReconciliationSummary).not.toHaveBeenCalled();
+  });
+
+  it("returns only the bounded memory-health projection to an authorized collaborator", async () => {
+    mocks.checkProjectAccess.mockResolvedValue("granted");
+    const router = (await import("../knowledge")).default;
+    const response = await request(appFor(router)).get("/knowledge/reconciliation?projectId=52");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      semantics: "zero-project-memory-reconciliation-summary-v1",
+      status: "current",
+      observedAt: "2026-08-25T23:00:00.000Z",
+      counts: { confirmed: 2, stale: 0, unverifiable: 0 },
+      surfaces: [],
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(
+      /memoryRecord|evidenceIdentity|checks|content/,
+    );
+    expect(mocks.readProjectMemoryReconciliationSummary).toHaveBeenCalledWith(52);
   });
 
   it("denies POST /knowledge for another user's project", async () => {
