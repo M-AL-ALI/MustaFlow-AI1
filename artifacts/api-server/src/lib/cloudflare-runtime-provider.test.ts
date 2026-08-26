@@ -403,7 +403,7 @@ describe("CloudflareRuntimeProvider", () => {
     });
   });
 
-  it("fails closed instead of starting a durable runtime with a mismatched manifest", async () => {
+  it("reconciles a stopped durable preview to its accepted sealed release before starting", async () => {
     const projectId = 51;
     const identity = await deriveRuntimeIdentity({
       namespace: "staging",
@@ -411,23 +411,143 @@ describe("CloudflareRuntimeProvider", () => {
       role: "preview",
       slot: "primary",
     });
-    vi.mocked(fetch).mockResolvedValueOnce(
-      json({
+    const release = acceptedRelease(identity);
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    let reconciled = false;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method, path, body });
+      if (path.endsWith("/version") && init?.headers === undefined) {
+        return json({ code: "unauthorized" }, 401);
+      }
+      if (path.endsWith("/version")) {
+        return json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: "staging-v1",
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-layers-v1", "manifest-update-v1"],
+        });
+      }
+      if (method === "GET") {
+        return json({
+          runtime: {
+            ...(runningRuntime(identity, projectId) as { runtime: Record<string, unknown> })
+              .runtime,
+            status: "stopped",
+            manifestRevision: reconciled ? release.manifest.revision : "different-manifest",
+          },
+        });
+      }
+      if (path.endsWith("/preview/primary/manifest")) reconciled = true;
+      return json({
         runtime: {
           ...(runningRuntime(identity, projectId) as { runtime: Record<string, unknown> }).runtime,
-          status: "stopped",
-          manifestRevision: "different-manifest",
+          status: method === "POST" ? "running" : "stopped",
+          manifestRevision: release.manifest.revision,
         },
-      }),
-    );
+      });
+    });
     const provider = new CloudflareRuntimeProvider(config);
     await expect(
       provider.zeroGenerationStartAcceptedSealedRelease({
         projectId,
-        acceptedRelease: acceptedRelease(identity),
+        acceptedRelease: release,
       }),
-    ).rejects.toMatchObject({ code: "sealed_release_runtime_mismatch", retryable: false });
-    expect(fetch).toHaveBeenCalledTimes(1);
+    ).resolves.toMatchObject({ identity, manifestRevision: release.manifest.revision });
+
+    const updateCall = calls.find(
+      (call) => call.method === "PUT" && call.path.endsWith("/preview/primary/manifest"),
+    );
+    expect(updateCall?.body).toMatchObject({
+      expectedManifestRevision: "different-manifest",
+      manifest: release.manifest,
+      restart: "reject-if-running",
+      sealedArtifactSha256: release.sealedArtifactSha256,
+    });
+    const startCall = calls.find(
+      (call) => call.method === "POST" && call.path.endsWith("/preview/primary/start"),
+    );
+    expect(startCall?.body).toMatchObject({
+      artifactRevision: release.artifactRevision,
+      artifactSha256: release.sealedArtifactSha256,
+    });
+  });
+
+  it("atomically restarts a running mismatched preview from its committed accepted release", async () => {
+    const projectId = 52;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const release = acceptedRelease(identity);
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    let reconciled = false;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method, path, body });
+      if (path.endsWith("/version") && init?.headers === undefined) {
+        return json({ code: "unauthorized" }, 401);
+      }
+      if (path.endsWith("/version")) {
+        return json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: "staging-v1",
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-layers-v1", "manifest-update-v1"],
+        });
+      }
+      if (method === "GET") {
+        return json({
+          runtime: {
+            ...(runningRuntime(identity, projectId) as { runtime: Record<string, unknown> })
+              .runtime,
+            manifestRevision: reconciled ? release.manifest.revision : "project-52-runtime-v1",
+          },
+        });
+      }
+      if (path.endsWith("/preview/primary/manifest")) reconciled = true;
+      return json({
+        runtime: {
+          ...(runningRuntime(identity, projectId) as { runtime: Record<string, unknown> }).runtime,
+          manifestRevision: release.manifest.revision,
+        },
+      });
+    });
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(
+      provider.zeroGenerationStartAcceptedSealedRelease({
+        projectId,
+        acceptedRelease: release,
+      }),
+    ).resolves.toMatchObject({
+      identity,
+      manifestRevision: release.manifest.revision,
+      status: "running",
+    });
+
+    const updateCall = calls.find(
+      (call) => call.method === "PUT" && call.path.endsWith("/preview/primary/manifest"),
+    );
+    expect(updateCall?.body).toMatchObject({
+      expectedManifestRevision: "project-52-runtime-v1",
+      manifest: release.manifest,
+      restart: "restart",
+      sealedArtifactSha256: release.sealedArtifactSha256,
+    });
+    expect(
+      calls.filter(
+        (call) => call.method === "POST" && call.path.endsWith("/preview/primary/start"),
+      ),
+    ).toHaveLength(0);
   });
 
   it("accepts an offset-corrected acceptance clock without changing the production default", async () => {

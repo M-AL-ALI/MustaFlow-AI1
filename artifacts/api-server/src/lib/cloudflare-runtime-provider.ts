@@ -1490,10 +1490,7 @@ export class CloudflareRuntimeProvider
         endpoint: ensured.endpoint,
       };
     }
-    if (
-      current.identity !== release.sourceRuntimeIdentity ||
-      current.manifestRevision !== release.manifest.revision
-    ) {
+    if (current.identity !== release.sourceRuntimeIdentity) {
       throw new CloudflareRuntimeControlError(
         409,
         "sealed_release_runtime_mismatch",
@@ -1502,11 +1499,37 @@ export class CloudflareRuntimeProvider
       );
     }
     await this.requireControlFeature("artifact-layers-v1");
+    let reconciledManifest = false;
+    if (current.manifestRevision !== release.manifest.revision) {
+      await this.updateRuntimeManifest(release.sourceRuntimeIdentity, input.projectId, {
+        expectedManifestRevision: current.manifestRevision,
+        manifest: release.manifest,
+        restart: current.status === "running" ? "restart" : "reject-if-running",
+        sealedArtifactSha256: release.sealedArtifactSha256,
+        operationTimeoutMs: input.operationTimeoutMs,
+        signal: input.signal,
+      });
+      current = await this.zeroGenerationRuntimeDescriptorForProject(input.projectId);
+      if (
+        current === null ||
+        current.identity !== release.sourceRuntimeIdentity ||
+        current.manifestRevision !== release.manifest.revision
+      ) {
+        throw new CloudflareRuntimeControlError(
+          409,
+          "sealed_release_runtime_mismatch",
+          false,
+          "Accepted sealed release did not become the durable preview runtime",
+        );
+      }
+      reconciledManifest = true;
+    }
     this.deployedArtifacts.set(release.sourceRuntimeIdentity, {
       artifactRevision: release.artifactRevision,
       sealedArtifactSha256: release.sealedArtifactSha256,
       feature: "artifact-layers-v1",
     });
+    if (reconciledManifest && current.status === "running") return current;
     const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
     const started = await this.descriptorRequest(
       locator,
