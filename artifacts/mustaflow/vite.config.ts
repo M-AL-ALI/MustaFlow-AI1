@@ -64,6 +64,29 @@ const builderIsolationPreviewHeaders = {
   },
 };
 
+function boundedWorkspaceSharedChunk(id: string): string | undefined {
+  const normalized = id.replaceAll("\\", "/");
+
+  // The authenticated workspace imports many small Lucide leaf modules and UI
+  // primitives. Leaving each shared leaf as its own chunk creates a burst large
+  // enough for production artifact serving to rate-limit module requests. These
+  // two acyclic families are safe to coalesce without hand-splitting the larger
+  // vendor graphs called out below.
+  if (
+    normalized.includes("/node_modules/lucide-react/dist/esm/icons/") ||
+    normalized.endsWith("/node_modules/lucide-react/dist/esm/createLucideIcon.js") ||
+    normalized.endsWith("/node_modules/lucide-react/dist/esm/shared/src/utils.js")
+  ) {
+    return "workspace-icons";
+  }
+
+  if (normalized.includes("/artifacts/mustaflow/src/components/ui/")) {
+    return "workspace-ui";
+  }
+
+  return undefined;
+}
+
 export default defineConfig({
   base: basePath,
   plugins: [
@@ -106,13 +129,14 @@ export default defineConfig({
         // Lightweight public entry — no Clerk, smaller initial JS for crawlers.
         public: path.resolve(import.meta.dirname, "public.html"),
       },
-      // NOTE: No custom `manualChunks` here on purpose. Hand-splitting
-      // interdependent vendor libraries (recharts/d3, remark/rehype, xyflow, etc.)
-      // across separate chunks creates circular imports between chunks, which
-      // surface at runtime as "Cannot access 'X' before initialization" (TDZ)
-      // errors that crash the whole app before React mounts. Rollup's default
-      // chunking co-locates circularly-dependent modules and guarantees correct
-      // init order. Route-level code splitting via lazy() imports is unaffected.
+      output: {
+        manualChunks: boundedWorkspaceSharedChunk,
+      },
+      // Keep Rollup's default chunking for interdependent vendor libraries
+      // (recharts/d3, remark/rehype, xyflow, etc.). Hand-splitting those graphs
+      // creates circular cross-chunk imports and TDZ crashes. The function above
+      // coalesces only the workspace's acyclic icon leaves and UI primitives to
+      // bound production request fan-out; route-level lazy chunks stay intact.
     },
   },
   server: {

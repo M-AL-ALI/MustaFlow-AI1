@@ -24,6 +24,7 @@ const DIST_DIR = join(__dirname, "..", "dist", "public");
 
 const BUDGET_BYTES = 2 * 1024 * 1024; // 2 MB — Google's JS rendering limit
 const WARN_BYTES = 1.5 * 1024 * 1024; // 1.5 MB — early warning threshold
+const WORKSPACE_SYNC_IMPORT_BUDGET = 24;
 
 function bytesToKB(n) {
   return (n / 1024).toFixed(1);
@@ -147,6 +148,37 @@ function checkViaManifest() {
   return { totalBytes, details, method: "manifest" };
 }
 
+function checkWorkspaceImportFanout() {
+  const manifestPath = join(DIST_DIR, ".vite", "manifest.json");
+  if (!existsSync(manifestPath)) {
+    console.error("[bundle-size] ✖ FAIL: Vite manifest missing; workspace fan-out is unverified.");
+    process.exit(1);
+  }
+
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+  const candidates = Object.values(manifest).filter(
+    (chunk) => chunk.isDynamicEntry && chunk.name === "_id_",
+  );
+  if (candidates.length !== 1) {
+    console.error(
+      `[bundle-size] ✖ FAIL: expected one project-workspace entry, found ${candidates.length}.`,
+    );
+    process.exit(1);
+  }
+
+  const synchronousImports = candidates[0].imports?.length ?? 0;
+  console.log(
+    `[bundle-size] Project workspace synchronous imports = ${synchronousImports} / budget ${WORKSPACE_SYNC_IMPORT_BUDGET}.`,
+  );
+  if (synchronousImports > WORKSPACE_SYNC_IMPORT_BUDGET) {
+    console.error(
+      `[bundle-size] ✖ FAIL: project workspace would request ${synchronousImports} synchronous chunks. ` +
+        `Coalesce acyclic leaf modules before publishing to avoid production edge throttling.`,
+    );
+    process.exit(1);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -163,6 +195,8 @@ if (!result) {
 if (result.skipped) {
   process.exit(0);
 }
+
+checkWorkspaceImportFanout();
 
 const { totalBytes, details, method } = result;
 
