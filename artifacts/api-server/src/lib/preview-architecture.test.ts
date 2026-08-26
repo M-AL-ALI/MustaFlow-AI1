@@ -238,15 +238,16 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(previewTabSource).toContain('data-testid="agentic-preview-unavailable"');
   });
 
-  it("checks provider truth before a wake claim and resumes the durable sealed release", () => {
+  it("replays the sealed release before a provider-running wake claim", () => {
     const liveCheck = containerRoutesSource.indexOf(
       "const liveStatus = await getContainerStatus(project.containerId)",
     );
     const runningClaim = containerRoutesSource.indexOf('containerStatus: "running"', liveCheck);
     const sealedResume = containerRoutesSource.indexOf("resumeAcceptedProjectPreview({");
+    expect(sealedResume).toBeGreaterThan(-1);
     expect(liveCheck).toBeGreaterThan(-1);
     expect(runningClaim).toBeGreaterThan(liveCheck);
-    expect(sealedResume).toBeGreaterThan(runningClaim);
+    expect(sealedResume).toBeLessThan(liveCheck);
   });
 
   it("test preview uses bounded background installs instead of direct npm install", () => {

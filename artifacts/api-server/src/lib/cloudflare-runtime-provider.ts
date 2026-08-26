@@ -1507,8 +1507,6 @@ export class CloudflareRuntimeProvider
       sealedArtifactSha256: release.sealedArtifactSha256,
       feature: "artifact-layers-v1",
     });
-    if (current.status === "running") return current;
-
     const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
     const started = await this.descriptorRequest(
       locator,
