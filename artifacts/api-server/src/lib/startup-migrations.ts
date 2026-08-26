@@ -129,10 +129,13 @@ export async function applyKnowledgeProvenanceMigration(client: MigrationClient)
       ) THEN
         ALTER TABLE knowledge_provenance_events
           ADD CONSTRAINT knowledge_provenance_events_claim_kind_check
-          CHECK (claim_kind IS NULL OR claim_kind IN ('stated', 'observed', 'inferred'))
-          NOT VALID;
+          CHECK (claim_kind IS NULL OR claim_kind IN ('stated', 'observed', 'inferred'));
       END IF;
     END $$
+  `);
+  await client.query(`
+    ALTER TABLE knowledge_provenance_events
+      VALIDATE CONSTRAINT knowledge_provenance_events_claim_kind_check
   `);
   await client.query(`
     CREATE INDEX IF NOT EXISTS knowledge_provenance_entry_idx

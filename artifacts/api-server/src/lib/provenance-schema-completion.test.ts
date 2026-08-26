@@ -66,7 +66,9 @@ describe("Zero provenance schema completion", () => {
     await run();
     expect(statements).toEqual(first);
     expect(first.join("\n")).not.toMatch(/UPDATE\s+(knowledge|projects|project_versions)/i);
-    expect(first.join("\n")).not.toContain("VALIDATE CONSTRAINT");
+    expect(first.join("\n")).toContain(
+      "VALIDATE CONSTRAINT knowledge_provenance_events_claim_kind_check",
+    );
     expect(first.join("\n")).toContain("CREATE TABLE IF NOT EXISTS zero_prompt_queue_items");
     expect(first.join("\n")).not.toMatch(/(DROP|TRUNCATE)\s/i);
   });
@@ -143,6 +145,10 @@ describe("Zero provenance schema completion", () => {
     expect(migration).toContain(
       "claim_kind IS NULL OR claim_kind IN ('stated', 'observed', 'inferred')",
     );
+    expect(migration).toContain("VALIDATE CONSTRAINT knowledge_provenance_events_claim_kind_check");
+    expect(migration).not.toMatch(
+      /knowledge_provenance_events_claim_kind_check[\s\S]{0,240}NOT VALID/,
+    );
     expect(migration).not.toMatch(/UPDATE\s+knowledge_provenance_events/i);
     expect(schema).toContain('"knowledge-provenance-v2"');
     expect(schema).toContain('claimKind: text("claim_kind")');
@@ -155,7 +161,7 @@ describe("Zero provenance schema completion", () => {
     );
   });
 
-  it("pins deletion effects and prevents startup backfill or constraint validation", () => {
+  it("pins deletion effects and prevents startup backfill", () => {
     const migration = source("./startup-migrations.ts");
     expect(migration).toContain("knowledge_provenance_events_entry_fk");
     expect(migration).toContain("knowledge_provenance_events_project_fk");
@@ -168,6 +174,6 @@ describe("Zero provenance schema completion", () => {
     expect(source("../../../../lib/db/src/schema/knowledge-provenance-events.ts")).toContain(
       'onDelete: "set null"',
     );
-    expect(migration).not.toContain("VALIDATE CONSTRAINT");
+    expect(migration).not.toMatch(/UPDATE\s+knowledge_provenance_events/i);
   });
 });
