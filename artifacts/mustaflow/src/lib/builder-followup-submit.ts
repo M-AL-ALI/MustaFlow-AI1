@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/api-fetch";
+import { isZeroProjectChoiceCaptureOnlyMessage } from "@workspace/ora-contracts";
 
 export type BuilderComposerIntent =
   | "answer"
@@ -20,6 +21,41 @@ export type BuilderComposerIntent =
 export type BuilderReceiptIntent = "answer" | "clarify" | "plan" | "mutate" | "observe";
 
 type LocalComposerIntent = "converse" | "plan" | "build" | null;
+
+const BUILDER_UPGRADE_KEYWORDS = [
+  "database",
+  "postgres",
+  "postgresql",
+  "mysql",
+  "sqlite",
+  "mongodb",
+  "redis",
+  "api",
+  "rest api",
+  "graphql",
+  "backend",
+  "server",
+  "express",
+  "fastapi",
+  "django",
+  "flask",
+  "node.js",
+  "nodejs",
+  "auth",
+  "authentication",
+  "login",
+  "sign in",
+  "user account",
+  "jwt",
+  "oauth",
+  "session",
+  "endpoint",
+  "crud",
+  "migration",
+  "drizzle",
+  "prisma",
+  "sequelize",
+] as const;
 
 export type BuilderSendIntentOptions = {
   planMode?: true;
@@ -173,16 +209,19 @@ export function mapIntentToSendOptions({
  * the task-creating messages mutation.
  */
 export function resolveBuilderComposerIntent({
+  messageText,
   activeIntent,
   localIntent,
   hasCompletedTask,
   routingAgentIdentity,
 }: {
+  messageText: string;
   activeIntent: BuilderComposerIntent | null;
   localIntent: LocalComposerIntent;
   hasCompletedTask: boolean;
   routingAgentIdentity?: string | null;
 }): BuilderReceiptIntent | undefined {
+  if (isZeroProjectChoiceCaptureOnlyMessage(messageText)) return "answer";
   if (activeIntent) return toBuilderReceiptIntent(activeIntent);
   if (localIntent === "converse" || localIntent === "plan" || localIntent === "build") {
     return toBuilderReceiptIntent(localIntent);
@@ -190,4 +229,18 @@ export function resolveBuilderComposerIntent({
   void hasCompletedTask;
   void routingAgentIdentity;
   return undefined;
+}
+
+/** A backend upgrade is relevant only to a mutation the user actually requested. */
+export function shouldShowBuilderUpgradeNudge({
+  messageText,
+  intent,
+}: {
+  messageText: string;
+  intent: BuilderComposerIntent | undefined;
+}): boolean {
+  if (toBuilderReceiptIntent(intent ?? "converse") !== "mutate") return false;
+  if (isZeroProjectChoiceCaptureOnlyMessage(messageText)) return false;
+  const lower = messageText.toLowerCase();
+  return BUILDER_UPGRADE_KEYWORDS.some((keyword) => lower.includes(keyword));
 }

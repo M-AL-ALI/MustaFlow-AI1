@@ -23,6 +23,7 @@ import type {
   ZeroGeneratedDependencyPlan,
   ZeroGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
+import { isZeroProjectChoiceCaptureOnlyMessage } from "@workspace/ora-contracts";
 import {
   isZeroSealedGenerationTarget,
   prepareZeroSealedNodeSource,
@@ -7904,6 +7905,15 @@ function fastClassify(
 ): IntentResult | null {
   const trimmed = userPrompt.trim();
   if (!trimmed) return null;
+
+  if (isZeroProjectChoiceCaptureOnlyMessage(trimmed)) {
+    return {
+      intent: "answer",
+      legacyIntent: "converse",
+      confidence: 1,
+      decisionSource: "deterministic_rule",
+    };
+  }
 
   const normalized = trimmed.toLowerCase().replace(/[.!?…]+$/g, "");
   if (SHORT_REACTIONS.has(normalized)) {

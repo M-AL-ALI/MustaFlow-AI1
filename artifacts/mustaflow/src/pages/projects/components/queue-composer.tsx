@@ -1229,6 +1229,7 @@ export function QueueComposer({
       // Pass the active developer intent (persisted badge) first; fall back to
       // client-detected intent so the server skips the classifier when possible.
       const detectedIntent: Parameters<typeof onSingleSend>[1] = resolveBuilderComposerIntent({
+        messageText: text,
         activeIntent: activeIntent as BuilderComposerIntent | null,
         localIntent: clientIntent,
         hasCompletedTask,

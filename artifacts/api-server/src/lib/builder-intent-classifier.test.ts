@@ -43,4 +43,19 @@ describe("zero closed intent classifier", () => {
       decisionSource: "classifier_fallback",
     });
   });
+
+  it("keeps an explicit project-choice capture out of the mutation path without a model call", async () => {
+    const result = await runIntentClassifierPipeline(
+      "Save this as a project decision: keep the site static. Save this as a project rejection: never add a database or authentication unless I explicitly reverse it. Do not build or change files.",
+      [],
+      true,
+    );
+    expect(result).toMatchObject({
+      intent: "answer",
+      legacyIntent: "converse",
+      confidence: 1,
+      decisionSource: "deterministic_rule",
+    });
+    expect(createChatCompletion).not.toHaveBeenCalled();
+  });
 });

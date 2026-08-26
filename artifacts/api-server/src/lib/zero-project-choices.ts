@@ -1,3 +1,5 @@
+import { parseZeroProjectChoiceCaptures } from "@workspace/ora-contracts";
+
 export const ZERO_PROJECT_CHOICES_SEMANTICS = "zero-project-choices-v1" as const;
 
 export const ZERO_PROJECT_CHOICE_KINDS = ["accepted-decision", "explicit-rejection"] as const;
@@ -38,20 +40,6 @@ export type ZeroProjectChoiceInput = {
 
 const MAX_CHOICES = 12;
 const MAX_CHOICE_TEXT = 800;
-
-const TAGGED_MESSAGE_PATTERNS: ReadonlyArray<{
-  kind: ZeroProjectChoiceKind;
-  pattern: RegExp;
-}> = [
-  {
-    kind: "accepted-decision",
-    pattern: /save this as (?:a )?project decision\s*:\s*([^\n.!?]+[.!?]?)/giu,
-  },
-  {
-    kind: "explicit-rejection",
-    pattern: /save this as (?:a )?project rejection\s*:\s*([^\n.!?]+[.!?]?)/giu,
-  },
-];
 
 function normalizeChoiceText(value: string): string | null {
   const normalized = value
@@ -100,18 +88,15 @@ export function buildZeroProjectChoiceProfile(
   }
 
   for (const message of input.userMessages ?? []) {
-    for (const { kind, pattern } of TAGGED_MESSAGE_PATTERNS) {
-      pattern.lastIndex = 0;
-      for (const match of message.content.matchAll(pattern)) {
-        const text = normalizeChoiceText(match[1] ?? "");
-        if (text) {
-          candidates.push({
-            kind,
-            text,
-            source: { kind: "user-message", id: message.id },
-            occurredAt: message.occurredAt,
-          });
-        }
+    for (const capture of parseZeroProjectChoiceCaptures(message.content)) {
+      const text = normalizeChoiceText(capture.text);
+      if (text) {
+        candidates.push({
+          kind: capture.kind === "decision" ? "accepted-decision" : "explicit-rejection",
+          text,
+          source: { kind: "user-message", id: message.id },
+          occurredAt: message.occurredAt,
+        });
       }
     }
   }

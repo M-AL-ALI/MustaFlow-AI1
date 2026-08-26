@@ -103,6 +103,7 @@ import {
 import { autoCommitProjectFiles } from "./github";
 import { staleDraftCandidate } from "./testing-invalidation";
 import { ProjectFileVersionHandoffError, writeProjectFilesAtomically } from "./project-file-writer";
+import { restoreInterruptedProjectFiles } from "./interrupted-project-file-restore";
 import { emitTaskEventBounded } from "./task-event-emission";
 import { healthCheckPathForStack } from "./health-inject";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
@@ -2252,6 +2253,13 @@ export async function runJob(input: JobInput): Promise<void> {
   let stopContainerKeepalive: (() => void) | null = null;
   // Machine ID whose autostop was patched to "off" — restored in the outer finally.
   let keepaliveMachineId: string | null = null;
+  // A user interruption must not strand a partially accepted file set. Capture
+  // the artifact snapshot immediately before the first durable file commit and
+  // keep an honest list of paths until the run reaches its terminal.
+  let interruptedPreRunFiles: BuilderFile[] | null = null;
+  let interruptedMutationCommitted = false;
+  let interruptedRuntimeId: string | null = null;
+  const interruptedChangedPaths = new Set<string>();
   // Job-level heartbeat timer — runs every 30 s for the entire job duration.
   // The per-step heartbeat (step%5===1 in agent-loop.ts) only fires when AI tool
   // steps complete. Long-blocking operations — AI calls, npm install, container
@@ -2994,6 +3002,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       if (kind === "build") {
+        interruptedPreRunFiles = await loadFiles(projectId);
+        interruptedRuntimeId =
+          isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+            ? null
+            : project.containerId;
         await emitEvent(
           taskId,
           "narration",
@@ -3200,6 +3213,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     : (project.containerUrl ?? null),
                   e2eEnabled: project.e2eEnabled ?? true,
                   onEvent: async (t, m) => emitEvent(taskId, t, m),
+                  onFileMutation: (path) => interruptedChangedPaths.add(path),
                   signal,
                 });
                 return loopResultToBuildResult(loopRes, userPrompt, project.name);
@@ -3489,6 +3503,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           const filesWithHealth = isZeroSealedGenerationTarget(zeroGenerationTarget)
             ? result.files
             : injectHealthEndpoint(result.files, project.stack ?? null);
+          for (const file of interruptedPreRunFiles) interruptedChangedPaths.add(file.path);
+          for (const file of filesWithHealth) interruptedChangedPaths.add(file.path);
           await emitZeroRunLoopPhase(
             (eventType, message) => emitEvent(taskId, eventType, message),
             "project_files_commit",
@@ -3499,6 +3515,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             files: filesWithHealth,
             replaceAll: true,
           });
+          interruptedMutationCommitted = true;
           void staleDraftCandidate(projectId, "build").catch(() => {});
         }
         diffSummary = computeBuildDiff(result.files);
@@ -3535,6 +3552,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         );
         await emitEvent(taskId, "reading_files", "Reading current project files…");
         const existingFiles = await loadFiles(projectId);
+        interruptedPreRunFiles = existingFiles.map((file) => ({ ...file }));
+        interruptedRuntimeId =
+          isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
+            ? null
+            : project.containerId;
         if (agentIdentity === "task") existingFilesSnapshot = existingFiles;
         await emitEvent(
           taskId,
@@ -3769,6 +3791,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                     : (project.containerUrl ?? null),
                   e2eEnabled: project.e2eEnabled ?? true,
                   onEvent: async (t, m) => emitEvent(taskId, t, m),
+                  onFileMutation: (path) => interruptedChangedPaths.add(path),
                   signal,
                 });
                 return loopResultToRefineResult(loopRes, userPrompt);
@@ -4089,6 +4112,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   : (project.containerUrl ?? null),
                 e2eEnabled: project.e2eEnabled ?? true,
                 onEvent: async (t, m) => emitEvent(taskId, t, m),
+                onFileMutation: (path) => interruptedChangedPaths.add(path),
                 signal,
               });
               const retryResult = loopResultToRefineResult(retryLoopRes, stricterPrompt);
@@ -4300,6 +4324,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             replaceAll: false,
             removedPaths: result.removedPaths,
           });
+          interruptedMutationCommitted = true;
+          for (const file of result.changedFiles) interruptedChangedPaths.add(file.path);
+          for (const path of result.removedPaths) interruptedChangedPaths.add(path);
           void staleDraftCandidate(projectId, "refine").catch(() => {});
         }
         if (agentIdentity === "task") {
@@ -4434,6 +4461,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 : (project.containerUrl ?? null),
               e2eEnabled: false,
               onEvent: async (t: string, m: string) => emitEvent(taskId, t, m),
+              onFileMutation: (path: string) => interruptedChangedPaths.add(path),
               signal,
             });
           } catch (repairErr) {
@@ -4457,6 +4485,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 files: repairLoopResult.changedFiles,
                 replaceAll: false,
               });
+              interruptedMutationCommitted = true;
+              for (const file of repairLoopResult.changedFiles) {
+                interruptedChangedPaths.add(file.path);
+              }
               repairChangedPaths.push(...repairLoopResult.changedFiles.map((f) => f.path));
               filesToSmellScan = repairLoopResult.changedFiles;
               for (const f of repairLoopResult.changedFiles) {
@@ -5483,6 +5515,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 previewUrl: project.containerUrl ?? null,
                 e2eEnabled: false,
                 onEvent: async (type, message) => emitEvent(taskId, type, message),
+                onFileMutation: (path) => interruptedChangedPaths.add(path),
                 signal,
               });
             } catch (repairError) {
@@ -5526,6 +5559,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   replaceAll: false,
                   removedPaths: appliedRemovedPaths,
                 });
+                interruptedMutationCommitted = true;
+                for (const file of appliedChangedFiles) interruptedChangedPaths.add(file.path);
+                for (const path of appliedRemovedPaths) interruptedChangedPaths.add(path);
                 for (const file of appliedChangedFiles) {
                   await emitEvent(taskId, "editing_files", `Repairing ${file.path}`, file.path);
                 }
@@ -7018,6 +7054,55 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         err instanceof Error &&
         (err.message === "Build cancelled" || abortController.signal.aborted)
       ) {
+        const restore = await restoreInterruptedProjectFiles(
+          {
+            projectId,
+            preRunFiles: interruptedPreRunFiles,
+            databaseCommitted: interruptedMutationCommitted,
+            runtimeMayHaveMutated:
+              interruptedRuntimeId !== null && interruptedChangedPaths.size > 0,
+            changedPaths: [...interruptedChangedPaths],
+          },
+          {
+            restoreRuntime: interruptedRuntimeId
+              ? async ({ files, removedPaths }) => {
+                  const { execInContainer, syncFilesToContainer } =
+                    await import("./tenant-runtime");
+                  for (const path of removedPaths) {
+                    const removal = await execInContainer(
+                      interruptedRuntimeId!,
+                      ["rm", "-f", "--", `/app/${path}`],
+                      projectId,
+                    );
+                    if (!removal.ok) throw new Error("RuntimeFileDeleteError");
+                  }
+                  await syncFilesToContainer(interruptedRuntimeId!, projectId, [...files], true);
+                }
+              : undefined,
+          },
+        );
+        if (restore.restored) {
+          await emitEvent(
+            taskId,
+            "narration",
+            "The interrupted run was rolled back to the exact file set from before it started.",
+          );
+        } else if (restore.remainingChangedPaths.length > 0) {
+          logger.error(
+            {
+              taskId,
+              projectId,
+              errorClass: restore.errorClass ?? "RestoreNotAttempted",
+              changedPathCount: restore.remainingChangedPaths.length,
+            },
+            "Interrupted project-file restore did not converge",
+          );
+          await emitEvent(
+            taskId,
+            "narration",
+            "The run stopped, but its file rollback could not be confirmed. Review the listed changes before continuing.",
+          );
+        }
         // Canceled work still consumed provider tokens. Persist it with an
         // explicit status so calibration can include or filter it honestly.
         const { flushBuildTokenTelemetry } = await import("./ai-providers");
@@ -7035,7 +7120,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           intent: "mutate",
           intentReceiptId: terminalIntentReceiptId,
           cause: "user_stop",
-          evidence: { lastPhase: "agent_loop", changedPaths: [] },
+          evidence: {
+            lastPhase: "agent_loop",
+            changedPaths: restore.remainingChangedPaths,
+          },
           allowedStatuses: ["building", "planning"],
           taskUpdate: { creditsReserved: null, tokenCount: canceledTokenCount },
         });
