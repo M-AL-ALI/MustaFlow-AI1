@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   liveError: false,
   sealedTarget: true,
   resumeCalls: 0,
+  resumeError: null as Error | null,
+  warning: null as unknown,
 }));
 
 const tables = vi.hoisted(() => ({
@@ -91,6 +93,7 @@ vi.mock("../lib/sealed-preview-resume", () => ({
   },
   resumeAcceptedProjectPreview: vi.fn(async () => {
     state.resumeCalls += 1;
+    if (state.resumeError !== null) throw state.resumeError;
     return {
       identity: "runtime-52",
       manifestRevision: "manifest-52",
@@ -114,6 +117,7 @@ vi.mock("../lib/preview-access", () => ({
 }));
 
 import containersRouter from "./containers";
+import { CloudflareRuntimeControlError } from "../lib/cloudflare-runtime-provider";
 
 describe("container status read purity", () => {
   beforeEach(() => {
@@ -122,6 +126,8 @@ describe("container status read purity", () => {
     state.liveError = false;
     state.sealedTarget = true;
     state.resumeCalls = 0;
+    state.resumeError = null;
+    state.warning = null;
   });
 
   it("reports the observed runtime state without writing project state", async () => {
@@ -182,6 +188,47 @@ describe("container status read purity", () => {
     expect(response.body.containerStatus).toBe("running");
     expect(state.resumeCalls).toBe(1);
     expect(state.updateCalls).toBe(1);
+  });
+
+  it("records only sanitized provider evidence when a sealed-preview wake fails", async () => {
+    state.resumeError = new CloudflareRuntimeControlError(
+      409,
+      "artifact_not_committed",
+      false,
+      "provider response body must not be logged",
+    );
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.log = {
+        warn: (details: unknown) => {
+          state.warning = details;
+        },
+      } as never;
+      next();
+    });
+    app.use(containersRouter);
+
+    const response = await request(app).post("/projects/52/container/start");
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      error: "The preview could not be woken yet. Please try again.",
+      code: "preview_resume_unavailable",
+    });
+    expect(state.warning).toEqual({
+      projectId: 52,
+      code: "preview_resume_failed",
+      providerFailure: {
+        class: "CloudflareRuntimeControlError",
+        status: 409,
+        code: "artifact_not_committed",
+        retryable: false,
+        transportCause: null,
+      },
+    });
+    expect(JSON.stringify(state.warning)).not.toContain("provider response body");
+    expect(state.updateCalls).toBe(0);
   });
 
   it("does not mutate after an ambiguous provider status failure", async () => {
