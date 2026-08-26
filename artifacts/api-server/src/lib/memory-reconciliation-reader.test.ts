@@ -10,7 +10,9 @@ vi.hoisted(() => {
 
 import {
   createDatabaseMemoryReconciliationObservationSource,
+  MEMORY_RECONCILIATION_ROW_LIMIT,
   readProjectMemoryReconciliation,
+  readProjectMemoryReconciliationSummary,
   reconcileProjectMemorySnapshot,
   type ProjectMemoryReconciliationSnapshot,
 } from "./memory-reconciliation-reader";
@@ -283,15 +285,22 @@ describe("Zero memory reconciliation reader", () => {
       fixture.provenanceEvents,
     ];
     const predicates: unknown[] = [];
+    const limits: number[] = [];
     const select = vi.fn(() => {
       const result = rows.shift() ?? [];
+      const query = {
+        where: vi.fn((predicate: unknown) => {
+          predicates.push(predicate);
+          return query;
+        }),
+        orderBy: vi.fn(() => query),
+        limit: vi.fn((limit: number) => {
+          limits.push(limit);
+          return Promise.resolve(result.slice(0, limit));
+        }),
+      };
       return {
-        from: vi.fn(() => ({
-          where: vi.fn((predicate: unknown) => {
-            predicates.push(predicate);
-            return Promise.resolve(result);
-          }),
-        })),
+        from: vi.fn(() => query),
       };
     });
     const writes = {
@@ -309,6 +318,76 @@ describe("Zero memory reconciliation reader", () => {
     expect(read.project?.id).toBe(52);
     expect(select).toHaveBeenCalledTimes(6);
     expect(predicates).toHaveLength(6);
+    expect(limits).toEqual([
+      1,
+      MEMORY_RECONCILIATION_ROW_LIMIT + 1,
+      MEMORY_RECONCILIATION_ROW_LIMIT + 1,
+      MEMORY_RECONCILIATION_ROW_LIMIT + 1,
+      MEMORY_RECONCILIATION_ROW_LIMIT + 1,
+      MEMORY_RECONCILIATION_ROW_LIMIT + 1,
+    ]);
+    expect(read.coverage).toEqual({
+      complete: true,
+      rowLimit: MEMORY_RECONCILIATION_ROW_LIMIT,
+      limitedSurfaces: [],
+    });
+    for (const write of Object.values(writes)) expect(write).not.toHaveBeenCalled();
+  });
+
+  it("caps database reads and fails closed rather than calling partial coverage complete", async () => {
+    const fixture = snapshot();
+    const messages = Array.from({ length: MEMORY_RECONCILIATION_ROW_LIMIT + 1 }, (_, index) => ({
+      ...fixture.messages[0]!,
+      id: index + 1,
+    }));
+    const rows = [
+      [{ ...fixture.project, observedAt }],
+      messages,
+      fixture.tasks,
+      fixture.versions,
+      fixture.knowledgeEntries,
+      fixture.provenanceEvents,
+    ];
+    const select = vi.fn(() => {
+      const result = rows.shift() ?? [];
+      const query = {
+        where: vi.fn(() => query),
+        orderBy: vi.fn(() => query),
+        limit: vi.fn((limit: number) => Promise.resolve(result.slice(0, limit))),
+      };
+      return { from: vi.fn(() => query) };
+    });
+    const writes = {
+      insert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      transaction: vi.fn(),
+      execute: vi.fn(),
+    };
+    const source = createDatabaseMemoryReconciliationObservationSource({
+      select,
+      ...writes,
+    } as never);
+
+    const summary = await readProjectMemoryReconciliationSummary(52, source);
+
+    expect(summary.status).toBe("limited");
+    expect(summary.coverage).toEqual({
+      complete: false,
+      rowLimit: MEMORY_RECONCILIATION_ROW_LIMIT,
+      limitedSurfaces: [
+        "chat-messages",
+        "conversation-summaries",
+        "knowledge-entries",
+        "plan-snapshots",
+        "project-summary",
+        "tasks",
+      ],
+    });
+    expect(summary.surfaces.find(({ surfaceId }) => surfaceId === "chat-messages")).toMatchObject({
+      status: "limited",
+      unverifiable: MEMORY_RECONCILIATION_ROW_LIMIT,
+    });
     for (const write of Object.values(writes)) expect(write).not.toHaveBeenCalled();
   });
 

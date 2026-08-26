@@ -9,8 +9,8 @@ import {
   projectVersionsTable,
   type ProjectSummaryProvenance,
 } from "@workspace/db";
-import { eq, sql } from "drizzle-orm";
-import { buildMemoryTruthRecord, type MemorySurfaceId } from "./memory-truth";
+import { desc, eq, sql } from "drizzle-orm";
+import { buildMemoryTruthRecord, MEMORY_SURFACE_IDS, type MemorySurfaceId } from "./memory-truth";
 import {
   reconcileMemoryRecords,
   summarizeProjectMemoryReconciliation,
@@ -86,6 +86,11 @@ export type ProjectMemoryReconciliationSnapshot = {
   versions: readonly VersionRow[];
   knowledgeEntries: readonly KnowledgeRow[];
   provenanceEvents: readonly ProvenanceRow[];
+  coverage?: {
+    complete: boolean;
+    rowLimit: number;
+    limitedSurfaces: readonly MemorySurfaceId[];
+  };
 };
 
 export type MemoryReconciliationObservationSource = {
@@ -93,6 +98,15 @@ export type MemoryReconciliationObservationSource = {
 };
 
 type MemorySelectDatabase = Pick<typeof db, "select">;
+
+export const MEMORY_RECONCILIATION_ROW_LIMIT = 500;
+
+function boundedRows<T>(rows: readonly T[]): { rows: readonly T[]; limited: boolean } {
+  return {
+    rows: rows.slice(0, MEMORY_RECONCILIATION_ROW_LIMIT),
+    limited: rows.length > MEMORY_RECONCILIATION_ROW_LIMIT,
+  };
+}
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -129,7 +143,8 @@ export function createDatabaseMemoryReconciliationObservationSource(
               observedAt: sql<Date>`CURRENT_TIMESTAMP`,
             })
             .from(projectsTable)
-            .where(eq(projectsTable.id, projectId)),
+            .where(eq(projectsTable.id, projectId))
+            .limit(1),
           database
             .select({
               id: chatMessagesTable.id,
@@ -139,7 +154,9 @@ export function createDatabaseMemoryReconciliationObservationSource(
               createdAt: chatMessagesTable.createdAt,
             })
             .from(chatMessagesTable)
-            .where(eq(chatMessagesTable.projectId, projectId)),
+            .where(eq(chatMessagesTable.projectId, projectId))
+            .orderBy(desc(chatMessagesTable.id))
+            .limit(MEMORY_RECONCILIATION_ROW_LIMIT + 1),
           database
             .select({
               id: agentTasksTable.id,
@@ -148,7 +165,9 @@ export function createDatabaseMemoryReconciliationObservationSource(
               createdAt: agentTasksTable.createdAt,
             })
             .from(agentTasksTable)
-            .where(eq(agentTasksTable.projectId, projectId)),
+            .where(eq(agentTasksTable.projectId, projectId))
+            .orderBy(desc(agentTasksTable.id))
+            .limit(MEMORY_RECONCILIATION_ROW_LIMIT + 1),
           database
             .select({
               id: projectVersionsTable.id,
@@ -158,7 +177,9 @@ export function createDatabaseMemoryReconciliationObservationSource(
               createdAt: projectVersionsTable.createdAt,
             })
             .from(projectVersionsTable)
-            .where(eq(projectVersionsTable.projectId, projectId)),
+            .where(eq(projectVersionsTable.projectId, projectId))
+            .orderBy(desc(projectVersionsTable.id))
+            .limit(MEMORY_RECONCILIATION_ROW_LIMIT + 1),
           database
             .select({
               id: knowledgeEntriesTable.id,
@@ -175,7 +196,9 @@ export function createDatabaseMemoryReconciliationObservationSource(
               createdAt: knowledgeEntriesTable.createdAt,
             })
             .from(knowledgeEntriesTable)
-            .where(eq(knowledgeEntriesTable.projectId, projectId)),
+            .where(eq(knowledgeEntriesTable.projectId, projectId))
+            .orderBy(desc(knowledgeEntriesTable.id))
+            .limit(MEMORY_RECONCILIATION_ROW_LIMIT + 1),
           database
             .select({
               id: knowledgeProvenanceEventsTable.id,
@@ -189,17 +212,36 @@ export function createDatabaseMemoryReconciliationObservationSource(
               createdAt: knowledgeProvenanceEventsTable.createdAt,
             })
             .from(knowledgeProvenanceEventsTable)
-            .where(eq(knowledgeProvenanceEventsTable.projectId, projectId)),
+            .where(eq(knowledgeProvenanceEventsTable.projectId, projectId))
+            .orderBy(desc(knowledgeProvenanceEventsTable.id))
+            .limit(MEMORY_RECONCILIATION_ROW_LIMIT + 1),
         ]);
       const project = projects[0] ?? null;
+      const boundedMessages = boundedRows(messages);
+      const boundedTasks = boundedRows(tasks);
+      const boundedVersions = boundedRows(versions);
+      const boundedKnowledge = boundedRows(knowledgeEntries);
+      const boundedProvenance = boundedRows(provenanceEvents);
+      const coverageLimited = [
+        boundedMessages,
+        boundedTasks,
+        boundedVersions,
+        boundedKnowledge,
+        boundedProvenance,
+      ].some(({ limited }) => limited);
       return {
         observedAt: project?.observedAt ?? new Date(0),
         project,
-        messages,
-        tasks,
-        versions,
-        knowledgeEntries,
-        provenanceEvents,
+        messages: boundedMessages.rows,
+        tasks: boundedTasks.rows,
+        versions: boundedVersions.rows,
+        knowledgeEntries: boundedKnowledge.rows,
+        provenanceEvents: boundedProvenance.rows,
+        coverage: {
+          complete: !coverageLimited,
+          rowLimit: MEMORY_RECONCILIATION_ROW_LIMIT,
+          limitedSurfaces: coverageLimited ? MEMORY_SURFACE_IDS : [],
+        },
       };
     },
   };
@@ -531,7 +573,9 @@ export async function readProjectMemoryReconciliationSummary(
   projectId: number,
   source: MemoryReconciliationObservationSource = databaseObservationSource,
 ): Promise<ProjectMemoryReconciliationSummary> {
-  return summarizeProjectMemoryReconciliation(
-    await readProjectMemoryReconciliation(projectId, source),
-  );
+  const snapshot = await source.readProjectSnapshot(projectId);
+  return summarizeProjectMemoryReconciliation(reconcileProjectMemorySnapshot(snapshot), {
+    limitedSurfaces: snapshot.coverage?.limitedSurfaces,
+    rowLimit: snapshot.coverage?.rowLimit ?? null,
+  });
 }

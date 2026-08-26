@@ -14,6 +14,8 @@
     "ora-stability-gate": "tsx ./src/ora-stability-gate.ts",
     "ora-stability-gate:release": "tsx ./src/ora-stability-gate.ts --profile=release --require-clean",
     "ora-stability-gate:mobile": "tsx ./src/ora-stability-gate.ts --profile=mobile",
+    "verify:production-release": "tsx ./src/verify-production-release.ts",
+    "test:release-contracts": "tsx ./src/production-release-verifier.test.ts && tsx ./src/release-operational-contract.test.ts",
     "migrate-containers": "tsx ./src/migrate-containers.ts",
     "migrate-production-container": "tsx ./src/migrate-production-container.ts",
     "migrate-prod-containers": "tsx ./src/migrate-prod-containers.ts",

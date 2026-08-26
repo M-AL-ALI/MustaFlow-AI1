@@ -12,6 +12,9 @@
     "ora:stability-gate": "pnpm --filter @workspace/scripts run ora-stability-gate",
     "ora:stability-gate:release": "pnpm --filter @workspace/scripts run ora-stability-gate:release",
     "ora:stability-gate:mobile": "pnpm --filter @workspace/scripts run ora-stability-gate:mobile",
+    "test:api:serial": "pnpm --filter @workspace/api-server exec vitest run --no-file-parallelism",
+    "test:web:serial": "pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts --no-file-parallelism",
+    "release:verify-production": "pnpm --filter @workspace/scripts run verify:production-release",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"

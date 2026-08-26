@@ -298,10 +298,11 @@ describe("Zero memory reconciliation decision engine", () => {
 
     const summary = summarizeProjectMemoryReconciliation(results);
     expect(summary).toEqual({
-      semantics: "zero-project-memory-reconciliation-summary-v1",
+      semantics: "zero-project-memory-reconciliation-summary-v2",
       status: "review-needed",
       observedAt,
       counts: { confirmed: 1, stale: 1, unverifiable: 1 },
+      coverage: { complete: true, rowLimit: null, limitedSurfaces: [] },
       surfaces: [
         {
           surfaceId: "conversation-summaries",
@@ -331,11 +332,32 @@ describe("Zero memory reconciliation decision engine", () => {
 
   it("reports an honest empty state when the project has no saved memory", () => {
     expect(summarizeProjectMemoryReconciliation([])).toEqual({
-      semantics: "zero-project-memory-reconciliation-summary-v1",
+      semantics: "zero-project-memory-reconciliation-summary-v2",
       status: "empty",
       observedAt: null,
       counts: { confirmed: 0, stale: 0, unverifiable: 0 },
+      coverage: { complete: true, rowLimit: null, limitedSurfaces: [] },
       surfaces: [],
     });
+  });
+
+  it("fails closed when a bounded reader cannot cover every memory row", () => {
+    const summary = summarizeProjectMemoryReconciliation(
+      [reconcile({}, { surfaceId: "project-summary", recordId: 1 })],
+      { limitedSurfaces: ["chat-messages", "project-summary"], rowLimit: 500 },
+    );
+
+    expect(summary.status).toBe("limited");
+    expect(summary.coverage).toEqual({
+      complete: false,
+      rowLimit: 500,
+      limitedSurfaces: ["chat-messages", "project-summary"],
+    });
+    expect(summary.surfaces).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ surfaceId: "chat-messages", status: "limited" }),
+        expect.objectContaining({ surfaceId: "project-summary", status: "limited" }),
+      ]),
+    );
   });
 });
