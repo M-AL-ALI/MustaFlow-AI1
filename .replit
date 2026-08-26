@@ -168,3 +168,6 @@ STRIPE_WAVE_PRICE_ID = "price_1Tg8OtDf10Zq7SrDl8q9CvT7"
 BUILDER_ALLOWLIST = "mus_192@yahoo.com,alialmshhdany0@gmail.com"
 CREDITS_ENFORCEMENT = "true"
 LEGACY_ADOPTION_OWNER_ID = "user_3EBE0elOH8G6UXbaISITn6SjKvj"
+
+[objectStorage]
+defaultBucketId = "replit-objstore-51735537-e716-40ad-8f43-c367447e31e5"
