@@ -55,6 +55,11 @@ The existing idempotent `migrate-knowledge-provenance` startup step adds nullabl
 2. **Import result-order assumption.** Early code correlated inserted rows by return order. Fixed by returning the stored content and hashing that exact value. Preventative: correlation no longer depends on database row order.
 3. **Manual knowledge creation accepted an unvalidated body and caller-selected scope.** Fixed with a strict bounded Zod schema and server-owned project scope. Preventative: invalid input is rejected before persistence and scope cannot be broadened by the caller.
 4. **Multiple provenance write paths could drift.** Consolidated to one canonical application insert path. Preventative: the code census asserts one non-test insert site and integration tests cover the mutation families.
+5. **Replit rejected the first publish before production changed.** Its schema-diff layer rendered the new unvalidated claim-kind check with malformed closing syntax. Fixed by making this new closed-value check validated and idempotently validating a pre-existing development copy. Preventative: a named regression test now forbids this constraint from returning to the `NOT VALID` shape, while preserving the no-backfill rule. The first publish attempt changed neither the live build nor production data.
+
+## First publish-attempt receipt
+
+The production-capable Replit gate passed all 22 stages on commit `63e9be4932c16869c4f15cfae9668aec0bf23687`, tree `289a51c4535e716973c150670c8c9ee95985c745`. The first publish then stopped during Replit's pre-production migration validation. The failure was isolated to the generated claim-kind check statement; the prior build remained live. The repair is a two-file follow-up with focused tests, typecheck, lint, formatting, and the same declared database-free lab failure set. Production publication remains pending until the repaired exact head passes the Replit gate and live closure below.
 
 ## Remaining live closure
 

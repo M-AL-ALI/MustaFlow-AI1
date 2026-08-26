@@ -51,18 +51,31 @@
     "cleanAfter": true,
     "credentialEnvironmentForwarding": false
   },
+  "firstPublishAttempt": {
+    "replitGateCommit": "63e9be4932c16869c4f15cfae9668aec0bf23687",
+    "replitGateTree": "289a51c4535e716973c150670c8c9ee95985c745",
+    "replitGatePassedStages": 22,
+    "replitGateFailedStages": 0,
+    "publishResult": "blocked-before-production-change",
+    "failureClass": "generated-check-constraint-syntax",
+    "liveBuildChanged": false,
+    "productionDataChanged": false,
+    "preventative": "validated closed-value check plus NOT VALID regression guard"
+  },
   "fileHashesSha256": {
     "artifacts/api-server/src/lib/jobs.ts": "51b45dde3210e4683e814db1ce20acd40c9891ac76612c00a6de7252e07c4f9b",
     "artifacts/api-server/src/lib/knowledge-context-selection.ts": "8c180cc2788a4aca8309afda5993085b96a012b3c7db70abea75386ff43637d5",
     "artifacts/api-server/src/lib/knowledge.ts": "ee5846bc4a4b6d85923918dc272d534df72c4e423cfd0c4fec11bfd9aa82fd9d",
-    "artifacts/api-server/src/lib/startup-migrations.ts": "bcd22c686cb25aa66490ccf8fe8853107e79493a70f9d306136cbacb6fc8641a",
+    "artifacts/api-server/src/lib/startup-migrations.ts": "8b35bc2d02c8286096af9a07507a54293e0a1b8f9fcd2f964f4cbcf85dc8af86",
+    "artifacts/api-server/src/lib/provenance-schema-completion.test.ts": "eb43bfe05f20678feaaa69986cfc24871b58e0906d9327e143d6544cde37be91",
     "artifacts/api-server/src/routes/knowledge.ts": "ef666f250002c0ebabb73eca1cd605a7cbb5e73268ce8ee0c40c87e17274a1ed",
     "artifacts/api-server/src/routes/messages.ts": "9c56a838ea0962f1c16f6e711ff0837143b94e6326053ce0f995cacafb2e789e",
     "artifacts/mustaflow/src/pages/projects/components/knowledge-provenance-badge.tsx": "1415bf0b9fc297e359e73f71fe51a9ee6dad8189022a6a657119f3d0c1aaa59c",
     "artifacts/mustaflow/src/pages/projects/components/knowledge-tab.tsx": "60085fce86100e2cb24aaa283d32cb6254b93ab53f1301ca75127fcaf62803b8",
     "lib/api-spec/openapi.yaml": "678e9a26cd0ef5a9c3ab9a9d91e3f15f2e9231a97a3d3868fc556c786a22edb9",
     "lib/db/src/schema/knowledge-provenance-events.ts": "e361840bba5f27d54ff867ba1f00e2fe9e68f71417f25d9936a4aadb8510f12a",
-    "lib/ora-contracts/src/zero-memory-provenance.ts": "f88245cd80c4c52ffaf40474fa7a216f3e323960a343677604f657f875e24f74"
+    "lib/ora-contracts/src/zero-memory-provenance.ts": "f88245cd80c4c52ffaf40474fa7a216f3e323960a343677604f657f875e24f74",
+    "docs/finish-the-15-z-j-provenance-2026-08-26.md": "5b51c040de102c6d5350749ced1b516fcee25904a90828ffe1fc9966fad3b610"
   },
   "liveClosure": {
     "status": "pending",
