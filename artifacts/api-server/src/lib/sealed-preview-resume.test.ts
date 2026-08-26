@@ -100,9 +100,9 @@ describe("sealed preview resume", () => {
 
   it("fails closed when no durable accepted release exists", async () => {
     const provider = {} as TenantRuntimeProvider;
-    await expect(resumeAcceptedProjectPreview({ projectId: 52, provider })).rejects.toMatchObject<
-      Partial<SealedPreviewResumeError>
-    >({ code: "sealed_preview_release_missing" });
+    await expect(resumeAcceptedProjectPreview({ projectId: 52, provider })).rejects.toMatchObject({
+      code: "sealed_preview_release_missing",
+    } satisfies Partial<SealedPreviewResumeError>);
     expect(state.updateCalls).toBe(0);
   });
 });
