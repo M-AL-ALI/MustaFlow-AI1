@@ -3,6 +3,7 @@ import {
   getPreviewAddress,
   getServerPreviewBadge,
   hasServerPreviewAccess,
+  presentAgenticPreviewUnavailable,
 } from "./preview-access-ui";
 
 describe("preview access UI", () => {
@@ -47,5 +48,35 @@ describe("preview access UI", () => {
         projectId: 52,
       }),
     ).toBe("https://webcontainer.example.test");
+  });
+
+  it("offers only actions that match observed preview truth", () => {
+    expect(presentAgenticPreviewUnavailable("stopped")).toMatchObject({
+      title: "Your preview is offline",
+      action: "wake",
+      actionLabel: "Wake preview",
+    });
+    expect(presentAgenticPreviewUnavailable("hibernated").action).toBe("wake");
+    expect(presentAgenticPreviewUnavailable("error")).toMatchObject({
+      title: "We could not check your preview",
+      action: "retry",
+    });
+    expect(presentAgenticPreviewUnavailable("starting")).toMatchObject({
+      title: "Waking your preview…",
+      action: null,
+    });
+  });
+
+  it("never exposes the provider's raw unavailable terminal in user copy", () => {
+    for (const status of ["stopped", "starting", "running", "hibernated", "error"] as const) {
+      const presentation = presentAgenticPreviewUnavailable(status);
+      const visible = [
+        presentation.title,
+        presentation.message,
+        presentation.actionLabel ?? "",
+      ].join(" ");
+      expect(visible).not.toContain("preview_runtime_unavailable");
+      expect(visible).not.toContain("runtime is not running");
+    }
   });
 });

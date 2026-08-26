@@ -6,6 +6,8 @@ const state = vi.hoisted(() => ({
   updateCalls: 0,
   liveStatus: "stopped",
   liveError: false,
+  sealedTarget: true,
+  resumeCalls: 0,
 }));
 
 const tables = vi.hoisted(() => ({
@@ -73,6 +75,31 @@ vi.mock("../lib/tenant-runtime", () => ({
   tenantRuntimeProvider: { providerId: "cloudflare" },
 }));
 
+vi.mock("../lib/zero-sealed-generation", () => ({
+  resolveZeroGenerationTarget: vi.fn(() => "cloudflare"),
+  isZeroSealedGenerationTarget: vi.fn(() => state.sealedTarget),
+}));
+
+vi.mock("../lib/sealed-preview-resume", () => ({
+  SealedPreviewResumeError: class SealedPreviewResumeError extends Error {
+    constructor(
+      public readonly code: string,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
+  resumeAcceptedProjectPreview: vi.fn(async () => {
+    state.resumeCalls += 1;
+    return {
+      identity: "runtime-52",
+      manifestRevision: "manifest-52",
+      status: "running",
+      endpoint: null,
+    };
+  }),
+}));
+
 vi.mock("../lib/event-bus", () => ({
   subscribeContainerLogs: vi.fn(() => () => undefined),
 }));
@@ -93,6 +120,8 @@ describe("container status read purity", () => {
     state.updateCalls = 0;
     state.liveStatus = "stopped";
     state.liveError = false;
+    state.sealedTarget = true;
+    state.resumeCalls = 0;
   });
 
   it("reports the observed runtime state without writing project state", async () => {
@@ -122,6 +151,53 @@ describe("container status read purity", () => {
     const response = await request(app).get("/projects/52/container/status");
 
     expect(response.status).toBe(503);
+    expect(state.updateCalls).toBe(0);
+  });
+
+  it("does not trust a stored running label when waking a stopped sealed preview", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(containersRouter);
+
+    const response = await request(app).post("/projects/52/container/start");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      containerId: "runtime-52",
+      containerStatus: "running",
+    });
+    expect(state.resumeCalls).toBe(1);
+    expect(state.updateCalls).toBe(1);
+  });
+
+  it("keeps a provider-confirmed running preview read-only on wake", async () => {
+    state.liveStatus = "running";
+    const app = express();
+    app.use(express.json());
+    app.use(containersRouter);
+
+    const response = await request(app).post("/projects/52/container/start");
+
+    expect(response.status).toBe(200);
+    expect(response.body.containerStatus).toBe("running");
+    expect(state.resumeCalls).toBe(0);
+    expect(state.updateCalls).toBe(0);
+  });
+
+  it("does not mutate after an ambiguous provider status failure", async () => {
+    state.liveError = true;
+    const app = express();
+    app.use(express.json());
+    app.use(containersRouter);
+
+    const response = await request(app).post("/projects/52/container/start");
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      error: "We could not check the preview just now. Please try again.",
+      code: "preview_status_unavailable",
+    });
+    expect(state.resumeCalls).toBe(0);
     expect(state.updateCalls).toBe(0);
   });
 

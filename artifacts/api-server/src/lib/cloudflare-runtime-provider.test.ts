@@ -326,6 +326,83 @@ describe("CloudflareRuntimeProvider", () => {
     expect(calls.filter((call) => call.path.includes("/layered-artifacts/"))).toHaveLength(0);
   });
 
+  it("recreates a missing preview descriptor from the exact accepted release before starting", async () => {
+    const projectId = 52;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const release = acceptedRelease(identity);
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      calls.push({ method, path, body });
+      if (path.endsWith("/version") && init?.headers === undefined) {
+        return json({ code: "unauthorized" }, 401);
+      }
+      if (path.endsWith("/version")) {
+        return json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: "staging-v1",
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-layers-v1", "manifest-update-v1"],
+        });
+      }
+      if (method === "GET") {
+        return json(
+          {
+            ok: false,
+            code: "runtime_not_found",
+            message: "Runtime not found",
+            retryable: false,
+            requestId: "missing-preview-52",
+          },
+          404,
+        );
+      }
+      return json({
+        runtime: {
+          identity,
+          projectId,
+          role: "preview",
+          slot: "primary",
+          status: method === "POST" ? "running" : "stopped",
+          servicePort: 8080,
+          manifestRevision: release.manifest.revision,
+          deploymentVersion: "staging-v1",
+          endpoint: null,
+          readyAt: method === "POST" ? "2026-08-25T10:10:00.000Z" : null,
+          lastError: null,
+        },
+      });
+    });
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(
+      provider.zeroGenerationStartAcceptedSealedRelease({
+        projectId,
+        acceptedRelease: release,
+      }),
+    ).resolves.toMatchObject({ identity, status: "running" });
+
+    const ensureCall = calls.find(
+      (call) => call.method === "PUT" && call.path.endsWith("/preview/primary"),
+    );
+    expect(ensureCall?.body).toMatchObject({ manifest: release.manifest });
+    const startCall = calls.find(
+      (call) => call.method === "POST" && call.path.endsWith("/preview/primary/start"),
+    );
+    expect(startCall?.body).toMatchObject({
+      artifactRevision: release.artifactRevision,
+      artifactSha256: release.sealedArtifactSha256,
+    });
+  });
+
   it("fails closed instead of starting a durable runtime with a mismatched manifest", async () => {
     const projectId = 51;
     const identity = await deriveRuntimeIdentity({
