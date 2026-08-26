@@ -20,6 +20,7 @@ authority.
 - Package: `ruflo`
 - Version: `3.38.20`
 - Implementation package: `@claude-flow/cli` `3.38.20`
+- Executable root: `A:/NabuFlowLab/.tools/ruflo-3.38.20`
 - License reported by both installed package manifests: MIT
 - Required runtime: Node.js 20 or newer
 - The wrapper and implementation file identities are pinned in
@@ -98,6 +99,10 @@ advertisement alone is never treated as authorization.
    Preventative: the child process runs from `A:/NabuFlowLab/.ruflo-safe`, while explicit `GIT_DIR`,
    `GIT_WORK_TREE`, and `CLAUDE_FLOW_CWD` bindings preserve read-only analysis of the permanent
    repository. A regression test forbids moving the child working directory back into the worktree.
+7. The lab's original global Ruflo installation and one daemon lived on C:. Preventative: the daemon
+   was stopped; the exact pinned package was installed under `A:/NabuFlowLab/.tools`; and the proxy
+   no longer searches the global command path. It fails closed unless the A-drive package and all
+   three pinned hashes match.
 
 ## Activation note
 

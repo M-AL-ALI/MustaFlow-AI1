@@ -18,12 +18,14 @@ const safePaths = resolveRufloSafePaths(repositoryRoot);
 if (process.platform === "win32") {
   assert.equal(safePaths.repositoryRoot.startsWith("A:\\"), true);
   assert.equal(safePaths.runtimeRoot.startsWith("A:\\"), true);
+  assert.equal(safePaths.toolRoot.startsWith("A:\\"), true);
   assert.throws(
     () => resolveRufloSafePaths("C:\\Users\\someone\\project", "win32"),
     /ruflo_workspace_must_be_on_a_drive/u,
   );
 }
 assert.equal(safePaths.runtimeRoot.startsWith(safePaths.repositoryRoot), false);
+assert.equal(safePaths.toolRoot.startsWith(safePaths.repositoryRoot), false);
 
 const environment = buildSanitizedRufloEnvironment(safePaths, {
   PATH: "safe-path",
@@ -106,8 +108,11 @@ assert.doesNotMatch(codexConfig, /A:\\|C:\\/u);
 
 const proxySource = readFileSync(resolve(repositoryRoot, "scripts/src/ruflo-mcp-proxy.ts"), "utf8");
 assert.match(proxySource, /childEnvironment\.GIT_WORK_TREE = repositoryRoot/u);
+assert.match(proxySource, /safePaths\.toolRoot/u);
+assert.doesNotMatch(proxySource, /where\.exe|execFileSync\("which"|ruflo\.cmd/u);
 assert.match(proxySource, /\[rufloEntry, "mcp", "start"[\s\S]{0,500}cwd: safePaths\.runtimeRoot/u);
 assert.doesNotMatch(proxySource, /\[rufloEntry, "mcp", "start"[\s\S]{0,500}cwd: repositoryRoot/u);
+assert.doesNotMatch(proxySource, /cwd: repositoryRoot,/u);
 
 console.log(`policy=${RUFLO_MCP_POLICY_VERSION}`);
 console.log(`ruflo_version=${RUFLO_PINNED_VERSION}`);

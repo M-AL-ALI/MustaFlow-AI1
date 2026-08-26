@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   RUFLO_ALLOWED_TOOLS,
   RUFLO_MAX_MESSAGE_BYTES,
@@ -31,40 +31,22 @@ function sha256(path: string): string {
 }
 
 function resolveRufloEntry(): string {
-  const located =
-    process.platform === "win32"
-      ? execFileSync(
-          join(process.env.SystemRoot ?? "C:\\Windows", "System32/where.exe"),
-          ["ruflo.cmd"],
-          {
-            encoding: "utf8",
-            windowsHide: true,
-          },
-        )
-      : execFileSync("which", ["ruflo"], { encoding: "utf8" });
-  for (const rawCandidate of located.split(/\r?\n/u).filter(Boolean)) {
-    const candidate = realpathSync(rawCandidate.trim());
-    const packageRoot =
-      process.platform === "win32"
-        ? resolve(dirname(candidate), "node_modules/ruflo")
-        : resolve(dirname(candidate), "../lib/node_modules/ruflo");
-    const entry = join(packageRoot, "bin/ruflo.js");
-    if (!existsSync(entry)) continue;
-    for (const [relativePath, expectedHash] of Object.entries(RUFLO_PINNED_FILES)) {
-      const actualHash = sha256(join(packageRoot, ...relativePath.split("/")));
-      if (actualHash !== expectedHash) throw new Error("ruflo_install_hash_mismatch");
-    }
-    return entry;
+  const entry = join(safePaths.toolRoot, "node_modules/ruflo/bin/ruflo.js");
+  if (!existsSync(entry)) throw new Error("ruflo_a_drive_install_unavailable");
+  for (const [relativePath, expectedHash] of Object.entries(RUFLO_PINNED_FILES)) {
+    const actualHash = sha256(join(safePaths.toolRoot, ...relativePath.split("/")));
+    if (actualHash !== expectedHash) throw new Error("ruflo_install_hash_mismatch");
   }
-  throw new Error("ruflo_executable_unavailable");
+  return entry;
 }
 
 const rufloEntry = resolveRufloEntry();
 
 function runVersionCheck(): Promise<string> {
   return new Promise((resolve, reject) => {
+    mkdirSync(safePaths.runtimeRoot, { recursive: true });
     const child = spawn(process.execPath, [rufloEntry, "--version"], {
-      cwd: repositoryRoot,
+      cwd: safePaths.runtimeRoot,
       env: childEnvironment,
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
@@ -145,6 +127,7 @@ async function main(): Promise<void> {
         version,
         repositoryRoot: safePaths.repositoryRoot,
         runtimeRoot: safePaths.runtimeRoot,
+        toolRoot: safePaths.toolRoot,
         temp: safePaths.temp,
         daemonAutostart: false,
         toolCount: RUFLO_ALLOWED_TOOLS.length,

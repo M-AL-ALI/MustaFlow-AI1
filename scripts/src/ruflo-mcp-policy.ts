@@ -5,8 +5,10 @@ export const RUFLO_PINNED_VERSION = "3.38.20" as const;
 export const RUFLO_MCP_POLICY_VERSION = "nabuflow-ruflo-readonly-v1" as const;
 export const RUFLO_MAX_MESSAGE_BYTES = 1_048_576;
 export const RUFLO_PINNED_FILES = {
-  "package.json": "f979110b4e35a3e3361dc56e319d0cbb2eec2b1e7c8062ef0566cb2b6918d506",
-  "bin/ruflo.js": "af863233c65b825ae38c689f759d9dcbb18528b42771aed4e929ca6d57f21ccd",
+  "node_modules/ruflo/package.json":
+    "f979110b4e35a3e3361dc56e319d0cbb2eec2b1e7c8062ef0566cb2b6918d506",
+  "node_modules/ruflo/bin/ruflo.js":
+    "af863233c65b825ae38c689f759d9dcbb18528b42771aed4e929ca6d57f21ccd",
   "node_modules/@claude-flow/cli/bin/cli.js":
     "4ec921923fb00ad86f89b171b0dbc293a1ec613c8ce0a20cbdc8169d4c836e51",
 } as const;
@@ -32,6 +34,7 @@ const allowedMethods = new Set([
 export interface RufloSafePaths {
   repositoryRoot: string;
   runtimeRoot: string;
+  toolRoot: string;
   home: string;
   appData: string;
   localAppData: string;
@@ -87,17 +90,27 @@ export function resolveRufloSafePaths(
 
   const labRoot = dirname(resolvedRoot);
   const runtimeRoot = resolve(labRoot, ".ruflo-safe");
+  const toolRoot = resolve(labRoot, ".tools", `ruflo-${RUFLO_PINNED_VERSION}`);
   const temp = resolve(labRoot, ".tmp");
-  if (parse(runtimeRoot).root.toUpperCase() !== volume.toUpperCase()) {
+  if (
+    parse(runtimeRoot).root.toUpperCase() !== volume.toUpperCase() ||
+    parse(toolRoot).root.toUpperCase() !== volume.toUpperCase()
+  ) {
     throw new Error("ruflo_runtime_volume_mismatch");
   }
-  if (runtimeRoot === resolvedRoot || runtimeRoot.startsWith(`${resolvedRoot}\\`)) {
+  if (
+    runtimeRoot === resolvedRoot ||
+    runtimeRoot.startsWith(`${resolvedRoot}\\`) ||
+    toolRoot === resolvedRoot ||
+    toolRoot.startsWith(`${resolvedRoot}\\`)
+  ) {
     throw new Error("ruflo_runtime_must_be_outside_worktree");
   }
 
   return {
     repositoryRoot: resolvedRoot,
     runtimeRoot,
+    toolRoot,
     home: resolve(runtimeRoot, "home"),
     appData: resolve(runtimeRoot, "appdata"),
     localAppData: resolve(runtimeRoot, "localappdata"),
