@@ -38,6 +38,23 @@ authority.
    through the explicit `ruflo:pilot` command. It is not automatically invoked and cannot publish.
    Customer-facing Zero delegation remains gated on a later production architecture decision.
 
+## Measured pilot receipt
+
+The first clean end-to-end pilot completed on 2026-08-26 against commit
+`817f21266aa99d2495b85dd28206371ec67edf3a` and tree
+`c9fac618eb1ee289cc141951e39714bc7e376193` in 1,267 ms. It proved:
+
+- the six-tool allowlist was exact;
+- an attempted direct call to `system_reset` was denied with MCP code `-32601`;
+- low, high, and critical calibration cases matched their expected classifications;
+- the typed branch review was bound to its base, commit, and tree;
+- no credential environment variables crossed the proxy boundary;
+- no daemon started and no state appeared in the repository; and
+- the worktree was clean before and after.
+
+The complete normalized machine-readable receipt is tracked in
+`docs/ruflo-safe-orchestration-evidence.json`.
+
 ## Allowed tools
 
 - `mcp_status`

@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "pilot": "nabuflow-ruflo-readonly-pilot-v1",
+  "policy": "nabuflow-ruflo-readonly-v1",
+  "providerVersion": "3.38.20",
+  "subject": {
+    "baseRef": "6b128e1a7818a8be68a9d37a9994ae63cbe4d733",
+    "headCommit": "817f21266aa99d2495b85dd28206371ec67edf3a",
+    "headTree": "c9fac618eb1ee289cc141951e39714bc7e376193"
+  },
+  "startedAt": "2026-08-26T18:29:45.356Z",
+  "finishedAt": "2026-08-26T18:29:46.563Z",
+  "durationMs": 1267,
+  "database": "NONE",
+  "environment": "LAB",
+  "store": "A:/NabuFlowLab/.ruflo-safe",
+  "kind": "bounded-readonly-mcp-pilot",
+  "tools": [
+    "analyze_diff-risk",
+    "analyze_diff-classify",
+    "analyze_file-risk",
+    "analyze_diff-stats",
+    "system_info",
+    "mcp_status"
+  ],
+  "unauthorizedDirectCall": {
+    "tool": "system_reset",
+    "code": -32601,
+    "blocked": true
+  },
+  "connection": {
+    "running": true,
+    "transport": "stdio",
+    "analysisSubjectCwd": "A:/NabuFlowLab/work",
+    "runtimeCwd": "A:/NabuFlowLab/.ruflo-safe",
+    "stderrBytes": 0
+  },
+  "accuracyCases": [
+    {
+      "path": "docs/overview.md",
+      "additions": 10,
+      "deletions": 0,
+      "expected": "low",
+      "observed": "low",
+      "score": 0
+    },
+    {
+      "path": "src/auth/session.ts",
+      "additions": 10,
+      "deletions": 0,
+      "expected": "high",
+      "observed": "high",
+      "score": 40
+    },
+    {
+      "path": "src/auth/config.ts",
+      "additions": 350,
+      "deletions": 10,
+      "expected": "critical",
+      "observed": "critical",
+      "score": 90
+    }
+  ],
+  "review": {
+    "schemaVersion": 1,
+    "provider": "ruflo",
+    "providerVersion": "3.38.20",
+    "policy": "nabuflow-ruflo-readonly-v1",
+    "subject": {
+      "baseRef": "6b128e1a7818a8be68a9d37a9994ae63cbe4d733",
+      "headCommit": "817f21266aa99d2495b85dd28206371ec67edf3a",
+      "headTree": "c9fac618eb1ee289cc141951e39714bc7e376193"
+    },
+    "assessment": {
+      "risk": "low",
+      "riskScore": 9,
+      "classification": "unknown",
+      "totalFiles": 11,
+      "totalAdditions": 1245,
+      "totalDeletions": 0
+    },
+    "evidence": {
+      "tools": ["analyze_diff-risk", "analyze_diff-classify", "analyze_diff-stats"],
+      "noMutationAuthority": true
+    }
+  },
+  "invariants": {
+    "worktreeCleanBefore": true,
+    "worktreeCleanAfter": true,
+    "projectStateCreated": false,
+    "daemonAutostart": false,
+    "credentialEnvironmentForwarding": false
+  },
+  "freeBytes": {
+    "before": {
+      "A": 75794694144,
+      "C": 16871424
+    },
+    "after": {
+      "A": 75794665472,
+      "C": 16805888
+    }
+  }
+}
