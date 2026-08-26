@@ -123,12 +123,36 @@ describe("Zero provenance schema completion", () => {
 
     const knowledge = source("./knowledge.ts");
     expect(knowledge).toContain("db.transaction");
-    expect(knowledge.match(/insert\(knowledgeProvenanceEventsTable\)/g)).toHaveLength(2);
+    expect(knowledge.match(/insert\(knowledgeProvenanceEventsTable\)/g)).toHaveLength(1);
+    expect(application.match(/insert\(knowledgeProvenanceEventsTable\)/g)).toHaveLength(1);
+    expect(knowledge).toContain("appendKnowledgeProvenanceReceipt(tx");
     expect(knowledge).toContain("Knowledge task provenance does not belong to the project");
     expect(knowledge).toContain("Knowledge version provenance does not belong to the project");
     expect(knowledge).toContain("Knowledge message provenance does not belong to the project");
     expect(knowledge).toContain('outcome: "inserted"');
     expect(knowledge).toContain('outcome: "reinforced"');
+    expect(knowledge).toContain('claimKind: opts.claimKind ?? "observed"');
+    expect(knowledge).toContain("buildKnowledgeProvenanceReceipt");
+  });
+
+  it("adds the closed provenance classes without guessing historical rows", () => {
+    const migration = source("./startup-migrations.ts");
+    const schema = source("../../../../lib/db/src/schema/knowledge-provenance-events.ts");
+    expect(migration).toContain("ADD COLUMN IF NOT EXISTS claim_kind TEXT");
+    expect(migration).toContain("ADD COLUMN IF NOT EXISTS actor_user_id TEXT");
+    expect(migration).toContain(
+      "claim_kind IS NULL OR claim_kind IN ('stated', 'observed', 'inferred')",
+    );
+    expect(migration).not.toMatch(/UPDATE\s+knowledge_provenance_events/i);
+    expect(schema).toContain('"knowledge-provenance-v2"');
+    expect(schema).toContain('claimKind: text("claim_kind")');
+    expect(schema).toContain('actorUserId: text("actor_user_id")');
+    expect(source("../routes/knowledge.ts")).toContain(
+      "selectDistinctOn([knowledgeProvenanceEventsTable.knowledgeEntryId]",
+    );
+    expect(source("./jobs.ts")).toContain(
+      "selectDistinctOn([knowledgeProvenanceEventsTable.knowledgeEntryId]",
+    );
   });
 
   it("pins deletion effects and prevents startup backfill or constraint validation", () => {

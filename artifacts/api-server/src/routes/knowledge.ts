@@ -3,10 +3,12 @@ import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import {
   db,
   knowledgeEntriesTable,
+  knowledgeProvenanceEventsTable,
   projectsTable,
   creditTransactionsTable,
   userCreditsTable,
 } from "@workspace/db";
+import { presentZeroMemoryProvenance } from "@workspace/ora-contracts";
 import { isAdminUser } from "../lib/adminAuth";
 import { getOrCreateCredits } from "./credits";
 import { buildEmbeddingInput, generateEmbedding } from "../lib/embeddings";
@@ -16,6 +18,7 @@ import { logger } from "../lib/logger";
 import { readProjectMemoryReconciliationSummary } from "../lib/memory-reconciliation-reader";
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
+import { appendKnowledgeProvenanceReceipt, writeKnowledge } from "../lib/knowledge";
 
 // Public column projection — excludes internal-only fields (embedding vector, contributorRewardedAt).
 // Use this for all SELECT and RETURNING clauses that send data to the client.
@@ -44,7 +47,72 @@ const publicKnowledgeColumns = {
   createdAt: knowledgeEntriesTable.createdAt,
 } as const;
 
+async function attachKnowledgeProvenance<Row extends { id: number; projectId?: number | null }>(
+  rows: readonly Row[],
+  requestingUserId: string | null,
+  accessibleProjectIds: ReadonlySet<number>,
+) {
+  if (rows.length === 0) return [];
+  const events = await db
+    .selectDistinctOn([knowledgeProvenanceEventsTable.knowledgeEntryId], {
+      id: knowledgeProvenanceEventsTable.id,
+      knowledgeEntryId: knowledgeProvenanceEventsTable.knowledgeEntryId,
+      projectId: knowledgeProvenanceEventsTable.projectId,
+      claimKind: knowledgeProvenanceEventsTable.claimKind,
+      actorUserId: knowledgeProvenanceEventsTable.actorUserId,
+      sourceMessageStartId: knowledgeProvenanceEventsTable.sourceMessageStartId,
+      sourceMessageEndId: knowledgeProvenanceEventsTable.sourceMessageEndId,
+      sourceTaskId: knowledgeProvenanceEventsTable.sourceTaskId,
+      sourceVersionId: knowledgeProvenanceEventsTable.sourceVersionId,
+      createdAt: knowledgeProvenanceEventsTable.createdAt,
+    })
+    .from(knowledgeProvenanceEventsTable)
+    .where(
+      inArray(
+        knowledgeProvenanceEventsTable.knowledgeEntryId,
+        rows.map((row) => row.id),
+      ),
+    )
+    .orderBy(
+      knowledgeProvenanceEventsTable.knowledgeEntryId,
+      desc(knowledgeProvenanceEventsTable.createdAt),
+      desc(knowledgeProvenanceEventsTable.id),
+    );
+
+  const latestByEntry = new Map<number, (typeof events)[number]>();
+  for (const event of events) {
+    if (!latestByEntry.has(event.knowledgeEntryId)) {
+      latestByEntry.set(event.knowledgeEntryId, event);
+    }
+  }
+
+  return rows.map((row) => {
+    const event = latestByEntry.get(row.id) ?? null;
+    return {
+      ...row,
+      provenance: presentZeroMemoryProvenance(event, {
+        requestingUserId,
+        maySeeSourceIdentities:
+          event?.projectId != null && accessibleProjectIds.has(event.projectId),
+      }),
+    };
+  });
+}
+
 // Zod schemas for request validation
+const createKnowledgeSchema = z
+  .object({
+    title: z.string().trim().min(1).max(500),
+    content: z.string().trim().min(1).max(10000),
+    category: z.string().trim().min(1).max(100).optional(),
+    type: z.string().trim().min(1).max(100).optional(),
+    severity: z.enum(["info", "warning", "error"]).optional(),
+    projectId: z.number().int().positive().optional(),
+    scope: z.enum(["project", "user", "org", "global"]).optional(),
+    tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  })
+  .strict();
+
 const patchKnowledgeSchema = z
   .object({
     annotation: z.string().trim().max(5000).nullable().optional(),
@@ -227,26 +295,20 @@ router.get("/knowledge", async (req, res): Promise<void> => {
     .limit(limit)
     .offset(offset);
 
-  res.json(rows);
+  const accessibleIds = req.userId
+    ? new Set(await listAccessibleProjectIds(req.userId, "viewer"))
+    : new Set<number>();
+  res.json(await attachKnowledgeProvenance(rows, req.userId ?? null, accessibleIds));
 });
 
 // POST /api/knowledge — manually create a knowledge entry.
 router.post("/knowledge", async (req, res): Promise<void> => {
-  const body = req.body as {
-    title?: string;
-    content?: string;
-    category?: string;
-    type?: string;
-    severity?: string;
-    projectId?: number;
-    scope?: string;
-    tags?: string[];
-  };
-
-  if (!body.title || !body.content) {
-    res.status(400).json({ error: "title and content are required" });
+  const parsed = createKnowledgeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "A valid memory is required" });
     return;
   }
+  const body = parsed.data;
 
   if (!req.userId) {
     res.status(401).json({ error: "Authentication required" });
@@ -260,25 +322,40 @@ router.post("/knowledge", async (req, res): Promise<void> => {
     }
   }
 
+  const receipt = await writeKnowledge({
+    title: body.title,
+    content: body.content,
+    category: body.category ?? "note",
+    type: body.type ?? "note",
+    severity: body.severity ?? "info",
+    projectId: body.projectId,
+    userId: req.userId,
+    scope: body.scope ?? (body.projectId != null ? "project" : "user"),
+    tags: body.tags,
+    approvedForReuse: false,
+    claimKind: "stated",
+    actorUserId: req.userId,
+  });
+  if (!receipt) {
+    res.status(503).json({ error: "That memory could not be saved right now" });
+    return;
+  }
   const [row] = await db
-    .insert(knowledgeEntriesTable)
-    .values({
-      title: body.title,
-      content: body.content,
-      category: body.category ?? "note",
-      type: body.type ?? "note",
-      severity: body.severity ?? "info",
-      projectId: body.projectId ?? null,
-      userId: req.userId,
-      scope: body.scope ?? "project",
-      tags: body.tags ? body.tags.join(",") : null,
-      approvedForReuse: false,
-      // AI Builder Knowledge Vault provenance — never surfaced by Ora.
-      origin: "builder",
-    })
-    .returning(publicKnowledgeColumns);
-
-  res.status(201).json(row);
+    .select(publicKnowledgeColumns)
+    .from(knowledgeEntriesTable)
+    .where(eq(knowledgeEntriesTable.id, receipt.entryId))
+    .limit(1);
+  if (!row) {
+    res.status(503).json({ error: "That memory could not be read back right now" });
+    return;
+  }
+  const accessibleIds = new Set(
+    body.projectId != null
+      ? [body.projectId]
+      : await listAccessibleProjectIds(req.userId, "viewer"),
+  );
+  const [presented] = await attachKnowledgeProvenance([row], req.userId, accessibleIds);
+  res.status(201).json(presented);
 });
 
 // PATCH /api/knowledge/:id — update annotation, approvedForReuse, archivedAt, title, content, isPublic, scope.
@@ -356,13 +433,36 @@ router.patch("/knowledge/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [updated] = await db
-    .update(knowledgeEntriesTable)
-    .set(updates)
-    .where(eq(knowledgeEntriesTable.id, entryId))
-    .returning(publicKnowledgeColumns);
+  const [updated] = await db.transaction(async (tx) => {
+    const updatedRows = await tx
+      .update(knowledgeEntriesTable)
+      .set(updates)
+      .where(eq(knowledgeEntriesTable.id, entryId))
+      .returning(publicKnowledgeColumns);
+    const updatedRow = updatedRows[0];
+    if (updatedRow && (typeof body.content === "string" || typeof body.title === "string")) {
+      await appendKnowledgeProvenanceReceipt(tx, {
+        knowledgeEntryId: updatedRow.id,
+        outcome: "reinforced",
+        projectId: updatedRow.projectId,
+        sourceTaskId: updatedRow.relatedTaskId,
+        sourceVersionId: updatedRow.relatedVersionId,
+        claimKind: "stated",
+        actorUserId: userId,
+        contributedContent: updatedRow.content,
+        resultingContent: updatedRow.content,
+      });
+    }
+    return updatedRows;
+  });
 
-  res.json(updated);
+  if (!updated) {
+    res.status(404).json({ error: "Entry not found" });
+    return;
+  }
+  const accessibleIds = new Set(await listAccessibleProjectIds(userId, "viewer"));
+  const [presented] = await attachKnowledgeProvenance([updated], userId, accessibleIds);
+  res.json(presented);
 });
 
 // POST /api/knowledge/:id/rate — record explicit thumbs-up or thumbs-down.
@@ -599,10 +699,25 @@ router.post("/knowledge/import", async (req, res): Promise<void> => {
     origin: "builder" as const,
   }));
 
-  const rows = await db
-    .insert(knowledgeEntriesTable)
-    .values(batchValues)
-    .returning({ id: knowledgeEntriesTable.id });
+  const rows = await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(knowledgeEntriesTable)
+      .values(batchValues)
+      .returning({ id: knowledgeEntriesTable.id, content: knowledgeEntriesTable.content });
+    if (inserted.length > 0) {
+      for (const row of inserted) {
+        await appendKnowledgeProvenanceReceipt(tx, {
+          knowledgeEntryId: row.id,
+          outcome: "inserted",
+          claimKind: "stated",
+          actorUserId: userId,
+          contributedContent: row.content,
+          resultingContent: row.content,
+        });
+      }
+    }
+    return inserted;
+  });
 
   const ids = rows.map((r) => r.id);
   res.status(201).json({ imported: ids.length, ids });
@@ -742,38 +857,66 @@ router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
     .limit(1);
 
   if (existing) {
-    const [updated] = await db
-      .update(knowledgeEntriesTable)
-      .set({
-        title: "Brand Profile",
-        content,
-        annotation,
-        archivedAt: null,
-        approvedForReuse: false,
-      })
-      .where(eq(knowledgeEntriesTable.id, existing.id))
-      .returning();
+    const [updated] = await db.transaction(async (tx) => {
+      const updatedRows = await tx
+        .update(knowledgeEntriesTable)
+        .set({
+          title: "Brand Profile",
+          content,
+          annotation,
+          archivedAt: null,
+          approvedForReuse: false,
+        })
+        .where(eq(knowledgeEntriesTable.id, existing.id))
+        .returning();
+      const updatedRow = updatedRows[0];
+      if (updatedRow) {
+        await appendKnowledgeProvenanceReceipt(tx, {
+          knowledgeEntryId: updatedRow.id,
+          outcome: "reinforced",
+          claimKind: "stated",
+          actorUserId: userId,
+          contributedContent: content,
+          resultingContent: content,
+        });
+      }
+      return updatedRows;
+    });
     res.json({ profile: { ...clean, id: updated?.id, content } });
     return;
   }
 
-  const [row] = await db
-    .insert(knowledgeEntriesTable)
-    .values({
-      title: "Brand Profile",
-      content,
-      category: "brand_profile",
-      type: "style_memory",
-      scope: "user",
-      severity: "info",
-      userId,
-      projectId: null,
-      annotation,
-      approvedForReuse: false,
-      // Builder brand profile — hidden from Ora Memory.
-      origin: "builder",
-    })
-    .returning();
+  const [row] = await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(knowledgeEntriesTable)
+      .values({
+        title: "Brand Profile",
+        content,
+        category: "brand_profile",
+        type: "style_memory",
+        scope: "user",
+        severity: "info",
+        userId,
+        projectId: null,
+        annotation,
+        approvedForReuse: false,
+        // Builder brand profile — hidden from Ora Memory.
+        origin: "builder",
+      })
+      .returning();
+    const insertedRow = inserted[0];
+    if (insertedRow) {
+      await appendKnowledgeProvenanceReceipt(tx, {
+        knowledgeEntryId: insertedRow.id,
+        outcome: "inserted",
+        claimKind: "stated",
+        actorUserId: userId,
+        contributedContent: content,
+        resultingContent: content,
+      });
+    }
+    return inserted;
+  });
 
   res.json({ profile: { ...clean, id: row?.id, content } });
 });

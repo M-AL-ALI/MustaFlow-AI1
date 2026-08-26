@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "capability": "Z-J",
+  "date": "2026-08-26",
+  "environment": "LAB",
+  "database": "NONE",
+  "store": "A:/NabuFlowLab/.pnpm-store/v10",
+  "kind": "branch-delivery-evidence",
+  "base": {
+    "commit": "2dd3be3344d141e7f5b6b64e26d9f7fbcd2ee545",
+    "tree": "be025b3545e3b38b734fdc9007b97d2f293dbb95"
+  },
+  "implementation": {
+    "wipCommit": "8888536aced9de668636989d1b7125bcd7febd0b",
+    "wipTree": "ff068518334381dad9131fbff0dbb65a4bba9373",
+    "semantics": "zero-memory-provenance-v1",
+    "changedFilesBeforeEvidence": 27,
+    "manifestChanged": false,
+    "lockfileChanged": false,
+    "newMigrationStep": false,
+    "startupMigrationCount": 145
+  },
+  "tests": {
+    "focusedApi": { "files": 3, "passed": 20, "failed": 0 },
+    "focusedWeb": { "files": 1, "passed": 2, "failed": 0 },
+    "baseApi": { "total": 2989, "passed": 2943, "failed": 41 },
+    "headApi": { "total": 3000, "passed": 2954, "failed": 41 },
+    "apiFailureHashBase": "ac3a26947d7439762cd9e894bb64d2dd1a388ca3138e0318d5f22f1496cfd654",
+    "apiFailureHashHead": "ac3a26947d7439762cd9e894bb64d2dd1a388ca3138e0318d5f22f1496cfd654",
+    "apiFailureDelta": 0,
+    "baseWeb": { "total": 1189, "passed": 1189, "failed": 0 },
+    "headWeb": { "total": 1191, "passed": 1191, "failed": 0 },
+    "webFailureDelta": 0,
+    "releaseGate": {
+      "passedStages": 19,
+      "failedStages": 3,
+      "failureClass": "database-unavailable-in-declared-database-none-lab",
+      "databaseEndpoint": "127.0.0.1:5432",
+      "productionGateRequired": true
+    }
+  },
+  "ruflo": {
+    "pilot": "nabuflow-ruflo-readonly-pilot-v1",
+    "policy": "nabuflow-ruflo-readonly-v1",
+    "providerVersion": "3.38.20",
+    "durationMs": 725,
+    "risk": "medium",
+    "riskScore": 6,
+    "noMutationAuthority": true,
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "credentialEnvironmentForwarding": false
+  },
+  "fileHashesSha256": {
+    "artifacts/api-server/src/lib/jobs.ts": "51b45dde3210e4683e814db1ce20acd40c9891ac76612c00a6de7252e07c4f9b",
+    "artifacts/api-server/src/lib/knowledge-context-selection.ts": "8c180cc2788a4aca8309afda5993085b96a012b3c7db70abea75386ff43637d5",
+    "artifacts/api-server/src/lib/knowledge.ts": "ee5846bc4a4b6d85923918dc272d534df72c4e423cfd0c4fec11bfd9aa82fd9d",
+    "artifacts/api-server/src/lib/startup-migrations.ts": "bcd22c686cb25aa66490ccf8fe8853107e79493a70f9d306136cbacb6fc8641a",
+    "artifacts/api-server/src/routes/knowledge.ts": "ef666f250002c0ebabb73eca1cd605a7cbb5e73268ce8ee0c40c87e17274a1ed",
+    "artifacts/api-server/src/routes/messages.ts": "9c56a838ea0962f1c16f6e711ff0837143b94e6326053ce0f995cacafb2e789e",
+    "artifacts/mustaflow/src/pages/projects/components/knowledge-provenance-badge.tsx": "1415bf0b9fc297e359e73f71fe51a9ee6dad8189022a6a657119f3d0c1aaa59c",
+    "artifacts/mustaflow/src/pages/projects/components/knowledge-tab.tsx": "60085fce86100e2cb24aaa283d32cb6254b93ab53f1301ca75127fcaf62803b8",
+    "lib/api-spec/openapi.yaml": "678e9a26cd0ef5a9c3ab9a9d91e3f15f2e9231a97a3d3868fc556c786a22edb9",
+    "lib/db/src/schema/knowledge-provenance-events.ts": "e361840bba5f27d54ff867ba1f00e2fe9e68f71417f25d9936a4aadb8510f12a",
+    "lib/ora-contracts/src/zero-memory-provenance.ts": "f88245cd80c4c52ffaf40474fa7a216f3e323960a343677604f657f875e24f74"
+  },
+  "liveClosure": {
+    "status": "pending",
+    "requirements": [
+      "production-capable release gate",
+      "single publish",
+      "boot migration receipt 145",
+      "api version commit and tree identity",
+      "three health probes",
+      "signed-in user-eyes provenance screenshot",
+      "branch deletion and clean permanent worktree"
+    ]
+  }
+}

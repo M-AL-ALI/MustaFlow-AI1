@@ -2230,6 +2230,66 @@ export interface TaskFeedbackInput {
  */
 export type KnowledgeEntryDiffSummary = { [key: string]: unknown } | null;
 
+export type ZeroMemoryProvenanceSemantics = typeof ZeroMemoryProvenanceSemantics[keyof typeof ZeroMemoryProvenanceSemantics];
+
+
+export const ZeroMemoryProvenanceSemantics = {
+  'zero-memory-provenance-v1': 'zero-memory-provenance-v1',
+} as const;
+
+export type ZeroMemoryProvenanceStatus = typeof ZeroMemoryProvenanceStatus[keyof typeof ZeroMemoryProvenanceStatus];
+
+
+export const ZeroMemoryProvenanceStatus = {
+  verified: 'verified',
+  unverified: 'unverified',
+} as const;
+
+/**
+ * @nullable
+ */
+export type ZeroMemoryProvenanceClaimKind = typeof ZeroMemoryProvenanceClaimKind[keyof typeof ZeroMemoryProvenanceClaimKind] | null;
+
+
+export const ZeroMemoryProvenanceClaimKind = {
+  stated: 'stated',
+  observed: 'observed',
+  inferred: 'inferred',
+} as const;
+
+export type ZeroMemoryProvenanceLabel = typeof ZeroMemoryProvenanceLabel[keyof typeof ZeroMemoryProvenanceLabel];
+
+
+export const ZeroMemoryProvenanceLabel = {
+  You_said: 'You said',
+  A_teammate_said: 'A teammate said',
+  Zero_observed: 'Zero observed',
+  Zero_inferred: 'Zero inferred',
+  Source_unverified: 'Source unverified',
+} as const;
+
+export type ZeroMemoryProvenanceSource = {
+  /** @nullable */
+  messageStartId: number | null;
+  /** @nullable */
+  messageEndId: number | null;
+  /** @nullable */
+  taskId: number | null;
+  /** @nullable */
+  versionId: number | null;
+} | null;
+
+export interface ZeroMemoryProvenance {
+  semantics: ZeroMemoryProvenanceSemantics;
+  status: ZeroMemoryProvenanceStatus;
+  /** @nullable */
+  claimKind: ZeroMemoryProvenanceClaimKind;
+  label: ZeroMemoryProvenanceLabel;
+  /** @nullable */
+  recordedAt: string | null;
+  source: ZeroMemoryProvenanceSource;
+}
+
 export interface KnowledgeEntry {
   id: number;
   title: string;
@@ -2261,6 +2321,7 @@ export interface KnowledgeEntry {
   /** @nullable */
   archivedAt?: string | null;
   createdAt: string;
+  provenance?: ZeroMemoryProvenance;
 }
 
 export interface KnowledgeInput {

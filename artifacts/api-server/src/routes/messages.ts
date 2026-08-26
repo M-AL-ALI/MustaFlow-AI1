@@ -1262,6 +1262,8 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
             sourceMessageStartId,
             sourceMessageEndId,
             tags: ["conversation", "context", "summary"],
+            claimKind: "inferred",
+            actorUserId: project.ownerId ?? undefined,
           });
           if (receipt) {
             logger.debug(

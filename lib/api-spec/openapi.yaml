@@ -9635,6 +9635,38 @@ components:
         annotation: { type: ["string", "null"] }
         archivedAt: { type: ["string", "null"], format: date-time }
         createdAt: { type: string, format: date-time }
+        provenance:
+          $ref: "#/components/schemas/ZeroMemoryProvenance"
+
+    ZeroMemoryProvenance:
+      type: object
+      required: [semantics, status, claimKind, label, recordedAt, source]
+      properties:
+        semantics:
+          type: string
+          enum: [zero-memory-provenance-v1]
+        status:
+          type: string
+          enum: [verified, unverified]
+        claimKind:
+          type: ["string", "null"]
+          enum: [stated, observed, inferred, null]
+        label:
+          type: string
+          enum: [You said, A teammate said, Zero observed, Zero inferred, Source unverified]
+        recordedAt:
+          type: ["string", "null"]
+          format: date-time
+        source:
+          oneOf:
+            - type: object
+              required: [messageStartId, messageEndId, taskId, versionId]
+              properties:
+                messageStartId: { type: ["integer", "null"] }
+                messageEndId: { type: ["integer", "null"] }
+                taskId: { type: ["integer", "null"] }
+                versionId: { type: ["integer", "null"] }
+            - type: "null"
 
     KnowledgeInput:
       type: object

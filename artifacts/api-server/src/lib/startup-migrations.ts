@@ -102,11 +102,37 @@ export async function applyKnowledgeProvenanceMigration(client: MigrationClient)
       source_message_end_id       INTEGER,
       source_task_id              INTEGER,
       source_version_id           INTEGER,
-      semantics                   TEXT NOT NULL DEFAULT 'knowledge-provenance-v1',
+      claim_kind                  TEXT,
+      actor_user_id               TEXT,
+      semantics                   TEXT NOT NULL DEFAULT 'knowledge-provenance-v2',
       contributed_content_sha256  TEXT NOT NULL,
       resulting_content_sha256    TEXT NOT NULL,
       created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+  await client.query(`
+    ALTER TABLE knowledge_provenance_events
+      ADD COLUMN IF NOT EXISTS claim_kind TEXT,
+      ADD COLUMN IF NOT EXISTS actor_user_id TEXT
+  `);
+  await client.query(`
+    ALTER TABLE knowledge_provenance_events
+      ALTER COLUMN semantics SET DEFAULT 'knowledge-provenance-v2'
+  `);
+  await client.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+         WHERE conname = 'knowledge_provenance_events_claim_kind_check'
+           AND conrelid = 'knowledge_provenance_events'::regclass
+      ) THEN
+        ALTER TABLE knowledge_provenance_events
+          ADD CONSTRAINT knowledge_provenance_events_claim_kind_check
+          CHECK (claim_kind IS NULL OR claim_kind IN ('stated', 'observed', 'inferred'))
+          NOT VALID;
+      END IF;
+    END $$
   `);
   await client.query(`
     CREATE INDEX IF NOT EXISTS knowledge_provenance_entry_idx

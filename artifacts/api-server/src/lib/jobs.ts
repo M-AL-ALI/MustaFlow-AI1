@@ -10,6 +10,7 @@ import {
   chatMessagesTable,
   taskEventsTable,
   knowledgeEntriesTable,
+  knowledgeProvenanceEventsTable,
   secretsTable,
   deploymentLogsTable,
   buildAnalyticsTable,
@@ -25,6 +26,7 @@ import {
   type FileSnapshotEntry,
   type CvePatchStatus,
 } from "@workspace/db";
+import { isZeroMemoryClaimKind } from "@workspace/ora-contracts";
 import {
   runBuildPipeline,
   runRefinePipeline,
@@ -1425,11 +1427,40 @@ export async function loadKnowledgeContext(
     ]);
 
     if (entries.length === 0) return { context: integrationsNote, applied: [] };
+    const provenanceEvents = await db
+      .selectDistinctOn([knowledgeProvenanceEventsTable.knowledgeEntryId], {
+        id: knowledgeProvenanceEventsTable.id,
+        knowledgeEntryId: knowledgeProvenanceEventsTable.knowledgeEntryId,
+        claimKind: knowledgeProvenanceEventsTable.claimKind,
+        createdAt: knowledgeProvenanceEventsTable.createdAt,
+      })
+      .from(knowledgeProvenanceEventsTable)
+      .where(
+        inArray(
+          knowledgeProvenanceEventsTable.knowledgeEntryId,
+          entries.map((entry) => entry.id),
+        ),
+      )
+      .orderBy(
+        knowledgeProvenanceEventsTable.knowledgeEntryId,
+        desc(knowledgeProvenanceEventsTable.createdAt),
+        desc(knowledgeProvenanceEventsTable.id),
+      );
+    const claimKindByEntry = new Map<number, (typeof provenanceEvents)[number]["claimKind"]>();
+    for (const event of provenanceEvents) {
+      if (!claimKindByEntry.has(event.knowledgeEntryId)) {
+        claimKindByEntry.set(event.knowledgeEntryId, event.claimKind);
+      }
+    }
+    const classifiedEntries = entries.map((entry) => {
+      const claimKind = claimKindByEntry.get(entry.id);
+      return { ...entry, claimKind: isZeroMemoryClaimKind(claimKind) ? claimKind : null };
+    });
     const nowMs = Date.now();
     const promptEmbedding =
       userPrompt && userPrompt.length > 0 ? await generateEmbedding(userPrompt) : null;
     return selectKnowledgeContext({
-      entries,
+      entries: classifiedEntries,
       integrationsNote,
       projectId,
       userPrompt,

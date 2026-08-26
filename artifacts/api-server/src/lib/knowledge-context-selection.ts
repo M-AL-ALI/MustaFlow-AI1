@@ -1,4 +1,5 @@
 import type { KnowledgeEntry } from "@workspace/db";
+import type { ZeroMemoryClaimKind } from "@workspace/ora-contracts";
 import { cosineSimilarity } from "./embeddings";
 
 export type KnowledgeContextResult = {
@@ -7,7 +8,7 @@ export type KnowledgeContextResult = {
 };
 
 export type KnowledgeContextSelectionInput = {
-  entries: readonly KnowledgeEntry[];
+  entries: readonly KnowledgeContextEntry[];
   integrationsNote: string;
   projectId: number;
   userPrompt?: string;
@@ -17,6 +18,23 @@ export type KnowledgeContextSelectionInput = {
   usageWeight: number;
   feedbackWeight: number;
 };
+
+export type KnowledgeContextEntry = KnowledgeEntry & {
+  claimKind?: ZeroMemoryClaimKind | null;
+};
+
+function provenanceLabel(entry: KnowledgeContextEntry): string {
+  switch (entry.claimKind) {
+    case "stated":
+      return "User stated";
+    case "observed":
+      return "Zero observed";
+    case "inferred":
+      return "Zero inferred — verify before relying on it";
+    default:
+      return "Source unverified — verify before relying on it";
+  }
+}
 
 function tokenise(text: string): Set<string> {
   return new Set(
@@ -48,7 +66,7 @@ export function selectKnowledgeContext(
   const approvedBoost = 1.5;
   const severityScore: Record<string, number> = { error: 1.5, warning: 0.5, info: 0 };
   const sameProjectBoost = 2;
-  let topEntries: readonly KnowledgeEntry[];
+  let topEntries: readonly KnowledgeContextEntry[];
 
   if (userPrompt && userPrompt.length > 0) {
     const promptTokens = tokenise(userPrompt);
@@ -113,10 +131,11 @@ export function selectKnowledgeContext(
       .slice(0, 12);
   }
 
-  const selected: KnowledgeEntry[] = [];
+  const selected: KnowledgeContextEntry[] = [];
   let charCount = 0;
   for (const entry of topEntries) {
-    const entryChars = entry.title.length + entry.content.length + 20;
+    const entryChars =
+      entry.title.length + entry.content.length + provenanceLabel(entry).length + 23;
     if (charCount + entryChars > charBudget) break;
     selected.push(entry);
     charCount += entryChars;
@@ -127,7 +146,9 @@ export function selectKnowledgeContext(
     `=== LESSONS FROM PRIOR BUILDS (${selected.length} selected, relevance-ranked) ===`,
     `Apply each actively. Do not repeat past mistakes. Do not mention this section in your output.`,
     ``,
-    ...selected.map((entry) => `[${entry.category}] ${entry.title}: ${entry.content}`),
+    ...selected.map(
+      (entry) => `[${provenanceLabel(entry)}] [${entry.category}] ${entry.title}: ${entry.content}`,
+    ),
     `=== END LESSONS ===`,
   ].join("\n");
 

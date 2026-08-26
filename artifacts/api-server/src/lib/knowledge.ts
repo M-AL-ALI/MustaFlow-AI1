@@ -26,12 +26,14 @@ import {
   resolveZeroIntegrationEligibility,
   resolveZeroIntegrationEligibilityOutcome,
 } from "./zero-capability-eligibility";
+import type { ZeroMemoryClaimKind } from "@workspace/ora-contracts";
 
 export interface KnowledgeWriteOpts {
   title: string;
   content: string;
   type: string;
   category?: string;
+  scope?: "project" | "user" | "org" | "global";
   severity?: "info" | "warning" | "error";
   projectId?: number;
   userId?: string;
@@ -42,6 +44,10 @@ export interface KnowledgeWriteOpts {
   tags?: string[];
   diffSummary?: DiffSummary;
   approvedForReuse?: boolean;
+  /** Closed provenance class. Automated system facts default to observed. */
+  claimKind?: ZeroMemoryClaimKind;
+  /** Actor responsible for a stated claim. Never returned directly to clients. */
+  actorUserId?: string;
 }
 
 export type KnowledgeWriteResult = {
@@ -146,6 +152,51 @@ const KNOWLEDGE_DEDUP_THRESHOLD = parseFloat(process.env.KNOWLEDGE_DEDUP_THRESHO
 
 function contentSha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export type KnowledgeProvenanceReceiptInput = {
+  knowledgeEntryId: number;
+  outcome: "inserted" | "reinforced";
+  projectId?: number | null;
+  sourceMessageStartId?: number | null;
+  sourceMessageEndId?: number | null;
+  sourceTaskId?: number | null;
+  sourceVersionId?: number | null;
+  claimKind: ZeroMemoryClaimKind;
+  actorUserId?: string | null;
+  contributedContent: string;
+  resultingContent: string;
+};
+
+/** The sole constructor for append-only Builder memory provenance receipts. */
+export function buildKnowledgeProvenanceReceipt(input: KnowledgeProvenanceReceiptInput) {
+  return {
+    knowledgeEntryId: input.knowledgeEntryId,
+    outcome: input.outcome,
+    projectId: input.projectId ?? null,
+    sourceMessageStartId: input.sourceMessageStartId ?? null,
+    sourceMessageEndId: input.sourceMessageEndId ?? null,
+    sourceTaskId: input.sourceTaskId ?? null,
+    sourceVersionId: input.sourceVersionId ?? null,
+    claimKind: input.claimKind,
+    actorUserId: input.actorUserId ?? null,
+    contributedContentSha256: contentSha256(input.contributedContent),
+    resultingContentSha256: contentSha256(input.resultingContent),
+  };
+}
+
+/**
+ * The single append operation for Builder memory provenance. Callers pass
+ * their existing transaction so the semantic write and its receipt commit or
+ * roll back together.
+ */
+export async function appendKnowledgeProvenanceReceipt(
+  client: Pick<typeof db, "insert">,
+  input: KnowledgeProvenanceReceiptInput,
+): Promise<void> {
+  await client
+    .insert(knowledgeProvenanceEventsTable)
+    .values(buildKnowledgeProvenanceReceipt(input));
 }
 
 export async function writeKnowledge(
@@ -297,16 +348,18 @@ export async function writeKnowledge(
               embedding,
             })
             .where(eq(knowledgeEntriesTable.id, bestId));
-          await tx.insert(knowledgeProvenanceEventsTable).values({
+          await appendKnowledgeProvenanceReceipt(tx, {
             knowledgeEntryId: bestId,
             outcome: "reinforced",
-            projectId: opts.projectId ?? null,
-            sourceMessageStartId: opts.sourceMessageStartId ?? null,
-            sourceMessageEndId: opts.sourceMessageEndId ?? null,
-            sourceTaskId: opts.relatedTaskId ?? null,
-            sourceVersionId: opts.relatedVersionId ?? null,
-            contributedContentSha256: contentSha256(opts.content),
-            resultingContentSha256: contentSha256(resultingContent),
+            projectId: opts.projectId,
+            sourceMessageStartId: opts.sourceMessageStartId,
+            sourceMessageEndId: opts.sourceMessageEndId,
+            sourceTaskId: opts.relatedTaskId,
+            sourceVersionId: opts.relatedVersionId,
+            claimKind: opts.claimKind ?? "observed",
+            actorUserId: opts.actorUserId ?? opts.userId,
+            contributedContent: opts.content,
+            resultingContent,
           });
           logger.debug(
             { id: bestId, similarity: bestSimilarity },
@@ -324,6 +377,7 @@ export async function writeKnowledge(
           content: opts.content,
           type: opts.type,
           category: opts.category ?? "note",
+          scope: opts.scope ?? (opts.projectId != null ? "project" : "user"),
           severity: opts.severity ?? "info",
           projectId: opts.projectId ?? null,
           userId: opts.userId ?? null,
@@ -339,16 +393,18 @@ export async function writeKnowledge(
         })
         .returning({ id: knowledgeEntriesTable.id });
       if (!row) throw new Error("Knowledge insert did not return an entry identity");
-      await tx.insert(knowledgeProvenanceEventsTable).values({
+      await appendKnowledgeProvenanceReceipt(tx, {
         knowledgeEntryId: row.id,
         outcome: "inserted",
-        projectId: opts.projectId ?? null,
-        sourceMessageStartId: opts.sourceMessageStartId ?? null,
-        sourceMessageEndId: opts.sourceMessageEndId ?? null,
-        sourceTaskId: opts.relatedTaskId ?? null,
-        sourceVersionId: opts.relatedVersionId ?? null,
-        contributedContentSha256: contentSha256(opts.content),
-        resultingContentSha256: contentSha256(opts.content),
+        projectId: opts.projectId,
+        sourceMessageStartId: opts.sourceMessageStartId,
+        sourceMessageEndId: opts.sourceMessageEndId,
+        sourceTaskId: opts.relatedTaskId,
+        sourceVersionId: opts.relatedVersionId,
+        claimKind: opts.claimKind ?? "observed",
+        actorUserId: opts.actorUserId ?? opts.userId,
+        contributedContent: opts.content,
+        resultingContent: opts.content,
       });
       return { outcome: "inserted", entryId: row.id } satisfies KnowledgeWriteResult;
     });
@@ -506,24 +562,21 @@ Extract 3–8 distinct, confident preferences. Only include preferences you can 
     return { inferred: 0 };
   }
 
-  const rows = await db
-    .insert(knowledgeEntriesTable)
-    .values(
-      validPrefs.map((pref) => ({
-        title: pref.title.slice(0, 500),
-        content: pref.content.slice(0, 5000),
-        category: pref.category ?? "style",
-        type: "style_memory",
-        scope: "user",
-        severity: "info" as const,
-        userId,
-        projectId: null as number | null,
-        approvedForReuse: false,
-        // Builder-inferred style memory — hidden from Ora Memory.
-        origin: "builder" as const,
-      })),
-    )
-    .returning({ id: knowledgeEntriesTable.id });
+  let inserted = 0;
+  for (const pref of validPrefs) {
+    const result = await writeKnowledge({
+      title: pref.title.slice(0, 500),
+      content: pref.content.slice(0, 5000),
+      category: pref.category ?? "style",
+      type: "style_memory",
+      scope: "user",
+      userId,
+      approvedForReuse: false,
+      claimKind: "inferred",
+      actorUserId: userId,
+    });
+    if (result) inserted += 1;
+  }
 
-  return { inferred: rows.length };
+  return { inferred: inserted };
 }

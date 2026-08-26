@@ -42,7 +42,14 @@ vi.mock("../embeddings", () => ({
 
 const FIXED_VECTOR = Array.from({ length: 1536 }, () => 0.1);
 
-import { db, knowledgeEntriesTable, projectsTable, pool, workspacesTable } from "@workspace/db";
+import {
+  db,
+  knowledgeEntriesTable,
+  knowledgeProvenanceEventsTable,
+  projectsTable,
+  pool,
+  workspacesTable,
+} from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { loadKnowledgeContext } from "../jobs";
 import { writeKnowledge } from "../knowledge";
@@ -154,6 +161,35 @@ describe("Ora ↔ Builder memory isolation", () => {
     const rows = res.body as Array<{ content: string }>;
     expect(rows.some((r) => r.content.includes(BUILDER_MARKER))).toBe(true);
     expect(rows.some((r) => r.content.includes(ORA_MARKER))).toBe(false);
+  });
+
+  it("classifies a user-created project memory and never exposes the actor identity", async () => {
+    const created = await request(knowledgeApp)
+      .post("/api/knowledge")
+      .send({
+        projectId,
+        title: "Provenance statement",
+        content: `The user explicitly chose ${TEST_USER}`,
+        type: "provenance-test",
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.provenance).toMatchObject({
+      semantics: "zero-memory-provenance-v1",
+      status: "verified",
+      claimKind: "stated",
+      label: "You said",
+    });
+    expect(JSON.stringify(created.body.provenance)).not.toContain(TEST_USER);
+
+    const entryId = created.body.id as number;
+    const [receipt] = await db
+      .select({
+        claimKind: knowledgeProvenanceEventsTable.claimKind,
+        actorUserId: knowledgeProvenanceEventsTable.actorUserId,
+      })
+      .from(knowledgeProvenanceEventsTable)
+      .where(eq(knowledgeProvenanceEventsTable.knowledgeEntryId, entryId));
+    expect(receipt).toEqual({ claimKind: "stated", actorUserId: TEST_USER });
   });
 
   it("writeKnowledge dedup never merges a Builder write into the Ora row", async () => {

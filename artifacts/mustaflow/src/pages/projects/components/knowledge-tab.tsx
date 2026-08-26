@@ -12,6 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { authFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { KnowledgeProvenanceBadge } from "./knowledge-provenance-badge";
 import {
   Hammer,
   RefreshCw,
@@ -253,6 +254,7 @@ function KnowledgeEntryCard({
                 >
                   {getTypeLabel(entry.type)}
                 </span>
+                <KnowledgeProvenanceBadge provenance={entry.provenance} />
                 {entry.category && entry.category !== entry.type && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded font-medium border border-border bg-muted text-muted-foreground">
                     {entry.category}

@@ -4518,7 +4518,20 @@ export const ListKnowledgeResponseItem = zod.object({
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "provenance": zod.object({
+  "semantics": zod.enum(['zero-memory-provenance-v1']),
+  "status": zod.enum(['verified', 'unverified']),
+  "claimKind": zod.union([zod.literal('stated'),zod.literal('observed'),zod.literal('inferred'),zod.literal(null)]).nullable(),
+  "label": zod.enum(['You said', 'A teammate said', 'Zero observed', 'Zero inferred', 'Source unverified']),
+  "recordedAt": zod.coerce.date().nullable(),
+  "source": zod.union([zod.object({
+  "messageStartId": zod.number().nullable(),
+  "messageEndId": zod.number().nullable(),
+  "taskId": zod.number().nullable(),
+  "versionId": zod.number().nullable()
+}),zod.null()])
+}).optional()
 })
 export const ListKnowledgeResponse = zod.array(ListKnowledgeResponseItem)
 
@@ -4566,7 +4579,20 @@ export const ExportKnowledgeResponse = zod.object({
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "provenance": zod.object({
+  "semantics": zod.enum(['zero-memory-provenance-v1']),
+  "status": zod.enum(['verified', 'unverified']),
+  "claimKind": zod.union([zod.literal('stated'),zod.literal('observed'),zod.literal('inferred'),zod.literal(null)]).nullable(),
+  "label": zod.enum(['You said', 'A teammate said', 'Zero observed', 'Zero inferred', 'Source unverified']),
+  "recordedAt": zod.coerce.date().nullable(),
+  "source": zod.union([zod.object({
+  "messageStartId": zod.number().nullable(),
+  "messageEndId": zod.number().nullable(),
+  "taskId": zod.number().nullable(),
+  "versionId": zod.number().nullable()
+}),zod.null()])
+}).optional()
 }))
 })
 
@@ -4636,7 +4662,20 @@ export const ListPublicKnowledgeResponseItem = zod.object({
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "provenance": zod.object({
+  "semantics": zod.enum(['zero-memory-provenance-v1']),
+  "status": zod.enum(['verified', 'unverified']),
+  "claimKind": zod.union([zod.literal('stated'),zod.literal('observed'),zod.literal('inferred'),zod.literal(null)]).nullable(),
+  "label": zod.enum(['You said', 'A teammate said', 'Zero observed', 'Zero inferred', 'Source unverified']),
+  "recordedAt": zod.coerce.date().nullable(),
+  "source": zod.union([zod.object({
+  "messageStartId": zod.number().nullable(),
+  "messageEndId": zod.number().nullable(),
+  "taskId": zod.number().nullable(),
+  "versionId": zod.number().nullable()
+}),zod.null()])
+}).optional()
 })
 export const ListPublicKnowledgeResponse = zod.array(ListPublicKnowledgeResponseItem)
 
@@ -4687,7 +4726,20 @@ export const UpdateKnowledgeResponse = zod.object({
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "provenance": zod.object({
+  "semantics": zod.enum(['zero-memory-provenance-v1']),
+  "status": zod.enum(['verified', 'unverified']),
+  "claimKind": zod.union([zod.literal('stated'),zod.literal('observed'),zod.literal('inferred'),zod.literal(null)]).nullable(),
+  "label": zod.enum(['You said', 'A teammate said', 'Zero observed', 'Zero inferred', 'Source unverified']),
+  "recordedAt": zod.coerce.date().nullable(),
+  "source": zod.union([zod.object({
+  "messageStartId": zod.number().nullable(),
+  "messageEndId": zod.number().nullable(),
+  "taskId": zod.number().nullable(),
+  "versionId": zod.number().nullable()
+}),zod.null()])
+}).optional()
 })
 
 
@@ -4730,7 +4782,20 @@ export const PromoteKnowledgeToGlobalResponse = zod.object({
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "provenance": zod.object({
+  "semantics": zod.enum(['zero-memory-provenance-v1']),
+  "status": zod.enum(['verified', 'unverified']),
+  "claimKind": zod.union([zod.literal('stated'),zod.literal('observed'),zod.literal('inferred'),zod.literal(null)]).nullable(),
+  "label": zod.enum(['You said', 'A teammate said', 'Zero observed', 'Zero inferred', 'Source unverified']),
+  "recordedAt": zod.coerce.date().nullable(),
+  "source": zod.union([zod.object({
+  "messageStartId": zod.number().nullable(),
+  "messageEndId": zod.number().nullable(),
+  "taskId": zod.number().nullable(),
+  "versionId": zod.number().nullable()
+}),zod.null()])
+}).optional()
 })
 
 
@@ -4767,7 +4832,20 @@ export const RateKnowledgeResponse = zod.object({
   "diffSummary": zod.record(zod.string(), zod.unknown()).nullish(),
   "annotation": zod.string().nullish(),
   "archivedAt": zod.coerce.date().nullish(),
-  "createdAt": zod.coerce.date()
+  "createdAt": zod.coerce.date(),
+  "provenance": zod.object({
+  "semantics": zod.enum(['zero-memory-provenance-v1']),
+  "status": zod.enum(['verified', 'unverified']),
+  "claimKind": zod.union([zod.literal('stated'),zod.literal('observed'),zod.literal('inferred'),zod.literal(null)]).nullable(),
+  "label": zod.enum(['You said', 'A teammate said', 'Zero observed', 'Zero inferred', 'Source unverified']),
+  "recordedAt": zod.coerce.date().nullable(),
+  "source": zod.union([zod.object({
+  "messageStartId": zod.number().nullable(),
+  "messageEndId": zod.number().nullable(),
+  "taskId": zod.number().nullable(),
+  "versionId": zod.number().nullable()
+}),zod.null()])
+}).optional()
 }).and(zod.object({
   "contributorRewardGranted": zod.boolean().optional().describe('True when this rating triggered a credit reward for the entry\'s contributor.'),
   "contributorRewardCredits": zod.number().optional().describe('Number of credits granted to the contributor (0 when not granted).')

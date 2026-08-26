@@ -1,11 +1,12 @@
 import { bigserial, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import type { ZeroMemoryClaimKind } from "@workspace/ora-contracts";
 import { knowledgeEntriesTable } from "./knowledge";
 import { projectsTable } from "./projects";
 import { chatMessagesTable } from "./messages";
 import { agentTasksTable } from "./tasks";
 import { projectVersionsTable } from "./versions";
 
-export const KNOWLEDGE_PROVENANCE_SEMANTICS = "knowledge-provenance-v1" as const;
+export const KNOWLEDGE_PROVENANCE_SEMANTICS = "knowledge-provenance-v2" as const;
 
 /**
  * Append-only receipt for every successful Builder knowledge insert or reinforcement.
@@ -35,6 +36,12 @@ export const knowledgeProvenanceEventsTable = pgTable(
     sourceVersionId: integer("source_version_id").references(() => projectVersionsTable.id, {
       onDelete: "set null",
     }),
+    // Nullable only for receipts written before provenance-v2. Readers must
+    // show those historical rows as unverified instead of guessing a class.
+    claimKind: text("claim_kind").$type<ZeroMemoryClaimKind>(),
+    // The actor identity is used only to render "You said" versus "A teammate
+    // said" after authorization; the identifier itself is never projected.
+    actorUserId: text("actor_user_id"),
     semantics: text("semantics").notNull().default(KNOWLEDGE_PROVENANCE_SEMANTICS),
     contributedContentSha256: text("contributed_content_sha256").notNull(),
     resultingContentSha256: text("resulting_content_sha256").notNull(),

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { KnowledgeEntryDiffSummary } from './knowledgeEntryDiffSummary';
+import type { ZeroMemoryProvenance } from './zeroMemoryProvenance';
 
 export interface KnowledgeEntry {
   id: number;
@@ -38,4 +39,5 @@ export interface KnowledgeEntry {
   /** @nullable */
   archivedAt?: Date | null;
   createdAt: Date;
+  provenance?: ZeroMemoryProvenance;
 }
