@@ -35,6 +35,7 @@ import {
   isZeroSealedGenerationTarget,
   resolveZeroGenerationTarget,
 } from "../lib/zero-sealed-generation";
+import { CloudflareRuntimeControlError } from "../lib/cloudflare-runtime-provider";
 
 const router: IRouter = Router();
 
@@ -154,10 +155,21 @@ router.post(
         const missingRelease =
           error instanceof SealedPreviewResumeError &&
           error.code === "sealed_preview_release_missing";
+        const providerFailure =
+          error instanceof CloudflareRuntimeControlError
+            ? {
+                class: error.name,
+                status: error.status,
+                code: error.code,
+                retryable: error.retryable,
+                transportCause: error.transportCause,
+              }
+            : null;
         req.log.warn(
           {
             projectId,
             code: error instanceof SealedPreviewResumeError ? error.code : "preview_resume_failed",
+            providerFailure,
           },
           "Sealed preview resume failed",
         );
