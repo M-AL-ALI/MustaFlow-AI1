@@ -1,0 +1,16 @@
+[mcp_servers.ruflo_readonly]
+command = "pnpm"
+args = ["--filter", "@workspace/scripts", "exec", "tsx", "./src/ruflo-mcp-proxy.ts"]
+enabled = true
+required = false
+startup_timeout_sec = 90
+tool_timeout_sec = 45
+enabled_tools = [
+  "mcp_status",
+  "system_info",
+  "analyze_diff-risk",
+  "analyze_diff-classify",
+  "analyze_diff-stats",
+  "analyze_file-risk",
+]
+default_tools_approval_mode = "prompt"

@@ -15,6 +15,9 @@
     "test:api:serial": "pnpm --filter @workspace/api-server exec vitest run --no-file-parallelism",
     "test:web:serial": "pnpm --filter @workspace/mustaflow exec vitest run --config vitest.config.ts --no-file-parallelism",
     "release:verify-production": "pnpm --filter @workspace/scripts run verify:production-release",
+    "ruflo:policy:test": "pnpm --filter @workspace/scripts run ruflo:policy:test",
+    "ruflo:adapter:test": "pnpm --filter @workspace/scripts run ruflo:adapter:test",
+    "ruflo:pilot": "pnpm --filter @workspace/scripts run ruflo:pilot",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepare": "husky"
