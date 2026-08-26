@@ -57,6 +57,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   getPreviewAddress,
+  getPreviewRecoveryControl,
   getServerPreviewBadge,
   hasServerPreviewAccess,
   presentAgenticPreviewUnavailable,
@@ -917,6 +918,10 @@ export function PreviewTab({
   const isAgentic = project.builderMode === "agentic";
   const serverPreviewLive = isAgentic && hasServerPreviewAccess(previewAccess);
   const agenticPreviewUnavailable = isAgentic && !serverPreviewLive;
+  const previewRecoveryControl = getPreviewRecoveryControl({
+    hasRuntime: Boolean(project.containerId),
+    status: containerStatus,
+  });
   const webContainerLive =
     isReactVite && !serverPreviewLive && wc.status === "ready" && wc.previewUrl != null;
 
@@ -2079,6 +2084,22 @@ export function PreviewTab({
               </div>
             )}
           </div>
+        )}
+
+        {/* Explicit recovery stays reachable even when provider metadata is stale. */}
+        {previewRecoveryControl && onStartContainer && (
+          <button
+            type="button"
+            onClick={onStartContainer}
+            disabled={previewRecoveryControl.disabled}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors shrink-0 border bg-muted text-muted-foreground border-border hover:text-foreground disabled:cursor-wait disabled:opacity-60"
+            title={previewRecoveryControl.label}
+          >
+            <RefreshCw
+              className={cn("h-3 w-3", previewRecoveryControl.disabled && "animate-spin")}
+            />
+            <span className="hidden sm:inline">{previewRecoveryControl.label}</span>
+          </button>
         )}
 
         {/* Console toggle */}

@@ -13,8 +13,34 @@ export type AgenticPreviewUnavailablePresentation = {
   actionLabel: string | null;
 };
 
+export type PreviewRuntimeStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
+
+export type PreviewRecoveryControl = {
+  label: "Wake preview" | "Restart preview" | "Waking preview…";
+  disabled: boolean;
+};
+
+/**
+ * Keeps explicit preview recovery reachable even when provider metadata says
+ * "running" while the accepted release is not yet serving. This control only
+ * describes a user-initiated POST action; preview reads remain side-effect free.
+ */
+export function getPreviewRecoveryControl(input: {
+  hasRuntime: boolean;
+  status: PreviewRuntimeStatus | undefined;
+}): PreviewRecoveryControl | null {
+  if (!input.hasRuntime) return null;
+  if (input.status === "starting") {
+    return { label: "Waking preview…", disabled: true };
+  }
+  if (input.status === "running") {
+    return { label: "Restart preview", disabled: false };
+  }
+  return { label: "Wake preview", disabled: false };
+}
+
 export function presentAgenticPreviewUnavailable(
-  status: "stopped" | "starting" | "running" | "hibernated" | "error" | undefined,
+  status: PreviewRuntimeStatus | undefined,
 ): AgenticPreviewUnavailablePresentation {
   if (status === "starting") {
     return {
