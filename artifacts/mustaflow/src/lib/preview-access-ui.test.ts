@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getPreviewAddress,
+  getPreviewRecoveryControl,
   getServerPreviewBadge,
   hasServerPreviewAccess,
   presentAgenticPreviewUnavailable,
@@ -78,5 +79,29 @@ describe("preview access UI", () => {
       expect(visible).not.toContain("preview_runtime_unavailable");
       expect(visible).not.toContain("runtime is not running");
     }
+  });
+
+  it("keeps explicit recovery reachable when a stale provider label says running", () => {
+    expect(getPreviewRecoveryControl({ hasRuntime: false, status: "running" })).toBeNull();
+    expect(getPreviewRecoveryControl({ hasRuntime: true, status: "running" })).toEqual({
+      label: "Restart preview",
+      disabled: false,
+    });
+    expect(getPreviewRecoveryControl({ hasRuntime: true, status: "stopped" })).toEqual({
+      label: "Wake preview",
+      disabled: false,
+    });
+    expect(getPreviewRecoveryControl({ hasRuntime: true, status: "hibernated" })).toEqual({
+      label: "Wake preview",
+      disabled: false,
+    });
+    expect(getPreviewRecoveryControl({ hasRuntime: true, status: "error" })).toEqual({
+      label: "Wake preview",
+      disabled: false,
+    });
+    expect(getPreviewRecoveryControl({ hasRuntime: true, status: "starting" })).toEqual({
+      label: "Waking preview…",
+      disabled: true,
+    });
   });
 });
