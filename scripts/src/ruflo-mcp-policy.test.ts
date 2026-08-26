@@ -104,6 +104,11 @@ for (const forbidden of ["system_reset", "memory_store", "agent_spawn", "termina
 assert.match(codexConfig, /default_tools_approval_mode = "prompt"/u);
 assert.doesNotMatch(codexConfig, /A:\\|C:\\/u);
 
+const proxySource = readFileSync(resolve(repositoryRoot, "scripts/src/ruflo-mcp-proxy.ts"), "utf8");
+assert.match(proxySource, /childEnvironment\.GIT_WORK_TREE = repositoryRoot/u);
+assert.match(proxySource, /\[rufloEntry, "mcp", "start"[\s\S]{0,500}cwd: safePaths\.runtimeRoot/u);
+assert.doesNotMatch(proxySource, /\[rufloEntry, "mcp", "start"[\s\S]{0,500}cwd: repositoryRoot/u);
+
 console.log(`policy=${RUFLO_MCP_POLICY_VERSION}`);
 console.log(`ruflo_version=${RUFLO_PINNED_VERSION}`);
 console.log(`allowed_tools=${RUFLO_ALLOWED_TOOLS.length}`);

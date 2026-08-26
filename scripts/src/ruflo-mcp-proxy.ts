@@ -19,6 +19,12 @@ import {
 const repositoryRoot = findRepositoryRoot(process.cwd());
 const safePaths = resolveRufloSafePaths(repositoryRoot);
 const childEnvironment = buildSanitizedRufloEnvironment(safePaths);
+childEnvironment.GIT_DIR = execFileSync(
+  "git",
+  ["-C", repositoryRoot, "rev-parse", "--absolute-git-dir"],
+  { encoding: "utf8", windowsHide: true },
+).trim();
+childEnvironment.GIT_WORK_TREE = repositoryRoot;
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -166,7 +172,7 @@ async function main(): Promise<void> {
     process.execPath,
     [rufloEntry, "mcp", "start", "--tools", RUFLO_ALLOWED_TOOLS.join(",")],
     {
-      cwd: repositoryRoot,
+      cwd: safePaths.runtimeRoot,
       env: childEnvironment,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,

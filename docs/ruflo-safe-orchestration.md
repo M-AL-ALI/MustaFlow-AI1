@@ -77,6 +77,10 @@ advertisement alone is never treated as authorization.
 5. The repository Prettier installation has no TOML parser. Preventative: the policy test reads the
    project MCP configuration and verifies its allowlist and approval mode structurally; Prettier
    remains authoritative for the TypeScript and JSON files.
+6. Ruflo initializes a local policy-state file during MCP startup, even for the bounded tool set.
+   Preventative: the child process runs from `A:/NabuFlowLab/.ruflo-safe`, while explicit `GIT_DIR`,
+   `GIT_WORK_TREE`, and `CLAUDE_FLOW_CWD` bindings preserve read-only analysis of the permanent
+   repository. A regression test forbids moving the child working directory back into the worktree.
 
 ## Activation note
 
