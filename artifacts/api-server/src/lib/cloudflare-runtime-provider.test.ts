@@ -264,7 +264,7 @@ describe("CloudflareRuntimeProvider", () => {
     await expect(provider.zeroGenerationRuntimeDescriptorForProject(44)).resolves.toBeNull();
   });
 
-  it("resumes the exact durable accepted release after the local deployment cache is lost", async () => {
+  it("replays the accepted release start when the runtime label is already running", async () => {
     const projectId = 51;
     const identity = await deriveRuntimeIdentity({
       namespace: "staging",
@@ -297,7 +297,7 @@ describe("CloudflareRuntimeProvider", () => {
           projectId,
           role: "preview",
           slot: "primary",
-          status: method === "POST" ? "running" : "stopped",
+          status: "running",
           servicePort: 8080,
           manifestRevision: release.manifest.revision,
           deploymentVersion: "staging-v1",

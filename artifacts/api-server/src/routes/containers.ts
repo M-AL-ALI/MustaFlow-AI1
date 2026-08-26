@@ -123,34 +123,9 @@ router.post(
       return;
     }
 
-    if (project.containerStatus === "running" && project.containerId) {
-      try {
-        const liveStatus = await getContainerStatus(project.containerId);
-        if (liveStatus === "running") {
-          res.json({
-            containerId: project.containerId,
-            containerStatus: "running",
-            containerUrl: project.containerUrl,
-            previewAccess: deriveConfiguredPreviewAccess(
-              {
-                runtimeId: project.containerId,
-                runtimeStatus: "running",
-              },
-              tenantRuntimeProvider.providerId,
-            ),
-          });
-          return;
-        }
-      } catch (error) {
-        logger.warn({ error, projectId }, "Preview runtime status check failed before wake");
-        res.status(503).json({
-          error: "We could not check the preview just now. Please try again.",
-          code: "preview_status_unavailable",
-        });
-        return;
-      }
-    }
-
+    // A Cloudflare sandbox can remain provider-running after its tenant process
+    // exits. An explicit wake is a governed mutation, so replay the exact accepted
+    // sealed release instead of treating the provider label as app readiness.
     if (isZeroSealedGenerationTarget(resolveZeroGenerationTarget(process.env))) {
       try {
         const runtime = await resumeAcceptedProjectPreview({
@@ -191,6 +166,34 @@ router.post(
             ? "This preview needs a fresh build before it can be opened."
             : "The preview could not be woken yet. Please try again.",
           code: missingRelease ? "preview_rebuild_required" : "preview_resume_unavailable",
+        });
+        return;
+      }
+    }
+
+    if (project.containerStatus === "running" && project.containerId) {
+      try {
+        const liveStatus = await getContainerStatus(project.containerId);
+        if (liveStatus === "running") {
+          res.json({
+            containerId: project.containerId,
+            containerStatus: "running",
+            containerUrl: project.containerUrl,
+            previewAccess: deriveConfiguredPreviewAccess(
+              {
+                runtimeId: project.containerId,
+                runtimeStatus: "running",
+              },
+              tenantRuntimeProvider.providerId,
+            ),
+          });
+          return;
+        }
+      } catch (error) {
+        logger.warn({ error, projectId }, "Preview runtime status check failed before wake");
+        res.status(503).json({
+          error: "We could not check the preview just now. Please try again.",
+          code: "preview_status_unavailable",
         });
         return;
       }

@@ -170,7 +170,7 @@ describe("container status read purity", () => {
     expect(state.updateCalls).toBe(1);
   });
 
-  it("keeps a provider-confirmed running preview read-only on wake", async () => {
+  it("replays an explicit sealed-preview wake even when the provider label is running", async () => {
     state.liveStatus = "running";
     const app = express();
     app.use(express.json());
@@ -180,12 +180,13 @@ describe("container status read purity", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.containerStatus).toBe("running");
-    expect(state.resumeCalls).toBe(0);
-    expect(state.updateCalls).toBe(0);
+    expect(state.resumeCalls).toBe(1);
+    expect(state.updateCalls).toBe(1);
   });
 
   it("does not mutate after an ambiguous provider status failure", async () => {
     state.liveError = true;
+    state.sealedTarget = false;
     const app = express();
     app.use(express.json());
     app.use(containersRouter);
