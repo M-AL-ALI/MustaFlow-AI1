@@ -34,6 +34,14 @@ Optional report file:
 pnpm --filter @workspace/scripts run ora-stability-gate -- --profile=release --require-clean --report=tmp/ora-stability-gate-report.md
 ```
 
+When an automation host has a shorter execution window than the complete release gate, use a checkpoint outside the repository and run a bounded number of checks per invocation:
+
+```bash
+pnpm --filter @workspace/scripts run ora-stability-gate -- --profile=release --require-clean --checkpoint=/tmp/ora-release-gate.json --max-checks=4
+```
+
+Repeat the exact same command until it emits the normal `Complete` and `PASSED` lines. Intermediate invocations emit `CHECKPOINTED` and never claim the release passed. The checkpoint is bound to the exact commit, tree, profile, clean-tree policy, changed-file impact, and ordered check prefix; a mismatch fails closed instead of reusing stale evidence.
+
 ## What The Automated Gate Covers
 
 The executable gate lives at `scripts/src/ora-stability-gate.ts`.
