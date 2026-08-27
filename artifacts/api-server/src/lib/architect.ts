@@ -85,6 +85,7 @@ export interface ArchitectInput {
   /** The focused review instruction, kept separate from the originating user request. */
   reviewBrief?: string;
   agentMode: AgentMode;
+  taskId?: number;
   /** Structured plan from Plan Mode, if any. */
   planContext?: Record<string, unknown> | null;
   /** Diff summary (added/modified/removed paths). */
@@ -217,6 +218,9 @@ export async function runArchitectReview(input: ArchitectInput): Promise<Archite
     const response = await createChatCompletion({
       provider,
       model,
+      taskId: input.taskId,
+      taskMode: input.agentMode,
+      zeroCall: { tier: input.agentMode, stage: "architect" },
       max_completion_tokens: 4096,
       messages: [
         { role: "system", content: ARCHITECT_SYSTEM_PROMPT },
