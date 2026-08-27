@@ -102,6 +102,175 @@ export async function applyAdminAccessFoundationMigration(client: MigrationClien
   }
 }
 
+export async function applySupportOperationsMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      ALTER TABLE support_tickets
+        ADD COLUMN IF NOT EXISTS resolution_class TEXT,
+        ADD COLUMN IF NOT EXISTS third_party_blocker TEXT,
+        ADD COLUMN IF NOT EXISTS resolution_evidence JSONB
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_tickets_resolution_class_idx
+        ON support_tickets(resolution_class, created_at)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS support_access_grants (
+        id            SERIAL PRIMARY KEY,
+        ticket_id     INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+        owner_user_id TEXT NOT NULL,
+        staff_user_id TEXT NOT NULL,
+        requested_by  TEXT NOT NULL,
+        reason        TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        requested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        decided_at    TIMESTAMPTZ,
+        expires_at    TIMESTAMPTZ,
+        revoked_at    TIMESTAMPTZ,
+        closed_at     TIMESTAMPTZ,
+        CONSTRAINT support_access_grants_status_check
+          CHECK (status IN ('pending','active','declined','revoked','expired','closed'))
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_access_grants_owner_status_idx
+        ON support_access_grants(owner_user_id, status)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_access_grants_staff_status_idx
+        ON support_access_grants(staff_user_id, status)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_access_grants_project_status_idx
+        ON support_access_grants(project_id, status)
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS support_access_grants_one_open_per_ticket_uq
+        ON support_access_grants(ticket_id)
+        WHERE status IN ('pending','active')
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS support_grant_events (
+        id                 SERIAL PRIMARY KEY,
+        grant_id           INTEGER NOT NULL REFERENCES support_access_grants(id) ON DELETE CASCADE,
+        ticket_id          INTEGER NOT NULL,
+        project_id         INTEGER NOT NULL,
+        actor_user_id      TEXT NOT NULL,
+        actor_display_name TEXT,
+        event              TEXT NOT NULL,
+        detail             JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_grant_events_grant_created_idx
+        ON support_grant_events(grant_id, created_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_grant_events_project_created_idx
+        ON support_grant_events(project_id, created_at)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS support_zero_sessions (
+        id                 SERIAL PRIMARY KEY,
+        ticket_id          INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        grant_id           INTEGER NOT NULL REFERENCES support_access_grants(id) ON DELETE RESTRICT,
+        project_id         INTEGER NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+        staff_user_id      TEXT NOT NULL,
+        status             TEXT NOT NULL DEFAULT 'diagnosing',
+        evidence_bundle    JSONB NOT NULL,
+        proposal           JSONB NOT NULL,
+        approved_by        TEXT,
+        declined_by        TEXT,
+        task_id            INTEGER,
+        applied_version_id INTEGER,
+        terminal           JSONB,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        decided_at         TIMESTAMPTZ,
+        completed_at       TIMESTAMPTZ,
+        CONSTRAINT support_zero_sessions_status_check
+          CHECK (status IN ('diagnosing','proposal_ready','approved','declined','applying','applied','interrupted'))
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_zero_sessions_ticket_created_idx
+        ON support_zero_sessions(ticket_id, created_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_zero_sessions_grant_created_idx
+        ON support_zero_sessions(grant_id, created_at)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS platform_defects (
+        id              SERIAL PRIMARY KEY,
+        fingerprint     TEXT NOT NULL UNIQUE,
+        title           TEXT NOT NULL,
+        status          TEXT NOT NULL DEFAULT 'open',
+        evidence        JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_by      TEXT NOT NULL,
+        shipped_version TEXT,
+        shipped_at      TIMESTAMPTZ,
+        verified_at     TIMESTAMPTZ,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT platform_defects_status_check
+          CHECK (status IN ('open','fixing','shipped','verified'))
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS platform_defects_status_updated_idx
+        ON platform_defects(status, updated_at)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS support_ticket_defect_links (
+        id        SERIAL PRIMARY KEY,
+        ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        defect_id INTEGER NOT NULL REFERENCES platform_defects(id) ON DELETE RESTRICT,
+        linked_by TEXT NOT NULL,
+        linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT support_ticket_defect_link_uq UNIQUE (ticket_id, defect_id)
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS shared_profile_migration_receipts (
+        id          SERIAL PRIMARY KEY,
+        user_id     TEXT NOT NULL UNIQUE,
+        source      TEXT NOT NULL,
+        outcome     TEXT NOT NULL,
+        migrated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+        CREATE INDEX IF NOT EXISTS shared_profile_migration_outcome_idx
+          ON shared_profile_migration_receipts(outcome, migrated_at)
+      `);
+    await client.query(`
+        ALTER TABLE chat_messages
+          ADD COLUMN IF NOT EXISTS support_session_id INTEGER,
+          ADD COLUMN IF NOT EXISTS provenance_actor_user_id TEXT
+      `);
+    await client.query(`
+        CREATE INDEX IF NOT EXISTS chat_messages_support_session_id_idx
+          ON chat_messages(support_session_id) WHERE support_session_id IS NOT NULL
+      `);
+    await client.query(`
+        ALTER TABLE agent_tasks
+          ADD COLUMN IF NOT EXISTS support_session_id INTEGER,
+          ADD COLUMN IF NOT EXISTS provenance_actor_user_id TEXT
+      `);
+    await client.query(`
+        CREATE INDEX IF NOT EXISTS agent_tasks_support_session_id_idx
+          ON agent_tasks(support_session_id) WHERE support_session_id IS NOT NULL
+      `);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function applyZeroTerminalMigration(client: MigrationClient): Promise<void> {
   await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS terminal JSONB`);
   const verification = await client.query<{ terminal_ready: boolean }>(`
@@ -6371,6 +6540,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-admin-access-foundation",
     async run(client) {
       await applyAdminAccessFoundationMigration(client);
+    },
+  },
+  {
+    name: "migrate-support-operations",
+    async run(client) {
+      await applySupportOperationsMigration(client);
     },
   },
 ];

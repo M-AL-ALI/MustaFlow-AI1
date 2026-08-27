@@ -53,6 +53,11 @@ export const chatMessagesTable = pgTable(
         onDelete: "set null",
       },
     ),
+    // A support-originated message keeps the staff actor and consent session
+    // explicit. The project owner approved the mutation; provenance still names
+    // the staff member who proposed it.
+    supportSessionId: integer("support_session_id"),
+    provenanceActorUserId: text("provenance_actor_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -62,6 +67,9 @@ export const chatMessagesTable = pgTable(
       .where(sql`checkpoint_id IS NOT NULL`),
     index("chat_messages_content_tsv_idx").using("gin", sql`content_tsv`),
     index("chat_messages_intent_receipt_id_idx").on(table.intentReceiptId),
+    index("chat_messages_support_session_id_idx")
+      .on(table.supportSessionId)
+      .where(sql`support_session_id IS NOT NULL`),
   ],
 );
 

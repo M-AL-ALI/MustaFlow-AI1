@@ -43,6 +43,7 @@ import {
   requestSupportAlertNotifications,
 } from "@/hooks/use-admin-ticket-alerts";
 import { toast } from "@/hooks/use-toast";
+import { SupportOperationConsole } from "./support-operation-console";
 
 type StatusFilter = "all" | "new" | "open" | "resolved";
 
@@ -440,7 +441,7 @@ function TicketDetail({
     queryClient.invalidateQueries({ queryKey: getGetAdminSupportTicketQueryKey(ticketId) });
   }
 
-  function changeStatus(next: "new" | "open" | "resolved") {
+  function changeStatus(next: "new" | "open") {
     if (!ticket || ticket.status === next) return;
     updateStatus.mutate(
       { id: ticketId, data: { status: next } },
@@ -566,7 +567,7 @@ function TicketDetail({
         {/* Status controls */}
         <div className="mt-3 flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground mr-1">Set status:</span>
-          {(["new", "open", "resolved"] as const).map((s) => (
+          {(["new", "open"] as const).map((s) => (
             <button
               key={s}
               onClick={() => changeStatus(s)}
@@ -583,6 +584,8 @@ function TicketDetail({
           ))}
         </div>
       </div>
+
+      <SupportOperationConsole ticketId={ticketId} />
 
       {/* Attachments */}
       {ticket.attachments.length > 0 && (

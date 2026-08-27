@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type RequestHandler } from "express";
 import healthRouter from "./health";
 import projectsRouter from "./projects";
 import messagesRouter from "./messages";
@@ -116,9 +116,13 @@ import oraxDesktopRouter from "./orax-desktop";
 import { oraxDesktopAuthPublicRouter, oraxDesktopAuthRouter } from "./orax-desktop-auth";
 import oraxProjectsRouter from "./orax-projects";
 import zeroPromptQueueRouter from "./zero-prompt-queue";
+import accountProfileRouter from "./account-profile";
+import supportAccessRouter from "./support-access";
+import supportOperationsRouter from "./support-operations";
 import snapshotObserveRouter from "./snapshot-observe";
 import { attachUser } from "../lib/auth";
 import { requireBuilderAccess } from "../lib/builder-access";
+import { readApprovedSupportMutation } from "../lib/support-access";
 import {
   aiBuilderLimiter,
   publishLimiter,
@@ -252,6 +256,7 @@ const KNOWN_PREFIXES = [
   "/gallery-templates",
   "/extensions",
   "/profiles",
+  "/support",
   "/sitemap.xml",
   "/brainstorm",
   "/docs",
@@ -278,7 +283,24 @@ router.use(attachUser);
 
 // ── AI Builder cohort access ──────────────────────────────────────────────────
 router.post("/projects", requireBuilderAccess);
-router.post("/projects/:id/messages", requireBuilderAccess);
+const requireBuilderOrApprovedSupportOperator: RequestHandler = async (req, res, next) => {
+  const projectId = Number(req.params.id);
+  const sessionId = Number(req.body?.supportSessionId);
+  if (req.userId && Number.isSafeInteger(projectId) && Number.isSafeInteger(sessionId)) {
+    const approved = await readApprovedSupportMutation({
+      sessionId,
+      projectId,
+      actorUserId: req.userId,
+    });
+    if (approved) {
+      next();
+      return;
+    }
+  }
+  await requireBuilderAccess(req, res, next);
+};
+
+router.post("/projects/:id/messages", requireBuilderOrApprovedSupportOperator);
 router.post("/projects/:id/messages/stream", requireBuilderAccess);
 router.post("/projects/:id/observe/snapshot", requireBuilderAccess);
 router.post("/projects/:id/plans/decompose", requireBuilderAccess);
@@ -395,6 +417,9 @@ router.use(projectActivityRouter);
 router.use(galleryTemplatesRouter);
 router.use(ecosystemExtensionsRouter);
 router.use(profilesRouter);
+router.use(accountProfileRouter); // one Clerk-backed identity shared by NabuFlow, Ora and Orax
+router.use(supportAccessRouter); // user consent + staff project-access grants
+router.use(supportOperationsRouter); // consented Zero handoff + honest support outcomes
 router.use(gdprRouter); // GET /me/export, DELETE /me
 router.use(tokensRouter); // GET/POST/DELETE /me/tokens
 router.use(oraxDesktopAuthRouter); // Clerk-approved Orax Desktop browser sign-in completion

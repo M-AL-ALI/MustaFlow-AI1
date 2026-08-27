@@ -75,6 +75,7 @@ export * from "./vault-embeddings";
 export * from "./generated-images";
 export * from "./help-articles";
 export * from "./support-tickets";
+export * from "./support-operations";
 export * from "./orax";
 export * from "./orax-desktop";
 export * from "./ora-spend-ledger";

@@ -13,10 +13,11 @@
  *      that don't speak Yjs yet (cursor pings, active-tab updates,
  *      typing intents). Kept for parity with the previous v0 client.
  *
- * Ownership: the project must have `multiplayerEnabled=true`, the
- *   socket must be authenticated (Clerk session cookie), and the user
- *   must be the project owner. (A collaborator ACL model is a future
- *   milestone — see followup #595.)
+ * Access and identity: the socket must be authenticated, the caller must have
+ *   live project access or a live user-approved support grant, and the person's
+ *   shared account profile must provide both a display name and picture. The
+ *   same mechanism renders teammates and staff; CRDT frames remain disabled
+ *   when the project's multiplayer switch is off.
  */
 import { IncomingMessage } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
@@ -29,6 +30,9 @@ import { db, projectsTable } from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
 import { logger } from "./logger";
+import { checkProjectAccess } from "./auth";
+import { getSharedAccountProfile } from "./clerk-users";
+import { findLiveSupportGrant } from "./support-access";
 
 // y-protocols message tags (from y-websocket reference impl).
 const MESSAGE_SYNC = 0;
@@ -36,7 +40,14 @@ const MESSAGE_AWARENESS = 1;
 
 interface Peer {
   id: string;
+  userId: string;
   name: string;
+  imageUrl: string;
+  kind: "owner" | "teammate" | "staff";
+  location: string;
+  grantId: number | null;
+  grantExpiresAt: string | null;
+  multiplayerEnabled: boolean;
   ws: WebSocket;
   /**
    * Awareness clientIDs that originated from this connection. We track
@@ -53,6 +64,37 @@ interface Room {
 }
 
 const rooms = new Map<number, Room>();
+
+const PRESENCE_LOCATIONS = new Set([
+  "Project workspace",
+  "Canvas",
+  "Code",
+  "Preview",
+  "Checks",
+  "History",
+  "Settings",
+  "Support session",
+]);
+
+export function parsePresenceLocation(value: unknown): string {
+  if (typeof value !== "string") return "Project workspace";
+  if (PRESENCE_LOCATIONS.has(value)) return value;
+  // Staff support sessions name only the bounded ticket number; arbitrary
+  // client text never becomes another user's presence label.
+  return /^Support ticket #\d{1,10}$/u.test(value) ? value : "Project workspace";
+}
+
+function publicPeer(peer: Peer) {
+  return {
+    id: peer.id,
+    name: peer.name,
+    imageUrl: peer.imageUrl,
+    kind: peer.kind,
+    location: peer.location,
+    grantId: peer.grantId,
+    grantExpiresAt: peer.grantExpiresAt,
+  };
+}
 
 function roomFor(projectId: number): Room {
   let room = rooms.get(projectId);
@@ -143,21 +185,39 @@ export function createMultiplayerServer(): MultiplayerServer {
       ws.close(4004, "Project not found");
       return;
     }
-    if (!project.multiplayerEnabled) {
-      sendJson(ws, { type: "error", message: "Multiplayer disabled for this project" });
-      ws.close(4001, "Multiplayer disabled");
-      return;
-    }
-    if (project.ownerId !== userId) {
+    const [access, supportGrant, identity] = await Promise.all([
+      checkProjectAccess(userId, projectId, "viewer"),
+      findLiveSupportGrant({ projectId, staffUserId: userId }),
+      getSharedAccountProfile(userId),
+    ]);
+    if (access !== "granted" && !supportGrant) {
       sendJson(ws, { type: "error", message: "Forbidden" });
       ws.close(4003, "Forbidden");
+      return;
+    }
+    if (!identity?.displayName || !identity.imageUrl) {
+      sendJson(ws, {
+        type: "error",
+        code: "presence_identity_required",
+        message: "Add your name and picture before joining this project.",
+      });
+      ws.close(4409, "Identity required");
       return;
     }
 
     const sp = new URL(`http://x${url}`).searchParams;
     const peer: Peer = {
-      id: userId,
-      name: sp.get("name") ?? userId.slice(0, 8),
+      id: `${userId}:${crypto.randomUUID()}`,
+      userId,
+      name: identity.displayName,
+      imageUrl: identity.imageUrl,
+      kind: supportGrant ? "staff" : project.ownerId === userId ? "owner" : "teammate",
+      location: supportGrant
+        ? `Support ticket #${supportGrant.ticketId}`
+        : parsePresenceLocation(sp.get("location")),
+      grantId: supportGrant?.id ?? null,
+      grantExpiresAt: supportGrant?.expiresAt?.toISOString() ?? null,
+      multiplayerEnabled: project.multiplayerEnabled,
       ws,
       controlledIds: new Set<number>(),
     };
@@ -188,10 +248,10 @@ export function createMultiplayerServer(): MultiplayerServer {
     }
 
     // Lightweight JSON greeting for non-Yjs clients (cursor-only mode).
-    sendJson(ws, { type: "hello", you: { id: peer.id, name: peer.name } });
-    const roster = Array.from(room.peers).map((p) => ({ id: p.id, name: p.name }));
+    sendJson(ws, { type: "hello", you: publicPeer(peer) });
+    const roster = Array.from(room.peers).map(publicPeer);
     sendJson(ws, { type: "roster", peers: roster });
-    broadcastJson(room, peer, { type: "join", id: peer.id, name: peer.name });
+    broadcastJson(room, peer, { type: "join", peer: publicPeer(peer) });
 
     // Fan-out any local Y.Doc updates to every other peer.
     const docUpdateHandler = (update: Uint8Array, origin: unknown) => {
@@ -227,10 +287,31 @@ export function createMultiplayerServer(): MultiplayerServer {
     };
     room.awareness.on("change", awarenessChangeHandler);
 
+    let lastSeenAt = Date.now();
+    ws.on("pong", () => {
+      lastSeenAt = Date.now();
+    });
     ws.on("message", (raw: Buffer | ArrayBuffer | Buffer[], isBinary?: boolean) => {
+      lastSeenAt = Date.now();
       // Binary frames → Yjs protocol.
       const binary = isBinary ?? (raw instanceof Buffer && raw.length > 0 && raw[0]! < 16);
       if (binary && Buffer.isBuffer(raw)) {
+        if (peer.kind === "staff") {
+          sendJson(ws, {
+            type: "error",
+            code: "support_presence_read_only",
+            message: "Support can inspect this project, but cannot edit without your approval.",
+          });
+          return;
+        }
+        if (!peer.multiplayerEnabled) {
+          sendJson(ws, {
+            type: "error",
+            code: "multiplayer_editing_disabled",
+            message: "Live editing is turned off for this project.",
+          });
+          return;
+        }
         try {
           const dec = decoding.createDecoder(new Uint8Array(raw));
           const messageType = decoding.readVarUint(dec);
@@ -269,18 +350,60 @@ export function createMultiplayerServer(): MultiplayerServer {
         sendJson(ws, { type: "pong" });
         return;
       }
-      if (msg.type === "presence" || msg.type === "edit") {
+      if (msg.type === "presence") {
+        if (peer.kind !== "staff") peer.location = parsePresenceLocation(msg.location);
         broadcastJson(room, peer, {
           type: "peer",
-          subtype: msg.type,
-          id: peer.id,
-          name: peer.name,
-          ...msg,
+          subtype: "presence",
+          peer: publicPeer(peer),
         });
+        return;
+      }
+      if (msg.type === "edit" && peer.kind === "staff") {
+        sendJson(ws, {
+          type: "error",
+          code: "support_presence_read_only",
+          message: "Support can inspect this project, but cannot edit without your approval.",
+        });
+        return;
+      }
+      if (msg.type === "edit" && peer.multiplayerEnabled) {
+        broadcastJson(room, peer, { type: "peer", subtype: "edit", peer: publicPeer(peer) });
       }
     });
 
+    const grantWatch =
+      peer.kind === "staff"
+        ? setInterval(() => {
+            void findLiveSupportGrant({ projectId, staffUserId: peer.userId })
+              .then((current) => {
+                if (!current || current.id !== peer.grantId) {
+                  sendJson(ws, {
+                    type: "grant_closed",
+                    message: "The user's support access has ended.",
+                  });
+                  ws.close(4403, "Support access ended");
+                }
+              })
+              .catch(() => ws.close(4413, "Support access could not be verified"));
+          }, 2_000)
+        : null;
+    grantWatch?.unref?.();
+    const livenessWatch = setInterval(() => {
+      if (Date.now() - lastSeenAt > 12_000) {
+        ws.terminate();
+        return;
+      }
+      if (ws.readyState === WebSocket.OPEN) ws.ping();
+    }, 4_000);
+    livenessWatch.unref?.();
+
+    let cleaned = false;
     const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (grantWatch) clearInterval(grantWatch);
+      clearInterval(livenessWatch);
       room.doc.off("update", docUpdateHandler);
       room.awareness.off("change", awarenessChangeHandler);
       if (peer.controlledIds.size > 0) {

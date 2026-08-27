@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, oraProfilesTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { getSharedAccountProfile, updateSharedAccountProfile } from "../lib/clerk-users";
 
 const router = Router();
 
@@ -26,11 +27,32 @@ function emptyToNull(v: string | null | undefined): string | null {
 router.get("/ora/profile", async (req, res) => {
   const userId = req.userId!;
   try {
-    const [row] = await db
-      .select()
-      .from(oraProfilesTable)
-      .where(eq(oraProfilesTable.userId, userId));
-    res.json({ profile: row ?? null });
+    const [[row], identity] = await Promise.all([
+      db.select().from(oraProfilesTable).where(eq(oraProfilesTable.userId, userId)),
+      getSharedAccountProfile(userId),
+    ]);
+    if (!identity) {
+      res.status(503).json({ error: "Your account profile is temporarily unavailable." });
+      return;
+    }
+    res.json({
+      profile: {
+        ...(row ?? {
+          id: 0,
+          userId,
+          occupation: null,
+          industry: null,
+          goals: null,
+          skillLevel: null,
+          responseStyle: null,
+          avoid: null,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        }),
+        preferredName: identity.displayName,
+        preferredLanguage: identity.preferredLanguage,
+      },
+    });
   } catch (err) {
     logger.error({ component: "ora-profile", err }, "Failed to load profile");
     res.status(500).json({ error: "Failed to load profile" });
@@ -58,17 +80,28 @@ router.put("/ora/profile", async (req, res) => {
   }
 
   const values = {
-    preferredName: emptyToNull(parsed.data.preferredName),
+    preferredName: null,
     occupation: emptyToNull(parsed.data.occupation),
     industry: emptyToNull(parsed.data.industry),
     goals: emptyToNull(parsed.data.goals),
     skillLevel: emptyToNull(parsed.data.skillLevel),
-    preferredLanguage: emptyToNull(parsed.data.preferredLanguage),
+    preferredLanguage: null,
     responseStyle: emptyToNull(parsed.data.responseStyle),
     avoid: emptyToNull(parsed.data.avoid),
   };
 
   try {
+    const currentIdentity = await getSharedAccountProfile(userId);
+    const requestedName = emptyToNull(parsed.data.preferredName);
+    if (!currentIdentity?.displayName && !requestedName) {
+      res.status(503).json({ error: "Your account profile is temporarily unavailable." });
+      return;
+    }
+    const identity = await updateSharedAccountProfile(userId, {
+      displayName: requestedName ?? currentIdentity!.displayName!,
+      preferredLanguage: emptyToNull(parsed.data.preferredLanguage),
+      whatIBuild: currentIdentity?.whatIBuild,
+    });
     const [row] = await db
       .insert(oraProfilesTable)
       .values({ userId, ...values })
@@ -77,7 +110,13 @@ router.put("/ora/profile", async (req, res) => {
         set: { ...values, updatedAt: new Date() },
       })
       .returning();
-    res.json({ profile: row });
+    res.json({
+      profile: {
+        ...row,
+        preferredName: identity.displayName,
+        preferredLanguage: identity.preferredLanguage,
+      },
+    });
   } catch (err) {
     logger.error({ component: "ora-profile", err }, "Failed to save profile");
     res.status(500).json({ error: "Failed to save profile" });

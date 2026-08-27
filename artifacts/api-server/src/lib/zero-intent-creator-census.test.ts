@@ -46,8 +46,8 @@ describe("zero intent creator census", () => {
 
   it("keeps answer, clarify, plan, and observe on non-mutation task branches", () => {
     const messages = source("../routes/messages.ts");
-    expect(messages).toContain(
-      'resolvedIntent === "answer" || resolvedIntent === "clarify" || resolvedIntent === "observe"',
+    expect(messages).toMatch(
+      /resolvedIntent === "answer"\s*\|\|\s*resolvedIntent === "clarify"\s*\|\|\s*resolvedIntent === "observe"/u,
     );
     expect(messages).toContain('resolvedIntent === "plan"');
     expect(messages.match(/mutationCapable: false/gu)).toHaveLength(3);

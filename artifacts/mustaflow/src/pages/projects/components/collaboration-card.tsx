@@ -1,6 +1,5 @@
 import { Users, Wifi, WifiOff } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import { useClerkUser } from "@/lib/clerk-safe";
 import { useMultiplayerPresence } from "@/hooks/use-multiplayer-presence";
 
 interface CollaborationCardProps {
@@ -16,10 +15,7 @@ export function CollaborationCard({
   isPending,
   onToggle,
 }: CollaborationCardProps) {
-  const { user } = useClerkUser();
-  const displayName =
-    user?.fullName || user?.firstName || user?.username || user?.id?.slice(0, 8) || null;
-  const presence = useMultiplayerPresence(projectId, enabled, displayName);
+  const presence = useMultiplayerPresence(projectId, enabled, "Settings");
   const otherPeers = presence.peers.filter((p) => p.id !== presence.self?.id);
 
   return (
@@ -75,7 +71,7 @@ export function CollaborationCard({
                 key={p.id}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-xs"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                <img src={p.imageUrl} alt="" className="h-4 w-4 rounded-full object-cover" />
                 {p.name}
               </span>
             ))}

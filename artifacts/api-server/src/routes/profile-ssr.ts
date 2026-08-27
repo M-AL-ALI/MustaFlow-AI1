@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db, communityProfilesTable, projectsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { getSharedAccountProfile } from "../lib/clerk-users";
 
 export const profileSsrRouter: IRouter = Router();
 
@@ -246,6 +247,12 @@ profileSsrRouter.get("/u/:username", async (req, res): Promise<void> => {
       headSnippet = head;
       bodyContent = body;
     } else {
+      const identity = await getSharedAccountProfile(profile.userId);
+      const resolvedProfile = {
+        ...profile,
+        displayName: identity?.displayName ?? null,
+        avatarUrl: identity?.imageUrl ?? null,
+      };
       // Fetch public projects for this profile
       const showcasedIds = (profile.showcasedProjectIds as number[]) ?? [];
       const publicIds = (profile.publicProjectIds as number[]) ?? [];
@@ -266,7 +273,7 @@ profileSsrRouter.get("/u/:username", async (req, res): Promise<void> => {
               .from(projectsTable)
               .where(and(inArray(projectsTable.id, allIds), isNull(projectsTable.deletedAt)));
 
-      const { head, body } = buildProfileHtml(username, profile, projects);
+      const { head, body } = buildProfileHtml(username, resolvedProfile, projects);
       headSnippet = head;
       bodyContent = body;
     }

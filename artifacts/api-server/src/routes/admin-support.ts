@@ -123,7 +123,7 @@ function normalizeStatus(raw: string): SupportTicketStatus {
 }
 
 // ── GET /api/admin/support-tickets ────────────────────────────────────────────
-// Query params: status (new|open|resolved|all), q (subject/email/user search),
+// Query params: status (new|open|blocked|resolved|all), q (subject/email/user search),
 // limit (1–100, default 50), offset (default 0).
 router.get("/admin/support-tickets", async (req, res): Promise<void> => {
   const statusParam = typeof req.query.status === "string" ? req.query.status.trim() : "all";
@@ -166,6 +166,8 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
           plan: supportTicketsTable.plan,
           category: supportTicketsTable.category,
           status: supportTicketsTable.status,
+          resolutionClass: supportTicketsTable.resolutionClass,
+          thirdPartyBlocker: supportTicketsTable.thirdPartyBlocker,
           subject: supportTicketsTable.subject,
           projectId: supportTicketsTable.projectId,
           projectName: projectsTable.name,
@@ -187,7 +189,12 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
         .groupBy(supportTicketsTable.status),
     ]);
 
-    const statusCounts = { new: 0, open: 0, resolved: 0 };
+    const statusCounts: Record<SupportTicketStatus, number> = {
+      new: 0,
+      open: 0,
+      blocked: 0,
+      resolved: 0,
+    };
     for (const r of statusCountRows) {
       const s = normalizeStatus(r.status);
       statusCounts[s] += Number(r.n);
@@ -201,6 +208,8 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
         plan: r.plan,
         category: r.category,
         status: normalizeStatus(r.status),
+        resolutionClass: r.resolutionClass,
+        thirdPartyBlocker: r.thirdPartyBlocker,
         subject: r.subject,
         projectId: r.projectId,
         projectName: r.projectId != null ? (r.projectName ?? "(deleted)") : null,
@@ -236,6 +245,9 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
         plan: supportTicketsTable.plan,
         category: supportTicketsTable.category,
         status: supportTicketsTable.status,
+        resolutionClass: supportTicketsTable.resolutionClass,
+        thirdPartyBlocker: supportTicketsTable.thirdPartyBlocker,
+        resolutionEvidence: supportTicketsTable.resolutionEvidence,
         subject: supportTicketsTable.subject,
         transcript: supportTicketsTable.transcript,
         projectId: supportTicketsTable.projectId,
@@ -279,6 +291,9 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
       plan: row.plan,
       category: row.category,
       status: normalizeStatus(row.status),
+      resolutionClass: row.resolutionClass,
+      thirdPartyBlocker: row.thirdPartyBlocker,
+      resolutionEvidence: row.resolutionEvidence,
       subject: row.subject,
       transcript: asTranscript(row.transcript),
       projectId: row.projectId,
@@ -297,7 +312,8 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
 });
 
 // ── PATCH /api/admin/support-tickets/:id ──────────────────────────────────────
-// Body: { status: "new" | "open" | "resolved" }
+// Body: { status: "new" | "open" }. Resolution is evidence-gated and uses
+// the class-specific operations in support-operations.ts.
 router.patch("/admin/support-tickets/:id", async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
@@ -305,8 +321,11 @@ router.patch("/admin/support-tickets/:id", async (req, res): Promise<void> => {
     return;
   }
   const status = (req.body as { status?: string })?.status;
-  if (!status || !(SUPPORT_TICKET_STATUSES as readonly string[]).includes(status)) {
-    res.status(400).json({ error: "status must be one of: new, open, resolved" });
+  if (status !== "new" && status !== "open") {
+    res.status(409).json({
+      error: "Choose the ticket's outcome and complete its proof before resolving it.",
+      code: "support_resolution_proof_required",
+    });
     return;
   }
   try {

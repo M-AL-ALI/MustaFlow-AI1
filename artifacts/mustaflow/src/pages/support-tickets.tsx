@@ -10,6 +10,7 @@ import {
 import { useAuth } from "@clerk/react";
 import { Link, useParams } from "wouter";
 import { useListSupportTickets, useGetSupportTicket } from "@workspace/api-client-react";
+import { SupportOwnerActions } from "./support-owner-actions";
 
 /**
  * My Support Tickets (Task #1318).
@@ -142,6 +143,8 @@ function TicketDetail({ ticketId }: { ticketId: number }) {
           )}
         </div>
       </div>
+
+      <SupportOwnerActions ticketId={ticketId} />
 
       {data.attachments.length > 0 && (
         <section className="space-y-2">

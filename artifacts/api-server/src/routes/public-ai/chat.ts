@@ -889,18 +889,23 @@ export async function buildCrossConversationContext(
 export async function buildProfileContext(userId: string): Promise<string> {
   try {
     const { db, oraProfilesTable } = await import("@workspace/db");
-    const [p] = await db.select().from(oraProfilesTable).where(eq(oraProfilesTable.userId, userId));
-    if (!p) return "";
+    const [{ getSharedAccountProfile }, [p]] = await Promise.all([
+      import("../../lib/clerk-users"),
+      db.select().from(oraProfilesTable).where(eq(oraProfilesTable.userId, userId)),
+    ]);
+    const identity = await getSharedAccountProfile(userId);
+    if (!p && !identity) return "";
 
     const lines: string[] = [];
-    if (p.preferredName) lines.push(`- Preferred name: ${p.preferredName}`);
-    if (p.occupation) lines.push(`- Occupation: ${p.occupation}`);
-    if (p.industry) lines.push(`- Industry: ${p.industry}`);
-    if (p.skillLevel) lines.push(`- Skill level: ${p.skillLevel}`);
-    if (p.preferredLanguage) lines.push(`- Preferred language: ${p.preferredLanguage}`);
-    if (p.goals) lines.push(`- Goals: ${p.goals}`);
-    if (p.responseStyle) lines.push(`- Preferred response style: ${p.responseStyle}`);
-    if (p.avoid) lines.push(`- Things to avoid: ${p.avoid}`);
+    if (identity?.displayName) lines.push(`- Preferred name: ${identity.displayName}`);
+    if (p?.occupation) lines.push(`- Occupation: ${p.occupation}`);
+    if (p?.industry) lines.push(`- Industry: ${p.industry}`);
+    if (p?.skillLevel) lines.push(`- Skill level: ${p.skillLevel}`);
+    if (identity?.preferredLanguage)
+      lines.push(`- Preferred language: ${identity.preferredLanguage}`);
+    if (p?.goals) lines.push(`- Goals: ${p.goals}`);
+    if (p?.responseStyle) lines.push(`- Preferred response style: ${p.responseStyle}`);
+    if (p?.avoid) lines.push(`- Things to avoid: ${p.avoid}`);
 
     if (lines.length === 0) return "";
 

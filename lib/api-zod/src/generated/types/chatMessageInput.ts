@@ -29,6 +29,11 @@ export interface ChatMessageInput {
   origin?: string;
   /** Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call. */
   idempotencyKey?: string;
+  /**
+     * User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.
+     * @minimum 1
+     */
+  supportSessionId?: number;
   /** Optional brainstorm conversation history from the brainstorm panel. When provided, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming — context that may not have fully made it into the resolved prompt. */
   brainstormContext?: ChatMessageInputBrainstormContextItem[];
 }

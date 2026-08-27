@@ -15,7 +15,7 @@ import { pgTable, serial, text, integer, jsonb, timestamp, index } from "drizzle
 // support staff move it to "open" (being worked) and finally "resolved".
 // "closed" is accepted as a legacy alias for "resolved" so pre-existing rows
 // keep loading; new transitions only ever write new/open/resolved.
-export const SUPPORT_TICKET_STATUSES = ["new", "open", "resolved"] as const;
+export const SUPPORT_TICKET_STATUSES = ["new", "open", "blocked", "resolved"] as const;
 export type SupportTicketStatus = (typeof SUPPORT_TICKET_STATUSES)[number];
 
 export const SUPPORT_EMAIL_STATUSES = ["sent", "skipped", "failed"] as const;
@@ -30,6 +30,9 @@ export const supportTicketsTable = pgTable(
     plan: text("plan").notNull().default("free"),
     category: text("category").notNull().default("other"),
     status: text("status").notNull().default("new"),
+    resolutionClass: text("resolution_class"),
+    thirdPartyBlocker: text("third_party_blocker"),
+    resolutionEvidence: jsonb("resolution_evidence"),
     subject: text("subject").notNull(),
     transcript: jsonb("transcript").notNull().default([]),
     projectId: integer("project_id"),
@@ -43,6 +46,7 @@ export const supportTicketsTable = pgTable(
   (t) => [
     index("support_tickets_user_id_idx").on(t.userId, t.createdAt),
     index("support_tickets_status_idx").on(t.status, t.createdAt),
+    index("support_tickets_resolution_class_idx").on(t.resolutionClass, t.createdAt),
   ],
 );
 

@@ -409,6 +409,8 @@ export interface ZeroAgentPanelProps {
   scrollToTaskId?: number | null;
   /** Called once the scroll + highlight cycle completes */
   onScrollToComplete?: () => void;
+  /** Owner-approved support proposal carried into this exact project. */
+  supportSessionId?: number | null;
 }
 
 export function ZeroAgentPanel({
@@ -422,6 +424,7 @@ export function ZeroAgentPanel({
   onWidthChange,
   scrollToTaskId,
   onScrollToComplete,
+  supportSessionId,
 }: ZeroAgentPanelProps) {
   const queryClient = useQueryClient();
 
@@ -438,8 +441,10 @@ export function ZeroAgentPanel({
   const [isDetached, setIsDetached] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [highlightedMsgId, setHighlightedMsgId] = useState<number | null>(null);
+  const [supportHandoffError, setSupportHandoffError] = useState<string | null>(null);
   /** Tracks which scrollToTaskId we have already acted on to avoid re-running */
   const appliedScrollTaskIdRef = useRef<number | null>(null);
+  const appliedSupportSessionRef = useRef<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
   const creditCosts = useBuilderCreditCosts();
 
@@ -780,6 +785,92 @@ export function ZeroAgentPanel({
     doSend(text || "(attached file)");
   }, [prompt, attachments, doSend]);
 
+  useEffect(() => {
+    if (
+      !isOpen ||
+      !supportSessionId ||
+      appliedSupportSessionRef.current === supportSessionId ||
+      sendMessage.isPending
+    ) {
+      return;
+    }
+    appliedSupportSessionRef.current = supportSessionId;
+    setSupportHandoffError(null);
+    void (async () => {
+      const response = await authFetch(`/api/support/zero-sessions/${supportSessionId}`);
+      const body = (await response.json().catch(() => null)) as {
+        session?: {
+          id: number;
+          status: string;
+          proposal?: { instruction?: unknown };
+        };
+        error?: string;
+      } | null;
+      if (!response.ok || !body?.session) {
+        throw new Error(body?.error ?? "This approved support change could not be loaded.");
+      }
+      if (body.session.status === "applying" || body.session.status === "applied") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("supportSession");
+        window.history.replaceState(null, "", url);
+        return;
+      }
+      if (body.session.status !== "approved") {
+        throw new Error("This support proposal is not approved for a project change.");
+      }
+      const instruction = body.session.proposal?.instruction;
+      if (typeof instruction !== "string" || !instruction.trim()) {
+        throw new Error("This support proposal does not contain an approved change.");
+      }
+      setActiveTaskId(null);
+      setPendingStartedAt(new Date());
+      sendMessage.mutate(
+        {
+          id: projectId,
+          data: {
+            content: instruction,
+            agentMode: "eco",
+            planMode: false,
+            background: false,
+            agentIntent: "mutate",
+            origin: `support-session:${supportSessionId}`,
+            idempotencyKey: `support-session:${supportSessionId}`,
+            supportSessionId,
+          },
+        },
+        {
+          onSuccess: (data) => {
+            const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
+            const taskId =
+              plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
+            if (taskId) setActiveTaskId(taskId);
+            setPendingStartedAt(taskId ? new Date() : null);
+            const url = new URL(window.location.href);
+            url.searchParams.delete("supportSession");
+            window.history.replaceState(null, "", url);
+            void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+            void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+          },
+          onError: (error) => {
+            setPendingStartedAt(null);
+            setSupportHandoffError(
+              error instanceof Error
+                ? error.message
+                : "The approved support change could not start. Nothing was changed.",
+            );
+          },
+        },
+      );
+    })().catch((error: unknown) => {
+      setPendingStartedAt(null);
+      setSupportHandoffError(
+        error instanceof Error
+          ? error.message
+          : "The approved support change could not start. Nothing was changed.",
+      );
+    });
+  }, [isOpen, projectId, queryClient, sendMessage, supportSessionId]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -1028,6 +1119,12 @@ export function ZeroAgentPanel({
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {supportHandoffError && (
+          <div className="shrink-0 border-b border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-600">
+            {supportHandoffError}
+          </div>
+        )}
 
         {/* ── Thread ── */}
         <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto py-3 hide-scrollbar">

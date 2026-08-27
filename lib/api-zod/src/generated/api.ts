@@ -1401,6 +1401,7 @@ export const SendMessageParams = zod.object({
 
 export const sendMessageBodyDeepReasoningDefault = false;
 
+
 export const SendMessageBody = zod.object({
   "content": zod.string().min(1),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
@@ -1420,6 +1421,7 @@ export const SendMessageBody = zod.object({
 })).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
   "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
+  "supportSessionId": zod.number().min(1).optional().describe('User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.'),
   "brainstormContext": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string()
@@ -1526,6 +1528,7 @@ export const StreamMessageParams = zod.object({
 
 export const streamMessageBodyDeepReasoningDefault = false;
 
+
 export const StreamMessageBody = zod.object({
   "content": zod.string().min(1),
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
@@ -1545,6 +1548,7 @@ export const StreamMessageBody = zod.object({
 })).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
   "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
+  "supportSessionId": zod.number().min(1).optional().describe('User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.'),
   "brainstormContext": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string()

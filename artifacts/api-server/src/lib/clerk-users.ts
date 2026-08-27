@@ -18,6 +18,62 @@ export interface ClerkUserSummary {
   imageUrl: string | null;
 }
 
+export const SHARED_ACCOUNT_PROFILE_SEMANTICS = "shared-account-profile-v1" as const;
+
+export interface SharedAccountProfile extends ClerkUserSummary {
+  semantics: typeof SHARED_ACCOUNT_PROFILE_SEMANTICS;
+  preferredLanguage: string | null;
+  whatIBuild: string | null;
+}
+
+export interface SharedAccountProfileUpdate {
+  displayName: string;
+  preferredLanguage?: string | null;
+  whatIBuild?: string | null;
+}
+
+export const SHARED_PROFILE_SURFACE_FIELDS = {
+  nabuflow: ["displayName", "imageUrl", "email", "preferredLanguage", "whatIBuild"],
+  ora: ["displayName", "imageUrl", "email", "preferredLanguage"],
+  orax: ["displayName", "imageUrl", "email"],
+} as const satisfies Record<string, readonly (keyof SharedAccountProfile)[]>;
+
+export type SharedProfileSurface = keyof typeof SHARED_PROFILE_SURFACE_FIELDS;
+
+/** Presentation is configured per product while storage remains one account record. */
+export function presentSharedAccountProfile(
+  profile: SharedAccountProfile,
+  surface: SharedProfileSurface,
+): Partial<SharedAccountProfile> {
+  return Object.fromEntries(
+    SHARED_PROFILE_SURFACE_FIELDS[surface].map((field) => [field, profile[field]]),
+  ) as Partial<SharedAccountProfile>;
+}
+
+type ClerkProfileMetadata = {
+  preferredLanguage?: unknown;
+  whatIBuild?: unknown;
+};
+
+function boundedText(value: unknown, max: number): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+function sharedMetadata(user: { privateMetadata?: Record<string, unknown> | null }): {
+  preferredLanguage: string | null;
+  whatIBuild: string | null;
+} {
+  const raw = user.privateMetadata?.nabuFlowProfile;
+  const profile =
+    raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as ClerkProfileMetadata) : {};
+  return {
+    preferredLanguage: boundedText(profile.preferredLanguage, 80),
+    whatIBuild: boundedText(profile.whatIBuild, 280),
+  };
+}
+
 function clerkConfigured(): boolean {
   return Boolean(process.env.CLERK_SECRET_KEY);
 }
@@ -59,6 +115,68 @@ export async function getClerkUserById(userId: string): Promise<ClerkUserSummary
     logger.warn({ err, userId }, "Clerk user lookup by ID failed");
     return null;
   }
+}
+
+/**
+ * Resolve the account-level identity shared by NabuFlow, Ora and Orax.
+ * Clerk is the single record: product-local tables must not cache these fields.
+ */
+export async function getSharedAccountProfile(
+  userId: string,
+): Promise<SharedAccountProfile | null> {
+  if (!userId || !clerkConfigured()) return null;
+  try {
+    const user = await clerkClient.users.getUser(userId);
+    if (!user) return null;
+    return {
+      ...summarise(user),
+      ...sharedMetadata(user),
+      semantics: SHARED_ACCOUNT_PROFILE_SEMANTICS,
+    };
+  } catch (err) {
+    logger.warn({ err, userId }, "Shared account profile lookup failed");
+    return null;
+  }
+}
+
+/**
+ * Update the shared account identity in one Clerk user record. Product settings
+ * remain outside this shape by design.
+ */
+export async function updateSharedAccountProfile(
+  userId: string,
+  input: SharedAccountProfileUpdate,
+): Promise<SharedAccountProfile> {
+  if (!userId || !clerkConfigured()) throw new Error("shared_profile_store_unavailable");
+  const displayName = boundedText(input.displayName, 80);
+  if (!displayName) throw new Error("shared_profile_display_name_required");
+
+  const current = await clerkClient.users.getUser(userId);
+  const parts = displayName.split(/\s+/u);
+  const firstName = parts[0] ?? displayName;
+  const lastName = parts.slice(1).join(" ");
+  const existingPrivate = (current.privateMetadata ?? {}) as Record<string, unknown>;
+  const existingShared = sharedMetadata(current);
+  const preferredLanguage =
+    input.preferredLanguage === undefined
+      ? existingShared.preferredLanguage
+      : boundedText(input.preferredLanguage, 80);
+  const whatIBuild =
+    input.whatIBuild === undefined ? existingShared.whatIBuild : boundedText(input.whatIBuild, 280);
+
+  await clerkClient.users.updateUser(userId, { firstName, lastName });
+  const updated = await clerkClient.users.updateUserMetadata(userId, {
+    privateMetadata: {
+      ...existingPrivate,
+      nabuFlowProfile: { preferredLanguage, whatIBuild },
+    },
+  });
+  return {
+    ...summarise(updated),
+    preferredLanguage,
+    whatIBuild,
+    semantics: SHARED_ACCOUNT_PROFILE_SEMANTICS,
+  };
 }
 
 /**

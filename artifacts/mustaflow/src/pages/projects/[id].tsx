@@ -186,6 +186,7 @@ import {
   type InlineSurfaceActivityUpdate,
 } from "./components/inline-activity-stream";
 import { ZeroAvatar } from "./components/zero-avatar";
+import { ProjectPresence, workspacePresenceLocation } from "./components/project-presence";
 import { InlineRunGroup, PersistedRunReplay } from "./components/inline-run-group";
 import {
   appendRecoveryStep,
@@ -1023,7 +1024,14 @@ export default function ProjectWorkspacePage() {
   const [planMode, setPlanMode] = useState(false);
   const [runInBackground, setRunInBackground] = useState(false);
   const [backgroundPanelOpen, setBackgroundPanelOpen] = useState(false);
-  const [zeroPanelOpen, setZeroPanelOpen] = useState(false);
+  const [supportSessionId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const value = new URLSearchParams(window.location.search).get("supportSession");
+    if (!value || !/^\d+$/.test(value)) return null;
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  });
+  const [zeroPanelOpen, setZeroPanelOpen] = useState(supportSessionId !== null);
   const [zeroPanelWidth, setZeroPanelWidth] = useState(380);
   const [zeroBgTaskId, setZeroBgTaskId] = useState<number | null>(null);
   const [zeroScrollToTaskId, setZeroScrollToTaskId] = useState<number | null>(null);
@@ -3469,6 +3477,11 @@ export default function ProjectWorkspacePage() {
           >
             {project.status}
           </span>
+          <ProjectPresence
+            projectId={projectId}
+            location={workspacePresenceLocation(activeTab)}
+            canRevokeSupport
+          />
           <ProvisioningProgress
             status={provisioningStatus}
             step={provisioningStep}
@@ -5650,6 +5663,7 @@ export default function ProjectWorkspacePage() {
             initialActiveTaskId={zeroBgTaskId}
             scrollToTaskId={zeroScrollToTaskId}
             onScrollToComplete={() => setZeroScrollToTaskId(null)}
+            supportSessionId={supportSessionId}
             onBuildComplete={() => {
               setZeroBgTaskId(null);
               void queryClient.invalidateQueries({

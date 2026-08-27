@@ -118,7 +118,6 @@ describe("AI Builder cohort access", () => {
     const routes = readFileSync(routePath, "utf8");
     const guardedRoutes = [
       ["post", "/projects"],
-      ["post", "/projects/:id/messages"],
       ["post", "/projects/:id/messages/stream"],
       ["post", "/projects/:id/plans/decompose"],
       ["post", "/projects/:id/plans/clarify"],
@@ -133,6 +132,11 @@ describe("AI Builder cohort access", () => {
     for (const [method, path] of guardedRoutes) {
       expect(routes).toContain(`router.${method}("${path}", requireBuilderAccess);`);
     }
+    expect(routes).toContain(
+      'router.post("/projects/:id/messages", requireBuilderOrApprovedSupportOperator);',
+    );
+    expect(routes).toContain("await requireBuilderAccess(req, res, next);");
+    expect(routes).toContain("readApprovedSupportMutation({");
     expect(routes).toMatch(
       /router\.post\(\s*"\/brainstorm\/resolve",\s*attachUser,\s*requireBuilderAccess,\s*brainstormAdmissionLimiter,\s*aiBuilderLimiter,?\s*\);/,
     );

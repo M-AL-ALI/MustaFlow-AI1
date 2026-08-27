@@ -381,7 +381,8 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
   },
   {
     id: "auth-compliance-support",
-    title: "Auth, Sign in with Apple, delete account, support, and App Store compliance",
+    title:
+      "Auth, Sign in with Apple, delete account, support, collaboration presence, and App Store compliance",
     ownerSurfaces: ["api", "website", "mobile"],
     fileHints: [
       /auth/i,
@@ -391,6 +392,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /sign-up/i,
       /delete.*account/i,
       /support/i,
+      /collaboration-card/i,
       /privacy/i,
     ],
     manualWebsite: "Verify public support/contact, sign-in state, and account endpoints.",

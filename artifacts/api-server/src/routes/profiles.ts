@@ -13,6 +13,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db, communityProfilesTable, profileFollowsTable, projectsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { getSharedAccountProfile, updateSharedAccountProfile } from "../lib/clerk-users";
 import { z } from "zod";
 
 const router: IRouter = Router();
@@ -54,6 +55,12 @@ publicProfilesRouter.get("/profiles/:username", async (req, res): Promise<void> 
       return;
     }
 
+    const identity = await getSharedAccountProfile(profile.userId);
+    if (!identity) {
+      res.status(503).json({ error: "This profile is temporarily unavailable" });
+      return;
+    }
+
     // Check if signed-in user follows this profile
     const viewerId = (req as { userId?: string }).userId;
     let isFollowing = false;
@@ -70,7 +77,12 @@ publicProfilesRouter.get("/profiles/:username", async (req, res): Promise<void> 
       isFollowing = !!follow;
     }
 
-    res.json({ ...profile, isFollowing });
+    res.json({
+      ...profile,
+      displayName: identity.displayName,
+      avatarUrl: identity.imageUrl,
+      isFollowing,
+    });
   } catch (err) {
     logger.error({ err }, "Failed to get profile");
     res.status(500).json({ error: "Failed to load profile" });
@@ -150,7 +162,16 @@ router.get("/me/profile", async (req, res): Promise<void> => {
       .from(communityProfilesTable)
       .where(eq(communityProfilesTable.userId, userId));
 
-    res.json(profile ?? null);
+    if (!profile) {
+      res.json(null);
+      return;
+    }
+    const identity = await getSharedAccountProfile(userId);
+    res.json(
+      identity
+        ? { ...profile, displayName: identity.displayName, avatarUrl: identity.imageUrl }
+        : profile,
+    );
   } catch (err) {
     logger.error({ err }, "Failed to get own profile");
     res.status(500).json({ error: "Failed to load profile" });
@@ -192,6 +213,13 @@ router.post("/me/profile", async (req, res): Promise<void> => {
   }
 
   try {
+    if (parsed.data.avatarUrl !== undefined) {
+      res.status(400).json({
+        error: "Change your profile picture from Manage Account.",
+        code: "profile_picture_managed_by_account",
+      });
+      return;
+    }
     const [existing] = await db
       .select({ id: communityProfilesTable.id, userId: communityProfilesTable.userId })
       .from(communityProfilesTable)
@@ -209,13 +237,28 @@ router.post("/me/profile", async (req, res): Promise<void> => {
       }
     }
 
+    const { displayName, avatarUrl: _avatarUrl, ...communityInput } = parsed.data;
+    let identity = null;
+    if (displayName !== undefined) {
+      const currentIdentity = await getSharedAccountProfile(userId);
+      identity = await updateSharedAccountProfile(userId, {
+        displayName,
+        preferredLanguage: currentIdentity?.preferredLanguage,
+        whatIBuild: currentIdentity?.whatIBuild,
+      });
+    }
+
     if (existing) {
       const [updated] = await db
         .update(communityProfilesTable)
-        .set({ ...parsed.data, updatedAt: new Date() })
+        .set({ ...communityInput, displayName: null, avatarUrl: null, updatedAt: new Date() })
         .where(eq(communityProfilesTable.userId, userId))
         .returning();
-      res.json(updated);
+      res.json({
+        ...updated,
+        displayName: identity?.displayName ?? null,
+        avatarUrl: identity?.imageUrl ?? null,
+      });
     } else {
       if (!parsed.data.username) {
         res.status(400).json({ error: "username is required when creating a profile" });
@@ -226,10 +269,16 @@ router.post("/me/profile", async (req, res): Promise<void> => {
         .values({
           userId,
           username: parsed.data.username,
-          ...parsed.data,
+          ...communityInput,
+          displayName: null,
+          avatarUrl: null,
         })
         .returning();
-      res.status(201).json(created);
+      res.status(201).json({
+        ...created,
+        displayName: identity?.displayName ?? null,
+        avatarUrl: identity?.imageUrl ?? null,
+      });
     }
   } catch (err) {
     logger.error({ err }, "Failed to save profile");

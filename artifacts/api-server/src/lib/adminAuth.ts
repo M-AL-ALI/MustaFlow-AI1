@@ -144,7 +144,10 @@ const ANALYST_READ_PATHS: ReadonlyArray<RegExp> = [
 export function staffRoleAllowsRequest(role: StaffRole, method: string, path: string): boolean {
   if (role === "owner") return true;
   if (role === "support") {
-    return path === "/api/admin/me" || /^\/api\/admin\/support-tickets(?:\/|$)/.test(path);
+    return (
+      path === "/api/admin/me" ||
+      /^\/api\/admin\/support-(?:tickets|grants|zero-sessions|defects)(?:\/|$)/.test(path)
+    );
   }
   if (role === "analyst") {
     return method === "GET" && ANALYST_READ_PATHS.some((pattern) => pattern.test(path));

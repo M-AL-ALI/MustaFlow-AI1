@@ -132,6 +132,8 @@ function AccountTab() {
   const { openUserProfile } = useClerkActions();
 
   const [displayName, setDisplayName] = useState("");
+  const [preferredLanguage, setPreferredLanguage] = useState("");
+  const [whatIBuild, setWhatIBuild] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -150,6 +152,28 @@ function AccountTab() {
     const full = [user.firstName ?? "", user.lastName ?? ""].join(" ").trim();
     setDisplayName(full || user.username || "");
 
+    let cancelled = false;
+    void authFetch("/api/me/account-profile")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Profile unavailable");
+        return (await response.json()) as {
+          profile: {
+            displayName: string | null;
+            preferredLanguage: string | null;
+            whatIBuild: string | null;
+          };
+        };
+      })
+      .then(({ profile }) => {
+        if (cancelled) return;
+        setDisplayName(profile.displayName ?? (full || user.username || ""));
+        setPreferredLanguage(profile.preferredLanguage ?? "");
+        setWhatIBuild(profile.whatIBuild ?? "");
+      })
+      .catch(() => {
+        if (!cancelled) setProfileError("Your shared profile could not be loaded right now.");
+      });
+
     const prefs = (user.unsafeMetadata ?? {}) as UserPrefs;
     if (prefs.emailBuildComplete !== undefined) setEmailBuildComplete(prefs.emailBuildComplete);
     if (prefs.emailWeeklyDigest !== undefined) setEmailWeeklyDigest(prefs.emailWeeklyDigest);
@@ -157,6 +181,9 @@ function AccountTab() {
       setAppearance(prefs.appearance);
       applyTheme(prefs.appearance);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [isLoaded, user]);
 
   const saveProfile = async () => {
@@ -164,10 +191,16 @@ function AccountTab() {
     setSavingProfile(true);
     setProfileError(null);
     try {
-      const parts = displayName.trim().split(/\s+/);
-      const firstName = parts[0] ?? "";
-      const lastName = parts.slice(1).join(" ");
-      await user.update({ firstName, lastName });
+      const response = await authFetch("/api/me/account-profile", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName, preferredLanguage, whatIBuild }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Your profile could not be saved right now.");
+      }
+      await user.reload();
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 2500);
     } catch (e) {
@@ -240,6 +273,27 @@ function AccountTab() {
           </p>
         </div>
 
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-3">
+          <img
+            src={user?.imageUrl}
+            alt={displayName || "Your profile picture"}
+            className="h-12 w-12 rounded-full object-cover"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Profile picture</p>
+            <p className="text-xs text-muted-foreground">
+              This same picture appears in NabuFlow, Ora, Orax, team roles, and live presence.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => openUserProfile()}
+            className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted/60"
+          >
+            Change picture
+          </button>
+        </div>
+
         <div className="space-y-1">
           <label htmlFor="display-name" className="text-sm font-medium">
             Display Name
@@ -252,6 +306,42 @@ function AccountTab() {
             className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             placeholder="Your name"
           />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label htmlFor="preferred-language" className="text-sm font-medium">
+              Preferred Language
+            </label>
+            <input
+              id="preferred-language"
+              value={preferredLanguage}
+              onChange={(event) => setPreferredLanguage(event.target.value)}
+              maxLength={80}
+              className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="English"
+            />
+            <p className="text-xs text-muted-foreground">
+              Used by Zero and Ora when they explain work.
+            </p>
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <label htmlFor="what-i-build" className="text-sm font-medium">
+              What I Build
+            </label>
+            <textarea
+              id="what-i-build"
+              value={whatIBuild}
+              onChange={(event) => setWhatIBuild(event.target.value)}
+              maxLength={280}
+              rows={3}
+              className="w-full resize-y px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              placeholder="A short private note that helps NabuFlow understand your work."
+            />
+            <p className="text-xs text-muted-foreground">
+              Private to your account. It is not added to your public community profile.
+            </p>
+          </div>
         </div>
 
         {profileError && <p className="text-sm text-destructive">{profileError}</p>}

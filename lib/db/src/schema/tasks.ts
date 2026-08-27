@@ -483,6 +483,8 @@ export const agentTasksTable = pgTable(
     // origin: source surface that created the task. Mirrors chat_messages.origin
     // so queued/background task reports can be written back to the same thread.
     origin: text("origin"),
+    supportSessionId: integer("support_session_id"),
+    provenanceActorUserId: text("provenance_actor_user_id"),
     intentReceiptId: integer("intent_receipt_id").references(() => zeroIntentReceiptsTable.id, {
       onDelete: "set null",
     }),
@@ -544,6 +546,9 @@ export const agentTasksTable = pgTable(
     index("agent_tasks_queue_batch_id_idx").on(table.queueBatchId),
     index("agent_tasks_run_mode_status_idx").on(table.runMode, table.status),
     index("agent_tasks_intent_receipt_id_idx").on(table.intentReceiptId),
+    index("agent_tasks_support_session_id_idx")
+      .on(table.supportSessionId)
+      .where(sql`support_session_id IS NOT NULL`),
     // Partial unique index: prevents more than one active background auto-fix task
     // with the same title from being queued for the same project simultaneously.
     // Rows that have transitioned to done/failed/canceled fall outside the index,

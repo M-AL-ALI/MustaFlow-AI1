@@ -4,6 +4,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, oraxDesktopAuthChallengesTable, oraxDesktopSessionsTable } from "@workspace/db";
 import { encryptionService } from "../lib/encryption";
+import { getSharedAccountProfile } from "../lib/clerk-users";
 
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -61,11 +62,16 @@ function buildVerificationUrl(
   return url.toString();
 }
 
-function publicSession(session: { userId: string; expiresAt: Date }, token: string) {
+function publicSession(
+  session: { userId: string; expiresAt: Date },
+  token: string,
+  identity: NonNullable<Awaited<ReturnType<typeof getSharedAccountProfile>>>,
+) {
   return {
     userId: session.userId,
-    email: "",
-    displayName: "MustaFlow User",
+    email: identity.email ?? "",
+    displayName: identity.displayName,
+    imageUrl: identity.imageUrl,
     token,
     expiresAt: session.expiresAt.toISOString(),
   };
@@ -156,6 +162,16 @@ oraxDesktopAuthPublicRouter.get("/orax/desktop-auth/status/:challengeId", async 
     return;
   }
 
+  const identity = await getSharedAccountProfile(session.userId);
+  if (!identity) {
+    res.status(503).json({
+      status: "approved",
+      error: "Your shared account profile is temporarily unavailable.",
+      code: "shared_profile_unavailable",
+    });
+    return;
+  }
+
   const token = encryptionService.decrypt(challenge.sessionTokenCiphertext);
   await db
     .update(oraxDesktopAuthChallengesTable)
@@ -168,7 +184,7 @@ oraxDesktopAuthPublicRouter.get("/orax/desktop-auth/status/:challengeId", async 
 
   res.json({
     status: "approved",
-    session: publicSession(session, token),
+    session: publicSession(session, token, identity),
   });
 });
 

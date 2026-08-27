@@ -22,6 +22,7 @@ import {
   projectActivityTable,
   notificationsTable,
   nabuflowOrgSeatsTable,
+  supportZeroSessionsTable,
   type TaskReport,
   type FileSnapshotEntry,
   type CvePatchStatus,
@@ -142,6 +143,7 @@ import {
   changedWithIssuesTerminal,
   failedTerminal,
   mutationSucceededTerminal,
+  parseZeroTerminalV1,
   presentZeroTerminalV1,
   IntentReceiptError,
   type IntentReceiptErrorCode,
@@ -154,6 +156,7 @@ import {
   persistZeroTerminal,
   zeroTerminalRef,
 } from "./zero-terminal-persistence";
+import { recordSupportGrantEvent, supportMutationStillAuthorized } from "./support-access";
 
 import {
   buildPreviewRepairObservation,
@@ -865,6 +868,10 @@ export interface JobInput {
   runMode?: "foreground" | "background";
   /** Wall-clock cap (ms) to pass into the agent loop. */
   wallClockCapMs?: number;
+  /** User-approved support proposal bound to this exact task and project. */
+  supportSessionId?: number;
+  /** Account that actually initiated the work; support mutations name the staff operator. */
+  provenanceActorUserId?: string;
   /** Deterministic test adapter. Product routes never accept or populate this field. */
   modelAdapter?: BuilderModelAdapter;
 }
@@ -1694,6 +1701,8 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     queueTotalCount: batchTasks.length,
     runMode: (nextTask.runMode as "foreground" | "background" | undefined) ?? undefined,
     wallClockCapMs: nextTask.wallClockCapMs ?? undefined,
+    supportSessionId: nextTask.supportSessionId ?? undefined,
+    provenanceActorUserId: nextTask.provenanceActorUserId ?? undefined,
   });
 }
 
@@ -1810,6 +1819,8 @@ export async function drainNextProjectTask(
     imageAttachments: drainedImageAttachments,
     runMode: (nextTask.runMode as "foreground" | "background" | undefined) ?? undefined,
     wallClockCapMs: nextTask.wallClockCapMs ?? undefined,
+    supportSessionId: nextTask.supportSessionId ?? undefined,
+    provenanceActorUserId: nextTask.provenanceActorUserId ?? undefined,
   });
   logger.info(
     {
@@ -2332,6 +2343,69 @@ export async function runJob(input: JobInput): Promise<void> {
   const abortController = new AbortController();
   const { signal } = abortController;
   activeJobControllers.set(taskId, abortController);
+  let supportGrantWatchTimer: ReturnType<typeof setInterval> | null = null;
+  let supportGrantCheckRunning = false;
+
+  const assertSupportGrantStillAuthorizesMutation = async (): Promise<void> => {
+    if (!input.supportSessionId) return;
+    let authorized = false;
+    try {
+      authorized = await supportMutationStillAuthorized({
+        sessionId: input.supportSessionId,
+        projectId,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          taskId,
+          projectId,
+          supportSessionId: input.supportSessionId,
+          errorClass: error instanceof Error ? error.constructor.name : "UnknownError",
+        },
+        "Support grant could not be rechecked; mutation remains stopped",
+      );
+    }
+    if (!authorized) {
+      abortController.abort();
+      throw new Error("Build cancelled");
+    }
+  };
+
+  if (input.supportSessionId) {
+    try {
+      await assertSupportGrantStillAuthorizesMutation();
+    } catch {
+      // The controller is already aborted. Enter the ordinary interruption path
+      // so the task and support session both receive durable terminal receipts.
+    }
+    supportGrantWatchTimer = setInterval(() => {
+      if (supportGrantCheckRunning || abortController.signal.aborted) return;
+      supportGrantCheckRunning = true;
+      void supportMutationStillAuthorized({
+        sessionId: input.supportSessionId!,
+        projectId,
+      })
+        .then((authorized) => {
+          if (!authorized) abortController.abort();
+        })
+        .catch((error) => {
+          logger.warn(
+            {
+              taskId,
+              projectId,
+              supportSessionId: input.supportSessionId,
+              errorClass: error instanceof Error ? error.constructor.name : "UnknownError",
+            },
+            "Support grant watcher failed closed",
+          );
+          abortController.abort();
+        })
+        .finally(() => {
+          supportGrantCheckRunning = false;
+        });
+    }, 2_000);
+    supportGrantWatchTimer.unref?.();
+  }
 
   // Atomically claim execution across replicas. The short xact-scoped lock is
   // safe through transaction poolers and cannot survive a dead request/consumer.
@@ -2438,6 +2512,7 @@ export async function runJob(input: JobInput): Promise<void> {
       });
       return;
     }
+    const provenanceActorUserId = input.provenanceActorUserId ?? project.ownerId;
     // Deployment-owned and resolved once. No request, project row, generated
     // file, or model output can select the sealed target.
     const zeroGenerationTarget: ZeroGenerationTarget = resolveZeroGenerationTarget(process.env);
@@ -3569,6 +3644,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             (eventType, message) => emitEvent(taskId, eventType, message),
             "project_files_commit",
           );
+          await assertSupportGrantStillAuthorizesMutation();
           await writeProjectFilesAtomically({
             projectId,
             scope: { kind: "artifact" },
@@ -4377,6 +4453,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           agentIdentity !== "task" &&
           (result.changedFiles.length > 0 || result.removedPaths.length > 0)
         ) {
+          await assertSupportGrantStillAuthorizesMutation();
           await writeProjectFilesAtomically({
             projectId,
             scope: { kind: "artifact" },
@@ -4539,6 +4616,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 (eventType, message) => emitEvent(taskId, eventType, message),
                 "project_files_commit",
               );
+              await assertSupportGrantStillAuthorizesMutation();
               await writeProjectFilesAtomically({
                 projectId,
                 scope: { kind: "artifact" },
@@ -5612,6 +5690,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 );
               }
               if (appliedChangedFiles.length > 0 || appliedRemovedPaths.length > 0) {
+                await assertSupportGrantStillAuthorizesMutation();
                 await writeProjectFilesAtomically({
                   projectId,
                   scope: { kind: "artifact" },
@@ -6018,7 +6097,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             let autoFixTaskId: number | null = null;
             let completedWithWarnings = false;
             const needsFix = shouldTriggerAutoFix(review);
-            if (needsFix && !isArchitectAutoFix) {
+            if (needsFix && !isArchitectAutoFix && !input.supportSessionId) {
               const fixPrompt = buildAutoFixPrompt(review);
               const fixTitle =
                 `${ARCHITECT_AUTOFIX_TITLE_PREFIX} ${review.findings[0]?.title ?? review.verdict}`.slice(
@@ -6412,7 +6491,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               // Guard: skip if the triggering task is itself an auto-fix (title
               // starts with "Auto-fix:") to prevent cascading loops.
               const isAutoFixTask = (input.userPrompt ?? "").startsWith("Auto-fix:");
-              if (project.autoFixOnCheckFailure && checkRunsSummary.failed > 0 && !isAutoFixTask) {
+              if (
+                project.autoFixOnCheckFailure &&
+                checkRunsSummary.failed > 0 &&
+                !isAutoFixTask &&
+                !input.supportSessionId
+              ) {
                 try {
                   const failedRuns = runs.filter((r) => r.status === "fail");
                   const fixParts: string[] = [];
@@ -6524,7 +6608,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             sourceKind: "task",
             sourceIdentity: `task:${taskId}`,
             taskId,
-            actorUserId: project.ownerId,
+            actorUserId: provenanceActorUserId,
             content: assistantSummary.slice(0, 140),
           }),
           summary: assistantSummary,
@@ -6532,7 +6616,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             sourceKind: "task",
             sourceIdentity: `task:${taskId}`,
             taskId,
-            actorUserId: project.ownerId,
+            actorUserId: provenanceActorUserId,
             content: assistantSummary,
           }),
           updatedAt: sql`now()`,
@@ -6996,7 +7080,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       // If Moment.js was detected in an initial build, automatically enqueue a follow-up refine
       // that swaps it for Luxon. Only fires on builds (not on refines) to avoid infinite loops.
       // This runs as a fire-and-forget background job — failures never affect the build result.
-      if (kind === "build" && hasMomentNotice) {
+      if (kind === "build" && hasMomentNotice && !input.supportSessionId) {
         void (async () => {
           try {
             const MOMENT_REPLACE_PROMPT =
@@ -7407,6 +7491,68 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
     }
   } finally {
+    if (supportGrantWatchTimer) {
+      clearInterval(supportGrantWatchTimer);
+    }
+    if (input.supportSessionId) {
+      try {
+        const [task] = await db
+          .select({ terminal: agentTasksTable.terminal })
+          .from(agentTasksTable)
+          .where(eq(agentTasksTable.id, taskId))
+          .limit(1);
+        const terminal = parseZeroTerminalV1(task?.terminal);
+        const applied =
+          terminal !== "UNKNOWN" &&
+          (terminal.outcome === "mutation_succeeded" || terminal.outcome === "changed_with_issues");
+        const appliedVersionId = applied ? terminal.evidence.versionId : null;
+        const [session] = await db
+          .update(supportZeroSessionsTable)
+          .set({
+            status: applied ? "applied" : "interrupted",
+            appliedVersionId,
+            terminal: terminal as unknown as Record<string, unknown>,
+            completedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(supportZeroSessionsTable.id, input.supportSessionId),
+              eq(supportZeroSessionsTable.projectId, projectId),
+              eq(supportZeroSessionsTable.taskId, taskId),
+              eq(supportZeroSessionsTable.status, "applying"),
+            ),
+          )
+          .returning({
+            grantId: supportZeroSessionsTable.grantId,
+            ticketId: supportZeroSessionsTable.ticketId,
+            staffUserId: supportZeroSessionsTable.staffUserId,
+          });
+        if (session) {
+          await recordSupportGrantEvent({
+            grantId: session.grantId,
+            ticketId: session.ticketId,
+            projectId,
+            actorUserId: session.staffUserId,
+            event: applied ? "zero_change_applied" : "zero_change_interrupted",
+            detail: {
+              supportSessionId: input.supportSessionId,
+              taskId,
+              ...(appliedVersionId ? { versionId: appliedVersionId } : {}),
+            },
+          });
+        }
+      } catch (error) {
+        logger.error(
+          {
+            taskId,
+            projectId,
+            supportSessionId: input.supportSessionId,
+            errorClass: error instanceof Error ? error.constructor.name : "UnknownError",
+          },
+          "Support session terminal receipt could not be persisted",
+        );
+      }
+    }
     // Stop the job-level heartbeat timer.
     if (jobHeartbeatTimer) {
       clearInterval(jobHeartbeatTimer);
@@ -8522,7 +8668,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
         sourceKind: "task",
         sourceIdentity: `task:${taskId}`,
         taskId,
-        actorUserId: project.ownerId,
+        actorUserId: task.provenanceActorUserId ?? project.ownerId,
         content: assistantSummary.slice(0, 140),
       }),
       summary: assistantSummary,
@@ -8530,7 +8676,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
         sourceKind: "task",
         sourceIdentity: `task:${taskId}`,
         taskId,
-        actorUserId: project.ownerId,
+        actorUserId: task.provenanceActorUserId ?? project.ownerId,
         content: assistantSummary,
       }),
       updatedAt: sql`now()`,
@@ -8769,6 +8915,8 @@ function serializeJobInput(input: JobInput): Record<string, unknown> {
     queueTotalCount: input.queueTotalCount ?? null,
     runMode: input.runMode ?? null,
     wallClockCapMs: input.wallClockCapMs ?? null,
+    supportSessionId: input.supportSessionId ?? null,
+    provenanceActorUserId: input.provenanceActorUserId ?? null,
   };
 }
 
