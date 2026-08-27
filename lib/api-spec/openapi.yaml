@@ -9637,6 +9637,10 @@ components:
         createdAt: { type: string, format: date-time }
         provenance:
           $ref: "#/components/schemas/ZeroMemoryProvenance"
+        versionState:
+          oneOf:
+            - $ref: "#/components/schemas/ZeroMemoryVersionState"
+            - type: "null"
 
     ZeroMemoryProvenance:
       type: object
@@ -9667,6 +9671,22 @@ components:
                 taskId: { type: ["integer", "null"] }
                 versionId: { type: ["integer", "null"] }
             - type: "null"
+
+    ZeroMemoryVersionState:
+      type: object
+      required: [semantics, state, label, versionId, currentVersionId]
+      properties:
+        semantics:
+          type: string
+          enum: [zero-memory-version-v1]
+        state:
+          type: string
+          enum: [active, historical, unbound]
+        label:
+          type: string
+          enum: [Current app version, Saved with another version, Version not verified]
+        versionId: { type: ["integer", "null"] }
+        currentVersionId: { type: ["integer", "null"] }
 
     KnowledgeInput:
       type: object

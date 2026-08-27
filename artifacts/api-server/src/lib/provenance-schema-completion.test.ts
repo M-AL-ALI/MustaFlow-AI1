@@ -28,14 +28,38 @@ function countProjectSummaryWriterFields(text: string, field: string): number {
 }
 
 describe("Zero provenance schema completion", () => {
-  it("adds exactly three named boot steps and keeps both historical usage step names", () => {
+  it("adds the four named memory-truth boot steps and keeps both historical usage step names", () => {
     const migration = source("./startup-migrations.ts");
-    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(145);
+    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(146);
     expect(migration).toContain('name: "knowledge_usage_events"');
     expect(migration).toContain('name: "migrate-knowledge-usage-events"');
     expect(migration).toContain('name: "migrate-knowledge-provenance"');
+    expect(migration).toContain('name: "migrate-zero-memory-version-lineage"');
     expect(migration).toContain('name: "migrate-project-summary-provenance"');
     expect(migration).toContain('name: "migrate-plan-snapshot-provenance"');
+  });
+
+  it("makes version lineage and memory binding idempotent without deleting history", async () => {
+    const { applyMemoryVersionLineageMigration } = await import("./startup-migrations");
+    const statements: string[] = [];
+    const client = {
+      query: async (statement: string) => {
+        statements.push(statement.replace(/\s+/g, " ").trim());
+        return { rows: [], rowCount: 0 };
+      },
+    } as unknown as Parameters<typeof applyMemoryVersionLineageMigration>[0];
+
+    await applyMemoryVersionLineageMigration(client);
+    const first = [...statements];
+    statements.length = 0;
+    await applyMemoryVersionLineageMigration(client);
+
+    expect(statements).toEqual(first);
+    expect(first.join("\n")).toContain("ADD COLUMN IF NOT EXISTS parent_version_id INTEGER");
+    expect(first.join("\n")).toContain("VALIDATE CONSTRAINT project_versions_parent_version_fk");
+    expect(first.join("\n")).toContain("CREATE TRIGGER project_versions_set_parent");
+    expect(first.join("\n")).toContain("CREATE TRIGGER project_versions_bind_first_memory");
+    expect(first.join("\n")).not.toMatch(/(TRUNCATE|DELETE FROM)\s/i);
   });
 
   it("runs every new migration twice without changing its SQL shape", async () => {

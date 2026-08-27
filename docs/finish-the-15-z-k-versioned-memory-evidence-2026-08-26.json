@@ -1,0 +1,54 @@
+{
+  "date": "2026-08-26",
+  "capability": "Z-K",
+  "semantics": ["zero-memory-version-v1"],
+  "branch": "codex/finish15-z-k-versioned-memory",
+  "baseCommit": "01908f3d6f994cccb9e92ac548b45e10c3178243",
+  "database": "NONE (lab)",
+  "environment": "A:/NabuFlowLab/work",
+  "store": "A:/NabuFlowLab/.pnpm-store/v10",
+  "kind": "implementation-and-lab-verification",
+  "contracts": {
+    "states": ["active", "historical", "unbound"],
+    "lineageLimit": 2000,
+    "rollbackIsNonDestructive": true,
+    "readsWrite": false,
+    "migrationCount": 146
+  },
+  "tests": {
+    "apiFocused": { "filesPassed": 4, "testsPassed": 21 },
+    "webFocused": { "filesPassed": 3, "testsPassed": 9 },
+    "apiTypecheck": "passed",
+    "webTypecheck": "passed",
+    "apiLint": "passed",
+    "webLint": "passed",
+    "libraryDeclarations": "passed",
+    "repositoryTypecheck": "passed",
+    "repositoryLint": "passed",
+    "prettierChangedFiles": "passed (29 files)",
+    "secretPatternScan": "zero matches",
+    "apiFullBase": {
+      "filesPassed": 224,
+      "filesFailed": 41,
+      "testsPassed": 2954,
+      "testsFailed": 41,
+      "testsSkipped": 5
+    },
+    "apiFullCandidate": {
+      "filesPassed": 226,
+      "filesFailed": 41,
+      "testsPassed": 2964,
+      "testsFailed": 41,
+      "testsSkipped": 5
+    },
+    "apiNormalizedFailureDelta": 0,
+    "webFullBase": { "filesPassed": 126, "testsPassed": 1191 },
+    "webFullCandidate": { "filesPassed": 127, "testsPassed": 1195 },
+    "webNormalizedFailureDelta": 0
+  },
+  "weather": {
+    "firstCombinedWebRun": "one unchanged test timed out and one worker did not start",
+    "cleanRetry": "all three files passed serially"
+  },
+  "liveStatus": "pending-governed-replit-gate-and-publish"
+}

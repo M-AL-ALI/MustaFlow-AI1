@@ -7,6 +7,8 @@ import {
   timestamp,
   boolean,
   uniqueIndex,
+  index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 import type {
@@ -44,53 +46,66 @@ export type AuditReport = {
   fileCount: number;
 };
 
-export const projectVersionsTable = pgTable("project_versions", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id")
-    .notNull()
-    .references(() => projectsTable.id, { onDelete: "cascade" }),
-  label: text("label").notNull(),
-  note: text("note"),
-  changelogEntry: text("changelog_entry"),
-  filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
-  planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
-  // The physical startup migration owns this nullable FK. Keeping the Drizzle
-  // field non-referential avoids a versions <-> messages module cycle.
-  planSourceMessageId: integer("plan_source_message_id"),
-  auditReport: jsonb("audit_report").$type<AuditReport>(),
-  // Trusted kitchen acceptance and production promotion records contain identities and
-  // attestations only. Artifact bytes remain in the sealed dock.
-  sealedRelease: jsonb("sealed_release").$type<AcceptedSealedRelease>(),
-  productionRelease: jsonb("production_release").$type<ProductionArtifactRelease>(),
-  // Persisted validation outcome for the snapshot. "passed" = all required
-  // checks succeeded; "failed" = produced by the agentic builder with one or
-  // more required checks failing (snapshot saved anyway for inspection).
-  // Null = legacy snapshots written before this column existed.
-  validationStatus: text("validation_status").$type<
-    "passed" | "passed_with_warnings" | "failed" | "completed_with_errors"
-  >(),
-  // ogImageUrl: URL of the generated Open Graph image for this snapshot.
-  // Set at publish time; served via the public route's <head> injection.
-  ogImageUrl: text("og_image_url"),
-  // environment: which environment slot this version was published to.
-  // "production" = live public URL, "staging" = staging URL, "preview" = ephemeral per-build URL.
-  // Null = legacy build snapshot (no environment slot assigned).
-  environment: text("environment").$type<"production" | "staging" | "preview">(),
-  // Task #767 — Testing approval gate.
-  // testingApprovedAt: when a reviewer approved this version for production promotion.
-  // Null = not yet approved. Required for agentic projects to publish to production.
-  testingApprovedAt: timestamp("testing_approved_at", { withTimezone: true }),
-  // testingApprovedBy: the Clerk userId of the reviewer who approved this version.
-  testingApprovedBy: text("testing_approved_by"),
-  // migrationStatus: lifecycle of the DB migration associated with this version.
-  // null = no migration defined. "pending" | "running" | "passed" | "failed"
-  migrationStatus: text("migration_status").$type<"pending" | "running" | "passed" | "failed">(),
-  // migrationLog: captured output from running the migration (stdout + stderr).
-  migrationLog: text("migration_log"),
-  // testingSkipped: when true the approval gate was explicitly bypassed by an admin.
-  testingSkipped: boolean("testing_skipped").notNull().default(false),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const projectVersionsTable = pgTable(
+  "project_versions",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projectsTable.id, { onDelete: "cascade" }),
+    // The version whose app and memory state this snapshot continues.
+    // Ordinary inserts receive the current head from the startup-owned trigger;
+    // an explicit restore supplies the restored version instead.
+    parentVersionId: integer("parent_version_id").references(
+      (): AnyPgColumn => projectVersionsTable.id,
+      { onDelete: "set null" },
+    ),
+    label: text("label").notNull(),
+    note: text("note"),
+    changelogEntry: text("changelog_entry"),
+    filesSnapshot: jsonb("files_snapshot").$type<FileSnapshotEntry[]>(),
+    planSnapshot: jsonb("plan_snapshot").$type<Record<string, unknown>>(),
+    // The physical startup migration owns this nullable FK. Keeping the Drizzle
+    // field non-referential avoids a versions <-> messages module cycle.
+    planSourceMessageId: integer("plan_source_message_id"),
+    auditReport: jsonb("audit_report").$type<AuditReport>(),
+    // Trusted kitchen acceptance and production promotion records contain identities and
+    // attestations only. Artifact bytes remain in the sealed dock.
+    sealedRelease: jsonb("sealed_release").$type<AcceptedSealedRelease>(),
+    productionRelease: jsonb("production_release").$type<ProductionArtifactRelease>(),
+    // Persisted validation outcome for the snapshot. "passed" = all required
+    // checks succeeded; "failed" = produced by the agentic builder with one or
+    // more required checks failing (snapshot saved anyway for inspection).
+    // Null = legacy snapshots written before this column existed.
+    validationStatus: text("validation_status").$type<
+      "passed" | "passed_with_warnings" | "failed" | "completed_with_errors"
+    >(),
+    // ogImageUrl: URL of the generated Open Graph image for this snapshot.
+    // Set at publish time; served via the public route's <head> injection.
+    ogImageUrl: text("og_image_url"),
+    // environment: which environment slot this version was published to.
+    // "production" = live public URL, "staging" = staging URL, "preview" = ephemeral per-build URL.
+    // Null = legacy build snapshot (no environment slot assigned).
+    environment: text("environment").$type<"production" | "staging" | "preview">(),
+    // Task #767 — Testing approval gate.
+    // testingApprovedAt: when a reviewer approved this version for production promotion.
+    // Null = not yet approved. Required for agentic projects to publish to production.
+    testingApprovedAt: timestamp("testing_approved_at", { withTimezone: true }),
+    // testingApprovedBy: the Clerk userId of the reviewer who approved this version.
+    testingApprovedBy: text("testing_approved_by"),
+    // migrationStatus: lifecycle of the DB migration associated with this version.
+    // null = no migration defined. "pending" | "running" | "passed" | "failed"
+    migrationStatus: text("migration_status").$type<"pending" | "running" | "passed" | "failed">(),
+    // migrationLog: captured output from running the migration (stdout + stderr).
+    migrationLog: text("migration_log"),
+    // testingSkipped: when true the approval gate was explicitly bypassed by an admin.
+    testingSkipped: boolean("testing_skipped").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("project_versions_project_parent_idx").on(table.projectId, table.parentVersionId),
+  ],
+);
 
 // ── preview_snapshots — ephemeral per-build preview URLs ─────────────────────
 // Created after every successful build. Expire after PREVIEW_EXPIRY_DAYS (default 7).

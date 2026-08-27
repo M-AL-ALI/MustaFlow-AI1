@@ -7,6 +7,7 @@
  */
 import type { KnowledgeEntryDiffSummary } from './knowledgeEntryDiffSummary';
 import type { ZeroMemoryProvenance } from './zeroMemoryProvenance';
+import type { ZeroMemoryVersionState } from './zeroMemoryVersionState';
 
 export interface KnowledgeEntry {
   id: number;
@@ -40,4 +41,5 @@ export interface KnowledgeEntry {
   archivedAt?: Date | null;
   createdAt: Date;
   provenance?: ZeroMemoryProvenance;
+  versionState?: ZeroMemoryVersionState | null;
 }

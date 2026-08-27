@@ -2290,6 +2290,41 @@ export interface ZeroMemoryProvenance {
   source: ZeroMemoryProvenanceSource;
 }
 
+export type ZeroMemoryVersionStateSemantics = typeof ZeroMemoryVersionStateSemantics[keyof typeof ZeroMemoryVersionStateSemantics];
+
+
+export const ZeroMemoryVersionStateSemantics = {
+  'zero-memory-version-v1': 'zero-memory-version-v1',
+} as const;
+
+export type ZeroMemoryVersionStateState = typeof ZeroMemoryVersionStateState[keyof typeof ZeroMemoryVersionStateState];
+
+
+export const ZeroMemoryVersionStateState = {
+  active: 'active',
+  historical: 'historical',
+  unbound: 'unbound',
+} as const;
+
+export type ZeroMemoryVersionStateLabel = typeof ZeroMemoryVersionStateLabel[keyof typeof ZeroMemoryVersionStateLabel];
+
+
+export const ZeroMemoryVersionStateLabel = {
+  Current_app_version: 'Current app version',
+  Saved_with_another_version: 'Saved with another version',
+  Version_not_verified: 'Version not verified',
+} as const;
+
+export interface ZeroMemoryVersionState {
+  semantics: ZeroMemoryVersionStateSemantics;
+  state: ZeroMemoryVersionStateState;
+  label: ZeroMemoryVersionStateLabel;
+  /** @nullable */
+  versionId: number | null;
+  /** @nullable */
+  currentVersionId: number | null;
+}
+
 export interface KnowledgeEntry {
   id: number;
   title: string;
@@ -2322,6 +2357,7 @@ export interface KnowledgeEntry {
   archivedAt?: string | null;
   createdAt: string;
   provenance?: ZeroMemoryProvenance;
+  versionState?: ZeroMemoryVersionState | null;
 }
 
 export interface KnowledgeInput {

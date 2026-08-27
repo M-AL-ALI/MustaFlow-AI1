@@ -73,6 +73,7 @@ import { projectSummaryProvenance } from "./project-summary-provenance";
 import { zeroProjectMemoryContext } from "./zero-project-memory";
 import { loadZeroProjectChoices } from "./zero-project-choice-store";
 import { readProjectMemoryReconciliationSummary } from "./memory-reconciliation-reader";
+import { readProjectMemoryVersionLineage } from "./project-memory-versioning";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
 import { isSuperuser } from "./superusers";
@@ -1383,14 +1384,22 @@ export async function loadKnowledgeContext(
 
     // Look up the project owner so we can also pull in their user-scope
     // entries (e.g. brand profile, inferred style preferences).
-    const [ownerRow] = retrievalEnabled
-      ? await db
-          .select({ ownerId: projectsTable.ownerId })
-          .from(projectsTable)
-          .where(eq(projectsTable.id, projectId))
-          .limit(1)
-      : [undefined];
+    const [ownerRows, versionLineage] = retrievalEnabled
+      ? await Promise.all([
+          db
+            .select({ ownerId: projectsTable.ownerId })
+            .from(projectsTable)
+            .where(eq(projectsTable.id, projectId))
+            .limit(1),
+          readProjectMemoryVersionLineage(projectId),
+        ])
+      : [[], { currentVersionId: null, activeVersionIds: new Set<number>(), coverage: "empty" }];
+    const [ownerRow] = ownerRows;
     const ownerId = ownerRow?.ownerId ?? null;
+    const projectVersionCondition =
+      versionLineage.currentVersionId === null
+        ? isNull(knowledgeEntriesTable.relatedVersionId)
+        : inArray(knowledgeEntriesTable.relatedVersionId, [...versionLineage.activeVersionIds]);
 
     const [entries, integrationsNote] = await Promise.all([
       retrievalEnabled
@@ -1400,8 +1409,14 @@ export async function loadKnowledgeContext(
             .where(
               and(
                 or(
-                  eq(knowledgeEntriesTable.approvedForReuse, true),
-                  eq(knowledgeEntriesTable.projectId, projectId),
+                  and(eq(knowledgeEntriesTable.projectId, projectId), projectVersionCondition),
+                  and(
+                    eq(knowledgeEntriesTable.approvedForReuse, true),
+                    or(
+                      isNull(knowledgeEntriesTable.projectId),
+                      ne(knowledgeEntriesTable.projectId, projectId),
+                    ),
+                  ),
                   ownerId
                     ? and(
                         eq(knowledgeEntriesTable.userId, ownerId),

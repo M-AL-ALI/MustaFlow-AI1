@@ -711,3 +711,7 @@ export * from './zeroMemoryProvenanceLabel';
 export * from './zeroMemoryProvenanceSemantics';
 export * from './zeroMemoryProvenanceSource';
 export * from './zeroMemoryProvenanceStatus';
+export * from './zeroMemoryVersionState';
+export * from './zeroMemoryVersionStateLabel';
+export * from './zeroMemoryVersionStateSemantics';
+export * from './zeroMemoryVersionStateState';

@@ -6,6 +6,7 @@ export * from "./zero-project-choice-capture";
 export * from "./zero-terminal";
 export * from "./workspace-readiness";
 export * from "./zero-memory-provenance";
+export * from "./zero-memory-version";
 export * from "./billing-user-errors";
 export * from "./user-visible-errors";
 

@@ -4531,7 +4531,14 @@ export const ListKnowledgeResponseItem = zod.object({
   "taskId": zod.number().nullable(),
   "versionId": zod.number().nullable()
 }),zod.null()])
-}).optional()
+}).optional(),
+  "versionState": zod.union([zod.object({
+  "semantics": zod.enum(['zero-memory-version-v1']),
+  "state": zod.enum(['active', 'historical', 'unbound']),
+  "label": zod.enum(['Current app version', 'Saved with another version', 'Version not verified']),
+  "versionId": zod.number().nullable(),
+  "currentVersionId": zod.number().nullable()
+}),zod.null()]).optional()
 })
 export const ListKnowledgeResponse = zod.array(ListKnowledgeResponseItem)
 
@@ -4592,7 +4599,14 @@ export const ExportKnowledgeResponse = zod.object({
   "taskId": zod.number().nullable(),
   "versionId": zod.number().nullable()
 }),zod.null()])
-}).optional()
+}).optional(),
+  "versionState": zod.union([zod.object({
+  "semantics": zod.enum(['zero-memory-version-v1']),
+  "state": zod.enum(['active', 'historical', 'unbound']),
+  "label": zod.enum(['Current app version', 'Saved with another version', 'Version not verified']),
+  "versionId": zod.number().nullable(),
+  "currentVersionId": zod.number().nullable()
+}),zod.null()]).optional()
 }))
 })
 
@@ -4675,7 +4689,14 @@ export const ListPublicKnowledgeResponseItem = zod.object({
   "taskId": zod.number().nullable(),
   "versionId": zod.number().nullable()
 }),zod.null()])
-}).optional()
+}).optional(),
+  "versionState": zod.union([zod.object({
+  "semantics": zod.enum(['zero-memory-version-v1']),
+  "state": zod.enum(['active', 'historical', 'unbound']),
+  "label": zod.enum(['Current app version', 'Saved with another version', 'Version not verified']),
+  "versionId": zod.number().nullable(),
+  "currentVersionId": zod.number().nullable()
+}),zod.null()]).optional()
 })
 export const ListPublicKnowledgeResponse = zod.array(ListPublicKnowledgeResponseItem)
 
@@ -4739,7 +4760,14 @@ export const UpdateKnowledgeResponse = zod.object({
   "taskId": zod.number().nullable(),
   "versionId": zod.number().nullable()
 }),zod.null()])
-}).optional()
+}).optional(),
+  "versionState": zod.union([zod.object({
+  "semantics": zod.enum(['zero-memory-version-v1']),
+  "state": zod.enum(['active', 'historical', 'unbound']),
+  "label": zod.enum(['Current app version', 'Saved with another version', 'Version not verified']),
+  "versionId": zod.number().nullable(),
+  "currentVersionId": zod.number().nullable()
+}),zod.null()]).optional()
 })
 
 
@@ -4795,7 +4823,14 @@ export const PromoteKnowledgeToGlobalResponse = zod.object({
   "taskId": zod.number().nullable(),
   "versionId": zod.number().nullable()
 }),zod.null()])
-}).optional()
+}).optional(),
+  "versionState": zod.union([zod.object({
+  "semantics": zod.enum(['zero-memory-version-v1']),
+  "state": zod.enum(['active', 'historical', 'unbound']),
+  "label": zod.enum(['Current app version', 'Saved with another version', 'Version not verified']),
+  "versionId": zod.number().nullable(),
+  "currentVersionId": zod.number().nullable()
+}),zod.null()]).optional()
 })
 
 
@@ -4845,7 +4880,14 @@ export const RateKnowledgeResponse = zod.object({
   "taskId": zod.number().nullable(),
   "versionId": zod.number().nullable()
 }),zod.null()])
-}).optional()
+}).optional(),
+  "versionState": zod.union([zod.object({
+  "semantics": zod.enum(['zero-memory-version-v1']),
+  "state": zod.enum(['active', 'historical', 'unbound']),
+  "label": zod.enum(['Current app version', 'Saved with another version', 'Version not verified']),
+  "versionId": zod.number().nullable(),
+  "currentVersionId": zod.number().nullable()
+}),zod.null()]).optional()
 }).and(zod.object({
   "contributorRewardGranted": zod.boolean().optional().describe('True when this rating triggered a credit reward for the entry\'s contributor.'),
   "contributorRewardCredits": zod.number().optional().describe('Number of credits granted to the contributor (0 when not granted).')

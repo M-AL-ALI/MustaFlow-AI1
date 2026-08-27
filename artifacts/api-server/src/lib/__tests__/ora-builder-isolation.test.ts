@@ -47,6 +47,7 @@ import {
   knowledgeEntriesTable,
   knowledgeProvenanceEventsTable,
   projectsTable,
+  projectVersionsTable,
   pool,
   workspacesTable,
 } from "@workspace/db";
@@ -190,6 +191,74 @@ describe("Ora ↔ Builder memory isolation", () => {
       .from(knowledgeProvenanceEventsTable)
       .where(eq(knowledgeProvenanceEventsTable.knowledgeEntryId, entryId));
     expect(receipt).toEqual({ claimKind: "stated", actorUserId: TEST_USER });
+  });
+
+  it("rolls project memory back with the app version and keeps the abandoned branch visible as history", async () => {
+    const [versionOne] = await db
+      .insert(projectVersionsTable)
+      .values({ projectId, label: "Memory baseline", filesSnapshot: [] })
+      .returning({ id: projectVersionsTable.id });
+    expect(versionOne?.id).toBeTypeOf("number");
+
+    const activeMarker = `ACTIVE_VERSION_MEMORY_${TEST_USER}`;
+    const abandonedMarker = `ABANDONED_VERSION_MEMORY_${TEST_USER}`;
+    const baselineMemory = await writeKnowledge({
+      projectId,
+      userId: TEST_USER,
+      title: "Baseline version memory",
+      content: activeMarker,
+      type: "z-k-version-memory",
+      claimKind: "stated",
+    });
+    const [versionTwo] = await db
+      .insert(projectVersionsTable)
+      .values({
+        projectId,
+        parentVersionId: versionOne!.id,
+        label: "Abandoned branch",
+        filesSnapshot: [],
+      })
+      .returning({ id: projectVersionsTable.id });
+    const abandonedMemory = await writeKnowledge({
+      projectId,
+      userId: TEST_USER,
+      title: "Abandoned branch memory",
+      content: abandonedMarker,
+      type: "z-k-version-memory",
+      claimKind: "stated",
+    });
+    const [rollbackVersion] = await db
+      .insert(projectVersionsTable)
+      .values({
+        projectId,
+        parentVersionId: versionOne!.id,
+        label: "Restored baseline",
+        filesSnapshot: [],
+      })
+      .returning({ id: projectVersionsTable.id });
+    expect(versionTwo?.id).toBeTypeOf("number");
+    expect(rollbackVersion?.id).toBeTypeOf("number");
+
+    const { context } = await loadKnowledgeContext(projectId);
+    expect(context).toContain(activeMarker);
+    expect(context).not.toContain(abandonedMarker);
+
+    const rows = await request(knowledgeApp).get("/api/knowledge").query({ projectId, limit: 200 });
+    expect(rows.status).toBe(200);
+    const baselineRow = rows.body.find(
+      (entry: { id: number }) => entry.id === baselineMemory?.entryId,
+    );
+    const abandonedRow = rows.body.find(
+      (entry: { id: number }) => entry.id === abandonedMemory?.entryId,
+    );
+    expect(baselineRow?.versionState).toMatchObject({
+      state: "active",
+      currentVersionId: rollbackVersion!.id,
+    });
+    expect(abandonedRow?.versionState).toMatchObject({
+      state: "historical",
+      currentVersionId: rollbackVersion!.id,
+    });
   });
 
   it("writeKnowledge dedup never merges a Builder write into the Ora row", async () => {

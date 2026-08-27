@@ -27,6 +27,7 @@ import {
   resolveZeroIntegrationEligibilityOutcome,
 } from "./zero-capability-eligibility";
 import type { ZeroMemoryClaimKind } from "@workspace/ora-contracts";
+import { readCurrentProjectVersionId } from "./project-memory-versioning";
 
 export interface KnowledgeWriteOpts {
   title: string;
@@ -216,9 +217,13 @@ export async function writeKnowledge(
     }
 
     const result = await db.transaction(async (tx) => {
+      const relatedVersionId =
+        opts.projectId != null && opts.relatedVersionId == null
+          ? await readCurrentProjectVersionId(opts.projectId, tx)
+          : (opts.relatedVersionId ?? null);
       const sourceIds = [
         opts.relatedTaskId,
-        opts.relatedVersionId,
+        relatedVersionId,
         opts.sourceMessageStartId,
         opts.sourceMessageEndId,
       ].filter((value): value is number => value != null);
@@ -236,11 +241,11 @@ export async function writeKnowledge(
             throw new Error("Knowledge task provenance does not belong to the project");
           }
         }
-        if (opts.relatedVersionId != null) {
+        if (relatedVersionId != null) {
           const [source] = await tx
             .select({ projectId: projectVersionsTable.projectId })
             .from(projectVersionsTable)
-            .where(eq(projectVersionsTable.id, opts.relatedVersionId))
+            .where(eq(projectVersionsTable.id, relatedVersionId))
             .limit(1);
           if (source?.projectId !== opts.projectId) {
             throw new Error("Knowledge version provenance does not belong to the project");
@@ -278,6 +283,9 @@ export async function writeKnowledge(
                   and(
                     eq(knowledgeEntriesTable.projectId, opts.projectId),
                     eq(knowledgeEntriesTable.type, opts.type),
+                    relatedVersionId === null
+                      ? isNull(knowledgeEntriesTable.relatedVersionId)
+                      : eq(knowledgeEntriesTable.relatedVersionId, relatedVersionId),
                     eq(knowledgeEntriesTable.approvedForReuse, false),
                     ne(knowledgeEntriesTable.scope, "global"),
                     // ISOLATION: writeKnowledge only ever produces Builder entries,
@@ -355,7 +363,7 @@ export async function writeKnowledge(
             sourceMessageStartId: opts.sourceMessageStartId,
             sourceMessageEndId: opts.sourceMessageEndId,
             sourceTaskId: opts.relatedTaskId,
-            sourceVersionId: opts.relatedVersionId,
+            sourceVersionId: relatedVersionId,
             claimKind: opts.claimKind ?? "observed",
             actorUserId: opts.actorUserId ?? opts.userId,
             contributedContent: opts.content,
@@ -382,7 +390,7 @@ export async function writeKnowledge(
           projectId: opts.projectId ?? null,
           userId: opts.userId ?? null,
           relatedTaskId: opts.relatedTaskId ?? null,
-          relatedVersionId: opts.relatedVersionId ?? null,
+          relatedVersionId,
           sourceMessageStartId: opts.sourceMessageStartId ?? null,
           sourceMessageEndId: opts.sourceMessageEndId ?? null,
           tags: tagsCsv,
@@ -400,7 +408,7 @@ export async function writeKnowledge(
         sourceMessageStartId: opts.sourceMessageStartId,
         sourceMessageEndId: opts.sourceMessageEndId,
         sourceTaskId: opts.relatedTaskId,
-        sourceVersionId: opts.relatedVersionId,
+        sourceVersionId: relatedVersionId,
         claimKind: opts.claimKind ?? "observed",
         actorUserId: opts.actorUserId ?? opts.userId,
         contributedContent: opts.content,

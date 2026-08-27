@@ -8,7 +8,7 @@ import {
   creditTransactionsTable,
   userCreditsTable,
 } from "@workspace/db";
-import { presentZeroMemoryProvenance } from "@workspace/ora-contracts";
+import { presentZeroMemoryProvenance, presentZeroMemoryVersion } from "@workspace/ora-contracts";
 import { isAdminUser } from "../lib/adminAuth";
 import { getOrCreateCredits } from "./credits";
 import { buildEmbeddingInput, generateEmbedding } from "../lib/embeddings";
@@ -19,6 +19,7 @@ import { readProjectMemoryReconciliationSummary } from "../lib/memory-reconcilia
 import type { SQL } from "drizzle-orm";
 import { z } from "zod";
 import { appendKnowledgeProvenanceReceipt, writeKnowledge } from "../lib/knowledge";
+import { readProjectMemoryVersionLineage } from "../lib/project-memory-versioning";
 
 // Public column projection — excludes internal-only fields (embedding vector, contributorRewardedAt).
 // Use this for all SELECT and RETURNING clauses that send data to the client.
@@ -86,8 +87,25 @@ async function attachKnowledgeProvenance<Row extends { id: number; projectId?: n
     }
   }
 
+  const projectIds = [
+    ...new Set(
+      rows
+        .map((row) => row.projectId)
+        .filter((projectId): projectId is number => projectId != null),
+    ),
+  ];
+  const lineageResults = await Promise.allSettled(
+    projectIds.map(
+      async (projectId) => [projectId, await readProjectMemoryVersionLineage(projectId)] as const,
+    ),
+  );
+  const lineageByProject = new Map(
+    lineageResults.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])),
+  );
+
   return rows.map((row) => {
     const event = latestByEntry.get(row.id) ?? null;
+    const lineage = row.projectId == null ? null : (lineageByProject.get(row.projectId) ?? null);
     return {
       ...row,
       provenance: presentZeroMemoryProvenance(event, {
@@ -95,6 +113,17 @@ async function attachKnowledgeProvenance<Row extends { id: number; projectId?: n
         maySeeSourceIdentities:
           event?.projectId != null && accessibleProjectIds.has(event.projectId),
       }),
+      versionState:
+        row.projectId == null
+          ? null
+          : presentZeroMemoryVersion({
+              versionId:
+                "relatedVersionId" in row && typeof row.relatedVersionId === "number"
+                  ? row.relatedVersionId
+                  : null,
+              currentVersionId: lineage?.currentVersionId ?? null,
+              activeVersionIds: lineage?.activeVersionIds ?? new Set<number>(),
+            }),
     };
   });
 }

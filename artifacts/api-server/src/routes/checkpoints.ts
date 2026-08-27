@@ -299,6 +299,7 @@ router.post(
           .insert(projectVersionsTable)
           .values({
             projectId,
+            parentVersionId: target.id,
             label: `Restored "${target.label}"`,
             note: `Restored from checkpoint #${checkpointId}. The previous state remains saved as checkpoint #${forwardCheckpointId}.`,
             changelogEntry: `Restored "${target.label}" from Version History.`,

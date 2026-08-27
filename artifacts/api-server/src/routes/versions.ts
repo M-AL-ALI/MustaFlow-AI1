@@ -396,6 +396,7 @@ router.post(
         .insert(projectVersionsTable)
         .values({
           projectId,
+          parentVersionId: version.id,
           label: `Restored "${version.label}"`.slice(0, 200),
           note: `Authoritative preview revision restored from version #${version.id}.`,
           changelogEntry: `Restored ${snapshot.length} file(s) from version #${version.id}.`,
@@ -586,7 +587,7 @@ router.post(
         projectId,
         userId: req.userId ?? undefined,
         relatedTaskId: taskId,
-        relatedVersionId: version.id,
+        relatedVersionId: rollbackRevisionId,
         tags: ["agent-zero", "task-memory", "rollback", "checkpoint"],
       });
     } catch {

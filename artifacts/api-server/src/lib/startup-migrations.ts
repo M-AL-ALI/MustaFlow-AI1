@@ -196,6 +196,128 @@ export async function applyKnowledgeProvenanceMigration(client: MigrationClient)
   await client.query("COMMIT");
 }
 
+export async function applyMemoryVersionLineageMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  await client.query(`
+    ALTER TABLE project_versions
+      ADD COLUMN IF NOT EXISTS parent_version_id INTEGER
+  `);
+  await addNotValidForeignKey(
+    client,
+    "project_versions",
+    "project_versions_parent_version_fk",
+    "FOREIGN KEY (parent_version_id) REFERENCES project_versions(id) ON DELETE SET NULL",
+  );
+  await client.query(`
+    WITH ordered AS (
+      SELECT
+        id,
+        LAG(id) OVER (PARTITION BY project_id ORDER BY created_at, id) AS prior_version_id
+      FROM project_versions
+    )
+    UPDATE project_versions AS version
+       SET parent_version_id = ordered.prior_version_id
+      FROM ordered
+     WHERE version.id = ordered.id
+       AND version.parent_version_id IS NULL
+       AND ordered.prior_version_id IS NOT NULL
+  `);
+  await client.query(`
+    ALTER TABLE project_versions
+      VALIDATE CONSTRAINT project_versions_parent_version_fk
+  `);
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS project_versions_project_parent_idx
+      ON project_versions (project_id, parent_version_id)
+  `);
+  await client.query(`
+    CREATE OR REPLACE FUNCTION set_project_version_parent()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW.parent_version_id IS NULL THEN
+        SELECT id
+          INTO NEW.parent_version_id
+          FROM project_versions
+         WHERE project_id = NEW.project_id
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1;
+      END IF;
+      RETURN NEW;
+    END
+    $$
+  `);
+  await client.query(`
+    DROP TRIGGER IF EXISTS project_versions_set_parent ON project_versions
+  `);
+  await client.query(`
+    CREATE TRIGGER project_versions_set_parent
+    BEFORE INSERT ON project_versions
+    FOR EACH ROW
+    EXECUTE FUNCTION set_project_version_parent()
+  `);
+  await client.query(`
+    WITH bindings AS (
+      SELECT
+        entry.id AS knowledge_entry_id,
+        COALESCE(
+          (
+            SELECT version.id
+              FROM project_versions AS version
+             WHERE version.project_id = entry.project_id
+               AND version.created_at <= entry.created_at
+             ORDER BY version.created_at DESC, version.id DESC
+             LIMIT 1
+          ),
+          (
+            SELECT version.id
+              FROM project_versions AS version
+             WHERE version.project_id = entry.project_id
+             ORDER BY version.created_at, version.id
+             LIMIT 1
+          )
+        ) AS version_id
+      FROM knowledge_entries AS entry
+      WHERE entry.project_id IS NOT NULL
+        AND entry.related_version_id IS NULL
+        AND COALESCE(entry.origin, 'builder') <> 'ora'
+    )
+    UPDATE knowledge_entries AS entry
+       SET related_version_id = bindings.version_id
+      FROM bindings
+     WHERE entry.id = bindings.knowledge_entry_id
+       AND bindings.version_id IS NOT NULL
+  `);
+  await client.query(`
+    CREATE OR REPLACE FUNCTION bind_first_project_version_memory()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF NEW.parent_version_id IS NULL THEN
+        UPDATE knowledge_entries
+           SET related_version_id = NEW.id
+         WHERE project_id = NEW.project_id
+           AND related_version_id IS NULL
+           AND COALESCE(origin, 'builder') <> 'ora';
+      END IF;
+      RETURN NEW;
+    END
+    $$
+  `);
+  await client.query(`
+    DROP TRIGGER IF EXISTS project_versions_bind_first_memory ON project_versions
+  `);
+  await client.query(`
+    CREATE TRIGGER project_versions_bind_first_memory
+    AFTER INSERT ON project_versions
+    FOR EACH ROW
+    EXECUTE FUNCTION bind_first_project_version_memory()
+  `);
+  await client.query("COMMIT");
+}
+
 export async function applyProjectSummaryProvenanceMigration(
   client: MigrationClient,
 ): Promise<void> {
@@ -6002,6 +6124,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-knowledge-provenance",
     async run(client) {
       await applyKnowledgeProvenanceMigration(client);
+    },
+  },
+  {
+    name: "migrate-zero-memory-version-lineage",
+    async run(client) {
+      await applyMemoryVersionLineageMigration(client);
     },
   },
   {
