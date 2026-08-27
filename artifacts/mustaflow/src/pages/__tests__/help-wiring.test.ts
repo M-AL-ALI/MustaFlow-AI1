@@ -17,6 +17,7 @@ import {
   persistMessages,
   clearStoredMessages,
   parseSupportReportParams,
+  usesSharedSupportHistory,
   supportConversationListQueryKey,
   supportConversationDetailQueryKey,
   remainingSupportAttachmentSlots,
@@ -49,6 +50,17 @@ describe("parseSupportReportParams (Report Issue opens /help?mode=report)", () =
     expect(parseSupportReportParams("?mode=report&projectId=42", "").initialProjectId).toBe(42);
     expect(parseSupportReportParams("?projectId=abc", "").initialProjectId).toBeNull();
     expect(parseSupportReportParams("", "").initialProjectId).toBeNull();
+  });
+});
+
+describe("project-linked report context isolation", () => {
+  it("never hydrates a different project's shared support transcript", () => {
+    expect(usesSharedSupportHistory(52)).toBe(false);
+    expect(usesSharedSupportHistory(1)).toBe(false);
+  });
+
+  it("keeps the normal Help Center conversation history outside a project report", () => {
+    expect(usesSharedSupportHistory(null)).toBe(true);
   });
 });
 
