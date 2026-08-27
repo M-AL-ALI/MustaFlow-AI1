@@ -44,6 +44,8 @@ import {
 } from "@/hooks/use-admin-ticket-alerts";
 import { toast } from "@/hooks/use-toast";
 import { SupportOperationConsole } from "./support-operation-console";
+import { AdminBreadcrumbs } from "@/components/admin/admin-breadcrumbs";
+import { Link } from "wouter";
 
 type StatusFilter = "all" | "new" | "open" | "resolved";
 
@@ -237,6 +239,13 @@ export default function SupportInboxPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-8">
+      <AdminBreadcrumbs
+        items={[
+          { label: "Projects", href: "/projects" },
+          { label: "Admin Page", href: "/admin" },
+          { label: "Support Inbox" },
+        ]}
+      />
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <LifeBuoy className="h-6 w-6 text-primary" />
@@ -562,6 +571,30 @@ function TicketDetail({
             </div>
           </div>
           <StatusBadge status={ticket.status} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <Link
+            href="/admin"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Back to Admin Page
+          </Link>
+          {ticket.projectId != null ? (
+            <Link
+              href={`/projects/${ticket.projectId}`}
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 font-medium text-primary transition-colors hover:bg-primary/10"
+            >
+              <FolderKanban className="h-3.5 w-3.5" />
+              Open reporting project{ticket.projectName ? `: ${ticket.projectName}` : ""}
+            </Link>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-muted-foreground">
+              <FolderKanban className="h-3.5 w-3.5" />
+              No project linked to this ticket
+            </span>
+          )}
         </div>
 
         {/* Status controls */}

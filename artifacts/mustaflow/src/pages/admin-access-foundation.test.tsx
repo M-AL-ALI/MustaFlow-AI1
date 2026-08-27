@@ -10,7 +10,8 @@ const sidebarSource = readFileSync(resolve(sourceRoot, "components/layout/sideba
 describe("Admin Page shell", () => {
   it("names the operator console and shows the four-role allowlist only to Owners", () => {
     expect(pageSource).toContain(">Admin Page</h1>");
-    expect(pageSource).toContain("The operator console for provider control");
+    expect(pageSource).toContain("Operational health, support, access controls");
+    expect(pageSource).not.toContain("The operator console for provider control");
     expect(pageSource).toContain("{isOwner && (");
     for (const role of ["owner", "operator", "support", "analyst"]) {
       expect(pageSource).toContain(`<option value="${role}"`);

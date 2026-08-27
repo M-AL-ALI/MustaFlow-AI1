@@ -90,16 +90,17 @@ This amendment is recorded here but must not be implemented before P4 authorizat
 
 ## Incidental findings and permanent preventives
 
-| Finding                                          | Preventive measure                                                                                                           |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| Wrong-framework support proposal                 | Primary-artifact/format/stack binding, architecture validation, one bounded retry, and refusal instead of an unsafe proposal |
-| Expired grant displayed active                   | One canonical clock-aware effective-status reader with contract tests                                                        |
-| Control-character regex failed lint              | Codepoint sanitizer, regression test and release-gate lint                                                                   |
-| In-progress publish treated as potential failure | Never retry or classify without a terminal deployment receipt                                                                |
-| Three competing Admin authority sources          | P4 single typed resolver and cross-panel consistency tests                                                                   |
-| Superuser source mislabeled as environment       | Remove competing authority rather than relabel it                                                                            |
-| Customer project-state contradiction             | Parked; proposed single derived state contract and one presenter                                                             |
-| Unreceipted A-drive reduction                    | Pair every phase with free-space receipts; account by metadata before any cleanup                                            |
+| Finding                                                        | Preventive measure                                                                                                           |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Wrong-framework support proposal                               | Primary-artifact/format/stack binding, architecture validation, one bounded retry, and refusal instead of an unsafe proposal |
+| Expired grant displayed active                                 | One canonical clock-aware effective-status reader with contract tests                                                        |
+| Control-character regex failed lint                            | Codepoint sanitizer, regression test and release-gate lint                                                                   |
+| In-progress publish treated as potential failure               | Never retry or classify without a terminal deployment receipt                                                                |
+| Three competing Admin authority sources                        | P4 single typed resolver and cross-panel consistency tests                                                                   |
+| Superuser source mislabeled as environment                     | Remove competing authority rather than relabel it                                                                            |
+| Customer project-state contradiction                           | Parked; proposed single derived state contract and one presenter                                                             |
+| Unreceipted A-drive reduction                                  | Pair every phase with free-space receipts; account by metadata before any cleanup                                            |
+| Operational read failures could resemble zero or healthy state | Explicit unknown/unavailable states plus focused regression guards; no failed read renders a zero-success claim              |
 
 ## A-drive accounting before P1
 
@@ -120,3 +121,20 @@ installation and its A-drive cache are retained; no deletion is authorized by P1
 Every phase appends its exact changed-file hashes, Git tree, gate receipts, preview or
 serving evidence, drive readings, branch lifecycle and refusal paths here before the
 mission can close.
+
+### P1 implementation record
+
+- One shared `AdminBreadcrumbs` component gives `/admin` and `/admin/support` an
+  accessible, consistent path back to Projects and Admin.
+- A selected support ticket now carries two content-level exits: Back to Admin Page,
+  and a project-bound link generated only from that ticket's own `projectId`. Tickets
+  without a project state that fact and never invent a destination.
+- Launch readiness, production errors and the job queue now precede informational
+  cards in DOM order. The KEEP set remains ahead of all P2 EXILE panels; the five EXILE
+  panels are grouped at the bottom without changing their internal behavior.
+- The Admin header now names only the surfaces actually present in this phase.
+- Failed reads for readiness, production errors, queue state and summary statistics
+  render an explicit unknown/unavailable state. A failed read cannot be mistaken for
+  zero errors, an empty queue, or a passing launch state.
+- P1 deliberately does not change ticket status semantics, project access grants,
+  Admin authority, or any panel assigned to P2–P8.

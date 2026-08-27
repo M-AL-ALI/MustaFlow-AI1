@@ -59,6 +59,7 @@ import type {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { OraRoutingDiagnosticsPanel } from "@/components/admin/ora-routing-diagnostics-panel";
+import { AdminBreadcrumbs } from "@/components/admin/admin-breadcrumbs";
 
 function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
   return (
@@ -180,17 +181,22 @@ export default function AdminPage() {
 
   const stripeCheck = readinessCheck("stripe");
   const cfCheck = readinessCheck("cloudflare_ssl");
+  const statValue = (value: number | undefined): string =>
+    statsQuery.isError ? "Unavailable" : loading ? "…" : String(value ?? 0);
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+      <AdminBreadcrumbs
+        items={[{ label: "Projects", href: "/projects" }, { label: "Admin Page" }]}
+      />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <ShieldCheck className="h-6 w-6 text-primary" />
           <div>
             <h1 className="text-2xl font-bold">Admin Page</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              The operator console for provider control, health, support, users, revenue, spend,
-              flags, and automatic-action receipts.
+              Operational health, support, access controls, accounts, publishing, and audit receipts
+              in one place.
             </p>
           </div>
         </div>
@@ -203,161 +209,17 @@ export default function AdminPage() {
         </button>
       </div>
 
-      {me && (
-        <div className="border border-green-500/20 bg-green-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-green-600">
-          <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
-          <div>
-            <span className="font-semibold">Admin Page access is active.</span> Signed in as{" "}
-            <code className="font-mono text-xs">{me.role}</code>
-            {me.grantedViaEnv && " (granted via ADMIN_USER_IDS env var)"}
-            {!me.grantedViaEnv && me.grantedBy && ` (granted by ${me.grantedBy})`}.
-          </div>
-        </div>
-      )}
-
-      {canViewAnalytics && <EvalResultsTile />}
-
-      {canOperate && <InboxRecentUnreadTile />}
-
-      {canOperate && <OraRoutingDiagnosticsPanel />}
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {canViewSupport && <SupportTicketsTile />}
-        {canViewAnalytics && (
-          <>
-            <StatCard
-              icon={FolderKanban}
-              label="Total Projects"
-              value={loading ? "…" : String(stats?.projects.total ?? 0)}
-              sub="across all users"
-            />
-            <StatCard
-              icon={Globe}
-              label="Published"
-              value={loading ? "…" : String(stats?.projects.published ?? 0)}
-              sub="live projects"
-            />
-            <StatCard
-              icon={Users}
-              label="Users with Credits"
-              value={loading ? "…" : String(stats?.users.withCredits ?? 0)}
-              sub="active accounts"
-            />
-            <StatCard
-              icon={CreditCard}
-              label="Transactions"
-              value={loading ? "…" : String(stats?.transactions ?? 0)}
-              sub="credit transactions"
-            />
-          </>
-        )}
-      </div>
-
-      {canViewAnalytics &&
-        stats &&
-        (() => {
-          const arch = stats.architectReviews;
-          if (!arch) return null;
-          return (
-            <div className="border border-border rounded-xl bg-card overflow-hidden">
-              <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                  <BrainCircuit className="h-3.5 w-3.5 text-violet-400" />
-                  Architect Review (last {arch.windowDays} days)
-                </h3>
-                <span className="text-xs text-muted-foreground">
-                  {arch.reviewed} reviewed build{arch.reviewed === 1 ? "" : "s"}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border/40">
-                <ArchitectMetric
-                  label="Avg findings / build"
-                  value={arch.avgFindingsPerBuild.toFixed(2)}
-                  tone="neutral"
-                />
-                <ArchitectMetric label="Pass" value={String(arch.passCount)} tone="ok" />
-                <ArchitectMetric label="Partial" value={String(arch.partialCount)} tone="warn" />
-                <ArchitectMetric label="Fail" value={String(arch.failCount)} tone="error" />
-                <ArchitectMetric
-                  label="Auto-fixes queued"
-                  value={String(arch.autoFixesQueued)}
-                  tone="info"
-                />
-              </div>
-            </div>
-          );
-        })()}
-
-      {canViewAnalytics &&
-        stats &&
-        (() => {
-          const ts = (
-            stats as {
-              topSkills?: {
-                windowDays: number;
-                totalBuildsWithSkills: number;
-                skills: Array<{ name: string; count: number }>;
-              };
-            }
-          ).topSkills;
-          if (!ts || ts.skills.length === 0) return null;
-          const max = ts.skills[0]?.count ?? 1;
-          return (
-            <div className="border border-border rounded-xl bg-card overflow-hidden">
-              <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                  Top skills used (last {ts.windowDays} days)
-                </h3>
-                <span className="text-xs text-muted-foreground">
-                  {ts.totalBuildsWithSkills} build{ts.totalBuildsWithSkills === 1 ? "" : "s"} loaded
-                  skills
-                </span>
-              </div>
-              <ul className="divide-y divide-border">
-                {ts.skills.map((s, i) => {
-                  const pct = max > 0 ? Math.max(4, Math.round((s.count / max) * 100)) : 0;
-                  return (
-                    <li key={s.name} className="px-4 py-2 flex items-center gap-3 text-sm">
-                      <span className="w-6 text-xs text-muted-foreground tabular-nums">
-                        {i + 1}.
-                      </span>
-                      <span className="flex-1 min-w-0 truncate font-mono text-xs">{s.name}</span>
-                      <div className="hidden sm:block w-32 h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-400/70" style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="w-12 text-right tabular-nums text-muted-foreground">
-                        {s.count}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          );
-        })()}
-
       {canViewAnalytics && (
-        <ProdErrorsTile
-          loading={loading}
-          last14Days={
-            (stats as { prodErrors?: { last14Days?: number } } | undefined)?.prodErrors
-              ?.last14Days ?? 0
-          }
-          byDay={
-            (
-              stats as
-                | { prodErrors?: { byDay?: Array<{ day: string; count: number }> } }
-                | undefined
-            )?.prodErrors?.byDay ?? []
-          }
-        />
-      )}
-
-      {canViewAnalytics && <JobQueueTile />}
-
-      {canViewAnalytics && (
-        <div className="border border-border rounded-xl bg-card overflow-hidden">
+        <div
+          data-admin-priority="blocking"
+          className={`border rounded-xl bg-card overflow-hidden ${
+            readinessQuery.isError || (readiness && !readiness.ready)
+              ? "border-destructive/60"
+              : readiness?.ready
+                ? "border-green-500/40"
+                : "border-border"
+          }`}
+        >
           <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Launch Readiness Checklist
@@ -394,6 +256,12 @@ export default function AdminPage() {
               Running checks…
             </div>
           )}
+          {readinessQuery.isError && (
+            <div className="px-4 py-4 border-t border-destructive/30 bg-destructive/5 text-sm text-destructive">
+              Launch readiness could not be loaded. Treat launch status as unknown until the check
+              succeeds.
+            </div>
+          )}
           {readiness && (
             <div
               className={`px-4 py-3 border-t border-border text-xs font-semibold ${
@@ -407,6 +275,78 @@ export default function AdminPage() {
           )}
         </div>
       )}
+
+      {canViewAnalytics && (
+        <div data-admin-priority="operational">
+          <ProdErrorsTile
+            loading={loading}
+            failed={statsQuery.isError}
+            last14Days={
+              (stats as { prodErrors?: { last14Days?: number } } | undefined)?.prodErrors
+                ?.last14Days ?? 0
+            }
+            byDay={
+              (
+                stats as
+                  | { prodErrors?: { byDay?: Array<{ day: string; count: number }> } }
+                  | undefined
+              )?.prodErrors?.byDay ?? []
+            }
+          />
+        </div>
+      )}
+
+      {canViewAnalytics && (
+        <div data-admin-priority="operational">
+          <JobQueueTile />
+        </div>
+      )}
+
+      {me && (
+        <div className="border border-green-500/20 bg-green-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-green-600">
+          <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <span className="font-semibold">Admin Page access is active.</span> Signed in as{" "}
+            <code className="font-mono text-xs">{me.role}</code>
+            {me.grantedViaEnv && " (granted via ADMIN_USER_IDS env var)"}
+            {!me.grantedViaEnv && me.grantedBy && ` (granted by ${me.grantedBy})`}.
+          </div>
+        </div>
+      )}
+
+      {canOperate && <InboxRecentUnreadTile />}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {canViewSupport && <SupportTicketsTile />}
+        {canViewAnalytics && (
+          <>
+            <StatCard
+              icon={FolderKanban}
+              label="Total Projects"
+              value={statValue(stats?.projects.total)}
+              sub="across all users"
+            />
+            <StatCard
+              icon={Globe}
+              label="Published"
+              value={statValue(stats?.projects.published)}
+              sub="live projects"
+            />
+            <StatCard
+              icon={Users}
+              label="Users with Credits"
+              value={statValue(stats?.users.withCredits)}
+              sub="active accounts"
+            />
+            <StatCard
+              icon={CreditCard}
+              label="Transactions"
+              value={statValue(stats?.transactions)}
+              sub="credit transactions"
+            />
+          </>
+        )}
+      </div>
 
       {isOwner && (
         <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -524,8 +464,6 @@ export default function AdminPage() {
           </div>
         </div>
       )}
-
-      {canOperate && <SkillsPanel />}
 
       {canOperate && (
         <div className="border border-border rounded-xl bg-card overflow-hidden">
@@ -695,6 +633,102 @@ export default function AdminPage() {
           </AdminSection>
         </div>
       )}
+
+      <section
+        data-admin-tier="phase-2-exile"
+        aria-label="Panels scheduled for later review"
+        className="space-y-8"
+      >
+        {canViewAnalytics && <EvalResultsTile />}
+
+        {canOperate && <OraRoutingDiagnosticsPanel />}
+
+        {canViewAnalytics &&
+          stats &&
+          (() => {
+            const arch = stats.architectReviews;
+            if (!arch) return null;
+            return (
+              <div className="border border-border rounded-xl bg-card overflow-hidden">
+                <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <BrainCircuit className="h-3.5 w-3.5 text-violet-400" />
+                    Architect Review (last {arch.windowDays} days)
+                  </h3>
+                  <span className="text-xs text-muted-foreground">
+                    {arch.reviewed} reviewed build{arch.reviewed === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border/40">
+                  <ArchitectMetric
+                    label="Avg findings / build"
+                    value={arch.avgFindingsPerBuild.toFixed(2)}
+                    tone="neutral"
+                  />
+                  <ArchitectMetric label="Pass" value={String(arch.passCount)} tone="ok" />
+                  <ArchitectMetric label="Partial" value={String(arch.partialCount)} tone="warn" />
+                  <ArchitectMetric label="Fail" value={String(arch.failCount)} tone="error" />
+                  <ArchitectMetric
+                    label="Auto-fixes queued"
+                    value={String(arch.autoFixesQueued)}
+                    tone="info"
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
+        {canViewAnalytics &&
+          stats &&
+          (() => {
+            const ts = (
+              stats as {
+                topSkills?: {
+                  windowDays: number;
+                  totalBuildsWithSkills: number;
+                  skills: Array<{ name: string; count: number }>;
+                };
+              }
+            ).topSkills;
+            if (!ts || ts.skills.length === 0) return null;
+            const max = ts.skills[0]?.count ?? 1;
+            return (
+              <div className="border border-border rounded-xl bg-card overflow-hidden">
+                <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                    Top skills used (last {ts.windowDays} days)
+                  </h3>
+                  <span className="text-xs text-muted-foreground">
+                    {ts.totalBuildsWithSkills} build{ts.totalBuildsWithSkills === 1 ? "" : "s"}{" "}
+                    loaded skills
+                  </span>
+                </div>
+                <ul className="divide-y divide-border">
+                  {ts.skills.map((s, i) => {
+                    const pct = max > 0 ? Math.max(4, Math.round((s.count / max) * 100)) : 0;
+                    return (
+                      <li key={s.name} className="px-4 py-2 flex items-center gap-3 text-sm">
+                        <span className="w-6 text-xs text-muted-foreground tabular-nums">
+                          {i + 1}.
+                        </span>
+                        <span className="flex-1 min-w-0 truncate font-mono text-xs">{s.name}</span>
+                        <div className="hidden sm:block w-32 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-400/70" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="w-12 text-right tabular-nums text-muted-foreground">
+                          {s.count}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })()}
+
+        {canOperate && <SkillsPanel />}
+      </section>
     </div>
   );
 }
@@ -1087,10 +1121,12 @@ function AuditLogRow({ entry }: { entry: AdminAuditLogEntry }) {
 
 function ProdErrorsTile({
   loading,
+  failed,
   last14Days,
   byDay,
 }: {
   loading: boolean;
+  failed: boolean;
   last14Days: number;
   byDay: Array<{ day: string; count: number }>;
 }) {
@@ -1104,14 +1140,22 @@ function ProdErrorsTile({
         </h3>
         <span
           className={`text-xs font-semibold ${
-            last14Days > 0 ? "text-destructive" : "text-green-500"
+            failed || last14Days > 0 ? "text-destructive" : "text-green-500"
           }`}
         >
-          {loading ? "…" : `${last14Days.toLocaleString()} total`}
+          {failed ? "unknown" : loading ? "…" : `${last14Days.toLocaleString()} total`}
         </span>
       </div>
       <div className="px-4 py-4">
-        {byDay.length === 0 ? (
+        {failed ? (
+          <p className="text-sm text-destructive text-center py-4">
+            Production error history could not be loaded. Its current state is unknown.
+          </p>
+        ) : loading ? (
+          <p className="text-sm text-muted-foreground text-center py-4">
+            Loading production error history…
+          </p>
+        ) : byDay.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">
             No production errors recorded in the last 14 days.
           </p>
@@ -1589,17 +1633,19 @@ function AdminItem({
 function JobQueueTile() {
   const [data, setData] = useState<AdminJobQueue | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const result = await getAdminJobQueue({ recentLimit: 5 });
       setData(result);
       setLastUpdated(new Date());
     } catch {
-      // non-fatal
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -1636,6 +1682,12 @@ function JobQueueTile() {
 
       {!data && loading && (
         <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading…</div>
+      )}
+
+      {loadError && (
+        <div className="px-4 py-3 border-y border-destructive/30 bg-destructive/5 text-sm text-destructive">
+          The job queue could not be refreshed. Its current state is unknown.
+        </div>
       )}
 
       {data && !data.available && (
