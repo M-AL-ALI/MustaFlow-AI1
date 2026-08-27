@@ -31,6 +31,7 @@ async function callChat(
   return createChatCompletion({
     provider,
     model,
+    zeroCall: { tier: agentMode, stage },
     ...body,
   });
 }
@@ -553,6 +554,7 @@ export async function detectRequiredStack(prompt: string, devMode = false): Prom
     const res = await createChatCompletion({
       provider: "openai",
       model: "gpt-5-mini",
+      zeroCall: { tier: "eco", stage: "intent" },
       messages: [
         {
           role: "system",

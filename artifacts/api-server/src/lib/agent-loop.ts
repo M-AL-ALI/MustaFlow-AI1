@@ -2488,6 +2488,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         // flushBuildTokenTelemetry() can upsert one row at build completion.
         taskId: input.taskId ?? undefined,
         taskMode: input.agentMode,
+        zeroCall: {
+          tier: input.agentMode,
+          stage: input.mode === "refine" ? "refine" : "build",
+        },
       });
     } catch (err) {
       if (input.signal.aborted) {
@@ -3653,6 +3657,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             // NabuFlow R2 Phase D: include fix-turn tokens in per-build telemetry.
             taskId: input.taskId ?? undefined,
             taskMode: input.agentMode,
+            zeroCall: {
+              tier: input.agentMode,
+              stage: input.mode === "refine" ? "refine" : "build",
+            },
           });
           totalTokens += fixResp.usage?.total_tokens ?? 0;
           const fixChoice = fixResp.choices[0];

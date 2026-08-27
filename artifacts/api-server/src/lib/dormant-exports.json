@@ -28,5 +28,10 @@
     "path": "lib/api-client-react/src/served-identity.ts",
     "symbol": "useServedBuildIdentity",
     "reachableWhen": "A first-party status surface reads the serving build identity through the generated React query hook."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/zero-model-control-store.ts",
+    "symbol": "readActiveZeroModelBinding",
+    "reachableWhen": "ZM-4 activates registry resolver mode after the evaluation-gated provider-control slice."
   }
 ]

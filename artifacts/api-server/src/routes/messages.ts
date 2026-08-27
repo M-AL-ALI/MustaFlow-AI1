@@ -614,6 +614,7 @@ router.post("/projects/:id/messages", requireProjectOwnership, async (req, res):
         imageAttachments: visionParts.length > 0 ? visionParts : undefined,
         conversationSummary: projectMemoryContext,
         systemPromptOverride,
+        taskId: converseTask?.id,
       });
 
       assistantContent = converseResult.markdown;
@@ -1890,6 +1891,7 @@ router.post(
           signal: abortController.signal,
           systemPromptOverride,
           conversationSummary: projectMemoryContext,
+          taskId: converseTask?.id,
         },
         (token) => {
           streamSession.tokens.push(token);

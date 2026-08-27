@@ -40,7 +40,7 @@ exit is not sufficient: the complete streams must contain no PostgreSQL error li
 named pin. Phase 2.4 will replace `TODO_PHASE_2_4` with the first honest live object count; numeric
 pins are enforced on every later run.
 
-Layer 2 succeeds only at 145 attempted migrations with the exact typed tolerated set
+Layer 2 succeeds only at 147 attempted migrations with the exact typed tolerated set
 `migrate-workspace-tenancy: legacy_adoption_owner_id_missing` (144 passed, 1 tolerated). Any
 other count, failure, or superset fails the proof.
 

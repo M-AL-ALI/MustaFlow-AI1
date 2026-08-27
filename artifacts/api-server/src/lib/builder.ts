@@ -1698,6 +1698,7 @@ Return ONE plain-text brief (no markdown headings, no JSON). Be specific and sho
     const resp = await createChatCompletion({
       provider,
       model,
+      zeroCall: { tier: "lite", stage: "plan" },
       max_completion_tokens: 800,
       messages: [
         {
@@ -1787,6 +1788,7 @@ async function callWithRetry(
       const response = await createChatCompletion({
         provider,
         model: effectiveModel,
+        zeroCall: { tier: agentMode, stage },
         max_completion_tokens: maxTokens,
         messages,
         response_format: { type: "json_object" },
@@ -1858,6 +1860,7 @@ async function streamAndAccumulate(
     for await (const delta of streamChatCompletion({
       provider,
       model: effectiveModel,
+      zeroCall: { tier: agentMode, stage },
       max_completion_tokens: maxTokens,
       messages: messages as Parameters<typeof streamChatCompletion>[0]["messages"],
       signal,
@@ -4523,6 +4526,7 @@ export async function detectMobileModules(
     const response = await createChatCompletion({
       provider: mProv,
       model: mModel,
+      zeroCall: { tier: "eco", stage: "build" },
       max_completion_tokens: 200,
       messages: [
         {
@@ -8126,6 +8130,7 @@ export async function runIntentClassifierPipeline(
     const response = await createChatCompletion({
       provider,
       model,
+      zeroCall: { tier: "lite", stage: "intent" },
       max_completion_tokens: 60,
       messages: [
         { role: "system", content: INTENT_CLASSIFIER_SYSTEM },
@@ -8399,6 +8404,7 @@ export async function runConversePipeline(args: {
   imageAttachments?: ConverseImageAttachment[];
   conversationSummary?: string;
   systemPromptOverride?: string;
+  taskId?: number;
 }): Promise<ConverseResult> {
   const {
     projectName,
@@ -8410,6 +8416,7 @@ export async function runConversePipeline(args: {
     imageAttachments,
     conversationSummary,
     systemPromptOverride,
+    taskId,
   } = args;
 
   if (isAmbiguous) {
@@ -8423,6 +8430,9 @@ export async function runConversePipeline(args: {
       const response = await createChatCompletion({
         provider: cProvider,
         model: cModel,
+        taskId,
+        taskMode: agentMode,
+        zeroCall: { tier: agentMode, stage: "converse" },
         max_completion_tokens: 200,
         messages: [
           { role: "system", content: CLARIFY_SYSTEM_PROMPT },
@@ -8519,6 +8529,9 @@ export async function runConversePipeline(args: {
     const response = await createChatCompletion({
       provider: cProvider,
       model: cModel,
+      taskId,
+      taskMode: agentMode,
+      zeroCall: { tier: agentMode, stage: "converse" },
       max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
       ...(cProvider === "gemini" ? { disableThinking: true } : {}),
       reasoning_effort: "low",
@@ -8568,6 +8581,7 @@ export async function runConversationSummarizePipeline(
   const response = await createChatCompletion({
     provider: sProv,
     model: sModel,
+    zeroCall: { tier: "eco", stage: "converse" },
     max_completion_tokens: 600,
     messages: [
       {
@@ -8601,6 +8615,7 @@ export async function runConverseStreamPipeline(
     conversationSummary?: string;
     signal?: AbortSignal;
     systemPromptOverride?: string;
+    taskId?: number;
   },
   onToken: (token: string) => void,
 ): Promise<ConverseResult> {
@@ -8615,6 +8630,7 @@ export async function runConverseStreamPipeline(
     conversationSummary,
     signal,
     systemPromptOverride,
+    taskId,
   } = args;
 
   // Ambiguous path uses JSON mode — not streamable; call onToken once with full text.
@@ -8629,6 +8645,9 @@ export async function runConverseStreamPipeline(
       const response = await createChatCompletion({
         provider: cProvider,
         model: cModel,
+        taskId,
+        taskMode: agentMode,
+        zeroCall: { tier: agentMode, stage: "converse" },
         max_completion_tokens: 200,
         messages: [
           { role: "system", content: CLARIFY_SYSTEM_PROMPT },
@@ -8732,6 +8751,9 @@ export async function runConverseStreamPipeline(
       for await (const delta of streamChatCompletion({
         provider: streamProv,
         model: streamModel,
+        taskId,
+        taskMode: agentMode,
+        zeroCall: { tier: agentMode, stage: "converse" },
         max_completion_tokens: CONVERSE_MAX_COMPLETION_TOKENS,
         ...(streamProv === "gemini" ? { disableThinking: true } : {}),
         reasoning_effort: "low",
@@ -8803,6 +8825,7 @@ export async function runTestGenerationPipeline(
     const response = await createChatCompletion({
       provider: tProv,
       model: tModel,
+      zeroCall: { tier: "eco", stage: "build" },
       max_completion_tokens: 800,
       messages: [
         { role: "system", content: TEST_GENERATION_SYSTEM_PROMPT },
@@ -8930,6 +8953,7 @@ export async function runBrowserTestFixPipeline(
     const response = await createChatCompletion({
       provider,
       model,
+      zeroCall: { tier: "eco", stage: "build" },
       max_completion_tokens: 4000,
       messages: [
         { role: "system", content: BROWSER_FIX_SYSTEM_PROMPT },
@@ -9049,6 +9073,7 @@ Please upgrade "${packageName}" from "${currentVersion ?? "unknown"}" to "${targ
     const response = await createChatCompletion({
       provider: cveProv,
       model: cveModel,
+      zeroCall: { tier: "eco", stage: "build" },
       max_completion_tokens: 2000,
       messages: [
         { role: "system", content: CVE_PATCH_SYSTEM_PROMPT },

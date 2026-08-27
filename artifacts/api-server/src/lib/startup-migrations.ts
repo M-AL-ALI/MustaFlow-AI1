@@ -1011,6 +1011,126 @@ export async function applyZeroIntentReceiptMigration(client: MigrationClient): 
   }
 }
 
+type ZeroModelControlSchemaState = {
+  bindings_ready: boolean;
+  settings_ready: boolean;
+  calls_ready: boolean;
+  constraints_ready: boolean;
+};
+
+/**
+ * Add the versioned model-control registry and per-call identity receipts.
+ * No binding is activated here: the current stage router remains authoritative
+ * until the evaluation-gated cutover slice deliberately changes resolver_mode.
+ */
+export async function applyZeroModelControlMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS zero_model_registry_settings (
+        registry_key TEXT PRIMARY KEY DEFAULT 'global',
+        parity_floor NUMERIC(8,4),
+        resolver_mode TEXT NOT NULL DEFAULT 'legacy',
+        updated_by TEXT NOT NULL DEFAULT 'system',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT zero_model_registry_key_check CHECK (registry_key = 'global'),
+        CONSTRAINT zero_model_registry_mode_check CHECK (resolver_mode IN ('legacy','registry')),
+        CONSTRAINT zero_model_registry_parity_floor_check
+          CHECK (parity_floor IS NULL OR parity_floor >= 0)
+      );
+      INSERT INTO zero_model_registry_settings (registry_key)
+      VALUES ('global') ON CONFLICT (registry_key) DO NOTHING
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS zero_model_binding_versions (
+        id SERIAL PRIMARY KEY,
+        tier TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        parameters JSONB NOT NULL DEFAULT '{}'::jsonb,
+        state TEXT NOT NULL DEFAULT 'candidate',
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        activated_by TEXT,
+        activated_at TIMESTAMPTZ,
+        deactivated_at TIMESTAMPTZ,
+        CONSTRAINT zero_model_binding_tier_version_uq UNIQUE (tier, version),
+        CONSTRAINT zero_model_binding_tier_check CHECK (tier IN ('lite','eco','power','pro')),
+        CONSTRAINT zero_model_binding_provider_check
+          CHECK (provider IN ('openai','anthropic','gemini','deepseek','local')),
+        CONSTRAINT zero_model_binding_state_check
+          CHECK (state IN ('candidate','active','previous','retired')),
+        CONSTRAINT zero_model_binding_version_check CHECK (version > 0)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS zero_model_binding_one_active_per_tier_uq
+        ON zero_model_binding_versions(tier) WHERE state = 'active';
+      CREATE INDEX IF NOT EXISTS zero_model_binding_tier_state_idx
+        ON zero_model_binding_versions(tier, state, created_at)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS zero_model_call_receipts (
+        id UUID PRIMARY KEY,
+        operation_id TEXT NOT NULL,
+        task_id INTEGER REFERENCES agent_tasks(id) ON DELETE SET NULL,
+        tier TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        binding_version_id INTEGER REFERENCES zero_model_binding_versions(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'started',
+        input_tokens INTEGER,
+        output_tokens INTEGER,
+        error_code TEXT,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finished_at TIMESTAMPTZ,
+        CONSTRAINT zero_model_call_tier_check CHECK (tier IN ('lite','eco','power','pro')),
+        CONSTRAINT zero_model_call_stage_check
+          CHECK (stage IN ('build','refine','plan','architect','intent','converse')),
+        CONSTRAINT zero_model_call_provider_check
+          CHECK (provider IN ('openai','anthropic','gemini','deepseek','local')),
+        CONSTRAINT zero_model_call_status_check
+          CHECK (status IN ('started','completed','failed','interrupted'))
+      );
+      CREATE INDEX IF NOT EXISTS zero_model_call_tier_finished_idx
+        ON zero_model_call_receipts(tier, finished_at);
+      CREATE INDEX IF NOT EXISTS zero_model_call_operation_idx
+        ON zero_model_call_receipts(operation_id, started_at);
+      CREATE INDEX IF NOT EXISTS zero_model_call_task_idx
+        ON zero_model_call_receipts(task_id, started_at)
+    `);
+    const verification = await client.query<ZeroModelControlSchemaState>(`
+      SELECT
+        to_regclass('public.zero_model_binding_versions') IS NOT NULL AS bindings_ready,
+        to_regclass('public.zero_model_registry_settings') IS NOT NULL AS settings_ready,
+        to_regclass('public.zero_model_call_receipts') IS NOT NULL AS calls_ready,
+        (SELECT count(*) >= 10
+           FROM pg_constraint
+          WHERE conname IN (
+            'zero_model_registry_key_check', 'zero_model_registry_mode_check',
+            'zero_model_registry_parity_floor_check', 'zero_model_binding_tier_version_uq',
+            'zero_model_binding_tier_check', 'zero_model_binding_provider_check',
+            'zero_model_binding_state_check', 'zero_model_binding_version_check',
+            'zero_model_call_tier_check', 'zero_model_call_stage_check',
+            'zero_model_call_provider_check', 'zero_model_call_status_check'
+          )) AS constraints_ready
+    `);
+    const state = verification.rows[0];
+    if (
+      !state?.bindings_ready ||
+      !state.settings_ready ||
+      !state.calls_ready ||
+      !state.constraints_ready
+    ) {
+      throw new Error("zero_model_control_schema_incomplete");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 const MIGRATION_STEPS: MigrationStep[] = [
   {
     name: "migrate-production-artifact-release-records",
@@ -6160,6 +6280,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-zero-terminal-v1",
     async run(client) {
       await applyZeroTerminalMigration(client);
+    },
+  },
+  {
+    name: "migrate-zero-model-control",
+    async run(client) {
+      await applyZeroModelControlMigration(client);
     },
   },
 ];

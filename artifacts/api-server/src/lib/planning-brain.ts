@@ -47,6 +47,7 @@ async function planningCall<T>(
   const response = await createChatCompletion({
     provider,
     model,
+    zeroCall: { tier: input.mode, stage: "plan" },
     messages: [
       {
         role: "system",

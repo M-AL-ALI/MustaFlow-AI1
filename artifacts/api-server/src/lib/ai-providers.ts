@@ -19,6 +19,7 @@
  */
 
 import OpenAI from "openai";
+import { randomUUID } from "node:crypto";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import type {
   ChatCompletion,
@@ -327,6 +328,68 @@ export interface CreateChatCompletionParams {
    * Ignored when taskId is absent.
    */
   taskMode?: string;
+  /** Durable Zero identity. When present, the receipt is written before dispatch. */
+  zeroCall?: ZeroCallReceiptContext;
+}
+
+export interface ZeroCallReceiptContext {
+  tier: AgentMode;
+  stage: Stage;
+  operationId?: string;
+  bindingVersionId?: number | null;
+}
+
+type BegunZeroCallReceipt = { callId: string } | null;
+
+async function beginResolvedZeroCallReceipt(
+  params: Pick<CreateChatCompletionParams, "provider" | "model" | "taskId" | "zeroCall">,
+): Promise<BegunZeroCallReceipt> {
+  if (!params.zeroCall) return null;
+  const callId = randomUUID();
+  const operationId =
+    params.zeroCall.operationId ??
+    (params.taskId != null ? `task:${params.taskId}` : `call:${callId}`);
+  const [{ pool }, { beginZeroModelCallReceipt }] = await Promise.all([
+    import("@workspace/db"),
+    import("./zero-model-control-store"),
+  ]);
+  await beginZeroModelCallReceipt(pool, {
+    callId,
+    operationId,
+    taskId: params.taskId ?? null,
+    tier: params.zeroCall.tier,
+    stage: params.zeroCall.stage,
+    provider: params.provider,
+    model: params.model,
+    bindingVersionId: params.zeroCall.bindingVersionId ?? null,
+  });
+  return { callId };
+}
+
+async function finishResolvedZeroCallReceipt(
+  receipt: BegunZeroCallReceipt,
+  terminal: {
+    status: "completed" | "failed" | "interrupted";
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    errorCode?: string | null;
+  },
+): Promise<void> {
+  if (!receipt) return;
+  try {
+    const [{ pool }, { finishZeroModelCallReceipt }] = await Promise.all([
+      import("@workspace/db"),
+      import("./zero-model-control-store"),
+    ]);
+    await finishZeroModelCallReceipt(pool, receipt.callId, terminal);
+  } catch (error) {
+    // Never replay a paid provider call merely because its terminal receipt
+    // could not be updated. The durable started row remains visibly incomplete.
+    logger.error(
+      { err: error, callId: receipt.callId },
+      "zero model call terminal receipt could not be completed",
+    );
+  }
 }
 
 /**
@@ -340,103 +403,119 @@ export interface CreateChatCompletionParams {
 export async function createChatCompletion(
   params: CreateChatCompletionParams,
 ): Promise<ChatCompletion> {
-  // Wrap AI provider calls with a per-provider circuit breaker + retry.
-  // Each provider gets its own breaker so an Anthropic outage does not open
-  // the OpenAI breaker and vice versa.
-  const {
-    openaiCircuit,
-    anthropicCircuit,
-    geminiCircuit,
-    deepseekCircuit,
-    withRetry,
-    isTransientError,
-  } = await import("./resilience");
-  const circuit =
-    params.provider === "anthropic"
-      ? anthropicCircuit
-      : params.provider === "gemini"
-        ? geminiCircuit
-        : params.provider === "deepseek"
-          ? deepseekCircuit
-          : openaiCircuit;
+  const zeroReceipt = await beginResolvedZeroCallReceipt(params);
+  try {
+    // Wrap AI provider calls with a per-provider circuit breaker + retry.
+    // Each provider gets its own breaker so an Anthropic outage does not open
+    // the OpenAI breaker and vice versa.
+    const {
+      openaiCircuit,
+      anthropicCircuit,
+      geminiCircuit,
+      deepseekCircuit,
+      withRetry,
+      isTransientError,
+    } = await import("./resilience");
+    const circuit =
+      params.provider === "anthropic"
+        ? anthropicCircuit
+        : params.provider === "gemini"
+          ? geminiCircuit
+          : params.provider === "deepseek"
+            ? deepseekCircuit
+            : openaiCircuit;
 
-  const result = await circuit.call(() =>
-    withRetry(
-      () => {
-        if (params.provider === "openai") {
-          return openai.chat.completions.create(
-            {
-              model: params.model,
-              messages: params.messages,
-              tools: params.tools,
-              tool_choice: params.tool_choice,
-              response_format: params.response_format,
-              max_completion_tokens: params.max_completion_tokens,
-              reasoning_effort: params.reasoning_effort,
-            },
-            { signal: params.signal },
-          );
-        }
-        if (params.provider === "anthropic") {
-          // Route large tool-free calls through the streaming-accumulation path to
-          // avoid the SDK's built-in 10-minute non-streaming guard. Tool-call paths
-          // stay on non-streaming because tool_use blocks arrive at end of stream.
-          const hasTools = (params.tools?.length ?? 0) > 0;
-          if (!hasTools) {
-            const totalChars = params.messages.reduce(
-              (sum, m) =>
-                sum +
-                (typeof m.content === "string"
-                  ? m.content.length
-                  : JSON.stringify(m.content).length),
-              0,
+    const result = await circuit.call(() =>
+      withRetry(
+        () => {
+          if (params.provider === "openai") {
+            return openai.chat.completions.create(
+              {
+                model: params.model,
+                messages: params.messages,
+                tools: params.tools,
+                tool_choice: params.tool_choice,
+                response_format: params.response_format,
+                max_completion_tokens: params.max_completion_tokens,
+                reasoning_effort: params.reasoning_effort,
+              },
+              { signal: params.signal },
             );
-            if (totalChars >= ANTHROPIC_STREAM_THRESHOLD_CHARS) {
-              logger.info(
-                {
-                  chars: totalChars,
-                  threshold: ANTHROPIC_STREAM_THRESHOLD_CHARS,
-                  model: params.model,
-                },
-                "anthropic: large context detected — routing through streaming-accumulation path",
-              );
-              return callAnthropicAccumulated(params);
-            }
           }
-          return callAnthropic(params);
-        }
-        if (params.provider === "deepseek") {
-          return callDeepSeek(params);
-        }
-        return callGemini(params);
-      },
-      {
-        maxAttempts: 2,
-        baseDelayMs: 1000,
-        shouldRetry: isTransientError,
-        label: `ai-completion:${params.provider}:${params.model}`,
-        signal: params.signal,
-      },
-    ),
-  );
+          if (params.provider === "anthropic") {
+            // Route large tool-free calls through the streaming-accumulation path to
+            // avoid the SDK's built-in 10-minute non-streaming guard. Tool-call paths
+            // stay on non-streaming because tool_use blocks arrive at end of stream.
+            const hasTools = (params.tools?.length ?? 0) > 0;
+            if (!hasTools) {
+              const totalChars = params.messages.reduce(
+                (sum, m) =>
+                  sum +
+                  (typeof m.content === "string"
+                    ? m.content.length
+                    : JSON.stringify(m.content).length),
+                0,
+              );
+              if (totalChars >= ANTHROPIC_STREAM_THRESHOLD_CHARS) {
+                logger.info(
+                  {
+                    chars: totalChars,
+                    threshold: ANTHROPIC_STREAM_THRESHOLD_CHARS,
+                    model: params.model,
+                  },
+                  "anthropic: large context detected — routing through streaming-accumulation path",
+                );
+                return callAnthropicAccumulated(params);
+              }
+            }
+            return callAnthropic(params);
+          }
+          if (params.provider === "deepseek") {
+            return callDeepSeek(params);
+          }
+          return callGemini(params);
+        },
+        {
+          maxAttempts: 2,
+          baseDelayMs: 1000,
+          shouldRetry: isTransientError,
+          label: `ai-completion:${params.provider}:${params.model}`,
+          signal: params.signal,
+        },
+      ),
+    );
 
-  // Accumulate token telemetry when a taskId is provided (NabuFlow R2 Phase D).
-  // The returned usage object is the source of truth — all provider adapters
-  // route through synthesizeChatCompletion which always populates usage.
-  if (params.taskId != null) {
-    const usage = result.usage;
-    if (usage) {
-      accumulateBuildTokens(params.taskId, {
-        mode: params.taskMode ?? "unknown",
-        provider: params.provider,
-        model: params.model,
-        inputTokens: usage.prompt_tokens ?? 0,
-        outputTokens: usage.completion_tokens ?? 0,
-      });
+    // Accumulate token telemetry when a taskId is provided (NabuFlow R2 Phase D).
+    // The returned usage object is the source of truth — all provider adapters
+    // route through synthesizeChatCompletion which always populates usage.
+    if (params.taskId != null) {
+      const usage = result.usage;
+      if (usage) {
+        accumulateBuildTokens(params.taskId, {
+          mode: params.taskMode ?? "unknown",
+          provider: params.provider,
+          model: params.model,
+          inputTokens: usage.prompt_tokens ?? 0,
+          outputTokens: usage.completion_tokens ?? 0,
+        });
+      }
     }
+    await finishResolvedZeroCallReceipt(zeroReceipt, {
+      status: "completed",
+      inputTokens: result.usage?.prompt_tokens ?? null,
+      outputTokens: result.usage?.completion_tokens ?? null,
+    });
+    return result;
+  } catch (error) {
+    const interrupted =
+      params.signal?.aborted === true ||
+      (error instanceof Error && (error.name === "AbortError" || error.message === "AbortError"));
+    await finishResolvedZeroCallReceipt(zeroReceipt, {
+      status: interrupted ? "interrupted" : "failed",
+      errorCode: interrupted ? "provider_call_interrupted" : "provider_call_failed",
+    });
+    throw error;
   }
-
-  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -472,6 +551,8 @@ export interface StreamChatCompletionParams {
   taskMode?: string;
   /** Receives the provider's terminal stream evidence exactly once. */
   onFinish?: (summary: StreamCompletionSummary) => void;
+  /** Durable Zero identity. When present, the receipt is written before dispatch. */
+  zeroCall?: ZeroCallReceiptContext;
 }
 
 export interface StreamCompletionSummary {
@@ -532,83 +613,114 @@ function reportStreamCompletion(
 export async function* streamChatCompletion(
   params: StreamChatCompletionParams,
 ): AsyncGenerator<string, void, void> {
-  if (params.provider === "openai") {
-    const stream = await openai.chat.completions.create({
-      model: params.model,
-      messages: params.messages as any, // eslint-disable-line @typescript-eslint/no-explicit-any
-      stream: true,
-      stream_options: { include_usage: true },
-      ...(params.max_completion_tokens != null
-        ? { max_completion_tokens: params.max_completion_tokens }
-        : {}),
-      ...(params.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
-    });
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let reasoningTokens: number | undefined;
-    let finishReason: string | null = null;
-    let refusal = false;
-    let contentLength = 0;
-    let streamError: unknown;
-    try {
-      for await (const chunk of stream) {
-        const choice = chunk.choices[0];
-        const delta = choice?.delta?.content;
-        if (delta) {
-          contentLength += delta.length;
-          yield delta;
+  const zeroReceipt = await beginResolvedZeroCallReceipt(params);
+  const callerOnFinish = params.onFinish;
+  const terminalSummary: { value: StreamCompletionSummary | null } = { value: null };
+  let terminalError: unknown;
+  params = {
+    ...params,
+    onFinish(summary) {
+      terminalSummary.value = summary;
+      callerOnFinish?.(summary);
+    },
+  };
+  try {
+    if (params.provider === "openai") {
+      const stream = await openai.chat.completions.create({
+        model: params.model,
+        messages: params.messages as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+        stream: true,
+        stream_options: { include_usage: true },
+        ...(params.max_completion_tokens != null
+          ? { max_completion_tokens: params.max_completion_tokens }
+          : {}),
+        ...(params.reasoning_effort != null ? { reasoning_effort: params.reasoning_effort } : {}),
+      });
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let reasoningTokens: number | undefined;
+      let finishReason: string | null = null;
+      let refusal = false;
+      let contentLength = 0;
+      let streamError: unknown;
+      try {
+        for await (const chunk of stream) {
+          const choice = chunk.choices[0];
+          const delta = choice?.delta?.content;
+          if (delta) {
+            contentLength += delta.length;
+            yield delta;
+          }
+          if (choice?.delta?.refusal) refusal = true;
+          if (choice?.finish_reason != null) finishReason = choice.finish_reason;
+          // The final chunk (when stream_options.include_usage is set) has usage.
+          if (chunk.usage) {
+            inputTokens = chunk.usage.prompt_tokens ?? 0;
+            outputTokens = chunk.usage.completion_tokens ?? 0;
+            reasoningTokens = chunk.usage.completion_tokens_details?.reasoning_tokens ?? undefined;
+          }
         }
-        if (choice?.delta?.refusal) refusal = true;
-        if (choice?.finish_reason != null) finishReason = choice.finish_reason;
-        // The final chunk (when stream_options.include_usage is set) has usage.
-        if (chunk.usage) {
-          inputTokens = chunk.usage.prompt_tokens ?? 0;
-          outputTokens = chunk.usage.completion_tokens ?? 0;
-          reasoningTokens = chunk.usage.completion_tokens_details?.reasoning_tokens ?? undefined;
-        }
+      } catch (error) {
+        streamError = error;
+        throw error;
+      } finally {
+        reportStreamCompletion(params, {
+          finishReason,
+          inputTokens,
+          outputTokens,
+          reasoningTokens,
+          refusal,
+          aborted: streamWasAborted(params.signal, streamError),
+        });
       }
-    } catch (error) {
-      streamError = error;
-      throw error;
-    } finally {
-      reportStreamCompletion(params, {
+      if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
+        accumulateBuildTokens(params.taskId, {
+          mode: params.taskMode ?? "unknown",
+          provider: "openai",
+          model: params.model,
+          inputTokens,
+          outputTokens,
+        });
+      }
+      assertStreamProducedContent(contentLength, {
         finishReason,
-        inputTokens,
         outputTokens,
         reasoningTokens,
         refusal,
-        aborted: streamWasAborted(params.signal, streamError),
       });
+      return;
     }
-    if (params.taskId != null && (inputTokens > 0 || outputTokens > 0)) {
-      accumulateBuildTokens(params.taskId, {
-        mode: params.taskMode ?? "unknown",
-        provider: "openai",
-        model: params.model,
-        inputTokens,
-        outputTokens,
-      });
+
+    if (params.provider === "anthropic") {
+      yield* streamAnthropic(params);
+      return;
     }
-    assertStreamProducedContent(contentLength, {
-      finishReason,
-      outputTokens,
-      reasoningTokens,
-      refusal,
+
+    if (params.provider === "deepseek") {
+      yield* streamDeepSeek(params);
+      return;
+    }
+
+    yield* streamGemini(params);
+  } catch (error) {
+    terminalError = error;
+    throw error;
+  } finally {
+    const interrupted =
+      terminalSummary.value?.aborted === true ||
+      params.signal?.aborted === true ||
+      (terminalError instanceof Error && terminalError.name === "AbortError");
+    await finishResolvedZeroCallReceipt(zeroReceipt, {
+      status: terminalError ? (interrupted ? "interrupted" : "failed") : "completed",
+      inputTokens: terminalSummary.value?.inputTokens ?? null,
+      outputTokens: terminalSummary.value?.outputTokens ?? null,
+      errorCode: terminalError
+        ? interrupted
+          ? "provider_call_interrupted"
+          : "provider_call_failed"
+        : null,
     });
-    return;
   }
-
-  if (params.provider === "anthropic") {
-    yield* streamAnthropic(params);
-    return;
-  }
-
-  if (params.provider === "deepseek") {
-    yield* streamDeepSeek(params);
-    return;
-  }
-
-  yield* streamGemini(params);
 }
 
 /**

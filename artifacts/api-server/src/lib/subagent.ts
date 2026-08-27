@@ -253,6 +253,7 @@ async function runReviewer(
     userRequest: opts.parentInput.userPrompt,
     reviewBrief: opts.brief,
     agentMode: opts.parentInput.agentMode,
+    taskId: opts.parentInput.taskId ?? undefined,
     planContext: opts.planContext ?? null,
     diff: opts.diff,
     commandsRun: opts.commandsRun,
@@ -400,6 +401,9 @@ async function runMiniLoop(
       response = await createChatCompletion({
         provider,
         model,
+        taskId: parentCtx.input.taskId ?? undefined,
+        taskMode: parentCtx.input.agentMode,
+        zeroCall: { tier: parentCtx.input.agentMode, stage: "refine" },
         messages,
         tools,
         tool_choice: "auto",
