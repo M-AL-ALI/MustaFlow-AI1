@@ -5,6 +5,34 @@ import { selectPrimaryArtifactFiles } from "./primary-artifact-files";
 const PROJECT_52_ROWS = [
   {
     projectId: 52,
+    artifactId: null,
+    path: "nabuflow/runtime/index.ts",
+    content: "legacy runtime adapter",
+    mimeType: "text/typescript",
+  },
+  {
+    projectId: 52,
+    artifactId: null,
+    path: "package.json",
+    content: "legacy package",
+    mimeType: "application/json",
+  },
+  {
+    projectId: 52,
+    artifactId: null,
+    path: "src/index.ts",
+    content: "legacy server",
+    mimeType: "text/typescript",
+  },
+  {
+    projectId: 52,
+    artifactId: null,
+    path: "tsconfig.json",
+    content: "legacy compiler config",
+    mimeType: "application/json",
+  },
+  {
+    projectId: 52,
     artifactId: 100,
     path: "src/index.ts",
     content: "primary server",
@@ -48,13 +76,15 @@ const PROJECT_52_ROWS = [
 ] as const;
 
 describe("primary artifact file boundary", () => {
-  it("keeps Project 52's overlapping sibling paths out of the executable file set", () => {
+  it("composes Project 52's legacy base with primary overrides and excludes siblings", () => {
     const selected = selectPrimaryArtifactFiles(PROJECT_52_ROWS, 52, 100);
 
     expect(selected.map((file) => [file.path, file.content])).toEqual([
+      ["nabuflow/runtime/index.ts", "legacy runtime adapter"],
       ["package.json", "primary package"],
       ["src/index.ts", "primary server"],
       ["src/é.ts", "utf8 path"],
+      ["tsconfig.json", "legacy compiler config"],
     ]);
     expect(new Set(selected.map((file) => file.path)).size).toBe(selected.length);
   });
@@ -69,22 +99,21 @@ describe("primary artifact file boundary", () => {
     expect(PROJECT_52_ROWS).toEqual(before);
   });
 
-  it("treats the legacy null artifact as one scope, never as every artifact", () => {
-    const selected = selectPrimaryArtifactFiles(
-      [
-        ...PROJECT_52_ROWS,
-        {
-          projectId: 52,
-          artifactId: null,
-          path: "legacy.html",
-          content: "legacy",
-          mimeType: "text/html",
-        },
-      ],
-      52,
-      null,
-    );
+  it("keeps primary overrides deterministic when database row order changes", () => {
+    const forward = selectPrimaryArtifactFiles(PROJECT_52_ROWS, 52, 100);
+    const reverse = selectPrimaryArtifactFiles([...PROJECT_52_ROWS].reverse(), 52, 100);
 
-    expect(selected).toEqual([{ path: "legacy.html", content: "legacy", mimeType: "text/html" }]);
+    expect(reverse).toEqual(forward);
+  });
+
+  it("treats the legacy null artifact as one complete scope when no primary exists", () => {
+    const selected = selectPrimaryArtifactFiles(PROJECT_52_ROWS, 52, null);
+
+    expect(selected.map((file) => file.path)).toEqual([
+      "nabuflow/runtime/index.ts",
+      "package.json",
+      "src/index.ts",
+      "tsconfig.json",
+    ]);
   });
 });

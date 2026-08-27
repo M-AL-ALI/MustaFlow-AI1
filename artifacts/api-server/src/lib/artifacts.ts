@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { db, projectArtifactsTable, projectFilesTable, type ProjectArtifact } from "@workspace/db";
 import { selectPrimaryArtifactFiles, type PrimaryArtifactFile } from "./primary-artifact-files";
 
@@ -50,18 +50,23 @@ export async function resolveArtifactId(
 }
 
 /**
- * Load only the file set that belongs to the project's primary artifact.
+ * Load the complete file set for the project's primary artifact.
  *
- * The SQL predicate prevents sibling contents from crossing the artifact
- * boundary.  The pure selector repeats that boundary in memory and applies
- * the exact UTF-8 ordering required by the trusted-build contract.
+ * Legacy unscoped rows are the base layer for projects created during the
+ * artifact migration. Scoped primary rows override matching base paths.
+ * Sibling artifact rows never cross this boundary. The pure selector repeats
+ * that boundary in memory and applies the exact UTF-8 ordering required by
+ * the trusted-build contract.
  */
 export async function loadPrimaryArtifactFiles(projectId: number): Promise<PrimaryArtifactFile[]> {
   const primaryArtifactId = await resolvePrimaryArtifactId(projectId);
   const artifactScope =
     primaryArtifactId === null
       ? isNull(projectFilesTable.artifactId)
-      : eq(projectFilesTable.artifactId, primaryArtifactId);
+      : or(
+          isNull(projectFilesTable.artifactId),
+          eq(projectFilesTable.artifactId, primaryArtifactId),
+        );
   const rows = await db
     .select({
       projectId: projectFilesTable.projectId,
