@@ -138,3 +138,62 @@ mission can close.
   zero errors, an empty queue, or a passing launch state.
 - P1 deliberately does not change ticket status semantics, project access grants,
   Admin authority, or any panel assigned to P2–P8.
+
+### P1 honest completion matrix
+
+| Requirement                           | State in the P1 candidate                                                           | Refusal / boundary                                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Breadcrumbs on every Admin route      | Complete for the complete registered Admin route set: `/admin` and `/admin/support` | The current page is text, not a false link; every ancestor is one click                                          |
+| Ticket to reporting project           | Complete when the ticket carries `projectId`                                        | A ticket without `projectId` says `No project linked` and never invents a destination                            |
+| Back to Admin inside ticket content   | Complete for a selected ticket                                                      | The control remains inside ticket content; the product sidebar is not treated as a substitute                    |
+| KEEP-set information hierarchy        | Complete in DOM order                                                               | Blocking/degraded operational readers precede informational content; P2 EXILE panels remain unchanged below them |
+| Header truth                          | Complete because P1 touched hierarchy copy                                          | It names only the surfaces actually present and does not claim end-to-end control                                |
+| Browser-back-free preview walkthrough | Pending the clean-head preview gate                                                 | P1 cannot claim completion from unit tests alone                                                                 |
+| P2 panel cull                         | Not built                                                                           | P2 is not authorized                                                                                             |
+| P4 authority consolidation            | Not built                                                                           | Amendment is planning-only until P4 authorization                                                                |
+
+### P1 exact-base verification receipt
+
+All suites ran serially in the one permanent worktree. The existing worktree was
+temporarily detached at the exact base for the baseline run and then returned to the
+P1 branch; no second worktree was created and no install ran.
+
+- Exact base: `8a49f7e9e17768eaa303a451b76680cf4f538202`.
+- Candidate before this evidence update:
+  `e897f944d26c5c6fbe46007bfb09ce83e4a29a73`, tree
+  `e7b9457fe212d2bac79514ef1894579d9a1631db`.
+- Focused P1 tests: 3 files, 11 tests, all passed.
+- Test-inclusive web typecheck: passed.
+- Changed-file ESLint: passed.
+- Changed-file Prettier check: passed.
+- Base API: 41 failed / 3,027 passed / 5 skipped tests; 41 failed / 238 passed /
+  3 skipped files.
+- Candidate API: 41 failed / 3,027 passed / 5 skipped tests; 41 failed / 238 passed /
+  3 skipped files.
+- Normalized API failure-line set: 71 lines on each side; SHA-256
+  `ecb5943cdddb5699afbd0dd8cd33feb233363e26dc9781aa0747a15e0e114919` on
+  each side; base-only 0, candidate-only 0.
+- Base web: 129 files and 1,204 tests passed.
+- Candidate web: 130 files and 1,208 tests passed. The delta is the one new file and
+  four passing P1 regression guards; failures remain zero.
+- No manifest, lockfile, migration, schema, route or provider change.
+- Database named by these lab receipts: none. The API baseline failures are the exact
+  environment-gated base set, not a P1 regression.
+
+### P1 drive and production-probe receipt
+
+- P1 opening, `2026-08-27T20:41:39Z`: A free `74,526,621,696` bytes; C free
+  approximately `4.21` GB.
+- Full-suite opening, `2026-08-27T20:55:10Z`: A free `74,526,892,032` bytes; C
+  free `4,043,587,584` bytes.
+- Between base suites, `2026-08-27T21:01:41Z`: A free `74,525,257,728` bytes; C
+  free `3,907,489,792` bytes.
+- After candidate suites, `2026-08-27T21:06:15Z`: A free `74,510,737,408` bytes;
+  C free `3,873,587,200` bytes. C remained above the standing 3 GiB stop floor;
+  P1 intentionally wrote no project or evidence bytes there.
+- The exact production identity endpoint used by P0 was
+  `https://www.mustaflow.com/api/version`.
+
+The final clean-head gate, preview navigation capture, branch absence proofs and
+closing drive readings are phase-gate evidence and are not pre-claimed by this
+candidate record.
