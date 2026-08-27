@@ -1014,6 +1014,9 @@ router.post(
           const result = await runPlanPipeline({
             projectName: project.name,
             projectKind: project.kind,
+            projectFormat: project.projectFormat,
+            projectStack: project.stack,
+            preserveProjectArchitecture: Boolean(supportProposal),
             userPrompt: content,
             agentMode: mode,
             conversationHistory,
@@ -1582,11 +1585,13 @@ router.post(
     }
 
     if (supportProposal) {
-      const proposalInstruction = approvedSupportInstruction({
-        diagnosisInstruction: supportProposal.instruction,
-        planSummary: assistantContent,
-        plan: planWithIntent,
-      });
+      const proposalInstruction = plan
+        ? approvedSupportInstruction({
+            diagnosisInstruction: supportProposal.instruction,
+            planSummary: assistantContent,
+            plan: planWithIntent,
+          })
+        : null;
       const proposalReady =
         completedTerminal?.outcome === "plan_succeeded" &&
         proposalInstruction !== null &&
