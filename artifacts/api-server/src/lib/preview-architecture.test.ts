@@ -265,6 +265,9 @@ describe("Preview Architecture Fix regression coverage", () => {
 
   it("Agent Zero build/refine syncs and restarts the live preview runtime", () => {
     expect(jobsSource).toContain("const runtimePreviewResult = await syncAgenticPreviewRuntime");
+    expect(jobsSource).toContain(
+      "const allRuntimeFileRows = await loadPrimaryArtifactFiles(projectId)",
+    );
     expect(jobsSource).toContain("files: allRuntimeFileRows.map");
     expect(jobsSource).toContain("Restarting container app server");
     expect(jobsSource).toContain("report.previewUpdated = runtimePreviewResult.previewUpdated");
