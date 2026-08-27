@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { compareUtf8 } from "@workspace/tenant-runtime-contracts";
 import { selectPrimaryArtifactFiles } from "./primary-artifact-files";
 
@@ -36,6 +37,13 @@ const PROJECT_52_ROWS = [
     artifactId: 100,
     path: "src/index.ts",
     content: "primary server",
+    mimeType: "text/typescript",
+  },
+  {
+    projectId: 52,
+    artifactId: 101,
+    path: "src/App.tsx",
+    content: "sibling React app",
     mimeType: "text/typescript",
   },
   {
@@ -115,5 +123,12 @@ describe("primary artifact file boundary", () => {
       "src/index.ts",
       "tsconfig.json",
     ]);
+  });
+
+  it("keeps every message pipeline on the primary-artifact loader", () => {
+    const source = readFileSync(new URL("../routes/messages.ts", import.meta.url), "utf8");
+
+    expect(source.match(/loadPrimaryArtifactFiles\(project\.id\)/g)).toHaveLength(2);
+    expect(source).not.toContain("projectFilesTable");
   });
 });

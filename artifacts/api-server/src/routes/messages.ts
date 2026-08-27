@@ -4,7 +4,6 @@ import { asc, and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
-  projectFilesTable,
   chatMessagesTable,
   agentTasksTable,
   taskEventsTable,
@@ -28,6 +27,7 @@ import {
 } from "../lib/builder";
 import type { ConversationTurn, ConverseImageAttachment, IntentResult } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
+import { loadPrimaryArtifactFiles } from "../lib/artifacts";
 import {
   enqueueJob,
   runJob,
@@ -462,15 +462,10 @@ router.post(
       planMode: Boolean(planMode),
     });
 
-    // Load current project files — needed for Planning Agent investigation phase
-    const currentProjectFiles = await db
-      .select({
-        path: projectFilesTable.path,
-        content: projectFilesTable.content,
-        mimeType: projectFilesTable.mimeType,
-      })
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, project.id));
+    // Planning and support proposals must see exactly the same primary-artifact
+    // overlay that trusted builds consume. Sibling artifacts are separate apps,
+    // not extra context for the active one.
+    const currentProjectFiles = await loadPrimaryArtifactFiles(project.id);
 
     // Load recent conversation history for AI context (last 8 user/assistant turns)
     // Also load the most recent conversation summary for long-range context injection.
@@ -1019,6 +1014,9 @@ router.post(
           const result = await runPlanPipeline({
             projectName: project.name,
             projectKind: project.kind,
+            projectFormat: project.projectFormat,
+            projectStack: project.stack,
+            preserveProjectArchitecture: Boolean(supportProposal),
             userPrompt: content,
             agentMode: mode,
             conversationHistory,
@@ -1587,11 +1585,13 @@ router.post(
     }
 
     if (supportProposal) {
-      const proposalInstruction = approvedSupportInstruction({
-        diagnosisInstruction: supportProposal.instruction,
-        planSummary: assistantContent,
-        plan: planWithIntent,
-      });
+      const proposalInstruction = plan
+        ? approvedSupportInstruction({
+            diagnosisInstruction: supportProposal.instruction,
+            planSummary: assistantContent,
+            plan: planWithIntent,
+          })
+        : null;
       const proposalReady =
         completedTerminal?.outcome === "plan_succeeded" &&
         proposalInstruction !== null &&
@@ -1933,15 +1933,9 @@ router.post(
       idempotencyStore.set(streamIdempotencyKey, { status: "in-flight", timestamp: Date.now() });
     }
 
-    // Load project files + recent conversation history
-    const currentProjectFiles = await db
-      .select({
-        path: projectFilesTable.path,
-        content: projectFilesTable.content,
-        mimeType: projectFilesTable.mimeType,
-      })
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, project.id));
+    // Keep streaming/converse requests on the same primary-artifact boundary as
+    // planning, support proposals, and trusted builds.
+    const currentProjectFiles = await loadPrimaryArtifactFiles(project.id);
 
     const [recentMessages, summaryEntry, projectChoices, memoryTruth] = await Promise.all([
       db

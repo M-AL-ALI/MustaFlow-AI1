@@ -37,6 +37,7 @@ import {
   inferZeroDeclaredCapabilities,
   ZeroCapabilityGapError,
 } from "./zero-capability-eligibility";
+import { buildPlanProjectContext, planMatchesProjectArchitecture } from "./plan-project-context";
 
 /**
  * Sanitises an AI-generated summary so the chat always shows human-readable
@@ -6951,6 +6952,9 @@ export function runProjectInvestigation(files: BuilderFile[]): ProjectInvestigat
 export async function runPlanPipeline(args: {
   projectName: string;
   projectKind: string;
+  projectFormat?: string | null;
+  projectStack?: string | null;
+  preserveProjectArchitecture?: boolean;
   userPrompt: string;
   agentMode: AgentMode;
   conversationHistory?: ConversationTurn[];
@@ -6968,6 +6972,9 @@ export async function runPlanPipeline(args: {
   const {
     projectName,
     projectKind,
+    projectFormat,
+    projectStack,
+    preserveProjectArchitecture = false,
     userPrompt,
     agentMode,
     conversationHistory,
@@ -6984,7 +6991,14 @@ export async function runPlanPipeline(args: {
     { role: "system", content: planPrompt },
     {
       role: "system",
-      content: `Project: "${projectName}" (kind: ${projectKind}).`,
+      content: buildPlanProjectContext({
+        projectName,
+        projectKind,
+        projectFormat,
+        projectStack,
+        currentFiles,
+        preserveArchitecture: preserveProjectArchitecture,
+      }),
     },
   ];
 
@@ -7016,17 +7030,26 @@ export async function runPlanPipeline(args: {
       signal,
     });
 
-    // Retry once if required new fields are missing
-    if (plan && !validatePlanResponse(plan)) {
-      logger.info({ projectName }, "Plan missing required fields, retrying with stricter prompt");
+    // Retry once if required fields are missing or the model proposed files
+    // outside the project's authoritative architecture.
+    const fieldsMissing = plan ? !validatePlanResponse(plan) : false;
+    const architectureMismatch = plan
+      ? !planMatchesProjectArchitecture(plan, projectStack, preserveProjectArchitecture)
+      : false;
+    if (plan && (fieldsMissing || architectureMismatch)) {
+      logger.info(
+        { projectName, fieldsMissing, architectureMismatch, projectStack },
+        "Plan needs one bounded correction",
+      );
       messages.push({
         role: "assistant",
         content: JSON.stringify(plan),
       });
       messages.push({
         role: "user",
-        content:
-          "Your plan is missing required fields. Please regenerate with ALL fields: complexityScore (integer 1-10), recommendedMode (lite/eco/power/pro), sitemap (array of objects with name/route/purpose), uxNotes (object keyed by page name), estimatedBuildSeconds (integer). Output ONLY valid JSON.",
+        content: architectureMismatch
+          ? "That proposal changed this project's declared architecture. Regenerate it using only the authoritative stack, format, and current primary-artifact paths from the project context. Keep every required plan field and output ONLY valid JSON."
+          : "Your plan is missing required fields. Please regenerate with ALL fields: complexityScore (integer 1-10), recommendedMode (lite/eco/power/pro), sitemap (array of objects with name/route/purpose), uxNotes (object keyed by page name), estimatedBuildSeconds (integer). Output ONLY valid JSON.",
       });
       plan = await runPlanningBrain<Record<string, unknown>>({
         entryPoint: "planning_agent",
@@ -7037,6 +7060,14 @@ export async function runPlanPipeline(args: {
         maxCompletionTokens: 8000,
         signal,
       });
+    }
+
+    if (plan && !planMatchesProjectArchitecture(plan, projectStack, preserveProjectArchitecture)) {
+      logger.warn(
+        { projectName, projectStack },
+        "Withheld a plan that still contradicted the project architecture after correction",
+      );
+      plan = null;
     }
   } catch (error) {
     // Cancellation must escape the fallback path so the task owner can write
