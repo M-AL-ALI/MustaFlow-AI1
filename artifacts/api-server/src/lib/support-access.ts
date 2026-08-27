@@ -29,6 +29,21 @@ export function effectiveSupportGrantStatus(
   return grant.status as SupportGrantStatus;
 }
 
+/**
+ * Present support grants with their effective, clock-aware status.
+ * This is intentionally read-only: an expired grant is reported truthfully
+ * without mutating the durable receipt that records how it originally ended.
+ */
+export function presentSupportGrants(
+  grants: SupportAccessGrant[],
+  now = new Date(),
+): EffectiveSupportGrant[] {
+  return grants.map((grant) => ({
+    ...grant,
+    status: effectiveSupportGrantStatus(grant, now),
+  }));
+}
+
 export async function findLiveSupportGrant(input: {
   projectId: number;
   staffUserId: string;

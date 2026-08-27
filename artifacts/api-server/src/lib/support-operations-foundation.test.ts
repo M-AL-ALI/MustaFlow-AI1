@@ -10,7 +10,7 @@ function source(relative: string): string {
 
 describe("consented support operations", () => {
   it("ends a support session at an expired, revoked, declined or closed grant", async () => {
-    const { effectiveSupportGrantStatus } = await import("./support-access");
+    const { effectiveSupportGrantStatus, presentSupportGrants } = await import("./support-access");
     const now = new Date("2026-08-27T12:00:00.000Z");
     expect(
       effectiveSupportGrantStatus(
@@ -27,6 +27,33 @@ describe("consented support operations", () => {
     for (const status of ["declined", "revoked", "expired", "closed"] as const) {
       expect(effectiveSupportGrantStatus({ status, expiresAt: null }, now)).not.toBe("active");
     }
+    expect(
+      presentSupportGrants(
+        [
+          {
+            id: 7,
+            ticketId: 7,
+            projectId: 52,
+            ownerUserId: "owner",
+            staffUserId: "staff",
+            requestedBy: "staff",
+            status: "active",
+            reason: "Acceptance proof",
+            requestedAt: new Date("2026-08-27T10:00:00.000Z"),
+            decidedAt: new Date("2026-08-27T10:01:00.000Z"),
+            expiresAt: new Date("2026-08-27T11:00:00.000Z"),
+            revokedAt: null,
+            closedAt: null,
+          },
+        ],
+        now,
+      )[0]?.status,
+    ).toBe("expired");
+  });
+
+  it("presents clock-expired grants truthfully on both support operation reads", () => {
+    const route = source("../routes/support-operations.ts");
+    expect(route.match(/grants: presentSupportGrants\(grants\)/g)).toHaveLength(2);
   });
 
   it("creates the support schema idempotently without destructive SQL", async () => {

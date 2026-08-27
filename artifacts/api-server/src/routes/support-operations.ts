@@ -19,7 +19,11 @@ import {
 } from "@workspace/db";
 import { requireAdmin, writeAdminReceipt } from "../lib/adminAuth";
 import { nabuflowGateHttpError } from "../lib/nabuflow-billing";
-import { findLiveSupportGrant, recordSupportGrantEvent } from "../lib/support-access";
+import {
+  findLiveSupportGrant,
+  presentSupportGrants,
+  recordSupportGrantEvent,
+} from "../lib/support-access";
 import { getServedBuildIdentity } from "../lib/build-info";
 
 const router: IRouter = Router();
@@ -260,7 +264,14 @@ router.get(
     ]);
     const defects = links.map((row) => row.defect);
     const defectImpact = await readDefectImpact(defects.map((defect) => defect.id));
-    res.json({ ticket, grants, grantEvents, sessions, defects, defectImpact });
+    res.json({
+      ticket,
+      grants: presentSupportGrants(grants),
+      grantEvents,
+      sessions,
+      defects,
+      defectImpact,
+    });
   },
 );
 
@@ -298,7 +309,13 @@ router.get("/support/tickets/:id/operations", async (req, res): Promise<void> =>
       .where(eq(supportTicketDefectLinksTable.ticketId, ticketId)),
     readGrantEvents(ticketId),
   ]);
-  res.json({ ticket, grants, grantEvents, sessions, defects: defects.map((row) => row.defect) });
+  res.json({
+    ticket,
+    grants: presentSupportGrants(grants),
+    grantEvents,
+    sessions,
+    defects: defects.map((row) => row.defect),
+  });
 });
 
 router.post("/admin/support-tickets/:id/triage", requireAdmin, async (req, res): Promise<void> => {
