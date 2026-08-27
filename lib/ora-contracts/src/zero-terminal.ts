@@ -26,9 +26,19 @@ export type ZeroTerminalDiffRef = {
   revision: 1;
 };
 
-export type ZeroTerminalStopEvidence = {
-  providerReason: string;
-};
+export const ZERO_LOCAL_CONTRACT_FALLBACK_CODES = ["clarification_provider_unavailable"] as const;
+export type ZeroLocalContractFallbackCode = (typeof ZERO_LOCAL_CONTRACT_FALLBACK_CODES)[number];
+
+export type ZeroTerminalStopEvidence =
+  | {
+      /** Missing on legacy records; those parse as provider evidence. */
+      source?: "provider";
+      providerReason: string;
+    }
+  | {
+      source: "local_contract_fallback";
+      fallbackCode: ZeroLocalContractFallbackCode;
+    };
 
 type ZeroTerminalCommon = {
   schema: typeof ZERO_TERMINAL_SEMANTICS;
@@ -225,6 +235,29 @@ function parseCause(value: unknown): { code: string; stage: string } | null {
     : null;
 }
 
+function parseStopEvidence(value: unknown): ZeroTerminalStopEvidence | null {
+  const candidate = record(value);
+  if (!candidate) return null;
+  if (
+    candidate.source === "local_contract_fallback" &&
+    ZERO_LOCAL_CONTRACT_FALLBACK_CODES.includes(
+      candidate.fallbackCode as ZeroLocalContractFallbackCode,
+    )
+  ) {
+    return {
+      source: "local_contract_fallback",
+      fallbackCode: candidate.fallbackCode as ZeroLocalContractFallbackCode,
+    };
+  }
+  if (
+    (candidate.source === undefined || candidate.source === "provider") &&
+    nonEmptyString(candidate.providerReason)
+  ) {
+    return { source: "provider", providerReason: candidate.providerReason };
+  }
+  return null;
+}
+
 /** Parse durable JSON. Missing or malformed records are UNKNOWN, never success. */
 export function parseZeroTerminalV1(value: unknown): ZeroTerminalV1 | typeof ZERO_TERMINAL_UNKNOWN {
   const candidate = record(value);
@@ -255,18 +288,15 @@ export function parseZeroTerminalV1(value: unknown): ZeroTerminalV1 | typeof ZER
   }
 
   if (candidate.outcome === "response_succeeded" && candidate.runStatus === "completed") {
-    const stopEvidence = record(evidence?.stopEvidence);
-    if (
-      positiveInteger(evidence?.assistantMessageId) &&
-      nonEmptyString(stopEvidence?.providerReason)
-    ) {
+    const stopEvidence = parseStopEvidence(evidence?.stopEvidence);
+    if (positiveInteger(evidence?.assistantMessageId) && stopEvidence) {
       return responseSucceededTerminal({
         ...common,
         outcome: "response_succeeded",
         runStatus: "completed",
         evidence: {
           assistantMessageId: evidence.assistantMessageId,
-          stopEvidence: { providerReason: stopEvidence.providerReason },
+          stopEvidence,
         },
       });
     }

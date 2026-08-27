@@ -9,10 +9,13 @@ import { creditCostFor, EmptyCompletionError, resolveStageProvider } from "./ai-
 import type { StreamCompletionSummary } from "./ai-providers";
 import {
   completionSummaryFromResponse,
-  ConverseCompletionInterruptedError,
   requireCleanConverseCompletion,
   type ConverseStopEvidence,
 } from "./converse-completion";
+import {
+  localClarificationFallback,
+  providerFailureBehaviorForCapability,
+} from "./zero-contract-fallbacks";
 import type { TaskReport } from "@workspace/db";
 import { scanCdnUrls, autoUpgradeCdnUrl } from "./cdn-allowlist";
 import type { CdnUpgrade } from "./cdn-allowlist";
@@ -8460,9 +8463,20 @@ export async function runConversePipeline(args: {
         question,
       );
       return { markdown: question, stopEvidence, clarifying: { question, options } };
-    } catch (err) {
-      if (err instanceof ConverseCompletionInterruptedError) throw err;
-      logger.warn({ err }, "Clarify call failed, falling through to converse");
+    } catch {
+      const fallback = localClarificationFallback(userPrompt);
+      logger.warn(
+        {
+          fallbackCode: "clarification_provider_unavailable",
+          contractBehavior: providerFailureBehaviorForCapability("Z-B").behavior,
+        },
+        "Clarify call failed; using the local clarification contract",
+      );
+      return {
+        markdown: fallback.question,
+        stopEvidence: fallback.stopEvidence,
+        clarifying: { question: fallback.question, options: [...fallback.options] },
+      };
     }
   }
 
@@ -8676,9 +8690,21 @@ export async function runConverseStreamPipeline(
         question,
       );
       return { markdown: question, stopEvidence, clarifying: { question, options } };
-    } catch (err) {
-      if (err instanceof ConverseCompletionInterruptedError) throw err;
-      logger.warn({ err }, "Clarify call failed, falling through to converse stream");
+    } catch {
+      const fallback = localClarificationFallback(userPrompt);
+      logger.warn(
+        {
+          fallbackCode: "clarification_provider_unavailable",
+          contractBehavior: providerFailureBehaviorForCapability("Z-B").behavior,
+        },
+        "Clarify call failed; using the local clarification contract",
+      );
+      onToken(fallback.question);
+      return {
+        markdown: fallback.question,
+        stopEvidence: fallback.stopEvidence,
+        clarifying: { question: fallback.question, options: [...fallback.options] },
+      };
     }
   }
 
