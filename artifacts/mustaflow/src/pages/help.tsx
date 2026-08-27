@@ -120,6 +120,15 @@ export function parseSupportReportParams(
   };
 }
 
+/**
+ * Project-linked reports start with an empty, project-specific evidence buffer.
+ * Reusing the account's latest general support conversation can attach words
+ * about one project to a ticket for another project.
+ */
+export function usesSharedSupportHistory(initialProjectId: number | null): boolean {
+  return initialProjectId === null;
+}
+
 /** Best-effort, non-identifying browser/device context attached to a ticket. */
 function collectDeviceInfo(): Record<string, unknown> {
   try {
@@ -259,7 +268,6 @@ function SupportChat() {
   const { toast } = useToast();
   const { isSignedIn, userId } = useAuth();
   const [, setLocation] = useLocation();
-  const storageKey = userId ? supportChatKey(userId) : null;
   const searchString = useSearch();
 
   // ?mode=report (or #support) opens the page focused on contacting the team.
@@ -267,6 +275,8 @@ function SupportChat() {
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     return parseSupportReportParams(searchString, hash);
   }, [searchString]);
+  const useSharedHistory = usesSharedSupportHistory(initialProjectId);
+  const storageKey = userId && useSharedHistory ? supportChatKey(userId) : null;
 
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [input, setInput] = useState("");
@@ -295,28 +305,28 @@ function SupportChat() {
   // sync as new turns arrive.
   const conversationsQuery = useListSupportConversations({
     query: {
-      enabled: Boolean(isSignedIn && userId),
+      enabled: Boolean(isSignedIn && userId && useSharedHistory),
       queryKey: supportConversationListQueryKey(userId),
     },
   });
   const latestConversationId = conversationsQuery.data?.conversations?.[0]?.id ?? 0;
   const conversationDetail = useGetSupportConversation(latestConversationId, {
     query: {
-      enabled: Boolean(isSignedIn && userId) && latestConversationId > 0,
+      enabled: Boolean(isSignedIn && userId && useSharedHistory) && latestConversationId > 0,
       queryKey: supportConversationDetailQueryKey(latestConversationId, userId),
     },
   });
   const hydratedRef = useRef(false);
   const cacheLoadedRef = useRef(false);
-  const activeUserRef = useRef<string | null | undefined>(undefined);
+  const activeSupportContextRef = useRef<string | null | undefined>(undefined);
 
   // A shared browser can move from one Clerk account to another without a full
   // React remount. Reset every client-side support-chat cache latch on user
   // change so the next account never sees the previous account's draft state.
   useEffect(() => {
-    const nextUser = isSignedIn && userId ? userId : null;
-    if (activeUserRef.current === nextUser) return;
-    activeUserRef.current = nextUser;
+    const nextContext = isSignedIn && userId ? `${userId}:${initialProjectId ?? "shared"}` : null;
+    if (activeSupportContextRef.current === nextContext) return;
+    activeSupportContextRef.current = nextContext;
     hydratedRef.current = false;
     cacheLoadedRef.current = false;
     setMessages([]);
@@ -326,7 +336,7 @@ function SupportChat() {
     setSubject("");
     setAttachments([]);
     setEscalateResult(null);
-  }, [isSignedIn, userId]);
+  }, [initialProjectId, isSignedIn, userId]);
 
   // Purge the legacy pre-scoping global key once so an earlier account's
   // transcript can never leak to the next user on a shared browser.
@@ -352,6 +362,12 @@ function SupportChat() {
   // cleared so the chat reflects the account's true server-side history.
   useEffect(() => {
     if (hydratedRef.current || !isSignedIn) return;
+    if (!useSharedHistory) {
+      hydratedRef.current = true;
+      setMessages([]);
+      setCanEscalate(false);
+      return;
+    }
     if (conversationsQuery.isLoading) return;
     if (latestConversationId > 0 && conversationDetail.isLoading) return;
 
@@ -368,6 +384,7 @@ function SupportChat() {
     }
   }, [
     isSignedIn,
+    useSharedHistory,
     conversationsQuery.isLoading,
     latestConversationId,
     conversationDetail.isLoading,
