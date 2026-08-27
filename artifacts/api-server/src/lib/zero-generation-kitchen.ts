@@ -29,6 +29,7 @@ import {
   trustedBuildSourceManifestHash,
   trustedBuildStatusResponseSchema,
   acceptedSealedReleaseSchema,
+  compareUtf8,
   type PantryCatalogShelfRecord,
   type PantryCatalogStockRequest,
   type PantryErrorCode,
@@ -68,6 +69,38 @@ export class ZeroGenerationKitchenError extends Error {
     super(message);
     this.name = "ZeroGenerationKitchenError";
   }
+}
+
+export const ZERO_TRUSTED_BUILD_REQUEST_INVALID_MESSAGE =
+  "This website could not be prepared safely for building. Please try again.";
+
+function trustedBuildValidationFields(
+  issues: readonly { path: readonly PropertyKey[] }[],
+): string[] {
+  return [
+    ...new Set(
+      issues
+        .map((issue) => issue.path[0])
+        .filter((part): part is string => typeof part === "string")
+        .map((part) => (part === "files" || part === "manifest" ? "source" : part)),
+    ),
+  ].sort(compareUtf8);
+}
+
+function trustedBuildValidationFieldsFromUnknown(error: unknown): string[] {
+  if (typeof error !== "object" || error === null || !("issues" in error)) return ["request"];
+  const issues = (error as { issues?: unknown }).issues;
+  if (!Array.isArray(issues)) return ["request"];
+  const paths = issues
+    .map((issue) =>
+      typeof issue === "object" && issue !== null && "path" in issue
+        ? (issue as { path?: unknown }).path
+        : null,
+    )
+    .filter((path): path is readonly PropertyKey[] => Array.isArray(path));
+  return paths.length > 0
+    ? trustedBuildValidationFields(paths.map((path) => ({ path })))
+    : ["request"];
 }
 
 export function trustedBuildTerminalError(
@@ -142,7 +175,7 @@ export async function makeZeroTrustedBuildRequest(input: {
 }): Promise<TrustedBuildRequest> {
   const sourceFiles = input.files
     .map((file) => ({ path: file.path, mode: 0o644 as const, bytes: sourceBytes(file) }))
-    .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+    .sort((left, right) => compareUtf8(left.path, right.path));
   const payload = new Uint8Array(
     sourceFiles.reduce((total, file) => total + file.bytes.byteLength, 0),
   );
@@ -165,41 +198,62 @@ export async function makeZeroTrustedBuildRequest(input: {
     payloadBytes: payload.byteLength,
     files,
   };
-  const sourceArtifactSha256 = await trustedBuildSourceManifestHash(manifest);
-  const dependencyIntentSha256 = await trustedBuildDependencyIntentHash(
-    input.dependencyPlan.intents,
-  );
-  const buildId = `pbuild_zero_${await sha256Hex(`${sourceArtifactSha256}:${dependencyIntentSha256}`)}`;
-  const unsigned = {
-    format: TRUSTED_BUILD_REQUEST_FORMAT,
-    schemaVersion: TRUSTED_BUILD_SCHEMA_VERSION,
-    input: {
-      format: PANTRY_BUILD_INPUT_FORMAT,
-      schemaVersion: PANTRY_SCHEMA_VERSION,
-      buildId,
-      sourceArtifactSha256,
-      dependencyIntentSha256,
-      lockfileSha256: input.shelf.lockfileSha256,
-      pantryRevisionId: input.shelf.revision.content.revisionId,
-      pantryRevisionRootSha256: input.shelf.revision.rootSha256,
-      dependencyClosureSha256: input.shelf.revision.content.dependencyClosureSha256,
-      platform: ZERO_SEALED_BUILD_PLATFORM,
-      buildCommand: ["npm", "run", "build"],
-      createdAt: input.createdAt,
-    },
-    source: { manifest, payloadBase64: base64(payload) },
-    dependencyIntents: input.dependencyPlan.intents,
-    output: {
-      strategy: "bundle-first" as const,
-      dependencyPackaging: "layer" as const,
-      appDirectory: "dist",
-      dependencyLayerMountPath: "node_modules" as const,
-    },
-  };
-  return trustedBuildRequestSchema.parse({
-    ...unsigned,
-    requestId: `pbuildreq_${await trustedBuildRequestHash(unsigned)}`,
-  });
+  try {
+    const sourceArtifactSha256 = await trustedBuildSourceManifestHash(manifest);
+    const dependencyIntentSha256 = await trustedBuildDependencyIntentHash(
+      input.dependencyPlan.intents,
+    );
+    const buildId = `pbuild_zero_${await sha256Hex(`${sourceArtifactSha256}:${dependencyIntentSha256}`)}`;
+    const unsigned = {
+      format: TRUSTED_BUILD_REQUEST_FORMAT,
+      schemaVersion: TRUSTED_BUILD_SCHEMA_VERSION,
+      input: {
+        format: PANTRY_BUILD_INPUT_FORMAT,
+        schemaVersion: PANTRY_SCHEMA_VERSION,
+        buildId,
+        sourceArtifactSha256,
+        dependencyIntentSha256,
+        lockfileSha256: input.shelf.lockfileSha256,
+        pantryRevisionId: input.shelf.revision.content.revisionId,
+        pantryRevisionRootSha256: input.shelf.revision.rootSha256,
+        dependencyClosureSha256: input.shelf.revision.content.dependencyClosureSha256,
+        platform: ZERO_SEALED_BUILD_PLATFORM,
+        buildCommand: ["npm", "run", "build"],
+        createdAt: input.createdAt,
+      },
+      source: { manifest, payloadBase64: base64(payload) },
+      dependencyIntents: input.dependencyPlan.intents,
+      output: {
+        strategy: "bundle-first" as const,
+        dependencyPackaging: "layer" as const,
+        appDirectory: "dist",
+        dependencyLayerMountPath: "node_modules" as const,
+      },
+    };
+    const parsed = trustedBuildRequestSchema.safeParse({
+      ...unsigned,
+      requestId: `pbuildreq_${await trustedBuildRequestHash(unsigned)}`,
+    });
+    if (parsed.success) return parsed.data;
+    throw new ZeroGenerationKitchenError(
+      "zero_trusted_build_request_invalid",
+      ZERO_TRUSTED_BUILD_REQUEST_INVALID_MESSAGE,
+      {
+        stage: "request-validation",
+        fields: trustedBuildValidationFields(parsed.error.issues),
+      },
+    );
+  } catch (error) {
+    if (error instanceof ZeroGenerationKitchenError) throw error;
+    throw new ZeroGenerationKitchenError(
+      "zero_trusted_build_request_invalid",
+      ZERO_TRUSTED_BUILD_REQUEST_INVALID_MESSAGE,
+      {
+        stage: "request-validation",
+        fields: trustedBuildValidationFieldsFromUnknown(error),
+      },
+    );
+  }
 }
 
 function unpack(

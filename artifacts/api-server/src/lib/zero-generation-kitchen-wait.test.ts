@@ -10,8 +10,11 @@ import {
   ZERO_SEALED_BUILD_PLATFORM,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
+  type PantryCatalogShelfRecord,
 } from "@workspace/tenant-runtime-contracts";
 import {
+  makeZeroTrustedBuildRequest,
+  ZERO_TRUSTED_BUILD_REQUEST_INVALID_MESSAGE,
   ZeroGenerationKitchenError,
   readZeroGenerationControlWithWeather,
   trustedBuildTerminalError,
@@ -62,6 +65,40 @@ function progress(state: "queued" | "running", attempt: number) {
 }
 
 describe("Zero generator Pantry lifecycle waiting", () => {
+  it("carries a plain typed terminal instead of exposing trusted-build validation details", async () => {
+    const shelf = {
+      lockfileSha256: "a".repeat(64),
+      revision: {
+        rootSha256: "b".repeat(64),
+        content: {
+          revisionId: "pantry-2026-08-27.1",
+          dependencyClosureSha256: "c".repeat(64),
+        },
+      },
+    } as PantryCatalogShelfRecord;
+
+    await expect(
+      makeZeroTrustedBuildRequest({
+        files: [
+          { path: "src/index.ts", content: "first", mimeType: "text/typescript" },
+          { path: "src/index.ts", content: "second", mimeType: "text/typescript" },
+        ],
+        dependencyPlan: {
+          format: "nabu-zero-generation/v1",
+          schemaVersion: 1,
+          target: "cloudflare-sealed-v1",
+          intents: [{ ecosystem: "npm", name: "express", selector: "5.1.0" }],
+        },
+        shelf,
+        createdAt: "2026-08-27T00:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({
+      code: "zero_trusted_build_request_invalid",
+      message: ZERO_TRUSTED_BUILD_REQUEST_INVALID_MESSAGE,
+      evidence: { stage: "request-validation", fields: ["source"] },
+    });
+  });
+
   it("preserves sanitized trusted-build identity and per-attempt diagnostics", () => {
     const buildId = `pbuild_zero_${"d".repeat(64)}`;
     const requestId = `pbuildreq_${"e".repeat(64)}`;

@@ -490,7 +490,10 @@ vi.mock("./ai-providers", () => ({
   clearBuildTokenAccumulator: vi.fn(),
   flushBuildTokenTelemetry: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("./artifacts", () => ({ resolveArtifactId: vi.fn().mockResolvedValue(null) }));
+vi.mock("./artifacts", () => ({
+  resolveArtifactId: vi.fn().mockResolvedValue(null),
+  loadPrimaryArtifactFiles: vi.fn().mockResolvedValue([]),
+}));
 vi.mock("./durable-queue", () => ({
   durableEnqueue: vi.fn().mockResolvedValue(null),
   isDurableQueueReady: vi.fn().mockReturnValue(false),

@@ -196,6 +196,7 @@ import {
   type ZeroGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
 import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
+import { loadPrimaryArtifactFiles } from "./artifacts";
 
 /**
  * Pre-build gate for agentic projects.
@@ -1190,27 +1191,11 @@ function emitTokenEvent(taskId: number, delta: string): void {
 }
 
 async function loadFiles(projectId: number): Promise<BuilderFile[]> {
-  const rows = await db
-    .select()
-    .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId));
-  return rows.map((r) => ({
-    path: r.path,
-    content: r.content,
-    mimeType: r.mimeType,
-  }));
+  return loadPrimaryArtifactFiles(projectId);
 }
 
 async function snapshotFilesForVersion(projectId: number): Promise<FileSnapshotEntry[]> {
-  const rows = await db
-    .select()
-    .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId));
-  return rows.map((r) => ({
-    path: r.path,
-    content: r.content,
-    mimeType: r.mimeType,
-  }));
+  return loadPrimaryArtifactFiles(projectId);
 }
 
 /** Map of integration name → required secret key names (subset of the frontend registry). */
@@ -5454,10 +5439,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         project.containerId ||
         project.containerUrl
       ) {
-        const allRuntimeFileRows = await db
-          .select({ path: projectFilesTable.path, content: projectFilesTable.content })
-          .from(projectFilesTable)
-          .where(eq(projectFilesTable.projectId, projectId));
+        const allRuntimeFileRows = await loadPrimaryArtifactFiles(projectId);
         const packageManifestChanged = filesToSmellScan.some((file) =>
           isRuntimeManifestPath(file.path),
         );
