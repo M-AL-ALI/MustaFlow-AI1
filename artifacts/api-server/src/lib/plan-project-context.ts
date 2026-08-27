@@ -15,8 +15,31 @@ const MAX_PLAN_PATHS = 200;
 const MAX_METADATA_CHARS = 160;
 const MAX_PATH_CHARS = 300;
 
+function replaceAsciiControls(value: string, replacement: string): string {
+  let result = "";
+  let replacingControlRun = false;
+
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    const isControl = codePoint <= 0x1f || codePoint === 0x7f;
+
+    if (isControl) {
+      if (replacement && !replacingControlRun) {
+        result += replacement;
+      }
+      replacingControlRun = true;
+      continue;
+    }
+
+    result += character;
+    replacingControlRun = false;
+  }
+
+  return result;
+}
+
 function boundedMetadata(value: string | null | undefined, fallback: string): string {
-  const normalized = value?.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim();
+  const normalized = value ? replaceAsciiControls(value, " ").trim() : "";
   return normalized ? normalized.slice(0, MAX_METADATA_CHARS) : fallback;
 }
 
@@ -24,7 +47,7 @@ function boundedPaths(files: readonly PlanProjectFile[] | undefined): string[] {
   return [
     ...new Set(
       (files ?? [])
-        .map((file) => file.path.replace(/[\u0000-\u001f\u007f]+/gu, "").trim())
+        .map((file) => replaceAsciiControls(file.path, "").trim())
         .filter(Boolean)
         .map((path) => path.slice(0, MAX_PATH_CHARS)),
     ),

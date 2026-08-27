@@ -63,4 +63,28 @@ describe("planning project architecture", () => {
     expect(first).toContain("Current primary-artifact paths (200+)");
     expect(first).not.toContain("src/file-249.ts");
   });
+
+  it("removes ASCII controls without relying on control-character regular expressions", () => {
+    const context = buildPlanProjectContext({
+      ...project52,
+      projectName: "IRQ\u0000\u001f TEL",
+      currentFiles: [{ path: "src/\u0000index.ts\u007f" }],
+    });
+
+    expect(context).toContain('Project name: "IRQ  TEL"');
+    expect(context).toContain('"src/index.ts"');
+    const sanitizedInputLines = context
+      .split("\n")
+      .filter(
+        (line) => line.startsWith("Project name:") || line.startsWith("Current primary-artifact"),
+      );
+    expect(
+      sanitizedInputLines.every((line) =>
+        Array.from(line).every((character) => {
+          const codePoint = character.codePointAt(0) ?? 0;
+          return codePoint > 0x1f && codePoint !== 0x7f;
+        }),
+      ),
+    ).toBe(true);
+  });
 });
