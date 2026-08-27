@@ -1,4 +1,5 @@
 import type { StreamCompletionSummary } from "./ai-providers";
+import type { ZeroTerminalStopEvidence } from "@workspace/ora-contracts";
 
 export const CONVERSE_INTERRUPTION_CODES = [
   "stream_aborted",
@@ -9,9 +10,7 @@ export const CONVERSE_INTERRUPTION_CODES = [
 
 export type ConverseInterruptionCode = (typeof CONVERSE_INTERRUPTION_CODES)[number];
 
-export type ConverseStopEvidence = {
-  providerReason: string;
-};
+export type ConverseStopEvidence = ZeroTerminalStopEvidence;
 
 const CLEAN_FINISH_REASONS = new Set(["stop", "end_turn"]);
 const LENGTH_FINISH_REASONS = new Set(["length", "max_tokens", "max_output_tokens"]);

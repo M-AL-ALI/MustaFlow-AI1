@@ -180,6 +180,31 @@ describe("ZeroTerminalV1", () => {
       "Outcome unavailable for this older run",
     );
   });
+
+  it("accepts honest local clarification evidence without inventing a provider stop", () => {
+    const terminal = responseSucceededTerminal({
+      ...common,
+      intent: "clarify",
+      outcome: "response_succeeded",
+      runStatus: "completed",
+      evidence: {
+        assistantMessageId: 44,
+        stopEvidence: {
+          source: "local_contract_fallback",
+          fallbackCode: "clarification_provider_unavailable",
+        },
+      },
+    });
+
+    expect(parseZeroTerminalV1(terminal)).toMatchObject({
+      evidence: {
+        stopEvidence: {
+          source: "local_contract_fallback",
+          fallbackCode: "clarification_provider_unavailable",
+        },
+      },
+    });
+  });
 });
 
 describe("migration 145 terminal column", () => {
