@@ -162,7 +162,8 @@ P1 branch; no second worktree was created and no install ran.
 - Candidate before this evidence update:
   `e897f944d26c5c6fbe46007bfb09ce83e4a29a73`, tree
   `e7b9457fe212d2bac79514ef1894579d9a1631db`.
-- Focused P1 tests: 3 files, 11 tests, all passed.
+- Focused P1 tests: 2 files, 6 tests, all passed (four new P1 guards plus two
+  existing Admin access guards).
 - Test-inclusive web typecheck: passed.
 - Changed-file ESLint: passed.
 - Changed-file Prettier check: passed.
