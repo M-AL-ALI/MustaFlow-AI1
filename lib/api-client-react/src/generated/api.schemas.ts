@@ -2906,9 +2906,19 @@ export interface BillingCheckoutSessionStatus {
   error?: string;
 }
 
+export type AdminMeRole = typeof AdminMeRole[keyof typeof AdminMeRole];
+
+
+export const AdminMeRole = {
+  owner: 'owner',
+  operator: 'operator',
+  support: 'support',
+  analyst: 'analyst',
+} as const;
+
 export interface AdminMe {
   userId: string;
-  role: string;
+  role: AdminMeRole;
   isAdmin: boolean;
   grantedViaEnv: boolean;
   /** @nullable */
@@ -3007,15 +3017,38 @@ export interface AdminLaunchReadiness {
   checks: AdminLaunchCheck[];
 }
 
+export type AdminRoleRole = typeof AdminRoleRole[keyof typeof AdminRoleRole];
+
+
+export const AdminRoleRole = {
+  owner: 'owner',
+  operator: 'operator',
+  support: 'support',
+  analyst: 'analyst',
+} as const;
+
 export interface AdminRole {
   userId: string;
-  role: string;
+  role: AdminRoleRole;
   /** @nullable */
   grantedBy?: string | null;
   /** @nullable */
   createdAt?: string | null;
   /** @nullable */
   updatedAt?: string | null;
+}
+
+export interface AdminAccessReceipt {
+  id: number;
+  actorUserId: string;
+  /** @nullable */
+  targetUserId?: string | null;
+  /** @nullable */
+  previousRole?: string | null;
+  /** @nullable */
+  nextRole?: string | null;
+  action: string;
+  createdAt: string;
 }
 
 export interface AnalyticsPingInput {
@@ -3215,9 +3248,10 @@ export type AdminRoleInputRole = typeof AdminRoleInputRole[keyof typeof AdminRol
 
 
 export const AdminRoleInputRole = {
-  user: 'user',
-  admin: 'admin',
   owner: 'owner',
+  operator: 'operator',
+  support: 'support',
+  analyst: 'analyst',
 } as const;
 
 export interface AdminRoleInput {
@@ -6434,6 +6468,7 @@ export type SubmitAbuseReport201 = {
 
 export type ListAdminRoles200 = {
   roles: AdminRole[];
+  history: AdminAccessReceipt[];
 };
 
 export type GrantAdminRole200 = {

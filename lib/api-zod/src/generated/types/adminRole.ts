@@ -5,10 +5,11 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { AdminRoleRole } from './adminRoleRole';
 
 export interface AdminRole {
   userId: string;
-  role: string;
+  role: AdminRoleRole;
   /** @nullable */
   grantedBy?: string | null;
   /** @nullable */

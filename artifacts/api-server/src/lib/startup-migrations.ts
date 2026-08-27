@@ -23,6 +23,85 @@ type MigrationStep = {
 
 type MigrationClient = Pick<import("pg").PoolClient, "query">;
 
+export async function applyAdminAccessFoundationMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_roles (
+        id          SERIAL PRIMARY KEY,
+        user_id     TEXT NOT NULL UNIQUE,
+        role        TEXT NOT NULL DEFAULT 'user',
+        granted_by  TEXT,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    // The former broad admin grant becomes the least-privileged operational role.
+    await client.query(`UPDATE user_roles SET role = 'operator' WHERE role = 'admin'`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS admin_access_receipts (
+        id                  SERIAL PRIMARY KEY,
+        actor_user_id       TEXT NOT NULL,
+        actor_role          TEXT NOT NULL,
+        kind                TEXT NOT NULL,
+        action              TEXT NOT NULL,
+        target_user_id      TEXT,
+        target_workspace_id INTEGER,
+        previous_role       TEXT,
+        next_role           TEXT,
+        outcome             TEXT NOT NULL,
+        request_method      TEXT,
+        request_path        TEXT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS admin_access_receipts_actor_created_idx
+        ON admin_access_receipts(actor_user_id, created_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS admin_access_receipts_target_user_created_idx
+        ON admin_access_receipts(target_user_id, created_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS admin_access_receipts_workspace_created_idx
+        ON admin_access_receipts(target_workspace_id, created_at)
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+           WHERE conname = 'user_roles_role_check'
+             AND conrelid = 'user_roles'::regclass
+        ) THEN
+          ALTER TABLE user_roles
+            ADD CONSTRAINT user_roles_role_check
+            CHECK (role IN ('user', 'owner', 'operator', 'support', 'analyst'));
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+           WHERE conname = 'admin_access_receipts_kind_check'
+             AND conrelid = 'admin_access_receipts'::regclass
+        ) THEN
+          ALTER TABLE admin_access_receipts
+            ADD CONSTRAINT admin_access_receipts_kind_check
+            CHECK (kind IN ('access', 'action', 'role_change', 'refusal'));
+        END IF;
+      END $$
+    `);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function applyZeroTerminalMigration(client: MigrationClient): Promise<void> {
   await client.query(`ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS terminal JSONB`);
   const verification = await client.query<{ terminal_ready: boolean }>(`
@@ -6286,6 +6365,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-zero-model-control",
     async run(client) {
       await applyZeroModelControlMigration(client);
+    },
+  },
+  {
+    name: "migrate-admin-access-foundation",
+    async run(client) {
+      await applyAdminAccessFoundationMigration(client);
     },
   },
 ];

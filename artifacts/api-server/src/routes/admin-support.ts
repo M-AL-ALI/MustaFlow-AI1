@@ -27,7 +27,7 @@ import {
   type SupportTicketStatus,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
-import { requireAdmin } from "../lib/adminAuth";
+import { requireAdmin, writeAdminReceipt } from "../lib/adminAuth";
 import { r2GetObject } from "../lib/cloudflare";
 import { sendEmailWithStatus } from "../lib/emailClient";
 import { supportReplyTemplate } from "../lib/emailTemplates";
@@ -38,6 +38,23 @@ const router: IRouter = Router();
 // All routes here are admin-only.
 router.use("/admin/support-tickets", requireAdmin);
 router.use("/admin/email", requireAdmin);
+
+async function recordTicketReceipt(
+  req: Parameters<typeof requireAdmin>[0],
+  action: string,
+  targetUserId: string,
+): Promise<void> {
+  await writeAdminReceipt({
+    actorUserId: req.userId!,
+    actorRole: req.staffPrincipal!.role,
+    kind: req.method === "GET" ? "access" : "action",
+    action,
+    targetUserId,
+    outcome: "completed",
+    requestMethod: req.method,
+    requestPath: req.originalUrl.split("?", 1)[0] ?? req.path,
+  });
+}
 
 interface TranscriptMessage {
   role: "user" | "assistant";
@@ -239,6 +256,8 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
       return;
     }
 
+    await recordTicketReceipt(req, "support_ticket_viewed", row.userId);
+
     // Rewrite each attachment to an admin-scoped download URL so a triaging
     // admin (who does not own the asset) can still fetch it.
     const attachments = asAttachments(row.attachments).map((a) => {
@@ -295,11 +314,16 @@ router.patch("/admin/support-tickets/:id", async (req, res): Promise<void> => {
       .update(supportTicketsTable)
       .set({ status, updatedAt: new Date() })
       .where(eq(supportTicketsTable.id, id))
-      .returning({ id: supportTicketsTable.id, status: supportTicketsTable.status });
+      .returning({
+        id: supportTicketsTable.id,
+        status: supportTicketsTable.status,
+        userId: supportTicketsTable.userId,
+      });
     if (!row) {
       res.status(404).json({ error: "Ticket not found" });
       return;
     }
+    await recordTicketReceipt(req, "support_ticket_status_changed", row.userId);
     res.json({ ok: true, id: row.id, status: normalizeStatus(row.status) });
   } catch (err) {
     logger.error({ component: "admin-support", err }, "Failed to update ticket status");
@@ -329,6 +353,7 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
         id: supportTicketsTable.id,
         subject: supportTicketsTable.subject,
         userEmail: supportTicketsTable.userEmail,
+        userId: supportTicketsTable.userId,
         transcript: supportTicketsTable.transcript,
         status: supportTicketsTable.status,
       })
@@ -370,6 +395,8 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
       .set({ transcript, status: nextStatus, updatedAt: new Date() })
       .where(eq(supportTicketsTable.id, id));
 
+    await recordTicketReceipt(req, "support_ticket_replied", row.userId);
+
     res.json({ ok: true, emailStatus, status: nextStatus });
   } catch (err) {
     logger.error({ component: "admin-support", err }, "Failed to send support reply");
@@ -399,6 +426,7 @@ router.post("/admin/support-tickets/:id/note", async (req, res): Promise<void> =
     const [row] = await db
       .select({
         id: supportTicketsTable.id,
+        userId: supportTicketsTable.userId,
         transcript: supportTicketsTable.transcript,
       })
       .from(supportTicketsTable)
@@ -425,6 +453,8 @@ router.post("/admin/support-tickets/:id/note", async (req, res): Promise<void> =
       .set({ transcript, updatedAt: new Date() })
       .where(eq(supportTicketsTable.id, id));
 
+    await recordTicketReceipt(req, "support_ticket_note_added", row.userId);
+
     res.json({ ok: true, message });
   } catch (err) {
     logger.error({ component: "admin-support", err }, "Failed to add support note");
@@ -445,7 +475,10 @@ router.get("/admin/support-tickets/:id/attachments/:assetId", async (req, res): 
   }
   try {
     const [ticket] = await db
-      .select({ attachments: supportTicketsTable.attachments })
+      .select({
+        attachments: supportTicketsTable.attachments,
+        userId: supportTicketsTable.userId,
+      })
       .from(supportTicketsTable)
       .where(eq(supportTicketsTable.id, id));
     if (!ticket) {
@@ -459,6 +492,8 @@ router.get("/admin/support-tickets/:id/attachments/:assetId", async (req, res): 
       res.status(404).json({ error: "Attachment not found on this ticket" });
       return;
     }
+
+    await recordTicketReceipt(req, "support_ticket_attachment_viewed", ticket.userId);
 
     const [asset] = await db.select().from(oraAssetsTable).where(eq(oraAssetsTable.id, assetId));
     if (!asset || asset.deletedAt) {

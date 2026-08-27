@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type AdminRoleInputRole = typeof AdminRoleInputRole[keyof typeof AdminRoleInputRole];
+export type AdminMeRole = typeof AdminMeRole[keyof typeof AdminMeRole];
 
 
-export const AdminRoleInputRole = {
+export const AdminMeRole = {
   owner: 'owner',
   operator: 'operator',
   support: 'support',

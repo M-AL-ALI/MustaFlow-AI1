@@ -75,9 +75,20 @@ export default function AdminPage() {
   const queryClient = useQueryClient();
 
   const meQuery = useGetAdminMe();
-  const statsQuery = useGetAdminStats();
-  const readinessQuery = useGetAdminLaunchReadiness();
-  const rolesQuery = useListAdminRoles();
+  const me = meQuery.data;
+  const isOwner = me?.role === "owner";
+  const canOperate = me?.role === "owner" || me?.role === "operator";
+  const canViewAnalytics = canOperate || me?.role === "analyst";
+  const canViewSupport = canOperate || me?.role === "support";
+  const statsQuery = useGetAdminStats({
+    query: { queryKey: getGetAdminStatsQueryKey(), enabled: canViewAnalytics },
+  });
+  const readinessQuery = useGetAdminLaunchReadiness({
+    query: { queryKey: getGetAdminLaunchReadinessQueryKey(), enabled: canViewAnalytics },
+  });
+  const rolesQuery = useListAdminRoles({
+    query: { queryKey: getListAdminRolesQueryKey(), enabled: isOwner },
+  });
 
   const [auditOffset, setAuditOffset] = useState(0);
   const [auditLive, setAuditLive] = useState(true);
@@ -85,7 +96,8 @@ export default function AdminPage() {
   const auditQuery = useGetAdminAuditLog(auditParams, {
     query: {
       queryKey: getGetAdminAuditLogQueryKey(auditParams),
-      refetchInterval: auditLive ? 10_000 : false,
+      enabled: canOperate,
+      refetchInterval: canOperate && auditLive ? 10_000 : false,
     },
   });
 
@@ -93,11 +105,12 @@ export default function AdminPage() {
   const revokeRoleMutation = useRevokeAdminRole();
 
   const [roleUserId, setRoleUserId] = useState("");
-  const [roleValue, setRoleValue] = useState<"admin" | "owner" | "user">("admin");
+  const [roleValue, setRoleValue] = useState<"owner" | "operator" | "support" | "analyst">(
+    "operator",
+  );
   const [roleError, setRoleError] = useState<string | null>(null);
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
 
-  const me = meQuery.data;
   const stats = statsQuery.data;
   const readiness = readinessQuery.data;
   const roles = rolesQuery.data?.roles ?? [];
@@ -174,9 +187,10 @@ export default function AdminPage() {
         <div className="flex items-center gap-3">
           <ShieldCheck className="h-6 w-6 text-primary" />
           <div>
-            <h1 className="text-2xl font-bold">Admin Dashboard</h1>
+            <h1 className="text-2xl font-bold">Admin Page</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Platform-level monitoring and management.
+              The operator console for provider control, health, support, users, revenue, spend,
+              flags, and automatic-action receipts.
             </p>
           </div>
         </div>
@@ -193,7 +207,7 @@ export default function AdminPage() {
         <div className="border border-green-500/20 bg-green-500/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-green-600">
           <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0" />
           <div>
-            <span className="font-semibold">Admin RBAC is active.</span> Signed in as{" "}
+            <span className="font-semibold">Admin Page access is active.</span> Signed in as{" "}
             <code className="font-mono text-xs">{me.role}</code>
             {me.grantedViaEnv && " (granted via ADMIN_USER_IDS env var)"}
             {!me.grantedViaEnv && me.grantedBy && ` (granted by ${me.grantedBy})`}.
@@ -201,41 +215,46 @@ export default function AdminPage() {
         </div>
       )}
 
-      <EvalResultsTile />
+      {canViewAnalytics && <EvalResultsTile />}
 
-      <InboxRecentUnreadTile />
+      {canOperate && <InboxRecentUnreadTile />}
 
-      <OraRoutingDiagnosticsPanel />
+      {canOperate && <OraRoutingDiagnosticsPanel />}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <SupportTicketsTile />
-        <StatCard
-          icon={FolderKanban}
-          label="Total Projects"
-          value={loading ? "…" : String(stats?.projects.total ?? 0)}
-          sub="across all users"
-        />
-        <StatCard
-          icon={Globe}
-          label="Published"
-          value={loading ? "…" : String(stats?.projects.published ?? 0)}
-          sub="live projects"
-        />
-        <StatCard
-          icon={Users}
-          label="Users with Credits"
-          value={loading ? "…" : String(stats?.users.withCredits ?? 0)}
-          sub="active accounts"
-        />
-        <StatCard
-          icon={CreditCard}
-          label="Transactions"
-          value={loading ? "…" : String(stats?.transactions ?? 0)}
-          sub="credit transactions"
-        />
+        {canViewSupport && <SupportTicketsTile />}
+        {canViewAnalytics && (
+          <>
+            <StatCard
+              icon={FolderKanban}
+              label="Total Projects"
+              value={loading ? "…" : String(stats?.projects.total ?? 0)}
+              sub="across all users"
+            />
+            <StatCard
+              icon={Globe}
+              label="Published"
+              value={loading ? "…" : String(stats?.projects.published ?? 0)}
+              sub="live projects"
+            />
+            <StatCard
+              icon={Users}
+              label="Users with Credits"
+              value={loading ? "…" : String(stats?.users.withCredits ?? 0)}
+              sub="active accounts"
+            />
+            <StatCard
+              icon={CreditCard}
+              label="Transactions"
+              value={loading ? "…" : String(stats?.transactions ?? 0)}
+              sub="credit transactions"
+            />
+          </>
+        )}
       </div>
 
-      {stats &&
+      {canViewAnalytics &&
+        stats &&
         (() => {
           const arch = stats.architectReviews;
           if (!arch) return null;
@@ -269,7 +288,8 @@ export default function AdminPage() {
           );
         })()}
 
-      {stats &&
+      {canViewAnalytics &&
+        stats &&
         (() => {
           const ts = (
             stats as {
@@ -317,317 +337,364 @@ export default function AdminPage() {
           );
         })()}
 
-      <ProdErrorsTile
-        loading={loading}
-        last14Days={
-          (stats as { prodErrors?: { last14Days?: number } } | undefined)?.prodErrors?.last14Days ??
-          0
-        }
-        byDay={
-          (stats as { prodErrors?: { byDay?: Array<{ day: string; count: number }> } } | undefined)
-            ?.prodErrors?.byDay ?? []
-        }
-      />
+      {canViewAnalytics && (
+        <ProdErrorsTile
+          loading={loading}
+          last14Days={
+            (stats as { prodErrors?: { last14Days?: number } } | undefined)?.prodErrors
+              ?.last14Days ?? 0
+          }
+          byDay={
+            (
+              stats as
+                | { prodErrors?: { byDay?: Array<{ day: string; count: number }> } }
+                | undefined
+            )?.prodErrors?.byDay ?? []
+          }
+        />
+      )}
 
-      <JobQueueTile />
+      {canViewAnalytics && <JobQueueTile />}
 
-      <div className="border border-border rounded-xl bg-card overflow-hidden">
-        <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Launch Readiness Checklist
-          </h3>
-          <div className="flex items-center gap-3 text-xs">
-            {readiness && (
-              <>
-                <span className="text-green-500">{readiness.passed} pass</span>
-                {readiness.partial > 0 && (
-                  <span className="text-yellow-500">{readiness.partial} partial</span>
-                )}
-                {readiness.failed > 0 && (
-                  <span className="text-destructive">{readiness.failed} fail</span>
-                )}
-              </>
-            )}
-            <button
-              onClick={refreshReadiness}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <RefreshCw className={`h-3 w-3 ${readinessLoading ? "animate-spin" : ""}`} />
-            </button>
+      {canViewAnalytics && (
+        <div className="border border-border rounded-xl bg-card overflow-hidden">
+          <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Launch Readiness Checklist
+            </h3>
+            <div className="flex items-center gap-3 text-xs">
+              {readiness && (
+                <>
+                  <span className="text-green-500">{readiness.passed} pass</span>
+                  {readiness.partial > 0 && (
+                    <span className="text-yellow-500">{readiness.partial} partial</span>
+                  )}
+                  {readiness.failed > 0 && (
+                    <span className="text-destructive">{readiness.failed} fail</span>
+                  )}
+                </>
+              )}
+              <button
+                onClick={refreshReadiness}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <RefreshCw className={`h-3 w-3 ${readinessLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
-        </div>
-        {readiness && (
-          <div className="divide-y divide-border">
-            {readiness.checks.map((c) => (
-              <ReadinessRow key={c.id} check={c} />
-            ))}
-          </div>
-        )}
-        {!readiness && readinessLoading && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">Running checks…</div>
-        )}
-        {readiness && (
-          <div
-            className={`px-4 py-3 border-t border-border text-xs font-semibold ${
-              readiness.ready ? "text-green-500" : "text-destructive"
-            }`}
-          >
-            {readiness.ready
-              ? "All blocking checks pass — ready to launch."
-              : `${readiness.blockingFailCount} blocking check(s) must be resolved before launch.`}
-          </div>
-        )}
-      </div>
-
-      <div className="border border-border rounded-xl bg-card overflow-hidden">
-        <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            <Users className="h-3.5 w-3.5" />
-            Role Management
-          </h3>
-          {rolesLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
-        </div>
-
-        <div className="px-4 py-4 border-b border-border space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Grant or revoke admin/owner roles for any user by their Clerk user ID.
-          </p>
-          <div className="flex gap-2 flex-wrap">
-            <input
-              type="text"
-              value={roleUserId}
-              onChange={(e) => setRoleUserId(e.target.value)}
-              placeholder="Clerk user ID (e.g. user_abc123)"
-              className="flex-1 min-w-0 px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
-            <select
-              value={roleValue}
-              onChange={(e) => setRoleValue(e.target.value as "admin" | "owner" | "user")}
-              className="px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="admin">Admin</option>
-              <option value="owner">Owner</option>
-              <option value="user">User (revoke)</option>
-            </select>
-            <button
-              onClick={() => void handleGrantRole()}
-              disabled={grantRoleMutation.isPending || !roleUserId.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              <UserPlus className="h-3.5 w-3.5" />
-              {grantRoleMutation.isPending ? "Saving…" : "Grant Role"}
-            </button>
-          </div>
-          {roleError && <p className="text-sm text-destructive">{roleError}</p>}
-          {roleSuccess && <p className="text-sm text-green-500">{roleSuccess}</p>}
-        </div>
-
-        {roles.length === 0 && !rolesLoading && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
-            No role grants found. Admins may be configured via the ADMIN_USER_IDS environment
-            variable.
-          </div>
-        )}
-
-        {roles.length > 0 && (
-          <div className="divide-y divide-border">
-            {roles.map((r: AdminRole) => (
-              <div key={r.userId} className="flex items-center justify-between px-4 py-3 text-sm">
-                <div className="min-w-0">
-                  <code className="font-mono text-xs text-foreground">{r.userId}</code>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span
-                      className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
-                        r.role === "owner"
-                          ? "bg-purple-500/10 text-purple-500"
-                          : r.role === "admin"
-                            ? "bg-blue-500/10 text-blue-500"
-                            : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {r.role}
-                    </span>
-                    {r.grantedBy && (
-                      <span className="text-xs text-muted-foreground">
-                        granted by {r.grantedBy}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleRevokeRole(r.userId)}
-                  title="Revoke role"
-                  className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive"
-                >
-                  <UserMinus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <SkillsPanel />
-
-      <div className="border border-border rounded-xl bg-card overflow-hidden">
-        <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            <ScrollText className="h-3.5 w-3.5" />
-            Secret Audit Log
-            {auditPage && (
-              <span className="text-muted-foreground font-normal normal-case tracking-normal">
-                — {auditPage.total.toLocaleString()} total event{auditPage.total !== 1 ? "s" : ""}
-              </span>
-            )}
-          </h3>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setAuditLive((v) => !v)}
-              className={`flex items-center gap-1 text-[10px] font-semibold uppercase px-2 py-0.5 rounded border transition-colors ${
-                auditLive
-                  ? "border-green-500/40 text-green-500 bg-green-500/10"
-                  : "border-border text-muted-foreground bg-transparent"
-              }`}
-              title={
-                auditLive
-                  ? "Auto-refresh on (every 10s) — click to pause"
-                  : "Auto-refresh off — click to enable"
-              }
-            >
-              {auditLive ? "Live" : "Paused"}
-            </button>
-            {auditLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
-            <button
-              onClick={() =>
-                void queryClient.invalidateQueries({ queryKey: getGetAdminAuditLogQueryKey() })
-              }
-              className="text-muted-foreground hover:text-foreground"
-              title="Refresh now"
-            >
-              <RefreshCw className="h-3 w-3" />
-            </button>
-          </div>
-        </div>
-
-        {!auditPage && auditLoading && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
-            Loading audit log…
-          </div>
-        )}
-
-        {auditQuery.isError && !auditPage && (
-          <div className="px-4 py-6 text-sm text-destructive text-center">
-            Failed to load audit log. Check your connection or try refreshing.
-          </div>
-        )}
-
-        {auditPage && auditPage.entries.length === 0 && (
-          <div className="px-4 py-6 text-sm text-muted-foreground text-center">
-            No audit events recorded yet.
-          </div>
-        )}
-
-        {auditPage && auditPage.entries.length > 0 && (
-          <>
+          {readiness && (
             <div className="divide-y divide-border">
-              {auditPage.entries.map((entry: AdminAuditLogEntry) => (
-                <AuditLogRow key={entry.id} entry={entry} />
+              {readiness.checks.map((c) => (
+                <ReadinessRow key={c.id} check={c} />
               ))}
             </div>
-            <div className="px-4 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-              <span>
-                Showing {auditOffset + 1}–{Math.min(auditOffset + AUDIT_PAGE_SIZE, auditPage.total)}{" "}
-                of {auditPage.total.toLocaleString()}
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setAuditOffset(Math.max(0, auditOffset - AUDIT_PAGE_SIZE))}
-                  disabled={auditOffset === 0}
-                  className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  title="Previous page"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <span className="px-2">
-                  Page {Math.floor(auditOffset / AUDIT_PAGE_SIZE) + 1} of{" "}
-                  {Math.max(1, Math.ceil(auditPage.total / AUDIT_PAGE_SIZE))}
-                </span>
-                <button
-                  onClick={() => setAuditOffset(auditOffset + AUDIT_PAGE_SIZE)}
-                  disabled={auditOffset + AUDIT_PAGE_SIZE >= auditPage.total}
-                  className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  title="Next page"
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
+          )}
+          {!readiness && readinessLoading && (
+            <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+              Running checks…
             </div>
-          </>
-        )}
-      </div>
+          )}
+          {readiness && (
+            <div
+              className={`px-4 py-3 border-t border-border text-xs font-semibold ${
+                readiness.ready ? "text-green-500" : "text-destructive"
+              }`}
+            >
+              {readiness.ready
+                ? "All blocking checks pass — ready to launch."
+                : `${readiness.blockingFailCount} blocking check(s) must be resolved before launch.`}
+            </div>
+          )}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <AdminSection title="Security">
-          <AdminItem label="Encryption" value="AES-256-GCM active" status="ok" />
-          <AdminItem label="Auth provider" value="Clerk (managed)" status="ok" />
-          <AdminItem
-            label="Admin RBAC"
-            value={me ? `Active — role: ${me.role}` : "Active"}
-            status="ok"
-          />
-          <AdminItem label="Rate limits" value="Active (in-memory)" status="ok" />
-          <AdminItem label="Secret rotation" value="Manual (script available)" status="warn" />
-        </AdminSection>
+      {isOwner && (
+        <div className="border border-border rounded-xl bg-card overflow-hidden">
+          <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Users className="h-3.5 w-3.5" />
+              Staff allowlist
+            </h3>
+            {rolesLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
+          </div>
 
-        <AdminSection title="Infrastructure">
-          <AdminItem label="Database" value="PostgreSQL (Replit)" status="ok" />
-          <AdminItem label="AI provider" value="OpenAI via Replit proxy" status="ok" />
-          <AdminItem
-            label="Cloudflare SSL"
-            value={
-              cfCheck
-                ? cfCheck.status === "pass"
-                  ? "Configured — automated SSL active"
-                  : "Not configured (manual cert)"
-                : "Checking…"
-            }
-            status={checkToStatus(cfCheck)}
-          />
-          <AdminItem
-            label="Deployments logged"
-            value={loading ? "…" : `${stats?.deployments ?? 0} deployment(s)`}
-            status="ok"
-          />
-        </AdminSection>
+          <div className="px-4 py-4 border-b border-border space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Only an Owner can add staff, change a role, or remove access. The last Owner is
+              protected.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <input
+                type="text"
+                value={roleUserId}
+                onChange={(e) => setRoleUserId(e.target.value)}
+                placeholder="Clerk user ID (e.g. user_abc123)"
+                className="flex-1 min-w-0 px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <select
+                value={roleValue}
+                onChange={(e) =>
+                  setRoleValue(e.target.value as "owner" | "operator" | "support" | "analyst")
+                }
+                className="px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="owner">Owner</option>
+                <option value="operator">Operator</option>
+                <option value="support">Support</option>
+                <option value="analyst">Analyst</option>
+              </select>
+              <button
+                onClick={() => void handleGrantRole()}
+                disabled={grantRoleMutation.isPending || !roleUserId.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+                {grantRoleMutation.isPending ? "Saving…" : "Grant Role"}
+              </button>
+            </div>
+            {roleError && <p className="text-sm text-destructive">{roleError}</p>}
+            {roleSuccess && <p className="text-sm text-green-500">{roleSuccess}</p>}
+          </div>
 
-        <AdminSection title="Publishing">
-          <AdminItem label="Public URLs" value="Slug-based (/api/p/:slug/)" status="ok" />
-          <AdminItem label="Snapshot storage" value="DB (project_versions)" status="ok" />
-          <AdminItem label="Deployment logs" value="Active" status="ok" />
-          <AdminItem label="Audit trail" value="Secret audit log active" status="ok" />
-        </AdminSection>
+          {roles.length === 0 && !rolesLoading && (
+            <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+              No database staff grants found. Bootstrap Owners may be configured in the hidden
+              environment allowlist.
+            </div>
+          )}
 
-        <AdminSection title="Billing">
-          <AdminItem label="Starter credits" value="100 per user (auto-grant)" status="ok" />
-          <AdminItem label="Credit enforcement" value="Active — enforced in builder" status="ok" />
-          <AdminItem
-            label="Stripe payments"
-            value={
-              stripeCheck
-                ? stripeCheck.status === "pass"
-                  ? "Configured — billing active"
-                  : "Setup required — see /billing"
-                : "Checking…"
-            }
-            status={checkToStatus(stripeCheck)}
-          />
-          <AdminItem
-            label="Transactions"
-            value={loading ? "…" : `${stats?.transactions ?? 0} total`}
-            status="ok"
-          />
-        </AdminSection>
-      </div>
+          {roles.length > 0 && (
+            <div className="divide-y divide-border">
+              {roles.map((r: AdminRole) => (
+                <div key={r.userId} className="flex items-center justify-between px-4 py-3 text-sm">
+                  <div className="min-w-0">
+                    <code className="font-mono text-xs text-foreground">{r.userId}</code>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span
+                        className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                          r.role === "owner"
+                            ? "bg-purple-500/10 text-purple-500"
+                            : r.role === "operator"
+                              ? "bg-blue-500/10 text-blue-500"
+                              : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {r.role}
+                      </span>
+                      {r.grantedBy && (
+                        <span className="text-xs text-muted-foreground">
+                          granted by {r.grantedBy}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRevokeRole(r.userId)}
+                    title="Revoke role"
+                    className="p-1.5 rounded hover:bg-destructive/10 transition-colors text-muted-foreground hover:text-destructive"
+                  >
+                    <UserMinus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="border-t border-border px-4 py-3 bg-muted/20">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Allowlist change history
+            </h4>
+            {(rolesQuery.data?.history ?? []).length === 0 ? (
+              <p className="text-xs text-muted-foreground mt-2">
+                No allowlist changes recorded yet.
+              </p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {(rolesQuery.data?.history ?? []).map((entry) => (
+                  <div key={entry.id} className="text-xs text-muted-foreground">
+                    <code>{entry.actorUserId}</code> {entry.action.replaceAll("_", " ")} for{" "}
+                    <code>{entry.targetUserId ?? "unknown user"}</code>:{" "}
+                    {entry.previousRole ?? "none"}
+                    {" → "}
+                    {entry.nextRole ?? "none"} · {new Date(entry.createdAt).toLocaleString()}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {canOperate && <SkillsPanel />}
+
+      {canOperate && (
+        <div className="border border-border rounded-xl bg-card overflow-hidden">
+          <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <ScrollText className="h-3.5 w-3.5" />
+              Secret Audit Log
+              {auditPage && (
+                <span className="text-muted-foreground font-normal normal-case tracking-normal">
+                  — {auditPage.total.toLocaleString()} total event{auditPage.total !== 1 ? "s" : ""}
+                </span>
+              )}
+            </h3>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setAuditLive((v) => !v)}
+                className={`flex items-center gap-1 text-[10px] font-semibold uppercase px-2 py-0.5 rounded border transition-colors ${
+                  auditLive
+                    ? "border-green-500/40 text-green-500 bg-green-500/10"
+                    : "border-border text-muted-foreground bg-transparent"
+                }`}
+                title={
+                  auditLive
+                    ? "Auto-refresh on (every 10s) — click to pause"
+                    : "Auto-refresh off — click to enable"
+                }
+              >
+                {auditLive ? "Live" : "Paused"}
+              </button>
+              {auditLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
+              <button
+                onClick={() =>
+                  void queryClient.invalidateQueries({ queryKey: getGetAdminAuditLogQueryKey() })
+                }
+                className="text-muted-foreground hover:text-foreground"
+                title="Refresh now"
+              >
+                <RefreshCw className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+
+          {!auditPage && auditLoading && (
+            <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+              Loading audit log…
+            </div>
+          )}
+
+          {auditQuery.isError && !auditPage && (
+            <div className="px-4 py-6 text-sm text-destructive text-center">
+              Failed to load audit log. Check your connection or try refreshing.
+            </div>
+          )}
+
+          {auditPage && auditPage.entries.length === 0 && (
+            <div className="px-4 py-6 text-sm text-muted-foreground text-center">
+              No audit events recorded yet.
+            </div>
+          )}
+
+          {auditPage && auditPage.entries.length > 0 && (
+            <>
+              <div className="divide-y divide-border">
+                {auditPage.entries.map((entry: AdminAuditLogEntry) => (
+                  <AuditLogRow key={entry.id} entry={entry} />
+                ))}
+              </div>
+              <div className="px-4 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  Showing {auditOffset + 1}–
+                  {Math.min(auditOffset + AUDIT_PAGE_SIZE, auditPage.total)} of{" "}
+                  {auditPage.total.toLocaleString()}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setAuditOffset(Math.max(0, auditOffset - AUDIT_PAGE_SIZE))}
+                    disabled={auditOffset === 0}
+                    className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Previous page"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="px-2">
+                    Page {Math.floor(auditOffset / AUDIT_PAGE_SIZE) + 1} of{" "}
+                    {Math.max(1, Math.ceil(auditPage.total / AUDIT_PAGE_SIZE))}
+                  </span>
+                  <button
+                    onClick={() => setAuditOffset(auditOffset + AUDIT_PAGE_SIZE)}
+                    disabled={auditOffset + AUDIT_PAGE_SIZE >= auditPage.total}
+                    className="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Next page"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {canViewAnalytics && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <AdminSection title="Security">
+            <AdminItem label="Encryption" value="AES-256-GCM active" status="ok" />
+            <AdminItem label="Auth provider" value="Clerk (managed)" status="ok" />
+            <AdminItem
+              label="Admin RBAC"
+              value={me ? `Active — role: ${me.role}` : "Active"}
+              status="ok"
+            />
+            <AdminItem label="Rate limits" value="Active (in-memory)" status="ok" />
+            <AdminItem label="Secret rotation" value="Manual (script available)" status="warn" />
+          </AdminSection>
+
+          <AdminSection title="Infrastructure">
+            <AdminItem label="Database" value="PostgreSQL (Replit)" status="ok" />
+            <AdminItem label="AI provider" value="OpenAI via Replit proxy" status="ok" />
+            <AdminItem
+              label="Cloudflare SSL"
+              value={
+                cfCheck
+                  ? cfCheck.status === "pass"
+                    ? "Configured — automated SSL active"
+                    : "Not configured (manual cert)"
+                  : "Checking…"
+              }
+              status={checkToStatus(cfCheck)}
+            />
+            <AdminItem
+              label="Deployments logged"
+              value={loading ? "…" : `${stats?.deployments ?? 0} deployment(s)`}
+              status="ok"
+            />
+          </AdminSection>
+
+          <AdminSection title="Publishing">
+            <AdminItem label="Public URLs" value="Slug-based (/api/p/:slug/)" status="ok" />
+            <AdminItem label="Snapshot storage" value="DB (project_versions)" status="ok" />
+            <AdminItem label="Deployment logs" value="Active" status="ok" />
+            <AdminItem label="Audit trail" value="Secret audit log active" status="ok" />
+          </AdminSection>
+
+          <AdminSection title="Billing">
+            <AdminItem label="Starter credits" value="100 per user (auto-grant)" status="ok" />
+            <AdminItem
+              label="Credit enforcement"
+              value="Active — enforced in builder"
+              status="ok"
+            />
+            <AdminItem
+              label="Stripe payments"
+              value={
+                stripeCheck
+                  ? stripeCheck.status === "pass"
+                    ? "Configured — billing active"
+                    : "Setup required — see /billing"
+                  : "Checking…"
+              }
+              status={checkToStatus(stripeCheck)}
+            />
+            <AdminItem
+              label="Transactions"
+              value={loading ? "…" : `${stats?.transactions ?? 0} total`}
+              status="ok"
+            />
+          </AdminSection>
+        </div>
+      )}
     </div>
   );
 }

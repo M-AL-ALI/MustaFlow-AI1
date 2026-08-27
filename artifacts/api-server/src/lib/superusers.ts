@@ -24,9 +24,10 @@ import { findClerkUserByEmail } from "./clerk-users";
 export const SUPERUSER_ORA_TIER = "core";
 
 // Case-insensitive email allowlist. Compared in lowercase.
-const SUPERUSER_EMAILS: ReadonlyArray<string> = ["mus_192@yahoo.com"].map((e) =>
-  e.trim().toLowerCase(),
-);
+const SUPERUSER_EMAILS: ReadonlyArray<string> = [
+  "mus_192@yahoo.com",
+  "alialmshhdany0@gmail.com",
+].map((e) => e.trim().toLowerCase());
 
 // Clerk user IDs resolved from SUPERUSER_EMAILS. Populated lazily and cached
 // for the process lifetime once successfully resolved.

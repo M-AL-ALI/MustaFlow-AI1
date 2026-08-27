@@ -90,16 +90,16 @@ function NavGroup({
 }
 
 function AdminNavItem() {
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [staffRole, setStaffRole] = useState<string | null>(null);
   const { isLoaded, isSignedIn } = useClerkUser();
   const [location] = useLocation();
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) return;
     authFetch("/api/admin/me")
-      .then((r) => (r.ok ? (r.json() as Promise<{ isAdmin: boolean }>) : null))
+      .then((r) => (r.ok ? (r.json() as Promise<{ isAdmin: boolean; role: string }>) : null))
       .then((data) => {
-        if (data?.isAdmin) setIsAdmin(true);
+        if (data?.isAdmin) setStaffRole(data.role);
       })
       .catch(() => {});
   }, [isLoaded, isSignedIn]);
@@ -109,7 +109,7 @@ function AdminNavItem() {
     {
       query: {
         queryKey: getListAdminSupportTicketsQueryKey({ limit: 1 }),
-        enabled: isAdmin,
+        enabled: staffRole === "owner" || staffRole === "operator" || staffRole === "support",
         refetchInterval: 60_000,
         refetchOnWindowFocus: true,
       },
@@ -119,9 +119,11 @@ function AdminNavItem() {
 
   // Real-time push alerts for admins (toast + optional browser notification).
   // Falls back to the 60s polling above when the WebSocket is unavailable.
-  useAdminTicketAlerts(isAdmin);
+  const canViewSupport =
+    staffRole === "owner" || staffRole === "operator" || staffRole === "support";
+  useAdminTicketAlerts(canViewSupport);
 
-  if (!isAdmin) return null;
+  if (!staffRole) return null;
 
   const adminActive = location === "/admin";
   const supportActive = location === "/admin/support" || location.startsWith("/admin/support");
@@ -139,33 +141,35 @@ function AdminNavItem() {
             )}
           >
             <LayoutDashboard className="h-4 w-4" />
-            Admin
+            Admin Page
           </div>
         </Link>
       </div>
-      <div className="px-3 py-1">
-        <Link href="/admin/support">
-          <div
-            className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
-              supportActive
-                ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
-                : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
-            )}
-          >
-            <LifeBuoy className="h-4 w-4 shrink-0" />
-            <span className="flex-1">Support Inbox</span>
-            {newTicketCount > 0 && (
-              <span
-                className="ml-auto inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold leading-none text-primary-foreground"
-                title={`${newTicketCount} new ticket${newTicketCount === 1 ? "" : "s"}`}
-              >
-                {newTicketCount > 99 ? "99+" : newTicketCount}
-              </span>
-            )}
-          </div>
-        </Link>
-      </div>
+      {canViewSupport && (
+        <div className="px-3 py-1">
+          <Link href="/admin/support">
+            <div
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-all duration-150 ease-out cursor-pointer",
+                supportActive
+                  ? "border-l-2 border-primary bg-primary/5 text-primary pl-[10px]"
+                  : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground pl-[10px]",
+              )}
+            >
+              <LifeBuoy className="h-4 w-4 shrink-0" />
+              <span className="flex-1">Support Inbox</span>
+              {newTicketCount > 0 && (
+                <span
+                  className="ml-auto inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-bold leading-none text-primary-foreground"
+                  title={`${newTicketCount} new ticket${newTicketCount === 1 ? "" : "s"}`}
+                >
+                  {newTicketCount > 99 ? "99+" : newTicketCount}
+                </span>
+              )}
+            </div>
+          </Link>
+        </div>
+      )}
     </>
   );
 }

@@ -18538,7 +18538,7 @@ export const getGetAdminMeUrl = () => {
 }
 
 /**
- * @summary Current user admin status and role
+ * @summary Current user's Admin Page access and staff role
  */
 export const getAdminMe = async ( options?: RequestInit): Promise<AdminMe> => {
 
@@ -18585,7 +18585,7 @@ export type GetAdminMeQueryError = ErrorType<ApiError>
 
 
 /**
- * @summary Current user admin status and role
+ * @summary Current user's Admin Page access and staff role
  */
 
 export function useGetAdminMe<TData = Awaited<ReturnType<typeof getAdminMe>>, TError = ErrorType<ApiError>>(
@@ -18917,7 +18917,7 @@ export const getRevokeAdminRoleUrl = (userId: string,) => {
 }
 
 /**
- * @summary Revoke a role grant — user reverts to default "user" role
+ * @summary Remove a user from the Admin Page allowlist
  */
 export const revokeAdminRole = async (userId: string, options?: RequestInit): Promise<RevokeAdminRole200> => {
 
@@ -18965,7 +18965,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RevokeAdminRoleMutationError = ErrorType<unknown>
 
     /**
- * @summary Revoke a role grant — user reverts to default "user" role
+ * @summary Remove a user from the Admin Page allowlist
  */
 export const useRevokeAdminRole = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeAdminRole>>, TError,{userId: string}, TContext>, request?: SecondParameter<typeof customFetch>}

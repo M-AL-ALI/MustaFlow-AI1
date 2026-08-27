@@ -281,7 +281,10 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
   if (meQuery.isError) {
     const isAuthError =
-      isHttpError(meQuery.error) && (meQuery.error.status === 401 || meQuery.error.status === 403);
+      isHttpError(meQuery.error) &&
+      (meQuery.error.status === 401 ||
+        meQuery.error.status === 403 ||
+        meQuery.error.status === 404);
 
     if (isAuthError) {
       return <AdminRedirect />;

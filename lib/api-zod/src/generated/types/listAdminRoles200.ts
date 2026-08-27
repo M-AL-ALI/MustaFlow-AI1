@@ -5,8 +5,10 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { AdminAccessReceipt } from './adminAccessReceipt';
 import type { AdminRole } from './adminRole';
 
 export type ListAdminRoles200 = {
   roles: AdminRole[];
+  history: AdminAccessReceipt[];
 };

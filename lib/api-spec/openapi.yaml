@@ -6157,7 +6157,7 @@ paths:
     get:
       operationId: getAdminMe
       tags: [admin]
-      summary: Current user admin status and role
+      summary: Current user's Admin Page access and staff role
       responses:
         "200":
           description: Admin identity
@@ -6165,14 +6165,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminMe"
-        "401":
-          description: Unauthenticated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ApiError"
-        "403":
-          description: Forbidden — not an admin
+        "404":
+          description: Unknown route or caller is not on the staff allowlist
           content:
             application/json:
               schema:
@@ -6216,12 +6210,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [roles]
+                required: [roles, history]
                 properties:
                   roles:
                     type: array
                     items:
                       $ref: "#/components/schemas/AdminRole"
+                  history:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdminAccessReceipt"
     post:
       operationId: grantAdminRole
       tags: [admin]
@@ -6254,7 +6252,7 @@ paths:
     delete:
       operationId: revokeAdminRole
       tags: [admin]
-      summary: Revoke a role grant — user reverts to default "user" role
+      summary: Remove a user from the Admin Page allowlist
       parameters:
         - { name: userId, in: path, required: true, schema: { type: string } }
       responses:
@@ -10225,7 +10223,9 @@ components:
       required: [userId, role, isAdmin, grantedViaEnv]
       properties:
         userId: { type: string }
-        role: { type: string }
+        role:
+          type: string
+          enum: [owner, operator, support, analyst]
         isAdmin: { type: boolean }
         grantedViaEnv: { type: boolean }
         grantedBy: { type: ["string", "null"] }
@@ -10337,10 +10337,24 @@ components:
       required: [userId, role]
       properties:
         userId: { type: string }
-        role: { type: string }
+        role:
+          type: string
+          enum: [owner, operator, support, analyst]
         grantedBy: { type: ["string", "null"] }
         createdAt: { type: ["string", "null"], format: date-time }
         updatedAt: { type: ["string", "null"], format: date-time }
+
+    AdminAccessReceipt:
+      type: object
+      required: [id, actorUserId, action, createdAt]
+      properties:
+        id: { type: integer }
+        actorUserId: { type: string }
+        targetUserId: { type: ["string", "null"] }
+        previousRole: { type: ["string", "null"] }
+        nextRole: { type: ["string", "null"] }
+        action: { type: string }
+        createdAt: { type: string, format: date-time }
 
     AnalyticsPingInput:
       type: object
@@ -10542,7 +10556,7 @@ components:
         userId: { type: string, minLength: 1 }
         role:
           type: string
-          enum: [user, admin, owner]
+          enum: [owner, operator, support, analyst]
 
     FileSearchResult:
       type: object

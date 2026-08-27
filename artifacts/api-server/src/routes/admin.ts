@@ -13,9 +13,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { eq, sql, count, desc, isNotNull } from "drizzle-orm";
+import { and, eq, sql, count, desc, isNotNull } from "drizzle-orm";
 import {
   db,
+  adminAccessReceiptsTable,
   projectsTable,
   userRolesTable,
   userCreditsTable,
@@ -28,10 +29,11 @@ import {
   projectDomainsTable,
   projectWebhooksTable,
 } from "@workspace/db";
-import { and, gte } from "drizzle-orm";
+import { gte } from "drizzle-orm";
 import { getUncachableStripeClient } from "../lib/stripeClient";
 import { logger } from "../lib/logger";
-import { requireAdmin } from "../lib/adminAuth";
+import { requireAdmin, requireOwner } from "../lib/adminAuth";
+import { decideStaffRemoval, decideStaffRoleChange } from "../lib/admin-role-policy";
 import { creditCostFor } from "../lib/ai-providers";
 import { NABUFLOW_MIN_OVERAGE_RATE_USD } from "../lib/nabuflow-plans";
 import { errorsPerDay } from "../lib/prodLogs";
@@ -53,22 +55,14 @@ router.use("/admin", requireAdmin);
 
 // ── GET /api/admin/me ─────────────────────────────────────────────────────────
 router.get("/admin/me", async (req, res): Promise<void> => {
-  const userId = req.userId!;
-  const [row] = await db.select().from(userRolesTable).where(eq(userRolesTable.userId, userId));
-
-  const adminViaEnv = Boolean(
-    (process.env.ADMIN_USER_IDS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .includes(userId),
-  );
+  const principal = req.staffPrincipal!;
 
   res.json({
-    userId,
-    role: row?.role ?? "user",
-    isAdmin: true, // requireAdmin already passed
-    grantedViaEnv: adminViaEnv,
-    grantedBy: row?.grantedBy ?? null,
+    userId: principal.userId,
+    role: principal.role,
+    isAdmin: true,
+    grantedViaEnv: principal.source !== "database",
+    grantedBy: principal.grantedBy,
   });
 });
 
@@ -526,7 +520,7 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
   const [adminRoleRow] = await db
     .select({ total: count() })
     .from(userRolesTable)
-    .where(sql`role IN ('admin','owner')`);
+    .where(sql`role IN ('owner','operator','support','analyst')`);
   const hasDbAdmins = (adminRoleRow?.total ?? 0) > 0;
   const hasEnvAdmins = Boolean(process.env.ADMIN_USER_IDS?.trim());
   check(
@@ -681,55 +675,159 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
 });
 
 // ── GET /api/admin/roles ──────────────────────────────────────────────────────
-router.get("/admin/roles", async (_req, res): Promise<void> => {
-  const rows = await db
-    .select({
-      userId: userCreditsTable.userId,
-      balance: userCreditsTable.balance,
-      updatedAt: userCreditsTable.updatedAt,
-    })
-    .from(userCreditsTable)
-    .orderBy(desc(userCreditsTable.balance))
-    .limit(100);
-  res.json({ roles: rows });
+router.get("/admin/roles", requireOwner, async (_req, res): Promise<void> => {
+  const [roles, history] = await Promise.all([
+    db
+      .select({
+        userId: userRolesTable.userId,
+        role: userRolesTable.role,
+        grantedBy: userRolesTable.grantedBy,
+        createdAt: userRolesTable.createdAt,
+        updatedAt: userRolesTable.updatedAt,
+      })
+      .from(userRolesTable)
+      .where(sql`role IN ('owner','operator','support','analyst')`)
+      .orderBy(desc(userRolesTable.updatedAt))
+      .limit(100),
+    db
+      .select({
+        id: adminAccessReceiptsTable.id,
+        actorUserId: adminAccessReceiptsTable.actorUserId,
+        targetUserId: adminAccessReceiptsTable.targetUserId,
+        previousRole: adminAccessReceiptsTable.previousRole,
+        nextRole: adminAccessReceiptsTable.nextRole,
+        action: adminAccessReceiptsTable.action,
+        createdAt: adminAccessReceiptsTable.createdAt,
+      })
+      .from(adminAccessReceiptsTable)
+      .where(eq(adminAccessReceiptsTable.kind, "role_change"))
+      .orderBy(desc(adminAccessReceiptsTable.createdAt))
+      .limit(200),
+  ]);
+  res.json({ roles, history });
 });
 
 // ── POST /api/admin/roles ─────────────────────────────────────────────────────
-// Body: { userId: string; role: "user" | "admin" | "owner" }
-router.post("/admin/roles", async (req, res): Promise<void> => {
+// Body: { userId: string; role: "owner" | "operator" | "support" | "analyst" }
+router.post("/admin/roles", requireOwner, async (req, res): Promise<void> => {
   const { userId, role } = req.body as { userId?: string; role?: string };
 
   if (!userId || typeof userId !== "string" || !userId.trim()) {
     res.status(400).json({ error: "userId is required" });
     return;
   }
-  if (!["user", "admin", "owner"].includes(role ?? "")) {
-    res.status(400).json({ error: "role must be one of: user, admin, owner" });
+  if (!["owner", "operator", "support", "analyst"].includes(role ?? "")) {
+    res.status(400).json({ error: "role must be one of: owner, operator, support, analyst" });
     return;
   }
 
-  const [row] = await db
-    .insert(userRolesTable)
-    .values({ userId: userId.trim(), role: role!, grantedBy: req.userId ?? "system" })
-    .onConflictDoUpdate({
-      target: userRolesTable.userId,
-      set: { role: role!, grantedBy: req.userId ?? "system", updatedAt: new Date() },
-    })
-    .returning();
+  const targetUserId = userId.trim();
+  const actorUserId = req.userId!;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(1732050807)`);
+    const [previous] = await tx
+      .select({ role: userRolesTable.role })
+      .from(userRolesTable)
+      .where(eq(userRolesTable.userId, targetUserId));
+    const [ownerCount] = await tx
+      .select({ total: count() })
+      .from(userRolesTable)
+      .where(eq(userRolesTable.role, "owner"));
+    const decision = decideStaffRoleChange(
+      previous?.role ?? null,
+      role as "owner" | "operator" | "support" | "analyst",
+      ownerCount?.total ?? 0,
+    );
+    if (!decision.allowed) return { blocked: true as const, decision };
 
-  res.json({ ok: true, role: row });
+    const [row] = await tx
+      .insert(userRolesTable)
+      .values({ userId: targetUserId, role: role!, grantedBy: actorUserId })
+      .onConflictDoUpdate({
+        target: userRolesTable.userId,
+        set: { role: role!, grantedBy: actorUserId, updatedAt: new Date() },
+      })
+      .returning();
+    await tx.insert(adminAccessReceiptsTable).values({
+      actorUserId,
+      actorRole: "owner",
+      kind: "role_change",
+      action: previous ? "role_changed" : "staff_added",
+      targetUserId,
+      previousRole: previous?.role ?? "user",
+      nextRole: role!,
+      outcome: "completed",
+      requestMethod: req.method,
+      requestPath: "/api/admin/roles",
+    });
+    return { blocked: false as const, row };
+  });
+  if (result.blocked) {
+    res.status(409).json({
+      error: result.decision.message,
+      code: result.decision.code,
+    });
+    return;
+  }
+
+  res.json({ ok: true, role: result.row });
 });
 
 // ── DELETE /api/admin/roles/:userId ──────────────────────────────────────────
-router.delete("/admin/roles/:userId", async (req, res): Promise<void> => {
-  const targetUserId = req.params.userId;
-
-  await db.delete(userRolesTable).where(eq(userRolesTable.userId, targetUserId));
+router.delete("/admin/roles/:userId", requireOwner, async (req, res): Promise<void> => {
+  const rawTargetUserId = req.params.userId;
+  const targetUserId = Array.isArray(rawTargetUserId) ? rawTargetUserId[0] : rawTargetUserId;
+  if (!targetUserId) {
+    res.status(400).json({ error: "userId is required" });
+    return;
+  }
+  const actorUserId = req.userId!;
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(1732050807)`);
+    const [previous] = await tx
+      .select({ role: userRolesTable.role })
+      .from(userRolesTable)
+      .where(eq(userRolesTable.userId, targetUserId));
+    if (!previous) return { found: false as const, blocked: false as const };
+    const [ownerCount] = await tx
+      .select({ total: count() })
+      .from(userRolesTable)
+      .where(eq(userRolesTable.role, "owner"));
+    const decision = decideStaffRemoval(previous.role, ownerCount?.total ?? 0);
+    if (!decision.allowed) {
+      return { found: true as const, blocked: true as const, decision };
+    }
+    await tx.delete(userRolesTable).where(eq(userRolesTable.userId, targetUserId));
+    await tx.insert(adminAccessReceiptsTable).values({
+      actorUserId,
+      actorRole: "owner",
+      kind: "role_change",
+      action: "staff_removed",
+      targetUserId,
+      previousRole: previous.role,
+      nextRole: "user",
+      outcome: "completed",
+      requestMethod: req.method,
+      requestPath: "/api/admin/roles/:userId",
+    });
+    return { found: true as const, blocked: false as const };
+  });
+  if (!result.found) {
+    res.status(404).json({ error: "Staff access entry not found." });
+    return;
+  }
+  if (result.blocked) {
+    res.status(409).json({
+      error: result.decision.message,
+      code: result.decision.code,
+    });
+    return;
+  }
 
   res.json({
     ok: true,
     userId: targetUserId,
-    note: "Role revoked — user reverts to default 'user' role.",
+    note: "Staff access removed.",
   });
 });
 

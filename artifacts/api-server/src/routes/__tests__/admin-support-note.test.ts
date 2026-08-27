@@ -34,7 +34,7 @@ vi.mock("../../lib/cloudflare", () => ({
   r2GetObject: vi.fn(async () => null),
 }));
 
-import { db, supportTicketsTable } from "@workspace/db";
+import { adminAccessReceiptsTable, db, supportTicketsTable } from "@workspace/db";
 
 let ticketId: number;
 
@@ -68,23 +68,30 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.delete(supportTicketsTable).where(inArray(supportTicketsTable.userId, [TICKET_OWNER]));
+  await db
+    .delete(adminAccessReceiptsTable)
+    .where(
+      inArray(adminAccessReceiptsTable.actorUserId, [ADMIN_USER, NON_ADMIN_USER, TICKET_OWNER]),
+    );
 });
 
 describe("POST /api/admin/support-tickets/:id/note", () => {
-  it("rejects an unauthenticated caller with 401", async () => {
+  it("makes the console indistinguishable from an unknown route to an unauthenticated caller", async () => {
     const app = await buildAppAs(null);
     const res = await request(app)
       .post(`/api/admin/support-tickets/${ticketId}/note`)
       .send({ note: "secret" });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Not found" });
   });
 
-  it("rejects a non-admin caller with 403", async () => {
+  it("makes the console indistinguishable from an unknown route to nonstaff", async () => {
     const app = await buildAppAs(NON_ADMIN_USER);
     const res = await request(app)
       .post(`/api/admin/support-tickets/${ticketId}/note`)
       .send({ note: "secret" });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Not found" });
   });
 
   it("rejects an empty note with 400", async () => {

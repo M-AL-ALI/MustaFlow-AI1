@@ -60,7 +60,7 @@ function DrawerAdminNavItem({ onClose }: { onClose: () => void }) {
           )}
         >
           <LayoutDashboard className="h-4 w-4" />
-          Admin
+          Admin Page
         </div>
       </Link>
     </div>

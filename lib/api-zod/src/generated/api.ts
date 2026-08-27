@@ -6981,11 +6981,11 @@ export const SubmitAbuseReportBody = zod.object({
 
 
 /**
- * @summary Current user admin status and role
+ * @summary Current user's Admin Page access and staff role
  */
 export const GetAdminMeResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.string(),
+  "role": zod.enum(['owner', 'operator', 'support', 'analyst']),
   "isAdmin": zod.boolean(),
   "grantedViaEnv": zod.boolean(),
   "grantedBy": zod.string().nullish()
@@ -7057,10 +7057,19 @@ export const GetAdminLaunchReadinessResponse = zod.object({
 export const ListAdminRolesResponse = zod.object({
   "roles": zod.array(zod.object({
   "userId": zod.string(),
-  "role": zod.string(),
+  "role": zod.enum(['owner', 'operator', 'support', 'analyst']),
   "grantedBy": zod.string().nullish(),
   "createdAt": zod.coerce.date().nullish(),
   "updatedAt": zod.coerce.date().nullish()
+})),
+  "history": zod.array(zod.object({
+  "id": zod.number(),
+  "actorUserId": zod.string(),
+  "targetUserId": zod.string().nullish(),
+  "previousRole": zod.string().nullish(),
+  "nextRole": zod.string().nullish(),
+  "action": zod.string(),
+  "createdAt": zod.coerce.date()
 }))
 })
 
@@ -7073,14 +7082,14 @@ export const ListAdminRolesResponse = zod.object({
 
 export const GrantAdminRoleBody = zod.object({
   "userId": zod.string().min(1),
-  "role": zod.enum(['user', 'admin', 'owner'])
+  "role": zod.enum(['owner', 'operator', 'support', 'analyst'])
 })
 
 export const GrantAdminRoleResponse = zod.object({
   "ok": zod.boolean(),
   "role": zod.object({
   "userId": zod.string(),
-  "role": zod.string(),
+  "role": zod.enum(['owner', 'operator', 'support', 'analyst']),
   "grantedBy": zod.string().nullish(),
   "createdAt": zod.coerce.date().nullish(),
   "updatedAt": zod.coerce.date().nullish()
@@ -7089,7 +7098,7 @@ export const GrantAdminRoleResponse = zod.object({
 
 
 /**
- * @summary Revoke a role grant — user reverts to default "user" role
+ * @summary Remove a user from the Admin Page allowlist
  */
 export const RevokeAdminRoleParams = zod.object({
   "userId": zod.coerce.string()

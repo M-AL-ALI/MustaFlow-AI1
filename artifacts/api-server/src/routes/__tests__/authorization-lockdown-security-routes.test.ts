@@ -11,7 +11,8 @@ vi.mock("@workspace/db", async (importOriginal) => {
   const select = vi.fn(() => ({
     from: vi.fn(() => ({ where: vi.fn(async () => []) })),
   }));
-  return { ...original, db: { ...original.db, select } };
+  const insert = vi.fn(() => ({ values: vi.fn(async () => undefined) }));
+  return { ...original, db: { ...original.db, select, insert } };
 });
 vi.mock("../../lib/superusers", () => ({ isSuperuser: vi.fn(async () => false) }));
 vi.mock("../../lib/sbom", () => ({ generateSbom: vi.fn() }));
@@ -49,7 +50,7 @@ describe("authorization lockdown: account-wide security routes", () => {
 
     const response = await request(app)[method](path).send({});
 
-    expect(response.status).toBe(403);
-    expect(response.body).toEqual({ error: "Forbidden — admin access required" });
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Not found" });
   });
 });
