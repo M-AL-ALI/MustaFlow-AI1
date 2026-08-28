@@ -918,11 +918,24 @@ export async function applyWorkspaceTenancyMigration(
     }
 
     let legacyWorkspaceId: number;
+    let effectiveLegacyOwnerId = normalizedOwnerId;
     let legacyWorkspaceCreated = 0;
     const existingLegacy = existingLegacyWorkspace.rows[0];
     if (existingLegacy) {
       if (existingLegacy.owner_user_id !== normalizedOwnerId) {
-        throw new Error("legacy_adoption_workspace_owner_mismatch");
+        const pendingLegacyRows = await client.query<{ count: string }>(`
+          SELECT COUNT(*)::text AS count
+            FROM projects
+           WHERE owner_id = 'demo-user'
+        `);
+        if (Number(pendingLegacyRows.rows[0]?.count ?? "0") !== 0) {
+          throw new Error("legacy_adoption_workspace_owner_mismatch");
+        }
+        // Deployment previews are isolated database copies whose runtime identity
+        // overlay can differ from the source environment. Once adoption is complete,
+        // the durable workspace owner is authoritative; a copied preview must not
+        // fail or re-own anything merely because its environment overlay differs.
+        effectiveLegacyOwnerId = existingLegacy.owner_user_id;
       }
       if (existingLegacy.deleted_at !== null) {
         throw new Error("legacy_adoption_workspace_deleted");
@@ -933,7 +946,7 @@ export async function applyWorkspaceTenancyMigration(
         `INSERT INTO workspaces (owner_user_id, system_key, name, type)
          VALUES ($1, $2, 'Legacy tests', 'personal')
          RETURNING id`,
-        [normalizedOwnerId, LEGACY_TESTS_WORKSPACE_SYSTEM_KEY],
+        [effectiveLegacyOwnerId, LEGACY_TESTS_WORKSPACE_SYSTEM_KEY],
       );
       const createdId = created.rows[0]?.id;
       if (!createdId) throw new Error("legacy_adoption_workspace_create_failed");
@@ -950,7 +963,7 @@ export async function applyWorkspaceTenancyMigration(
        WHERE workspace_members.role IS DISTINCT FROM 'owner'
           OR workspace_members.invited_by IS DISTINCT FROM EXCLUDED.invited_by
        RETURNING workspace_id`,
-      [legacyWorkspaceId, normalizedOwnerId],
+      [legacyWorkspaceId, effectiveLegacyOwnerId],
     );
 
     const adopted = await client.query<{ deleted_at: Date | null }>(
@@ -959,7 +972,7 @@ export async function applyWorkspaceTenancyMigration(
               workspace_id = $2
         WHERE owner_id = 'demo-user'
       RETURNING deleted_at`,
-      [normalizedOwnerId, legacyWorkspaceId],
+      [effectiveLegacyOwnerId, legacyWorkspaceId],
     );
 
     const backfilled = await client.query<{ deleted_at: Date | null }>(`

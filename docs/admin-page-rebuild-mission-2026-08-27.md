@@ -531,13 +531,17 @@ accept a P5 message, the UI must show `failed` and the phase does not close.
    `queueSchemaContract: error`; its Clerk script proxy returned HTTP 500 and the
    page rendered no content. Replit's deployment-log interface cannot select the
    private-preview host or build, so production's healthy boot logs were rejected
-   as evidence. Two pre-existing environment assumptions were corrected without
-   changing canonical production behavior: the existing nonsecret production
-   adoption owner is now present in the shared Replit environment used by database
-   previews, while `.kirk.prod.repl.run` preview hosts use Clerk's publishable-key
-   endpoint directly instead of the canonical production proxy. Structural tests
-   pin both configuration paths. A fresh private preview must prove the correction
-   before P5 can be approved for production.
+   as evidence. Replit's production-database contract establishes that a deployment
+   preview is an isolated database copy whose runtime identity overlay is not itself
+   durable tenancy truth. The migration now accepts the owner already bound to the
+   durable Legacy-tests workspace only when no `demo-user` rows remain; a mismatched
+   overlay still fails closed whenever adoption work remains. The environment-specific
+   owner was therefore removed from shared configuration instead of turning shared
+   configuration into a second identity authority. Regression tests pin both sides of
+   that decision. Separately, `.kirk.prod.repl.run` preview hosts use Clerk's
+   publishable-key endpoint directly instead of the canonical production proxy. A
+   fresh private preview must prove both corrections before P5 can be approved for
+   production.
 
 ### P5 lab verification
 

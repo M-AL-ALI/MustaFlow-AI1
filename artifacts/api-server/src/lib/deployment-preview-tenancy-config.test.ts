@@ -15,8 +15,8 @@ function userenvSection(name: string): string {
 }
 
 describe("deployment-preview workspace tenancy configuration", () => {
-  it("keeps a nonsecret adoption owner in shared deployment-preview configuration", () => {
-    expect(userenvSection("shared")).toMatch(/^LEGACY_ADOPTION_OWNER_ID = "user_[A-Za-z0-9]+"$/mu);
+  it("does not place an environment-specific adoption owner in shared configuration", () => {
+    expect(userenvSection("shared")).not.toMatch(/^LEGACY_ADOPTION_OWNER_ID\s*=/mu);
   });
 
   it("keeps development and production owner choices explicit", () => {

@@ -139,12 +139,6 @@ EXPO_PUBLIC_ORA_STREAMING_ENABLED = "true"
 EXPO_APPLE_TEAM_TYPE = "INDIVIDUAL"
 SMTP_FROM = "support@mustaflow.com"
 ZERO_INTENT_RECEIPT_ENFORCEMENT = "true"
-# Deployment-preview environments receive shared variables but do not always
-# receive the production overlay. Keep the already-public production adoption
-# owner available so the idempotent tenancy migration can prove its invariant
-# before a database-change preview is approved.
-LEGACY_ADOPTION_OWNER_ID = "user_3EBE0elOH8G6UXbaISITn6SjKvj"
-
 [userenv.development]
 DEV_SLOW_BUILD_DELAY_MS = "30000"
 AI_PROVIDER_BUILD = "anthropic:claude-sonnet-4-6"

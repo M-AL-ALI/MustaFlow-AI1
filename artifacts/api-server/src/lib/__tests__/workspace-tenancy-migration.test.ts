@@ -108,6 +108,11 @@ class WorkspaceTenancyMigrationClient {
       return { rows, rowCount: rows.length };
     }
 
+    if (/SELECT COUNT\(\*\)::text AS count/i.test(text) && /owner_id = 'demo-user'/i.test(text)) {
+      const count = this.projects.filter((project) => project.owner_id === "demo-user").length;
+      return { rows: [{ count: String(count) }], rowCount: 1 };
+    }
+
     if (/WITH project_defaults AS/i.test(text)) {
       const rows: Array<{ deleted_at: Date | null }> = [];
       for (const project of this.projects.filter((row) => row.workspace_id === null)) {
@@ -192,6 +197,54 @@ describe("workspace tenancy startup migration", () => {
       applyWorkspaceTenancyMigration(migrationClient(client), undefined),
     ).rejects.toThrow("legacy_adoption_owner_id_missing");
     expect(client.statements).toEqual([]);
+  });
+
+  it("uses completed durable adoption state when a deployment preview carries another owner", async () => {
+    const client = new WorkspaceTenancyMigrationClient();
+    await applyWorkspaceTenancyMigration(migrationClient(client), "founder-fixture");
+    const stateAfterAdoption = structuredClone({
+      workspaces: client.workspaces,
+      members: [...client.members.entries()],
+      projects: client.projects,
+    });
+
+    const previewRun = await applyWorkspaceTenancyMigration(
+      migrationClient(client),
+      "preview-owner-fixture",
+    );
+
+    expect(previewRun).toEqual({
+      legacyWorkspaceCreated: 0,
+      legacyOwnerMembershipsCreatedOrCorrected: 0,
+      demoProjectsAdoptedActive: 0,
+      demoProjectsAdoptedSoftDeleted: 0,
+      projectsBackfilledActive: 0,
+      projectsBackfilledSoftDeleted: 0,
+      projectsWithNullWorkspace: 0,
+    });
+    expect({
+      workspaces: client.workspaces,
+      members: [...client.members.entries()],
+      projects: client.projects,
+    }).toEqual(stateAfterAdoption);
+  });
+
+  it("refuses a mismatched owner when legacy rows still require adoption", async () => {
+    const client = new WorkspaceTenancyMigrationClient();
+    await applyWorkspaceTenancyMigration(migrationClient(client), "founder-fixture");
+    client.projects.push({
+      id: 6,
+      owner_id: "demo-user",
+      workspace_id: null,
+      deleted_at: null,
+    });
+
+    await expect(
+      applyWorkspaceTenancyMigration(migrationClient(client), "preview-owner-fixture"),
+    ).rejects.toThrow("legacy_adoption_workspace_owner_mismatch");
+    expect(client.projects.find((project) => project.id === 6)).toEqual(
+      expect.objectContaining({ owner_id: "demo-user", workspace_id: null }),
+    );
   });
 
   it("declares durable identity, serialized writes, FK verification, and the NOT NULL fence", async () => {
