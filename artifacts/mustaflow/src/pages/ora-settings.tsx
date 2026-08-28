@@ -341,7 +341,7 @@ interface AccountConsistency {
     billingTier: string;
     sourceTier: string;
     status: string | null;
-    isSuperuser: boolean;
+    isBillingPrivileged: boolean;
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
   };
@@ -778,7 +778,7 @@ function AccountSyncSection() {
             <DiagRow label="Billing plan">
               <span className="text-foreground">
                 {tierLabel(diag.billing.billingTier)}
-                {diag.billing.isSuperuser ? " (team)" : ""}
+                {diag.billing.isBillingPrivileged ? " (team)" : ""}
               </span>
             </DiagRow>
             <DiagRow label="Chat plan">

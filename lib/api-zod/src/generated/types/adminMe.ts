@@ -11,7 +11,7 @@ export interface AdminMe {
   userId: string;
   role: AdminMeRole;
   isAdmin: boolean;
-  grantedViaEnv: boolean;
+  authoritySource: "user_roles";
   /** @nullable */
   grantedBy?: string | null;
 }

@@ -10,7 +10,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db, userCreditsTable, creditTransactionsTable } from "@workspace/db";
 import { sendWelcomeEmail, sendLowCreditEmail } from "./emailClient";
 import { getClerkUserById } from "./clerk-users";
-import { isSuperuser } from "./superusers";
+import { isBillingPrivileged } from "./billing-privileges";
 import { logger } from "./logger";
 
 // Global kill switch — when false, credit checks/deductions are skipped so
@@ -86,9 +86,9 @@ export async function deductCredits(
   );
   const credits = await getOrCreateCredits(userId);
 
-  // Superusers never get charged, regardless of CREDITS_ENFORCEMENT. No
+  // Billing-privilege accounts never get charged, regardless of CREDITS_ENFORCEMENT. No
   // deduction, no transaction row, never "insufficient".
-  if (await isSuperuser(userId)) {
+  if (await isBillingPrivileged(userId)) {
     return { newBalance: credits.balance };
   }
 
@@ -148,10 +148,10 @@ export async function deductCreditsAtomic(
 ): Promise<CreditDeductionResult> {
   const credits = await getOrCreateCredits(userId);
 
-  // Superusers never get charged, regardless of CREDITS_ENFORCEMENT. Record
+  // Billing-privilege accounts never get charged, regardless of CREDITS_ENFORCEMENT. Record
   // the authorized zero-value operation so Usage and telemetry stay complete;
   // no deduction, no transaction row, never "insufficient".
-  if (await isSuperuser(userId)) {
+  if (await isBillingPrivileged(userId)) {
     try {
       const nabuflow = await import("./nabuflow-billing");
       await nabuflow.recordZeroChargeUsage(userId, {
@@ -167,7 +167,7 @@ export async function deductCreditsAtomic(
     } catch (err) {
       logger.error(
         { err, userId, taskId: opts.taskId ?? null, settlementKey: opts.settlementKey ?? null },
-        "Failed to record superuser zero-charge usage",
+        "Failed to record billing-privilege zero-charge usage",
       );
       if (opts.settlementKey) throw err;
     }

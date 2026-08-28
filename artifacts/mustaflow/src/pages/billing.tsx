@@ -552,8 +552,8 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Superuser-only: instant workspace plan switcher (no payment). */}
-        <SuperuserPlanSwitcher workspaceId={_workspaceId} />
+        {/* Billing-privilege-only: instant workspace plan switcher (no payment). */}
+        <BillingPrivilegePlanSwitcher workspaceId={_workspaceId} />
 
         {/* Tabs */}
         <div className="flex border-b border-border gap-1">
@@ -610,15 +610,15 @@ export default function BillingPage() {
   );
 }
 
-// ── Superuser-only workspace plan switcher ──────────────────────────────────
-// Renders nothing for normal users. For an allowlisted superuser it shows four
+// ── Billing-privilege-only workspace plan switcher ──────────────────────────
+// Renders nothing for normal users. For an allowlisted billing account it shows four
 // tier buttons (free/starter/pro/enterprise) that apply instantly with no
-// Stripe payment, via the Mode 2 checkout endpoint's superuser bypass.
+// Stripe payment, via the Mode 2 checkout endpoint's billing-privilege bypass.
 const WORKSPACE_PLAN_TIERS = ["free", "starter", "pro", "enterprise"] as const;
 
-function SuperuserPlanSwitcher({ workspaceId }: { workspaceId?: number }) {
+function BillingPrivilegePlanSwitcher({ workspaceId }: { workspaceId?: number }) {
   const { toast } = useToast();
-  const [isSuperuser, setIsSuperuser] = useState(false);
+  const [isBillingPrivileged, setIsBillingPrivileged] = useState(false);
   const [effectivePlan, setEffectivePlan] = useState<string | null>(null);
   const [applying, setApplying] = useState<string | null>(null);
 
@@ -627,8 +627,8 @@ function SuperuserPlanSwitcher({ workspaceId }: { workspaceId?: number }) {
     try {
       const res = await authFetch(`/api/billing/subscription/${workspaceId}`);
       if (!res.ok) return;
-      const data = (await res.json()) as { isSuperuser?: boolean; effectivePlan?: string };
-      setIsSuperuser(Boolean(data.isSuperuser));
+      const data = (await res.json()) as { isBillingPrivileged?: boolean; effectivePlan?: string };
+      setIsBillingPrivileged(Boolean(data.isBillingPrivileged));
       setEffectivePlan(data.effectivePlan ?? null);
     } catch {
       /* ignore */
@@ -685,7 +685,7 @@ function SuperuserPlanSwitcher({ workspaceId }: { workspaceId?: number }) {
     }
   }
 
-  if (!isSuperuser || !workspaceId) return null;
+  if (!isBillingPrivileged || !workspaceId) return null;
 
   return (
     <div className="border border-primary/30 bg-primary/5 rounded-xl p-5 space-y-3">

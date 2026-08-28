@@ -10,7 +10,7 @@
 //
 // COMPLETELY separate from Ora's free/core/wave tiers (user_subscriptions):
 // NabuFlow has NO free tier. Only the owner allow-list (BUILDER_ALLOWLIST) and
-// superusers bypass billing.
+// named billing-privilege accounts bypass billing.
 //
 // Credit calibration (margin protection): builds charge the provider-independent
 // `creditCostFor` prices — Pro 475, Pro+Deep 850, Power 160/290, Eco 34/60,

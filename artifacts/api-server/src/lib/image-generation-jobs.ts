@@ -39,7 +39,7 @@ import {
   IMAGE_RATE_LIMIT_PER_HOUR,
   IMAGE_DAILY_LIMIT,
 } from "../routes/image-credits";
-import { isSuperuser } from "./superusers";
+import { isBillingPrivileged } from "./billing-privileges";
 import { refundOraQuota } from "./public-ai/ora-usage";
 import {
   normalizeOraPlanTier,
@@ -227,7 +227,7 @@ export async function preflightImageJobs(
     .from(userCreditsTable)
     .where(eq(userCreditsTable.userId, userId));
   const balance = creditRow?.balance ?? 0;
-  if (balance < totalCost && !(await isSuperuser(userId))) {
+  if (balance < totalCost && !(await isBillingPrivileged(userId))) {
     throw Object.assign(
       new Error(
         `Insufficient credits: need ${totalCost} (${jobCount} × ${creditCostPer}) but have ${balance}.`,

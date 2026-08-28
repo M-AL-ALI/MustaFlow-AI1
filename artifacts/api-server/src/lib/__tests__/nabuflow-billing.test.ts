@@ -10,7 +10,7 @@
  *   - cycle math: charge splitting, rollover policy (Orbit none, Comet/Nova
  *     one cycle capped), simulated rollover resetting counters,
  *   - warning thresholds (50/80/100), overage pricing, spend-cap clamping,
- *   - bypass ordering: enforcement-off / test / superuser / allowlist — and
+ *   - bypass ordering: enforcement-off / test / billing privilege / allowlist — and
  *     the guarantee that NO test bypass can activate in production,
  *   - dunning transitions driven by invoice.payment_failed (retry → notify →
  *     pause), including the notification records.
@@ -116,8 +116,8 @@ vi.mock("@workspace/db", async () => {
   return { ...schema, db: h.mockDb };
 });
 
-vi.mock("../superusers", () => ({
-  isSuperuser: vi.fn(async () => false),
+vi.mock("../billing-privileges", () => ({
+  isBillingPrivileged: vi.fn(async () => false),
 }));
 
 vi.mock("../clerk-users", async () => ({
@@ -174,7 +174,7 @@ import {
   nabuflowEffectiveSpendCapCents,
   nabuflowUpgradeTarget,
 } from "../nabuflow-plans";
-import { isSuperuser } from "../superusers";
+import { isBillingPrivileged } from "../billing-privileges";
 import { getClerkUserById } from "../clerk-users";
 import { hasBuilderAccess } from "../builder-access";
 import { RERUN7_SUBSCRIPTION_UPDATE_INVOICE_PAID } from "./rerun7-subscription-update-invoice-paid.fixture";
@@ -256,7 +256,7 @@ beforeEach(() => {
   h.state.inserted = [];
   h.loggerWarn.mockClear();
   _clearNabuflowAllowlistCache();
-  vi.mocked(isSuperuser).mockResolvedValue(false);
+  vi.mocked(isBillingPrivileged).mockResolvedValue(false);
   vi.mocked(getClerkUserById).mockResolvedValue(null as never);
 });
 
@@ -759,11 +759,11 @@ describe("enforcement & bypass", () => {
     expect(decision.allowed).toBe(false);
   });
 
-  it("superuser bypasses everything (order: before allowlist and DB reads)", async () => {
+  it("billing privilege bypasses everything (order: before allowlist and DB reads)", async () => {
     process.env.CREDITS_ENFORCEMENT = "true";
-    vi.mocked(isSuperuser).mockResolvedValueOnce(true);
+    vi.mocked(isBillingPrivileged).mockResolvedValueOnce(true);
     const d = await resolveNabuflowBuildGate("user_super", { engineMode: "pro" });
-    expect(d).toEqual({ allowed: true, bypass: "superuser" });
+    expect(d).toEqual({ allowed: true, bypass: "billing_privilege" });
   });
 
   it("lets an allowlisted payer build while keeping that account chargeable", async () => {

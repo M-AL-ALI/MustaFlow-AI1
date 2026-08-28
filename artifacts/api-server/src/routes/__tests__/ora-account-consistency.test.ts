@@ -31,14 +31,13 @@ vi.mock("../../lib/clerk-users", () => ({
     imageUrl: null,
   })),
 }));
-vi.mock("../../lib/superusers", () => ({
-  isSuperuser: vi.fn(async () => false),
-  isSuperuserSync: vi.fn(() => false),
-  superuserEmails: vi.fn(() => []),
-  SUPERUSER_ORA_TIER: "core",
+vi.mock("../../lib/billing-privileges", () => ({
+  isBillingPrivileged: vi.fn(async () => false),
+  billingPrivilegeEmails: vi.fn(() => []),
+  BILLING_PRIVILEGE_ORA_TIER: "core",
 }));
 
-import { isSuperuser } from "../../lib/superusers";
+import { isBillingPrivileged } from "../../lib/billing-privileges";
 import { attachUser } from "../../lib/auth";
 import accountConsistencyRouter from "../ora-account-consistency";
 
@@ -181,7 +180,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  vi.mocked(isSuperuser).mockResolvedValue(false);
+  vi.mocked(isBillingPrivileged).mockResolvedValue(false);
 });
 
 describe("auth wall", () => {
@@ -272,9 +271,9 @@ describe("billing tier and chat tier always agree", () => {
 
 describe("superuser fallback raises the effective tier", () => {
   it("a superuser with no paid subscription resolves to the superuser tier", async () => {
-    vi.mocked(isSuperuser).mockResolvedValue(true);
+    vi.mocked(isBillingPrivileged).mockResolvedValue(true);
     const res = await request(appAs(USER_SUPER)).get("/ora/account-consistency");
-    expect(res.body.billing.isSuperuser).toBe(true);
+    expect(res.body.billing.isBillingPrivileged).toBe(true);
     expect(res.body.billing.sourceTier).toBe("free");
     expect(res.body.billing.billingTier).toBe("core");
     expect(res.body.chatSession.tier).toBe("core");

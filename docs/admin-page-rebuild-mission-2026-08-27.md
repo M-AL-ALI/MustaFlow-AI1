@@ -31,18 +31,18 @@ without evidence.
 
 ## Binding phase sequence
 
-| Phase | Scope                                                      | State                   |
-| ----- | ---------------------------------------------------------- | ----------------------- |
-| P0    | Read-only survey and owed identity decisions               | Accepted                |
-| P1    | Shell, navigation and KEEP-panel hierarchy                 | Complete / live         |
-| P2    | Panel declarations and developer-tool exile                | Complete / live         |
-| P3    | Drill-in for every number                                  | Candidate / in progress |
-| P4    | One Admin authority source                                 | Planned only            |
-| P5    | In-product and email consent delivery                      | Not authorized          |
-| P6    | Ticket identity, ownership and resolution                  | Not authorized          |
-| P7    | Per-project invitations, members, roles and presence       | Not authorized          |
-| P8    | Ticket-to-Zero and completed triage                        | Not authorized          |
-| P9    | Serving-tree operator walkthrough and documentation parity | Not authorized          |
+| Phase | Scope                                                      | State           |
+| ----- | ---------------------------------------------------------- | --------------- |
+| P0    | Read-only survey and owed identity decisions               | Accepted        |
+| P1    | Shell, navigation and KEEP-panel hierarchy                 | Complete / live |
+| P2    | Panel declarations and developer-tool exile                | Complete / live |
+| P3    | Drill-in for every number                                  | Complete / live |
+| P4    | One Admin authority source                                 | In progress     |
+| P5    | In-product and email consent delivery                      | Not authorized  |
+| P6    | Ticket identity, ownership and resolution                  | Not authorized  |
+| P7    | Per-project invitations, members, roles and presence       | Not authorized  |
+| P8    | Ticket-to-Zero and completed triage                        | Not authorized  |
+| P9    | Serving-tree operator walkthrough and documentation parity | Not authorized  |
 
 ## P0 acceptance record
 
@@ -57,7 +57,7 @@ without evidence.
   it.
 - The KEEP/EXILE/REBUILD panel census from P0 is binding for P2.
 
-## P4 authority amendment — planning only
+## P4 authority amendment — authorized 2026-08-28
 
 The current resolver has three competing Admin sources: hard-coded superuser email
 resolution, `ADMIN_USER_IDS`, and `user_roles`, in that order. P4 must produce this
@@ -75,7 +75,9 @@ lockout-safe end state:
 7. Use one typed resolver and cross-panel tests so Admin Me, Security and Launch
    Readiness cannot disagree.
 
-This amendment is recorded here but must not be implemented before P4 authorization.
+The founder authorized P4 as part of the remaining Admin Page sequence on 2026-08-28.
+Implementation is constrained to the lockout-safe order above and is accepted only
+after the serving tree, boot reconciliation receipts and all three Admin surfaces agree.
 
 ## Decisions and refusal paths
 
@@ -372,6 +374,18 @@ P3 is source- and suite-complete but not yet live-complete. The remaining gate
 is the exact merged-head release gate, production tree-identity proof, live
 four-card drill-in walkthrough, screenshots, and branch cleanup.
 
+### P3 live closure
+
+P3 closed live on production on 2026-08-28. The merged-head 22-check gate passed
+22/22 in the development workspace. Production `/api/version` returned commit
+`1f8b6999f659c998d8b151c61c895741f0947df1` and tree
+`e21ce8e5a8f14160af052e994082c1189d666f2b`; `/api/healthz` returned HTTP 200
+with every subsystem `ok` on three consecutive probes. The Projects, Published,
+Credit accounts and Transactions cards each opened their bounded record surface;
+the IRQ TEL filter resolved Project 52 in workspace 5; identities remained masked;
+and project entry remained consent-gated. The local and remote P3 branches were
+deleted and proven absent, and the permanent A-drive tree returned clean to main.
+
 ### P3 lab release-gate boundary
 
 The release profile ran on the exact merged candidate tree with database
@@ -390,3 +404,63 @@ it is not promoted to a pass. The publish remains blocked until the same
 workspace, where the development test database is present. Prevention: a lab
 release-gate receipt always names its database and cannot authorize publish
 when a database-bound check did not execute successfully.
+
+## P4 — one Admin authority source
+
+P4 replaces three request-time authority paths with one typed resolver over
+`user_roles`. The former billing/account allowlist no longer imports into Admin
+authorization and is named `billing-privileges`; its API and UI fields likewise
+describe billing privilege rather than a platform-wide superuser. `ADMIN_USER_IDS`
+is read only by the guarded boot reconciliation. It may create the first Owner only
+when the role ledger is empty, then migrates each resolved legacy identity into the
+ledger with one durable receipt. Every existing Owner receives an idempotent
+presence-proof receipt. The reconciliation is serialized by a transaction-scoped
+advisory lock, verifies at least one final Owner, rolls back on failure, and never
+reopens a request-time fallback.
+
+Admin Me now returns `authoritySource: user_roles`; Launch Readiness passes only on
+live staff rows; and the Admin and Trust surfaces name the same ledger. Last-Owner
+protection remains unchanged. No schema or migration-count change is introduced;
+the existing `user_roles` and `admin_access_receipts` tables carry the transition.
+
+### P4 lab verification
+
+Database: none. Environment: lab. Store: `A:/NabuFlowLab/.pnpm-store/v10`.
+Kind: serial test and static verification in the one permanent A-drive tree.
+
+- New and related focused API tests: 9 files, 123 tests passed.
+- P4 authority tests: 5 files, 15 tests passed, including the dormant-export gate.
+- Admin UI focused tests: 1 file, 3 tests passed.
+- Root typecheck and root lint passed.
+- API exact-base parity against the live P3 source: base 41 failed / 3,032 passed /
+  5 pending; candidate 41 failed / 3,037 passed / 5 pending; normalized added
+  failures 0 and removed failures 0. Failure fingerprint:
+  `8618bbc6a1ea44f0a4cf949012a04452563f71bb4bb647a83342e8512e0ee77f`.
+- Web exact-base parity: base 1,219 passed / 0 failed; candidate 1,220 passed /
+  0 failed.
+- Full-suite opening at `2026-08-28T14:29:55.9987449Z`: C free
+  `3,968,466,944` bytes; A free `74,502,230,016` bytes. Closing at
+  `2026-08-28T14:35:25.1023497Z`: C free `3,966,398,464` bytes; A free
+  `74,499,145,728` bytes. C remained above the standing floor.
+
+P4 is source- and lab-gate complete. Live closure still requires a pre-publish
+receipt proving an Owner already exists in production, the exact merged-head gate,
+boot reconciliation receipts, production tree identity, and an Owner/nonstaff
+cross-panel walkthrough.
+
+### P4 incidental finding and prevention
+
+The first candidate full API run exposed one new dormant-export failure:
+`isBillingPrivilegedSync` had been renamed but was not consumed by production code.
+It was removed rather than declared dormant. The dedicated reachability guard then
+passed, and the full suite returned to exact-base failure parity. This is the
+preventive: new runtime exports must have a production consumer or be explicitly
+declared dormant; an unused privilege predicate cannot quietly become a second
+authority surface.
+
+The first exact merged-head release gate then rejected the two Ora account-
+consistency files changed by the billing-privilege rename because the feature
+registry's billing-plan declaration did not name that route family. The registry
+now explicitly owns `ora-account-consistency`, so every future change to that
+cross-product billing view is routed through the account/billing manual checklist
+instead of passing as an unmatched Ora change.

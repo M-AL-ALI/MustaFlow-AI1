@@ -61,7 +61,7 @@ router.get("/admin/me", async (req, res): Promise<void> => {
     userId: principal.userId,
     role: principal.role,
     isAdmin: true,
-    grantedViaEnv: principal.source !== "database",
+    authoritySource: principal.source,
     grantedBy: principal.grantedBy,
   });
 });
@@ -522,14 +522,13 @@ router.get("/admin/launch-readiness", async (_req, res): Promise<void> => {
     .from(userRolesTable)
     .where(sql`role IN ('owner','operator','support','analyst')`);
   const hasDbAdmins = (adminRoleRow?.total ?? 0) > 0;
-  const hasEnvAdmins = Boolean(process.env.ADMIN_USER_IDS?.trim());
   check(
     "admin_rbac",
     "Admin RBAC active",
-    hasDbAdmins || hasEnvAdmins ? "pass" : "fail",
-    hasDbAdmins || hasEnvAdmins
-      ? `Admin RBAC is active. ${hasEnvAdmins ? "ADMIN_USER_IDS env var set." : ""} ${hasDbAdmins ? `${adminRoleRow?.total} DB admin grant(s).` : ""}`.trim()
-      : "No admin users configured. Set ADMIN_USER_IDS env var or grant a role via POST /api/admin/roles.",
+    hasDbAdmins ? "pass" : "fail",
+    hasDbAdmins
+      ? `Admin RBAC is active with ${adminRoleRow?.total} user_roles grant(s).`
+      : "No Admin Page users are present in user_roles. Use the guarded Owner bootstrap or have an Owner grant a role.",
   );
 
   // 3. AES encryption

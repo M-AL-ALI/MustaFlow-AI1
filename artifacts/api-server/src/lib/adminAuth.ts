@@ -5,15 +5,7 @@
 import { eq } from "drizzle-orm";
 import { adminAccessReceiptsTable, db, userRolesTable, type StaffRole } from "@workspace/db";
 import type { Request, Response, NextFunction } from "express";
-import { isSuperuser } from "./superusers";
 import { logger } from "./logger";
-
-const ADMIN_USER_IDS: Set<string> = new Set(
-  (process.env.ADMIN_USER_IDS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean),
-);
 
 const STAFF_ROLE_SET = new Set<StaffRole>(["owner", "operator", "support", "analyst"]);
 const RECEIPT_ATTACHED = Symbol("admin-receipt-attached");
@@ -21,7 +13,7 @@ const RECEIPT_ATTACHED = Symbol("admin-receipt-attached");
 export type StaffPrincipal = {
   userId: string;
   role: StaffRole;
-  source: "environment" | "superuser" | "database";
+  source: "user_roles";
   grantedBy: string | null;
 };
 
@@ -57,19 +49,12 @@ function asStaffRole(value: string | null | undefined): StaffRole | null {
 }
 
 export async function resolveStaffPrincipal(userId: string): Promise<StaffPrincipal | null> {
-  if (await isSuperuser(userId)) {
-    return { userId, role: "owner", source: "superuser", grantedBy: null };
-  }
-  if (ADMIN_USER_IDS.has(userId)) {
-    return { userId, role: "owner", source: "environment", grantedBy: null };
-  }
-
   const [row] = await db
     .select({ role: userRolesTable.role, grantedBy: userRolesTable.grantedBy })
     .from(userRolesTable)
     .where(eq(userRolesTable.userId, userId));
   const role = asStaffRole(row?.role);
-  return role ? { userId, role, source: "database", grantedBy: row?.grantedBy ?? null } : null;
+  return role ? { userId, role, source: "user_roles", grantedBy: row?.grantedBy ?? null } : null;
 }
 
 /** Compatibility predicate used by non-console safety overrides. */

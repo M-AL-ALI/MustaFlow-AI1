@@ -28,7 +28,6 @@ vi.mock("@workspace/db", () => ({
     })),
   },
 }));
-vi.mock("./superusers", () => ({ isSuperuser: vi.fn(async () => false) }));
 vi.mock("./logger", () => ({ logger: { error: vi.fn() } }));
 
 import { requireAdmin, staffRoleAllowsRequest } from "./adminAuth";
@@ -95,6 +94,7 @@ describe("Admin Page access foundation", () => {
     expect(result.statusCode).toBe(200);
     expect(next).toHaveBeenCalledOnce();
     expect(req.staffPrincipal?.role).toBe("owner");
+    expect(req.staffPrincipal?.source).toBe("user_roles");
     expect(state.receipts).toEqual([
       expect.objectContaining({
         actorUserId: "user_test",

@@ -6,6 +6,7 @@ const sourceRoot = resolve(process.cwd(), "src");
 const pageSource = readFileSync(resolve(sourceRoot, "pages/admin.tsx"), "utf8");
 const appSource = readFileSync(resolve(sourceRoot, "App.tsx"), "utf8");
 const sidebarSource = readFileSync(resolve(sourceRoot, "components/layout/sidebar.tsx"), "utf8");
+const trustSource = readFileSync(resolve(sourceRoot, "pages/trust.tsx"), "utf8");
 
 describe("Admin Page shell", () => {
   it("names the operator console and shows the four-role allowlist only to Owners", () => {
@@ -26,5 +27,12 @@ describe("Admin Page shell", () => {
     expect(sidebarSource).toContain("Admin Page");
     expect(appSource).toContain("useGetAdminMe()");
     expect(appSource).toContain("meQuery.error.status === 404");
+  });
+
+  it("names the same user_roles authority on the Admin and Trust surfaces", () => {
+    expect(pageSource).toContain("Authority is read from the Admin");
+    expect(pageSource).not.toContain("granted via ADMIN_USER_IDS");
+    expect(trustSource).toContain("server-side user_roles ledger");
+    expect(trustSource).not.toContain("ADMIN_USER_IDS");
   });
 });

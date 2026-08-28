@@ -76,7 +76,7 @@ import {
   snapshotCustomerCard,
   switchNabuflowStripePlan,
 } from "../lib/nabuflow-stripe";
-import { isSuperuser } from "../lib/superusers";
+import { isBillingPrivileged } from "../lib/billing-privileges";
 import { ensureStripeCustomer } from "./billing";
 import { logger } from "../lib/logger";
 
@@ -946,7 +946,7 @@ router.patch("/billing/nabuflow/org", async (req, res): Promise<void> => {
     if (parsed.data.invoiceTermsEnabled !== undefined) {
       // "Invoice with terms WHERE ENABLED": terms are a platform-granted
       // capability (credit exposure), not self-serve — owner flips it.
-      if (!(await isSuperuser(userId))) {
+      if (!(await isBillingPrivileged(userId))) {
         res.status(403).json({
           error:
             "Invoice terms are enabled by the NabuFlow team — get in touch and we'll set it up.",

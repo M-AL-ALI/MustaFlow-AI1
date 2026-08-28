@@ -6991,7 +6991,7 @@ export const GetAdminMeResponse = zod.object({
   "userId": zod.string(),
   "role": zod.enum(['owner', 'operator', 'support', 'analyst']),
   "isAdmin": zod.boolean(),
-  "grantedViaEnv": zod.boolean(),
+  "authoritySource": zod.literal("user_roles"),
   "grantedBy": zod.string().nullish()
 })
 
@@ -8626,5 +8626,4 @@ export const EscalateSupportBody = zod.object({
 })).optional(),
   "deviceInfo": zod.record(zod.string(), zod.unknown()).nullish()
 })
-
 

@@ -1302,12 +1302,12 @@ export interface OraAccountConsistency {
     host: string | null;
   };
   billing: {
-    /** Effective tier after subscription status + superuser fallback. */
+    /** Effective tier after subscription status + billing-privilege fallback. */
     billingTier: string;
     /** Raw subscription tier on file ("free" when no subscription row). */
     sourceTier: string;
     status: string | null;
-    isSuperuser: boolean;
+    isBillingPrivileged: boolean;
     currentPeriodEnd: string | null;
     cancelAtPeriodEnd: boolean;
   };
