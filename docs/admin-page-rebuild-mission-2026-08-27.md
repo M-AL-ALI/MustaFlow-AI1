@@ -526,6 +526,18 @@ accept a P5 message, the UI must show `failed` and the phase does not close.
    `tsc --build --force` step rebuilt the declaration and remains the structural
    preventive; every merged head must pass that forced library build before
    publication.
+4. Replit's required database-change preview booted the exact P5 tree but its
+   public health receipt stayed at `startupMigrations: error` and
+   `queueSchemaContract: error`; its Clerk script proxy returned HTTP 500 and the
+   page rendered no content. Replit's deployment-log interface cannot select the
+   private-preview host or build, so production's healthy boot logs were rejected
+   as evidence. Two pre-existing environment assumptions were corrected without
+   changing canonical production behavior: the existing nonsecret production
+   adoption owner is now present in the shared Replit environment used by database
+   previews, while `.kirk.prod.repl.run` preview hosts use Clerk's publishable-key
+   endpoint directly instead of the canonical production proxy. Structural tests
+   pin both configuration paths. A fresh private preview must prove the correction
+   before P5 can be approved for production.
 
 ### P5 lab verification
 

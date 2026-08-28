@@ -12,6 +12,7 @@ import { ClerkUserProvider, ClerkActionsProvider } from "@/lib/clerk-safe";
 import { resolveBuilderAccess } from "@/lib/builder-flag";
 import { prepareBuilderIsolation } from "@/lib/builder-isolation";
 import { publishableKeyFromHost } from "@clerk/react/internal";
+import { resolveClerkProxyUrl } from "./lib/clerk-proxy-url";
 import { shadcn } from "@clerk/themes";
 import {
   useGetAdminMe,
@@ -102,7 +103,10 @@ const clerkPubKey = publishableKeyFromHost(
 
 // REQUIRED — empty in dev (Clerk hits FAPI directly), auto-populated in prod.
 // Do NOT gate on NODE_ENV / import.meta.env.PROD — the empty string is intentional.
-const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
+const clerkProxyUrl = resolveClerkProxyUrl(
+  window.location.hostname,
+  import.meta.env.VITE_CLERK_PROXY_URL,
+);
 
 function stripBase(path: string): string {
   return basePath && path.startsWith(basePath) ? path.slice(basePath.length) || "/" : path;
