@@ -8,7 +8,11 @@ import {
   agentTasksTable,
   projectActivityTable,
 } from "@workspace/db";
-import { requireProjectOwnership, requireProjectAccess } from "../lib/auth";
+import {
+  listAccessibleProjectIds,
+  requireProjectOwnership,
+  requireProjectAccess,
+} from "../lib/auth";
 import {
   CreateProjectBody,
   GetProjectParams,
@@ -144,9 +148,14 @@ router.get("/projects", async (req, res): Promise<void> => {
     return;
   }
   const userId = req.userId;
+  const accessibleIds = await listAccessibleProjectIds(userId, "viewer");
+  if (accessibleIds.length === 0) {
+    res.json([]);
+    return;
+  }
   const wsId = req.query.workspaceId ? parseInt(req.query.workspaceId as string, 10) : null;
   const mode = req.query.mode as string | undefined;
-  const conditions: SQL[] = [eq(projectsTable.ownerId, userId), activeProjects];
+  const conditions: SQL[] = [inArray(projectsTable.id, accessibleIds), activeProjects];
   if (wsId && !isNaN(wsId)) conditions.push(eq(projectsTable.workspaceId, wsId));
   if (mode === "developer" || mode === "builder") {
     conditions.push(eq(projectsTable.projectMode, mode));
@@ -170,10 +179,14 @@ router.get("/projects/summary", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Unauthenticated" });
     return;
   }
-  const rows = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.ownerId, req.userId), activeProjects));
+  const accessibleIds = await listAccessibleProjectIds(req.userId, "viewer");
+  const rows =
+    accessibleIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(projectsTable)
+          .where(and(inArray(projectsTable.id, accessibleIds), activeProjects));
 
   const byStatus: Record<string, number> = {};
   const byKind: Record<string, number> = {};

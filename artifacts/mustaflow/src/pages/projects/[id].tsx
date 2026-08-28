@@ -187,6 +187,7 @@ import {
 } from "./components/inline-activity-stream";
 import { ZeroAvatar } from "./components/zero-avatar";
 import { ProjectPresence, workspacePresenceLocation } from "./components/project-presence";
+import { ProjectCollaboration } from "./components/project-collaboration";
 import { ProjectSupportAccess } from "./components/project-support-access";
 import { InlineRunGroup, PersistedRunReplay } from "./components/inline-run-group";
 import {
@@ -3534,6 +3535,7 @@ export default function ProjectWorkspacePage() {
         </div>
         <div className="flex-1" />
         <div className="flex items-center gap-1.5 shrink-0">
+          <ProjectCollaboration projectId={projectId} />
           <button
             type="button"
             onClick={() => setCommandPaletteOpen(true)}

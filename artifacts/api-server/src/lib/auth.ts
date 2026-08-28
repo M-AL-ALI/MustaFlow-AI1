@@ -5,6 +5,7 @@ import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import {
   db,
   projectsTable,
+  projectCollaboratorsTable,
   orgMembersTable,
   organizationsTable,
   oraxDesktopSessionsTable,
@@ -229,6 +230,17 @@ function roleMeets(actual: string, minimum: ProjectRole): boolean {
   return actualRank >= ROLE_RANK[minimum];
 }
 
+const COLLABORATOR_ROLE_RANK: Record<string, number> = {
+  viewer: ROLE_RANK.viewer,
+  editor: ROLE_RANK.member,
+  publisher: ROLE_RANK.admin,
+  owner: ROLE_RANK.owner,
+};
+
+function collaboratorRoleMeets(actual: string, minimum: ProjectRole): boolean {
+  return (COLLABORATOR_ROLE_RANK[actual] ?? 0) >= ROLE_RANK[minimum];
+}
+
 export type ProjectAccessDecision = "granted" | "not_found" | "not_member" | "insufficient_role";
 
 /**
@@ -251,7 +263,22 @@ export async function checkProjectAccess(
 
   if (project?.ownerId === userId) return "granted";
 
-  const organizationId = project?.organizationId ?? -1;
+  if (!project) return "not_found";
+
+  const [collaborator] = await db
+    .select({ role: projectCollaboratorsTable.role })
+    .from(projectCollaboratorsTable)
+    .where(
+      and(
+        eq(projectCollaboratorsTable.projectId, projectId),
+        eq(projectCollaboratorsTable.userId, userId),
+      ),
+    );
+  if (collaborator) {
+    return collaboratorRoleMeets(collaborator.role, minRole) ? "granted" : "insufficient_role";
+  }
+
+  const organizationId = project.organizationId ?? -1;
   const [member] = await db
     .select({ role: orgMembersTable.role })
     .from(orgMembersTable)
@@ -264,7 +291,6 @@ export async function checkProjectAccess(
       ),
     );
 
-  if (!project) return "not_found";
   if (!member) return "not_member";
   return roleMeets(member.role, minRole) ? "granted" : "insufficient_role";
 }
@@ -290,11 +316,25 @@ export async function listAccessibleProjectIds(
           inArray(projectsTable.organizationId, organizationIds),
         )
       : eq(projectsTable.ownerId, userId);
-  const rows = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(and(accessCondition!, isNull(projectsTable.deletedAt)));
-  return rows.map((row) => row.id);
+  const [rows, collaboratorRows] = await Promise.all([
+    db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(and(accessCondition!, isNull(projectsTable.deletedAt))),
+    db
+      .select({ id: projectCollaboratorsTable.projectId, role: projectCollaboratorsTable.role })
+      .from(projectCollaboratorsTable)
+      .innerJoin(projectsTable, eq(projectsTable.id, projectCollaboratorsTable.projectId))
+      .where(and(eq(projectCollaboratorsTable.userId, userId), isNull(projectsTable.deletedAt))),
+  ]);
+  return Array.from(
+    new Set([
+      ...rows.map((row) => row.id),
+      ...collaboratorRows
+        .filter((row) => collaboratorRoleMeets(row.role, minRole))
+        .map((row) => row.id),
+    ]),
+  );
 }
 
 export function requireProjectAccess(minRole: ProjectRole = "viewer"): RequestHandler {

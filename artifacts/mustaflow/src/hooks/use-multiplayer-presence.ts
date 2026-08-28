@@ -100,8 +100,12 @@ export function useMultiplayerPresence(
           return;
         }
         if (!msg.type) return;
-        if (msg.type === "error" || msg.type === "grant_closed") {
+        if (msg.type === "error" || msg.type === "grant_closed" || msg.type === "access_removed") {
           setMessage(typeof msg.message === "string" ? msg.message : "Presence is unavailable.");
+          if (msg.type === "access_removed") {
+            setPeers([]);
+            setSelf(null);
+          }
           return;
         }
         if (msg.type === "hello") {

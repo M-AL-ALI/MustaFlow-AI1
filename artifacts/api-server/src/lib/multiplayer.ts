@@ -390,6 +390,23 @@ export function createMultiplayerServer(): MultiplayerServer {
           }, 2_000)
         : null;
     grantWatch?.unref?.();
+    const collaboratorWatch =
+      peer.kind !== "staff"
+        ? setInterval(() => {
+            void checkProjectAccess(peer.userId, projectId, "viewer")
+              .then((decision) => {
+                if (decision !== "granted") {
+                  sendJson(ws, {
+                    type: "access_removed",
+                    message: "Your access to this project has ended.",
+                  });
+                  ws.close(4403, "Project access ended");
+                }
+              })
+              .catch(() => ws.close(4413, "Project access could not be verified"));
+          }, 2_000)
+        : null;
+    collaboratorWatch?.unref?.();
     const livenessWatch = setInterval(() => {
       if (Date.now() - lastSeenAt > 12_000) {
         ws.terminate();
@@ -404,6 +421,7 @@ export function createMultiplayerServer(): MultiplayerServer {
       if (cleaned) return;
       cleaned = true;
       if (grantWatch) clearInterval(grantWatch);
+      if (collaboratorWatch) clearInterval(collaboratorWatch);
       clearInterval(livenessWatch);
       room.doc.off("update", docUpdateHandler);
       room.awareness.off("change", awarenessChangeHandler);

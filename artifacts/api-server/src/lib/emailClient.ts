@@ -21,6 +21,7 @@ import {
   lowCreditTemplate,
   domainRenewalWarningTemplate,
   orgInviteTemplate,
+  projectInviteTemplate,
   domainRenewalFailureTemplate,
   nabuflowUsageWarningTemplate,
   nabuflowPaymentFailedTemplate,
@@ -183,6 +184,18 @@ export async function sendOrgInvite(opts: {
   const { to, ...rest } = opts;
   const tmpl = orgInviteTemplate(rest);
   await sendEmail({ to, ...tmpl });
+}
+
+export async function sendProjectInvite(opts: {
+  to: string;
+  projectName: string;
+  inviterName: string | null;
+  role: string;
+  acceptUrl: string;
+  expiresAt: Date;
+}): Promise<EmailDeliveryStatus> {
+  const { to, ...rest } = opts;
+  return sendEmailWithStatus({ to, ...projectInviteTemplate(rest) });
 }
 
 export async function sendGdprDeletionConfirmation(opts: {
