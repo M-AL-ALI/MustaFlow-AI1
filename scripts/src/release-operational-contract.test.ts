@@ -26,6 +26,21 @@ assert.equal(
   "tsx ./src/verify-production-release.ts",
 );
 assert.equal(gateSource.includes("--minWorkers"), false);
+assert.equal(
+  gateSource.includes("/^artifacts\\/mustaflow\\/src\\/pages\\/.*ora/i"),
+  false,
+  "Ora file discovery must not match unrelated words such as collaboration",
+);
+for (const requiredRegistryGuard of [
+  "/^artifacts\\/mustaflow\\/src\\/pages\\/(?:.*\\/)?ora(?:x)?(?:[-./]|$)/i",
+  "/^artifacts\\/mustaflow\\/src\\/pages\\/projects\\/components\\/(?:collaboration-card|project-collaboration)/i",
+  "/project-collaboration/i",
+]) {
+  assert.ok(
+    gateSource.includes(requiredRegistryGuard),
+    `missing feature-registry path guard: ${requiredRegistryGuard}`,
+  );
+}
 
 for (const checkpointGuard of [
   "ora-stability-gate-checkpoint-v1",
