@@ -799,3 +799,11 @@ P7 incidental findings closed before commit:
    did not say the email failed. The surface now names delivery failure plainly and
    tells the owner to copy the already-created private link. A UI guard pins that
    refusal copy.
+4. The first exact merged-head release gate classified `project-collaboration` as
+   Ora only because its broad page matcher found the letters `ora` inside the word
+   `collaboration`; the two collaboration UI files then had no honest registry
+   owner. Ora discovery now uses a token-bound `ora`/`orax` path rule, collaboration
+   files have an explicit path and `auth-compliance-support` owner, and the release
+   operational contract forbids the old broad matcher while requiring both new
+   declarations. The evidence run passed 21 checks and failed only
+   `feature-registry`; publication remained blocked as designed.
