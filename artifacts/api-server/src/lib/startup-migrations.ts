@@ -247,6 +247,33 @@ export async function applySupportOperationsMigration(client: MigrationClient): 
           ON shared_profile_migration_receipts(outcome, migrated_at)
       `);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS support_user_deliveries (
+        id                   SERIAL PRIMARY KEY,
+        ticket_id            INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        project_id           INTEGER,
+        recipient_user_id    TEXT NOT NULL,
+        recipient_email      TEXT,
+        kind                 TEXT NOT NULL,
+        notification_id      INTEGER REFERENCES notifications(id) ON DELETE SET NULL,
+        email_status         TEXT NOT NULL DEFAULT 'pending',
+        email_failure_reason TEXT,
+        created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at         TIMESTAMPTZ,
+        CONSTRAINT support_user_deliveries_kind_check
+          CHECK (kind IN ('access_request','proposal_ready','ticket_classified','ticket_reply','platform_fix_verified','project_fix_verified','external_guidance')),
+        CONSTRAINT support_user_deliveries_email_status_check
+          CHECK (email_status IN ('pending','sent','delivered','failed'))
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_user_deliveries_ticket_created_idx
+        ON support_user_deliveries(ticket_id, created_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_user_deliveries_recipient_created_idx
+        ON support_user_deliveries(recipient_user_id, created_at)
+    `);
+    await client.query(`
         ALTER TABLE chat_messages
           ADD COLUMN IF NOT EXISTS support_session_id INTEGER,
           ADD COLUMN IF NOT EXISTS provenance_actor_user_id TEXT

@@ -51,6 +51,30 @@ export type PlatformDefectImpactView = {
   linkedTicketCount: number;
 };
 
+export type SupportUserDeliveryView = {
+  id: number;
+  ticketId: number;
+  projectId?: number | null;
+  kind: string;
+  emailStatus: "pending" | "sent" | "delivered" | "failed";
+  emailFailureReason?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+};
+
+export function presentSupportEmailStatus(status: SupportUserDeliveryView["emailStatus"]): string {
+  switch (status) {
+    case "pending":
+      return "email pending";
+    case "sent":
+      return "email accepted by provider";
+    case "delivered":
+      return "email delivered";
+    case "failed":
+      return "email failed";
+  }
+}
+
 export type SupportOperationsView = {
   ticket: {
     id: number;
@@ -65,6 +89,7 @@ export type SupportOperationsView = {
   sessions: SupportZeroSessionView[];
   defects: PlatformDefectView[];
   defectImpact?: PlatformDefectImpactView[];
+  deliveries: SupportUserDeliveryView[];
 };
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {

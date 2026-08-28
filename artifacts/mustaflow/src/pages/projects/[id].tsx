@@ -187,6 +187,7 @@ import {
 } from "./components/inline-activity-stream";
 import { ZeroAvatar } from "./components/zero-avatar";
 import { ProjectPresence, workspacePresenceLocation } from "./components/project-presence";
+import { ProjectSupportAccess } from "./components/project-support-access";
 import { InlineRunGroup, PersistedRunReplay } from "./components/inline-run-group";
 import {
   appendRecoveryStep,
@@ -3610,6 +3611,8 @@ export default function ProjectWorkspacePage() {
           )}
         </div>
       </div>
+
+      <ProjectSupportAccess projectId={projectId} />
 
       {/* ── Pre-flight failure banner ── */}
       {preflightBanner &&

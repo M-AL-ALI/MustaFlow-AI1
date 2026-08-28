@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, Loader2, ShieldCheck, Wrench } from "lucide-react";
+import { CheckCircle2, ExternalLink, Loader2, MailCheck, ShieldCheck, Wrench } from "lucide-react";
 import {
   getAdminSupportOperations,
   postSupportOperation,
+  presentSupportEmailStatus,
   type SupportOperationsView,
 } from "@/lib/support-operations";
 import { ProjectPresence } from "@/pages/projects/components/project-presence";
@@ -173,6 +174,27 @@ export function SupportOperationConsole({ ticketId }: { ticketId: number }) {
           }
         >
           {feedback.text}
+        </div>
+      )}
+
+      {operations && operations.deliveries.length > 0 && (
+        <div className="rounded-lg border border-border bg-background p-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <MailCheck className="h-4 w-4" /> User delivery receipts
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Every user-facing action records its in-product notice and email result.
+          </p>
+          <ol className="mt-2 space-y-1.5">
+            {operations.deliveries.slice(0, 8).map((delivery) => (
+              <li key={delivery.id} className="text-xs text-muted-foreground">
+                {delivery.kind.replaceAll("_", " ")} ·{" "}
+                {presentSupportEmailStatus(delivery.emailStatus)}
+                {delivery.emailFailureReason ? ` — ${delivery.emailFailureReason}` : ""} ·{" "}
+                {new Date(delivery.createdAt).toLocaleString()}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
 

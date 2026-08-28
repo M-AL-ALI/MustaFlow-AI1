@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lte } from "drizzle-orm";
 import { z } from "zod";
 import {
   db,
@@ -11,11 +11,14 @@ import {
 import { requireAdmin, writeAdminReceipt } from "../lib/adminAuth";
 import { resolveStaffPrincipal } from "../lib/adminAuth";
 import { getSharedAccountProfile } from "../lib/clerk-users";
+import { supportAccessRequestTemplate } from "../lib/emailTemplates";
 import {
   effectiveSupportGrantStatus,
   MAX_SUPPORT_GRANT_MS,
+  presentSupportGrants,
   recordSupportGrantEvent,
 } from "../lib/support-access";
+import { deliverSupportConsequence, supportProductUrl } from "../lib/support-user-delivery";
 
 const router: IRouter = Router();
 
@@ -66,7 +69,9 @@ router.post(
       .select({
         id: supportTicketsTable.id,
         userId: supportTicketsTable.userId,
+        userEmail: supportTicketsTable.userEmail,
         projectId: supportTicketsTable.projectId,
+        projectName: projectsTable.name,
         projectOwnerId: projectsTable.ownerId,
       })
       .from(supportTicketsTable)
@@ -80,6 +85,29 @@ router.post(
       return;
     }
     try {
+      const now = new Date();
+      const expiredOpenGrants = await db
+        .update(supportAccessGrantsTable)
+        .set({ status: "expired", closedAt: now })
+        .where(
+          and(
+            eq(supportAccessGrantsTable.ticketId, ticketId),
+            inArray(supportAccessGrantsTable.status, ["pending", "active"]),
+            lte(supportAccessGrantsTable.expiresAt, now),
+          ),
+        )
+        .returning();
+      for (const expiredGrant of expiredOpenGrants) {
+        await recordSupportGrantEvent({
+          grantId: expiredGrant.id,
+          ticketId,
+          projectId: expiredGrant.projectId,
+          actorUserId: req.userId!,
+          event: "grant_expired_before_new_request",
+          detail: { expiredAt: now.toISOString() },
+        });
+      }
+      const requestExpiresAt = new Date(Date.now() + MAX_SUPPORT_GRANT_MS);
       const [grant] = await db
         .insert(supportAccessGrantsTable)
         .values({
@@ -90,6 +118,7 @@ router.post(
           requestedBy: req.userId!,
           reason: parsed.data.reason,
           status: "pending",
+          expiresAt: requestExpiresAt,
         })
         .returning();
       await recordSupportGrantEvent({
@@ -103,9 +132,34 @@ router.post(
           staffUserId: requestedStaffId,
           staffDisplayName: requestedIdentity.displayName,
           staffImageUrl: requestedIdentity.imageUrl,
+          requestExpiresAt: requestExpiresAt.toISOString(),
         },
       });
-      res.status(201).json({ grant });
+      const email = supportAccessRequestTemplate({
+        ticketId,
+        projectName: ticket.projectName ?? `Project #${ticket.projectId}`,
+        staffName: requestedIdentity.displayName,
+        reason: parsed.data.reason,
+        requestExpiresAt,
+        decisionUrl: supportProductUrl(`/support/tickets/${ticketId}`),
+      });
+      const delivery = await deliverSupportConsequence({
+        ticketId,
+        projectId: ticket.projectId,
+        recipientUserId: ticket.userId,
+        recipientEmail: ticket.userEmail,
+        actorUserId: req.userId!,
+        actorName: requestedIdentity.displayName,
+        kind: "access_request",
+        notification: {
+          type: "support_access_requested",
+          title: `${requestedIdentity.displayName} is requesting project access`,
+          body: `${ticket.projectName ?? `Project #${ticket.projectId}`}: ${parsed.data.reason}`,
+          metadata: { requestExpiresAt: requestExpiresAt.toISOString(), grantId: grant!.id },
+        },
+        email,
+      });
+      res.status(201).json({ grant, delivery });
     } catch (error) {
       const code = (error as { code?: string } | null)?.code;
       if (code === "23505") {
@@ -128,6 +182,68 @@ router.get("/support/access-requests", async (req, res): Promise<void> => {
   res.json({
     grants: rows.map((row) => ({ ...row, status: effectiveSupportGrantStatus(row, now) })),
   });
+});
+
+router.get("/support/projects/:id/access-history", async (req, res): Promise<void> => {
+  const projectId = Number(req.params.id);
+  if (!Number.isSafeInteger(projectId) || projectId < 1) {
+    res.status(400).json({ error: "Choose a valid project." });
+    return;
+  }
+  const [project] = await db
+    .select({ id: projectsTable.id })
+    .from(projectsTable)
+    .where(
+      and(
+        eq(projectsTable.id, projectId),
+        eq(projectsTable.ownerId, req.userId!),
+        isNull(projectsTable.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!project) {
+    res.status(404).json({ error: "Project not found." });
+    return;
+  }
+  const grants = await db
+    .select()
+    .from(supportAccessGrantsTable)
+    .where(
+      and(
+        eq(supportAccessGrantsTable.projectId, projectId),
+        eq(supportAccessGrantsTable.ownerUserId, req.userId!),
+      ),
+    )
+    .orderBy(desc(supportAccessGrantsTable.requestedAt))
+    .limit(50);
+  const events =
+    grants.length === 0
+      ? []
+      : await db
+          .select()
+          .from(supportGrantEventsTable)
+          .where(
+            inArray(
+              supportGrantEventsTable.grantId,
+              grants.map((grant) => grant.id),
+            ),
+          )
+          .orderBy(desc(supportGrantEventsTable.createdAt))
+          .limit(500);
+  const staffProfiles = Object.fromEntries(
+    await Promise.all(
+      [...new Set(grants.map((grant) => grant.staffUserId))].map(async (staffUserId) => {
+        const profile = await getSharedAccountProfile(staffUserId);
+        return [
+          staffUserId,
+          profile
+            ? { displayName: profile.displayName, imageUrl: profile.imageUrl }
+            : { displayName: null, imageUrl: null },
+        ];
+      }),
+    ),
+  );
+  res.json({ grants: presentSupportGrants(grants), events, staffProfiles });
 });
 
 const decisionSchema = z
@@ -163,6 +279,10 @@ router.post("/support/access-requests/:id/decision", async (req, res): Promise<v
     return;
   }
   const now = new Date();
+  if (effectiveSupportGrantStatus(grant, now) === "expired") {
+    res.status(410).json({ error: "This access request has expired. Nothing was granted." });
+    return;
+  }
   const expiresAt =
     parsed.data.decision === "grant"
       ? new Date(

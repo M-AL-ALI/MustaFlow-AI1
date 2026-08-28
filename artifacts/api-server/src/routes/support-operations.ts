@@ -15,6 +15,7 @@ import {
   supportGrantEventsTable,
   supportTicketDefectLinksTable,
   supportTicketsTable,
+  supportUserDeliveriesTable,
   supportZeroSessionsTable,
 } from "@workspace/db";
 import { requireAdmin, writeAdminReceipt } from "../lib/adminAuth";
@@ -25,6 +26,8 @@ import {
   recordSupportGrantEvent,
 } from "../lib/support-access";
 import { getServedBuildIdentity } from "../lib/build-info";
+import { supportClassificationTemplate } from "../lib/emailTemplates";
+import { deliverSupportConsequence, supportProductUrl } from "../lib/support-user-delivery";
 
 const router: IRouter = Router();
 
@@ -145,6 +148,7 @@ async function readTicket(ticketId: number) {
     .select({
       id: supportTicketsTable.id,
       userId: supportTicketsTable.userId,
+      userEmail: supportTicketsTable.userEmail,
       subject: supportTicketsTable.subject,
       category: supportTicketsTable.category,
       status: supportTicketsTable.status,
@@ -239,7 +243,7 @@ router.get(
       res.status(404).json({ error: "Ticket not found." });
       return;
     }
-    const [grants, sessions, links, grantEvents] = await Promise.all([
+    const [grants, sessions, links, grantEvents, deliveries] = await Promise.all([
       db
         .select()
         .from(supportAccessGrantsTable)
@@ -261,6 +265,12 @@ router.get(
         )
         .where(eq(supportTicketDefectLinksTable.ticketId, ticketId)),
       readGrantEvents(ticketId),
+      db
+        .select()
+        .from(supportUserDeliveriesTable)
+        .where(eq(supportUserDeliveriesTable.ticketId, ticketId))
+        .orderBy(desc(supportUserDeliveriesTable.createdAt))
+        .limit(100),
     ]);
     const defects = links.map((row) => row.defect);
     const defectImpact = await readDefectImpact(defects.map((defect) => defect.id));
@@ -271,6 +281,7 @@ router.get(
       sessions,
       defects,
       defectImpact,
+      deliveries,
     });
   },
 );
@@ -286,7 +297,7 @@ router.get("/support/tickets/:id/operations", async (req, res): Promise<void> =>
     res.status(404).json({ error: "Support ticket not found." });
     return;
   }
-  const [grants, sessions, defects, grantEvents] = await Promise.all([
+  const [grants, sessions, defects, grantEvents, deliveries] = await Promise.all([
     db
       .select()
       .from(supportAccessGrantsTable)
@@ -308,6 +319,12 @@ router.get("/support/tickets/:id/operations", async (req, res): Promise<void> =>
       )
       .where(eq(supportTicketDefectLinksTable.ticketId, ticketId)),
     readGrantEvents(ticketId),
+    db
+      .select()
+      .from(supportUserDeliveriesTable)
+      .where(eq(supportUserDeliveriesTable.ticketId, ticketId))
+      .orderBy(desc(supportUserDeliveriesTable.createdAt))
+      .limit(100),
   ]);
   res.json({
     ticket,
@@ -315,6 +332,7 @@ router.get("/support/tickets/:id/operations", async (req, res): Promise<void> =>
     grantEvents,
     sessions,
     defects: defects.map((row) => row.defect),
+    deliveries,
   });
 });
 
@@ -367,17 +385,6 @@ router.post("/admin/support-tickets/:id/triage", requireAdmin, async (req, res):
         updatedAt: new Date(),
       })
       .where(eq(supportTicketsTable.id, ticketId));
-    await db.insert(notificationsTable).values({
-      recipientId: ticket.userId,
-      type: "support_blocked_external",
-      title: `Action needed with ${parsed.data.blocker}`,
-      body: parsed.data.guidance,
-      actorId: req.userId!,
-      resourceType: "support_ticket",
-      resourceId: String(ticketId),
-      projectId: ticket.projectId,
-      metadata: { blocker: parsed.data.blocker },
-    });
   } else {
     const fingerprint = normalizedFingerprint(parsed.data.fingerprintKey);
     const [defect] = await db
@@ -431,7 +438,48 @@ router.post("/admin/support-tickets/:id/triage", requireAdmin, async (req, res):
   }
 
   await writeOutcomeReceipt(req, "support_ticket_triaged", ticket.userId);
-  res.json({ ok: true, resolutionClass: parsed.data.resolutionClass, platformImpact });
+  const explanation =
+    parsed.data.resolutionClass === "project"
+      ? `We are investigating this inside ${ticket.projectName ?? "your project"}. Nothing in your project changes without your approval.`
+      : parsed.data.resolutionClass === "platform"
+        ? "We identified a NabuFlow platform issue. Your ticket is linked to the shared defect and will update automatically when the verified fix ships."
+        : `This is waiting on ${parsed.data.blocker}. ${parsed.data.guidance}`;
+  const email = supportClassificationTemplate({
+    ticketId,
+    subject: ticket.subject,
+    classification: parsed.data.resolutionClass,
+    explanation,
+    ticketUrl: supportProductUrl(`/support/tickets/${ticketId}`),
+  });
+  const delivery = await deliverSupportConsequence({
+    ticketId,
+    projectId: ticket.projectId,
+    recipientUserId: ticket.userId,
+    recipientEmail: ticket.userEmail,
+    actorUserId: req.userId!,
+    kind: parsed.data.resolutionClass === "external" ? "external_guidance" : "ticket_classified",
+    notification: {
+      type:
+        parsed.data.resolutionClass === "external"
+          ? "support_blocked_external"
+          : "support_ticket_classified",
+      title:
+        parsed.data.resolutionClass === "project"
+          ? "Support is investigating your project"
+          : parsed.data.resolutionClass === "platform"
+            ? "Your ticket is linked to a NabuFlow platform issue"
+            : `Action needed with ${parsed.data.blocker}`,
+      body: explanation,
+      metadata: { resolutionClass: parsed.data.resolutionClass },
+    },
+    email,
+  });
+  res.json({
+    ok: true,
+    resolutionClass: parsed.data.resolutionClass,
+    platformImpact,
+    delivery,
+  });
 });
 
 router.post(

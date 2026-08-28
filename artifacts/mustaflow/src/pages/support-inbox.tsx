@@ -44,6 +44,7 @@ import {
 } from "@/hooks/use-admin-ticket-alerts";
 import { toast } from "@/hooks/use-toast";
 import { SupportOperationConsole } from "./support-operation-console";
+import { presentSupportEmailStatus, type SupportUserDeliveryView } from "@/lib/support-operations";
 import { AdminBreadcrumbs } from "@/components/admin/admin-breadcrumbs";
 import { Link } from "wouter";
 
@@ -476,7 +477,10 @@ function TicketDetail({
           invalidateDetail();
           onMutated();
           if (res.emailStatus === "sent") {
-            setFeedback({ kind: "ok", text: "Reply sent to the requester." });
+            setFeedback({
+              kind: "ok",
+              text: "Reply saved, and the email provider accepted the message.",
+            });
           } else if (res.emailStatus === "skipped") {
             setFeedback({
               kind: "ok",
@@ -783,6 +787,11 @@ function TranscriptBubble({ message }: { message: AdminSupportTicketMessage }) {
 
   const isUser = message.role === "user";
   const isStaff = message.staffReply === true;
+  const deliveryStatus = (
+    message as AdminSupportTicketMessage & {
+      deliveryStatus?: SupportUserDeliveryView["emailStatus"];
+    }
+  ).deliveryStatus;
   return (
     <div className={cn("flex gap-2.5", isUser ? "" : "flex-row-reverse")}>
       <div
@@ -809,6 +818,7 @@ function TranscriptBubble({ message }: { message: AdminSupportTicketMessage }) {
         <p className={cn("text-[10px] text-muted-foreground", isUser ? "text-left" : "text-right")}>
           {isUser ? "Requester" : isStaff ? "Support (you)" : "Ora"}
           {message.at ? ` · ${formatDate(message.at)}` : ""}
+          {isStaff && deliveryStatus ? ` · ${presentSupportEmailStatus(deliveryStatus)}` : ""}
         </p>
       </div>
     </div>

@@ -21,7 +21,7 @@ export function effectiveSupportGrantStatus(
   now = new Date(),
 ): SupportGrantStatus {
   if (
-    grant.status === "active" &&
+    (grant.status === "active" || grant.status === "pending") &&
     (!grant.expiresAt || grant.expiresAt.getTime() <= now.getTime())
   ) {
     return "expired";

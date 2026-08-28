@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Clock3, Loader2, ShieldCheck } from "lucide-react";
+import { Clock3, Loader2, MailCheck, ShieldCheck } from "lucide-react";
 import {
   getOwnerSupportOperations,
   postSupportOperation,
+  presentSupportEmailStatus,
   type SupportGrantEventView,
   type SupportOperationsView,
 } from "@/lib/support-operations";
@@ -93,6 +94,30 @@ export function SupportOwnerActions({ ticketId }: { ticketId: number }) {
         </p>
       )}
       {guidance && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{guidance}</p>}
+
+      {operations.deliveries.length > 0 && (
+        <details className="rounded-md border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">
+            How support contacted you
+          </summary>
+          <ol className="mt-2 space-y-2">
+            {operations.deliveries.map((delivery) => (
+              <li
+                key={delivery.id}
+                className="flex items-start gap-2 text-xs text-muted-foreground"
+              >
+                <MailCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  In-product notification recorded ·{" "}
+                  {presentSupportEmailStatus(delivery.emailStatus)}
+                  {delivery.emailFailureReason ? ` — ${delivery.emailFailureReason}` : ""} ·{" "}
+                  {new Date(delivery.createdAt).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
 
       {pendingGrants.map((grant) => (
         <div key={grant.id} className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">

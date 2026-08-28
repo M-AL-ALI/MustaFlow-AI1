@@ -37,8 +37,8 @@ without evidence.
 | P1    | Shell, navigation and KEEP-panel hierarchy                 | Complete / live |
 | P2    | Panel declarations and developer-tool exile                | Complete / live |
 | P3    | Drill-in for every number                                  | Complete / live |
-| P4    | One Admin authority source                                 | In progress     |
-| P5    | In-product and email consent delivery                      | Not authorized  |
+| P4    | One Admin authority source                                 | Live and proven |
+| P5    | In-product and email consent delivery                      | In progress     |
 | P6    | Ticket identity, ownership and resolution                  | Not authorized  |
 | P7    | Per-project invitations, members, roles and presence       | Not authorized  |
 | P8    | Ticket-to-Zero and completed triage                        | Not authorized  |
@@ -464,3 +464,93 @@ registry's billing-plan declaration did not name that route family. The registry
 now explicitly owns `ora-account-consistency`, so every future change to that
 cross-product billing view is routed through the account/billing manual checklist
 instead of passing as an unmatched Ora change.
+
+### P4 live closure
+
+P4 closed live on production on 2026-08-28. The merged-head release gate passed
+22/22. Production `/api/version` returned commit
+`f578e1ec2453a808fd4eaf22483f1d8730afc5a2` and tree
+`392fc79eb7f667db75e68835f65bf5f6d5aeb9b3`; the serving Replit deployment was
+`a6a7faed-a465-45a7-86f4-f28002add3aa`. Boot reconciliation ran with 149
+startup migrations and proved three Owner rows in the production `neondb`
+ledger. Owner, staff and nonstaff views all resolved authority from
+`user_roles`; the former billing privilege did not grant Admin access. The P4
+branch was deleted locally and remotely, and the permanent A-drive tree returned
+clean to main.
+
+## P5 — consent and consequence delivery
+
+P5 makes every support consequence visible in-product and attempts the matching
+email without letting the email link authorize anything. One durable
+`support_user_deliveries` receipt binds the ticket, project, recipient,
+in-product notification and email-provider result. The receipt is written as
+`pending` in the same transaction as the notification, before the provider is
+called, then becomes `sent` or `failed`. `sent` means the email provider accepted
+the message; it is deliberately not relabelled as delivered without a provider
+delivery webhook.
+
+The dual-channel path now covers temporary access requests, Zero proposals,
+three-way triage outcomes and staff replies. Internal notes remain operator-only
+and cannot call the delivery helper. Access requests carry staff identity,
+project, reason and request expiry. Email links open an authenticated NabuFlow
+screen but never grant or approve. Pending requests expire fail-closed. The
+project workspace itself shows the request, Grant one hour, Refuse, Revoke now,
+and recent access receipt to the project owner; non-owners receive the same
+404-shaped denial as an absent project.
+
+During the P5 review, an unanswered request was found to become logically expired
+without changing its stored `pending` state. The one-open-request constraint would
+then reject a later legitimate request. The access-request mutation now first
+settles any time-expired open row to `expired`, emits a named grant event, and only
+then creates the new request. Reads remain pure. A regression test pins the
+time-bounded predicate and the provenance event so the stale-lock condition cannot
+return silently.
+
+P5 does not add a parallel support authority path, does not alter consent rules,
+does not expose secrets, and does not claim message delivery beyond what the
+provider returns. Production email is a hard live gate: if the provider does not
+accept a P5 message, the UI must show `failed` and the phase does not close.
+
+### P5 incidental findings and prevention
+
+1. An expired stored `pending` grant could block every later access request for
+   the same ticket. The request mutation now settles it to `expired` with a named
+   event before inserting the replacement; the regression guard pins both the
+   expiry predicate and event.
+2. The support-brand copy test used the unrelated reply template as the end marker
+   for the confirmation template. Adding a valid template between them caused a
+   false failure. The test now ends at the next exported function, so it checks
+   exactly one template regardless of future ordering.
+3. An ordinary incremental library build did not refresh the generated database
+   declarations after the local clock correction. The established release gate's
+   `tsc --build --force` step rebuilt the declaration and remains the structural
+   preventive; every merged head must pass that forced library build before
+   publication.
+
+### P5 lab verification
+
+Database: none. Environment: lab. Package store:
+`A:/NabuFlowLab/.pnpm-store/v10`. Kind: serial static, type, lint and test
+verification in the one permanent A-drive worktree.
+
+- Focused API: 2 files, 16 tests passed.
+- Focused web: 3 files, 12 tests passed after the brand-boundary preventive was
+  applied.
+- Root typecheck: all referenced libraries, eight artifacts and scripts passed.
+- Root lint: all 20 workspace packages with lint scripts passed.
+- API exact-base parity against `f578e1ec2453a808fd4eaf22483f1d8730afc5a2`:
+  base 41 failed / 3,037 passed / 5 pending; candidate 41 failed / 3,044 passed /
+  5 pending. Both normalized failure sets contain the same 41 entries and SHA-256
+  `4a20dc4e4667f56b13afdeba3b422c51bd2448db95da2c992c88be6d1897c573`;
+  base-only 0, candidate-only 0. P5 adds seven passing API guards.
+- Web exact-base parity: base 1,220 passed / 0 failed; candidate 1,224 passed /
+  0 failed. P5 adds four passing web guards.
+- Manifest and lockfile changes: none. Secret-pattern findings: none.
+- Opening at `2026-08-28T14:50:04.5967128Z`: C free `4,916,584,448`
+  bytes; A free `74,489,081,856` bytes. C remained above the standing
+  `3,221,225,472`-byte floor throughout the full serial runs.
+
+P5 is lab-complete but not yet live-complete. Closure requires the exact merged-head
+22-check release gate, production migration/identity proof, an actual dual-channel
+message accepted by the production email provider, owner and operator walkthroughs,
+screenshots, branch deletion and final drive receipts.

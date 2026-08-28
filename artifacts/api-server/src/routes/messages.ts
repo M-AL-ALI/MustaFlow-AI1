@@ -84,6 +84,9 @@ import {
   recordSupportGrantEvent,
   supportMutationStillAuthorized,
 } from "../lib/support-access";
+import { getSharedAccountProfile } from "../lib/clerk-users";
+import { supportProposalReadyTemplate } from "../lib/emailTemplates";
+import { deliverSupportConsequence, supportProductUrl } from "../lib/support-user-delivery";
 
 const router: IRouter = Router();
 
@@ -1648,6 +1651,37 @@ router.post(
           proposalMessageId: proposalReady ? assistantMessage.id : null,
         },
       });
+      if (proposalReady) {
+        const [ownerIdentity, staffIdentity] = await Promise.all([
+          getSharedAccountProfile(supportProposal.ownerUserId),
+          getSharedAccountProfile(supportProposal.staffUserId),
+        ]);
+        const staffName = staffIdentity?.displayName ?? "NabuFlow Support";
+        const summary = assistantContent.slice(0, 2_000);
+        const email = supportProposalReadyTemplate({
+          ticketId: supportProposal.ticketId,
+          projectName: project.name,
+          staffName,
+          summary,
+          decisionUrl: supportProductUrl(`/support/tickets/${supportProposal.ticketId}`),
+        });
+        await deliverSupportConsequence({
+          ticketId: supportProposal.ticketId,
+          projectId: project.id,
+          recipientUserId: supportProposal.ownerUserId,
+          recipientEmail: ownerIdentity?.email ?? null,
+          actorUserId: supportProposal.staffUserId,
+          actorName: staffName,
+          kind: "proposal_ready",
+          notification: {
+            type: "support_proposal_ready",
+            title: "Zero's support proposal is ready for your review",
+            body: `${project.name}: nothing changes until you approve or decline.`,
+            metadata: { supportSessionId: supportProposal.sessionId },
+          },
+          email,
+        });
+      }
     }
 
     await db

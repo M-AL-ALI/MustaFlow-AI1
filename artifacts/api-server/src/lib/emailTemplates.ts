@@ -336,6 +336,101 @@ export function supportTicketConfirmationTemplate(opts: {
   return { subject: emailSubject, html, text };
 }
 
+export function supportAccessRequestTemplate(opts: {
+  ticketId: number;
+  projectName: string;
+  staffName: string;
+  reason: string;
+  requestExpiresAt: Date;
+  decisionUrl: string;
+}): EmailTemplate {
+  const esc = (value: string): string =>
+    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const expires = opts.requestExpiresAt.toUTCString();
+  const subject = `Project access request — ticket #${opts.ticketId}`;
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">Your approval is required</h2>
+  <p><strong>${esc(opts.staffName)}</strong> from NabuFlow Support is requesting temporary access to <strong>${esc(opts.projectName)}</strong>.</p>
+  <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">${esc(opts.reason)}</p>
+  <p>This request expires ${esc(expires)}. Opening the link does not grant access; sign in and choose Grant or Refuse inside NabuFlow.</p>
+  ${ctaButton("Review request in NabuFlow", opts.decisionUrl)}
+  <p style="font-size:12px;color:#6b7280">Ticket #${opts.ticketId}</p>`);
+  const text = [
+    `Your approval is required — ticket #${opts.ticketId}`,
+    "",
+    `${opts.staffName} from NabuFlow Support is requesting temporary access to ${opts.projectName}.`,
+    `Reason: ${opts.reason}`,
+    `Request expires: ${expires}`,
+    "",
+    "Opening this link does not grant access. Sign in and choose Grant or Refuse inside NabuFlow:",
+    opts.decisionUrl,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function supportProposalReadyTemplate(opts: {
+  ticketId: number;
+  projectName: string;
+  staffName: string;
+  summary: string;
+  decisionUrl: string;
+}): EmailTemplate {
+  const esc = (value: string): string =>
+    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const subject = `Review Zero's proposal — ticket #${opts.ticketId}`;
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">Zero prepared a proposal for your review</h2>
+  <p><strong>${esc(opts.staffName)}</strong> completed a read-only diagnosis of <strong>${esc(opts.projectName)}</strong>.</p>
+  <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">${esc(opts.summary)}</p>
+  <p>Nothing has changed. Opening the link does not approve anything; sign in and review the proposal inside NabuFlow.</p>
+  ${ctaButton("Review proposal in NabuFlow", opts.decisionUrl)}
+  <p style="font-size:12px;color:#6b7280">Ticket #${opts.ticketId}</p>`);
+  const text = [
+    `Zero prepared a proposal — ticket #${opts.ticketId}`,
+    "",
+    `${opts.staffName} completed a read-only diagnosis of ${opts.projectName}.`,
+    opts.summary,
+    "",
+    "Nothing has changed. Sign in to review and approve or decline:",
+    opts.decisionUrl,
+  ].join("\n");
+  return { subject, html, text };
+}
+
+export function supportClassificationTemplate(opts: {
+  ticketId: number;
+  subject: string;
+  classification: "project" | "platform" | "external";
+  explanation: string;
+  ticketUrl: string;
+}): EmailTemplate {
+  const esc = (value: string): string =>
+    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const label =
+    opts.classification === "project"
+      ? "a project issue"
+      : opts.classification === "platform"
+        ? "a NabuFlow platform issue"
+        : "blocked on a third party";
+  const emailSubject = `Ticket #${opts.ticketId} update: ${label}`;
+  const html = wrap(`
+  <h2 style="margin-top:0;color:#111">We classified your support request</h2>
+  <p><strong>Ticket #${opts.ticketId}</strong> — ${esc(opts.subject)}</p>
+  <p>We classified this as <strong>${esc(label)}</strong>.</p>
+  <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">${esc(opts.explanation)}</p>
+  ${ctaButton("View ticket in NabuFlow", opts.ticketUrl)}`);
+  const text = [
+    `Ticket #${opts.ticketId} update`,
+    opts.subject,
+    "",
+    `We classified this as ${label}.`,
+    opts.explanation,
+    "",
+    opts.ticketUrl,
+  ].join("\n");
+  return { subject: emailSubject, html, text };
+}
+
 export function supportReplyTemplate(opts: {
   ticketId: number;
   subject: string;

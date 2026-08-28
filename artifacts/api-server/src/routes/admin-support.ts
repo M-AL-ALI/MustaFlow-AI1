@@ -32,6 +32,7 @@ import { r2GetObject } from "../lib/cloudflare";
 import { sendEmailWithStatus } from "../lib/emailClient";
 import { supportReplyTemplate } from "../lib/emailTemplates";
 import { resolveDefaultSender, resolveSupportRecipient } from "../lib/support-contact";
+import { deliverSupportConsequence } from "../lib/support-user-delivery";
 
 const router: IRouter = Router();
 
@@ -63,6 +64,8 @@ interface TranscriptMessage {
   internalNote?: boolean;
   authorId?: string;
   at?: string;
+  deliveryId?: number;
+  deliveryStatus?: "pending" | "sent" | "delivered" | "failed";
 }
 
 interface TicketAttachment {
@@ -83,6 +86,17 @@ function asTranscript(raw: unknown): TranscriptMessage[] {
       internalNote: m.internalNote === true ? true : undefined,
       authorId: typeof m.authorId === "string" ? m.authorId : undefined,
       at: typeof m.at === "string" ? m.at : undefined,
+      deliveryId:
+        typeof m.deliveryId === "number" && Number.isSafeInteger(m.deliveryId)
+          ? m.deliveryId
+          : undefined,
+      deliveryStatus:
+        m.deliveryStatus === "pending" ||
+        m.deliveryStatus === "sent" ||
+        m.deliveryStatus === "delivered" ||
+        m.deliveryStatus === "failed"
+          ? m.deliveryStatus
+          : undefined,
     }));
 }
 
@@ -373,6 +387,7 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
         subject: supportTicketsTable.subject,
         userEmail: supportTicketsTable.userEmail,
         userId: supportTicketsTable.userId,
+        projectId: supportTicketsTable.projectId,
         transcript: supportTicketsTable.transcript,
         status: supportTicketsTable.status,
       })
@@ -391,11 +406,19 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
     }
 
     const tpl = supportReplyTemplate({ ticketId: id, subject: row.subject, replyBody: body });
-    const emailStatus = await sendEmailWithStatus({
-      to: row.userEmail,
-      subject: tpl.subject,
-      html: tpl.html,
-      text: tpl.text,
+    const delivery = await deliverSupportConsequence({
+      ticketId: id,
+      projectId: row.projectId,
+      recipientUserId: row.userId,
+      recipientEmail: row.userEmail,
+      actorUserId: req.userId!,
+      kind: "ticket_reply",
+      notification: {
+        type: "support_ticket_reply",
+        title: `NabuFlow Support replied to ticket #${id}`,
+        body,
+      },
+      email: tpl,
     });
 
     // Record the staff reply in the transcript and move a "new" ticket to "open"
@@ -406,6 +429,8 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
       content: body,
       staffReply: true,
       at: new Date().toISOString(),
+      deliveryId: delivery.id,
+      deliveryStatus: delivery.emailStatus,
     });
     const nextStatus = normalizeStatus(row.status) === "new" ? "open" : normalizeStatus(row.status);
 
@@ -416,7 +441,12 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
 
     await recordTicketReceipt(req, "support_ticket_replied", row.userId);
 
-    res.json({ ok: true, emailStatus, status: nextStatus });
+    res.json({
+      ok: true,
+      emailStatus: delivery.emailStatus,
+      delivery,
+      status: nextStatus,
+    });
   } catch (err) {
     logger.error({ component: "admin-support", err }, "Failed to send support reply");
     res.status(500).json({ error: "Failed to send reply" });

@@ -71,6 +71,16 @@ function getNotificationHref(n: Notification): string | null {
     case "comment_reply":
       if (n.projectId) return `/projects/${n.projectId}?tab=comments`;
       return null;
+    case "support_access_requested":
+    case "support_proposal_ready":
+    case "support_ticket_classified":
+    case "support_ticket_reply":
+    case "support_blocked_external": {
+      const ticketId = meta.ticketId as number | undefined;
+      if (ticketId) return `/support/tickets/${ticketId}`;
+      if (n.projectId) return `/projects/${n.projectId}`;
+      return "/support/tickets";
+    }
     default:
       if (n.projectId) return `/projects/${n.projectId}`;
       return null;

@@ -59,7 +59,7 @@ describe("company and product display-copy boundaries", () => {
   it("keeps support ticket auto-replies company-branded rather than builder-branded", () => {
     const emailTemplates = read("artifacts/api-server/src/lib/emailTemplates.ts");
     const confirmationStart = emailTemplates.indexOf("supportTicketConfirmationTemplate");
-    const confirmationEnd = emailTemplates.indexOf("supportReplyTemplate", confirmationStart);
+    const confirmationEnd = emailTemplates.indexOf("\nexport function ", confirmationStart);
     const confirmationTemplate = emailTemplates.slice(confirmationStart, confirmationEnd);
 
     expect(confirmationStart).toBeGreaterThan(-1);

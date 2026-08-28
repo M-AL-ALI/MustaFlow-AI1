@@ -11,6 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
+import { notificationsTable } from "./notifications";
 import { supportTicketsTable } from "./support-tickets";
 
 export const SUPPORT_GRANT_STATUSES = [
@@ -167,7 +168,64 @@ export const sharedProfileMigrationReceiptsTable = pgTable(
   (table) => [index("shared_profile_migration_outcome_idx").on(table.outcome, table.migratedAt)],
 );
 
+export const SUPPORT_DELIVERY_KINDS = [
+  "access_request",
+  "proposal_ready",
+  "ticket_classified",
+  "ticket_reply",
+  "platform_fix_verified",
+  "project_fix_verified",
+  "external_guidance",
+] as const;
+export type SupportDeliveryKind = (typeof SUPPORT_DELIVERY_KINDS)[number];
+
+export const SUPPORT_DELIVERY_STATUSES = ["pending", "sent", "delivered", "failed"] as const;
+export type SupportDeliveryStatus = (typeof SUPPORT_DELIVERY_STATUSES)[number];
+
+/**
+ * One durable receipt for every support consequence promised to a user.
+ * The notification remains the in-product source; this row binds that fact to
+ * the corresponding email attempt so the console never implies delivery from
+ * a transcript write alone.
+ */
+export const supportUserDeliveriesTable = pgTable(
+  "support_user_deliveries",
+  {
+    id: serial("id").primaryKey(),
+    ticketId: integer("ticket_id")
+      .notNull()
+      .references(() => supportTicketsTable.id, { onDelete: "cascade" }),
+    projectId: integer("project_id"),
+    recipientUserId: text("recipient_user_id").notNull(),
+    recipientEmail: text("recipient_email"),
+    kind: text("kind").notNull(),
+    notificationId: integer("notification_id").references(() => notificationsTable.id, {
+      onDelete: "set null",
+    }),
+    emailStatus: text("email_status").notNull().default("pending"),
+    emailFailureReason: text("email_failure_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("support_user_deliveries_ticket_created_idx").on(table.ticketId, table.createdAt),
+    index("support_user_deliveries_recipient_created_idx").on(
+      table.recipientUserId,
+      table.createdAt,
+    ),
+    check(
+      "support_user_deliveries_kind_check",
+      sql`${table.kind} IN ('access_request','proposal_ready','ticket_classified','ticket_reply','platform_fix_verified','project_fix_verified','external_guidance')`,
+    ),
+    check(
+      "support_user_deliveries_email_status_check",
+      sql`${table.emailStatus} IN ('pending','sent','delivered','failed')`,
+    ),
+  ],
+);
+
 export type SupportAccessGrant = typeof supportAccessGrantsTable.$inferSelect;
 export type SupportGrantEvent = typeof supportGrantEventsTable.$inferSelect;
 export type SupportZeroSession = typeof supportZeroSessionsTable.$inferSelect;
 export type PlatformDefect = typeof platformDefectsTable.$inferSelect;
+export type SupportUserDelivery = typeof supportUserDeliveriesTable.$inferSelect;
