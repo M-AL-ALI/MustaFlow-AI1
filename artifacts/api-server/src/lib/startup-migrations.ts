@@ -15,6 +15,7 @@
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
 import { encryptionService, isEncryptedValue, type EncryptionService } from "./encryption";
+import { assessDeploymentRuntimeSchema } from "./deployment-runtime-schema";
 
 type MigrationStep = {
   name: string;
@@ -6621,6 +6622,44 @@ export async function runStartupMigrations(): Promise<{
   let passed = 0;
   let failed = 0;
   const errors: { name: string; message: string }[] = [];
+
+  const assessmentClient = await pool.connect();
+  try {
+    const assessment = await assessDeploymentRuntimeSchema(assessmentClient);
+    if (assessment.mode === "read-only-ready") {
+      logger.info(
+        {
+          contractId: assessment.contractId,
+          verifiedMigrations: MIGRATION_STEPS.length,
+          mode: assessment.mode,
+        },
+        "startup-migrations: deployed schema verified; runtime DDL is intentionally unavailable",
+      );
+      return { passed: MIGRATION_STEPS.length, failed: 0, errors: [] };
+    }
+    if (assessment.mode === "read-only-incomplete") {
+      logger.error(
+        {
+          contractId: assessment.contractId,
+          violations: assessment.violations,
+          mode: assessment.mode,
+        },
+        "startup-migrations: deployed schema is incomplete and runtime DDL is unavailable",
+      );
+      return {
+        passed: 0,
+        failed: 1,
+        errors: [
+          {
+            name: "verify-deployment-runtime-schema",
+            message: assessment.violations.join(","),
+          },
+        ],
+      };
+    }
+  } finally {
+    assessmentClient.release();
+  }
 
   for (const step of MIGRATION_STEPS) {
     const client = await pool.connect();

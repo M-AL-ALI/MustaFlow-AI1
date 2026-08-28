@@ -555,6 +555,20 @@ accept a P5 message, the UI must show `failed` and the phase does not close.
    proved the exact port and health/version receipts, then proved both the task and
    port absent after termination. Foreground supervision plus positive endpoint and
    negative post-stop checks are now required for every such boot receipt.
+6. Replit's deployment-preview card reported `Database migrations validated
+successfully`, but the running preview still attempted all startup DDL and
+   persisted `startupMigrations: error` plus `queueSchemaContract: error`.
+   Replit documents only the general `REPLIT_DEPLOYMENT` flag, not a distinct
+   preview-runtime flag, so environment-name guessing was rejected. The startup
+   runner now asks PostgreSQL whether the runtime role can create schema objects.
+   Mutable roles preserve the existing 149-step idempotent path. A deliberately
+   read-only runtime performs one catalog-only `deployment_runtime_schema_v1`
+   verification for the Admin authority, workspace membership, support delivery
+   and prompt-queue objects; it reports success only when every required object,
+   validated check and ready index exists. An incomplete read-only schema fails
+   closed with allowlisted violations and performs zero DDL. Four regression
+   guards pin the complete read-only path, the incomplete refusal, the mutable
+   path and the fact that this decision executes before any migration step.
 
 ### P5 lab verification
 
@@ -562,16 +576,18 @@ Database: none. Environment: lab. Package store:
 `A:/NabuFlowLab/.pnpm-store/v10`. Kind: serial static, type, lint and test
 verification in the one permanent A-drive worktree.
 
-- Focused API: 2 files, 16 tests passed.
+- Focused API after the deployment-runtime preventive: 2 files, 11 tests passed;
+  the complete P5 focused set remains green.
 - Focused web: 3 files, 12 tests passed after the brand-boundary preventive was
   applied.
 - Root typecheck: all referenced libraries, eight artifacts and scripts passed.
 - Root lint: all 20 workspace packages with lint scripts passed.
 - API exact-base parity against `f578e1ec2453a808fd4eaf22483f1d8730afc5a2`:
-  base 41 failed / 3,037 passed / 5 pending; candidate 41 failed / 3,044 passed /
+  base 41 failed / 3,037 passed / 5 pending; candidate 41 failed / 3,054 passed /
   5 pending. Both normalized failure sets contain the same 41 entries and SHA-256
   `4a20dc4e4667f56b13afdeba3b422c51bd2448db95da2c992c88be6d1897c573`;
-  base-only 0, candidate-only 0. P5 adds seven passing API guards.
+  base-only 0, candidate-only 0. P5 adds seventeen passing API guards across the
+  consent path and its deployment-runtime prevention work.
 - Web exact-base parity: base 1,220 passed / 0 failed; candidate 1,224 passed /
   0 failed. P5 adds four passing web guards.
 - Manifest and lockfile changes: none. Secret-pattern findings: none.
