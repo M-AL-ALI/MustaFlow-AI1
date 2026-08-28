@@ -55,6 +55,7 @@ const StatusPage = lazy(() => import("./pages/status"));
 const AdminPage = builderLazy(() => import("./pages/admin"));
 const SupportInboxPage = builderLazy(() => import("./pages/support-inbox"));
 const AdminDeveloperToolsPage = builderLazy(() => import("./pages/admin-developer-tools"));
+const AdminRecordsPage = builderLazy(() => import("./pages/admin-records"));
 const TrashPage = builderLazy(() => import("./pages/trash"));
 const BillingUsagePage = builderLazy(() => import("./pages/billing-usage"));
 const PublishedPage = builderLazy(() => import("./pages/published"));
@@ -696,6 +697,17 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                               <AdminDeveloperToolsPage />
                             </AppLayout>
                           </OwnerAdminGuard>
+                        </AdminGuard>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/admin/records/:kind">
+                    <Protected>
+                      <BuilderGuard>
+                        <AdminGuard>
+                          <AppLayout>
+                            <AdminRecordsPage />
+                          </AppLayout>
                         </AdminGuard>
                       </BuilderGuard>
                     </Protected>

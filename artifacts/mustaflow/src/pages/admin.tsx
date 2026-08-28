@@ -331,8 +331,9 @@ export default function AdminPage() {
               label="Total Projects"
               value={statValue(stats?.projects.total)}
               sub="across all users"
+              href="/admin/records/projects"
               purpose="Shows the total project estate visible to operators."
-              action="Use project records to investigate ownership or lifecycle questions."
+              action="Open the filterable project records and inspect a project in context."
               freshness="Fetched with the current Admin statistics response."
             />
             <StatCard
@@ -340,8 +341,9 @@ export default function AdminPage() {
               label="Published"
               value={statValue(stats?.projects.published)}
               sub="live projects"
+              href="/admin/records/published-projects"
               purpose="Shows how many projects currently have a published release."
-              action="Use publishing records when the count needs investigation."
+              action="Open published records to see the serving version and route."
               freshness="Fetched with the current Admin statistics response."
             />
             <StatCard
@@ -349,8 +351,9 @@ export default function AdminPage() {
               label="Users with Credits"
               value={statValue(stats?.users.withCredits)}
               sub="active accounts"
+              href="/admin/records/credit-accounts"
               purpose="Shows how many accounts currently hold usable credits."
-              action="Use account and billing records when a user reports a credit problem."
+              action="Open the masked account view and inspect balance activity."
               freshness="Fetched with the current Admin statistics response."
             />
             <StatCard
@@ -358,8 +361,9 @@ export default function AdminPage() {
               label="Transactions"
               value={statValue(stats?.transactions)}
               sub="credit transactions"
+              href="/admin/records/transactions"
               purpose="Shows the total number of recorded credit transactions."
-              action="Use billing records to investigate an unexpected transaction count."
+              action="Open the transaction ledger and inspect each receipt-bearing record."
               freshness="Fetched with the current Admin statistics response."
             />
           </>
@@ -1377,6 +1381,7 @@ function StatCard({
   label,
   value,
   sub,
+  href,
   purpose,
   action,
   freshness,
@@ -1385,12 +1390,16 @@ function StatCard({
   label: string;
   value: string;
   sub: string;
+  href: string;
   purpose: string;
   action: string;
   freshness: string;
 }) {
   return (
-    <div className="border border-border rounded-xl p-4 bg-card space-y-2">
+    <a
+      href={href}
+      className="block border border-border rounded-xl p-4 bg-card space-y-2 transition-colors hover:bg-muted/40 hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <div className="flex items-center gap-2 text-muted-foreground">
         <Icon className="h-4 w-4" />
         <span className="text-xs">{label}</span>
@@ -1398,7 +1407,11 @@ function StatCard({
       <div className="text-2xl font-bold">{value}</div>
       <div className="text-xs text-muted-foreground">{sub}</div>
       <PanelDeclaration compact purpose={purpose} action={action} freshness={freshness} />
-    </div>
+      <div className="text-xs font-medium text-primary flex items-center gap-1">
+        Open records
+        <ChevronRight className="h-3 w-3" aria-hidden="true" />
+      </div>
+    </a>
   );
 }
 

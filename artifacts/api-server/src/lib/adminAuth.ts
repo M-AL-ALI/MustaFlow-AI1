@@ -139,6 +139,7 @@ const ANALYST_READ_PATHS: ReadonlyArray<RegExp> = [
   /^\/api\/admin\/launch-readiness$/,
   /^\/api\/admin\/domain-metrics$/,
   /^\/api\/admin\/job-queue$/,
+  /^\/api\/admin\/records(?:\/|$)/,
 ];
 
 export function staffRoleAllowsRequest(role: StaffRole, method: string, path: string): boolean {

@@ -157,6 +157,8 @@ describe("Admin Page access foundation", () => {
     );
     expect(staffRoleAllowsRequest("support", "GET", "/api/admin/stats")).toBe(false);
     expect(staffRoleAllowsRequest("analyst", "GET", "/api/admin/stats")).toBe(true);
+    expect(staffRoleAllowsRequest("analyst", "GET", "/api/admin/records/projects")).toBe(true);
+    expect(staffRoleAllowsRequest("support", "GET", "/api/admin/records/projects")).toBe(false);
     expect(staffRoleAllowsRequest("analyst", "POST", "/api/admin/domains/7/suspend")).toBe(false);
   });
 

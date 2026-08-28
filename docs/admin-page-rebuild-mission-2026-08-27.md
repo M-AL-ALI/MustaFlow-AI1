@@ -35,8 +35,8 @@ without evidence.
 | ----- | ---------------------------------------------------------- | ----------------------- |
 | P0    | Read-only survey and owed identity decisions               | Accepted                |
 | P1    | Shell, navigation and KEEP-panel hierarchy                 | Complete / live         |
-| P2    | Panel declarations and developer-tool exile                | Candidate / in progress |
-| P3    | Drill-in for every number                                  | Not authorized          |
+| P2    | Panel declarations and developer-tool exile                | Complete / live         |
+| P3    | Drill-in for every number                                  | Candidate / in progress |
 | P4    | One Admin authority source                                 | Planned only            |
 | P5    | In-product and email consent delivery                      | Not authorized          |
 | P6    | Ticket identity, ownership and resolution                  | Not authorized          |
@@ -190,7 +190,91 @@ Tag: `ADMIN-PAGE-REBUILD-P2-2026-08-28`
 | Owner-only route enforcement      | Built           | Non-Owner Admins return to `/admin`; non-Admins remain denied by `AdminGuard`                |
 | Existing developer-tool behavior  | Preserved       | No tool API or mutation semantics changed                                                    |
 | Focused regressions and typecheck | Passing         | Live and merged-head evidence still required                                                 |
-| Live production visual proof      | Pending         | P2 cannot close until the serving tree is independently identified and captured              |
+| Live production visual proof      | Complete        | Exact served tree, health receipt, live assertions and durable screenshots captured          |
+
+### P2 serving closure
+
+- Replit release gate on the detached, exact GitHub tree: `22 pass`, `0 warn`,
+  `0 fail`.
+- Replit deployment receipt: `af142308`; bundle log timestamps began at
+  `2026-08-28T09:45:20Z`, the Autoscale service creation began at
+  `2026-08-28T09:47:55Z`, and the deployment reached the terminal `Published`
+  state before the production probes below.
+- Production identity at `2026-08-28T09:50:20Z`: commit
+  `e97467734f9337b2c30e434e729de1d1061a1ba1`, tree
+  `f7f6e7e4ff96833755444df96795126d1350231a`, built at
+  `2026-08-28T09:43:19.957Z`.
+- Production `/api/healthz` returned HTTP 200, status `ok`, container subsystem
+  `ok`, encryption key `ok`, startup migrations `ok`, queue schema contract
+  `ok`, and the exact P2 build commit.
+- Live Admin assertions: one Developer tools link; zero Prompt Eval, routing
+  inspector, Architect Review, Top skills used, or Builder Skills panels on the
+  operator page; fifteen visible Purpose, Operator action, and Freshness
+  declarations.
+- Live Developer tools assertions: all five exiled panels present on the
+  owner-only route, complete breadcrumb path, and Back to Admin Page returned to
+  `/admin` without browser back.
+- Durable screenshots:
+  `A:/NabuFlowLab/evidence/admin-p2-live-2026-08-28/admin-main-live.png` and
+  `A:/NabuFlowLab/evidence/admin-p2-live-2026-08-28/developer-tools-live.png`.
+- The feature branch was deleted locally and remotely after live proof; both
+  absence queries were empty. The permanent tree remained clean on main.
+- Closing free-space receipt: A `74,516,172,800` bytes; C `3,986,956,288`
+  bytes. No additional worktree or install was created.
+
+### P3 candidate — coherent drill-ins
+
+Tag: `ADMIN-PAGE-REBUILD-P3-2026-08-28`
+
+- All four previously dead summary cards are now real links: projects,
+  published projects, accounts with credits, and credit transactions.
+- One governed, bounded read route serves the four record families. Lists are
+  capped at 50 rows per request; the UI asks for 25, offers Previous/Next, and
+  project filters are capped at 120 characters.
+- Account identifiers are pseudonymized on the server with a stable SHA-256
+  label. Raw Clerk IDs and their fragments never cross the route. Receipt URLs
+  are not returned. The UI states that masking is active and that unmasking is
+  not available in this phase.
+- Project records open to a useful detail card with owner label, workspace,
+  stack, status, update time, and project entry. Published records additionally
+  name the exact serving version and public route. Opening a record does not
+  grant workspace access; that boundary remains consent-gated.
+- Account records open to balance, active-project count, transaction count and
+  balance freshness. Transaction records open to type, signed amount, balance
+  after, timestamp, description, account record and linked project.
+- An invalid drill-in, overlong project filter, or unreadable record store has a
+  typed, plain refusal. A failed read never renders an empty-success state.
+- Analysts receive read-only drill-in access through the existing central role
+  predicate. Support remains denied; Owner and Operator behavior remains
+  unchanged.
+
+### P3 preventive guards and refusal paths
+
+- API tests pin the row cap, deterministic masking, absence of raw identity and
+  receipt URL material, account and transaction details, invalid-kind refusal,
+  overlong-filter refusal and sanitized unavailable terminal.
+- Web tests pin every card destination, the Admin guard, the masking notice,
+  the detail surfaces, project consent boundary, list bound and pagination.
+- Existing Admin-access tests pin Analyst allow and Support deny for the new
+  read surface. The shared predicate remains the only role decision.
+- Project workspaces that belong to another account remain inaccessible without
+  consent. The read-only Admin record is useful by itself and plainly states the
+  boundary rather than weakening project isolation.
+- AP-6 unmasking is not invented in P3. Masked views ship; the unavailable
+  unmask workflow is visible and remains a later governed capability.
+
+### P3 honest completion matrix
+
+| Requirement                            | Candidate state | Refusal / boundary                                                                    |
+| -------------------------------------- | --------------- | ------------------------------------------------------------------------------------- |
+| Project count opens filterable records | Built           | Bounded to 50 server-side; no unbounded estate read                                   |
+| Each project row opens useful detail   | Built           | Cross-account workspace entry remains consent-gated                                   |
+| Published rows name serving version    | Built           | Public route appears only when a persisted slug exists                                |
+| Credit accounts open account views     | Built           | Raw identity is never returned; unmasking remains unavailable                         |
+| Transactions open individual details   | Built           | Provider receipt URL is deliberately omitted from the masked operator view            |
+| Role masking                           | Built           | P3 does not create an unmask workflow                                                 |
+| Focused tests and typechecks           | Passing         | Full exact-base parity, merged-head gate, live drill-in proof, and cleanup still owed |
+| Live production proof                  | Pending         | Candidate cannot close from source and focused tests alone                            |
 
 ### P1 exact-base verification receipt
 
@@ -238,3 +322,52 @@ P1 branch; no second worktree was created and no install ran.
 The final clean-head gate, preview navigation capture, branch absence proofs and
 closing drive readings are phase-gate evidence and are not pre-claimed by this
 candidate record.
+
+### P3 exact-base verification receipt
+
+Tag: `ADMIN-PAGE-REBUILD-P3-GATE-2026-08-28`
+
+Database: none. Environment: lab. Store: `A:/NabuFlowLab/.pnpm-store/v10`.
+Kind: serial test and static verification. All runs used the one permanent
+`A:/NabuFlowLab/work` tree; no install and no additional worktree were created.
+
+- Exact base: `e97467734f9337b2c30e434e729de1d1061a1ba1`, tree
+  `f7f6e7e4ff96833755444df96795126d1350231a`.
+- Candidate before this evidence-only document update:
+  `6d09c745d3d8d6a857ec6fed60a1e3857791b5c1`, tree
+  `7f91dd92dd877adaf90c10491f8eb3453e1b6193`.
+- Focused API verification: 2 files, 11 tests, all passed.
+- Focused web verification: 3 files, 15 tests, all passed.
+- Shared-library, API, web, and test-inclusive web typechecks: passed.
+- Changed-file ESLint: passed. Changed-file Prettier: passed.
+- Secret-pattern scan: zero matches. Manifest and lockfile delta: zero.
+- Base API: 41 failed, 3,027 passed, 5 pending tests across 282 files.
+- Candidate API: 41 failed, 3,032 passed, 5 pending tests across 283 files.
+- Normalized API failure identity: 41 entries on each side; SHA-256
+  `9b019f950c203d9cf6e9e59e7a03cafb3e607ef68442a71949cb3ddbd8f8a118`
+  on each side; base-only 0, candidate-only 0. Candidate adds five passing
+  API guards and no failure.
+- Base web: 131 files, 1,211 tests passed, zero failed.
+- Candidate web: 132 files, 1,219 tests passed, zero failed. Candidate adds
+  one file and eight passing web guards.
+- Opening free-space receipt at `2026-08-28T13:09:33.8719214Z`: A free
+  `74,516,172,800` bytes; C free `3,985,035,264` bytes.
+- Post-suite receipt at `2026-08-28T13:38:36.9395461Z`: A free
+  `74,507,186,176` bytes; C free `3,980,894,208` bytes. C remained above the
+  standing `3,221,225,472`-byte stop floor.
+
+### P3 incidental finding and prevention
+
+The full API suite intentionally exits nonzero because the exact base contains
+41 known environment-gated failures. `pnpm --dir ... exec vitest` nevertheless
+wrote a complete JSON report and then printed an additional misleading
+`Command "vitest" not found` wrapper message. A clean retry reproduced the exact
+same 41-entry failure set and fingerprint, proving that the post-report message
+belongs to the pnpm command wrapper rather than to a missing Vitest binary or a
+new product failure. Prevention: exact-base comparisons consume the complete
+JSON receipt, require a stable normalized failure fingerprint across base and
+candidate, and never treat the wrapper exit or prose alone as suite truth.
+
+P3 is source- and suite-complete but not yet live-complete. The remaining gate
+is the exact merged-head release gate, production tree-identity proof, live
+four-card drill-in walkthrough, screenshots, and branch cleanup.
