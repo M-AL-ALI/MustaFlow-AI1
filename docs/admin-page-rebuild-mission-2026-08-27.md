@@ -371,3 +371,22 @@ candidate, and never treat the wrapper exit or prose alone as suite truth.
 P3 is source- and suite-complete but not yet live-complete. The remaining gate
 is the exact merged-head release gate, production tree-identity proof, live
 four-card drill-in walkthrough, screenshots, and branch cleanup.
+
+### P3 lab release-gate boundary
+
+The release profile ran on the exact merged candidate tree with database
+`none`. It completed 22 checks with `pass=19`, `warn=0`, `fail=3`. Every
+failure was database-bound and named the same unavailable lab endpoint,
+`ECONNREFUSED 127.0.0.1:5432`:
+
+- `api-release-extended`: environment-gated realtime usage tests.
+- `api-account-billing-history`: environment-gated memory/account tests.
+- `web-build`: the static bundle and public entry budget passed, then dynamic
+  route prerendering required the unavailable database.
+
+This is consistent with the exact-base API failure set already proven equal;
+it is not promoted to a pass. The publish remains blocked until the same
+22-check gate passes on the exact GitHub head inside Replit's development
+workspace, where the development test database is present. Prevention: a lab
+release-gate receipt always names its database and cannot authorize publish
+when a database-bound check did not execute successfully.
