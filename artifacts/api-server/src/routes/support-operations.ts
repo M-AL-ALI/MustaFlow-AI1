@@ -18,7 +18,7 @@ import {
   supportUserDeliveriesTable,
   supportZeroSessionsTable,
 } from "@workspace/db";
-import { requireAdmin, writeAdminReceipt } from "../lib/adminAuth";
+import { requireAdmin, requireSupportResolver, writeAdminReceipt } from "../lib/adminAuth";
 import { nabuflowGateHttpError } from "../lib/nabuflow-billing";
 import {
   findLiveSupportGrant,
@@ -28,6 +28,7 @@ import {
 import { getServedBuildIdentity } from "../lib/build-info";
 import { supportClassificationTemplate } from "../lib/emailTemplates";
 import { deliverSupportConsequence, supportProductUrl } from "../lib/support-user-delivery";
+import { formatSupportTicketNumber } from "../lib/support-ticket-workflow";
 
 const router: IRouter = Router();
 
@@ -131,7 +132,7 @@ function supportInstruction(input: {
 }): string | null {
   const evidence = JSON.stringify(input.evidenceBundle);
   const instruction = [
-    `Resolve support ticket #${input.ticketId} in this project.`,
+    `Resolve support ticket ${formatSupportTicketNumber(input.ticketId)} in this project.`,
     `The user's report is: ${input.subject}`,
     input.failingPath ? `The reported path is ${input.failingPath}.` : null,
     "The complete support evidence follows as structured JSON. Preserve the user's words exactly; diagnose from the receipts and attached screenshots rather than asking staff to retype them.",
@@ -375,7 +376,7 @@ router.post("/admin/support-tickets/:id/triage", requireAdmin, async (req, res):
       .update(supportTicketsTable)
       .set({
         resolutionClass: "external",
-        status: "blocked",
+        status: "blocked_on_third_party",
         thirdPartyBlocker: parsed.data.blocker,
         resolutionEvidence: {
           classifiedBy: req.userId!,
@@ -590,7 +591,7 @@ router.post(
         evidenceBundle,
         proposal: {
           diagnosisInstruction: instruction,
-          summary: `Zero is preparing a project-level proposal for ticket #${ticket.id}.`,
+          summary: `Zero is preparing a project-level proposal for ticket ${formatSupportTicketNumber(ticket.id)}.`,
           requiresOwnerApproval: true,
         },
       })
@@ -701,132 +702,142 @@ router.post("/support/zero-sessions/:id/decision", async (req, res): Promise<voi
   });
 });
 
-router.post("/admin/support-defects/:id/verify", requireAdmin, async (req, res): Promise<void> => {
-  const defectId = Number(req.params.id);
-  const parsed = z
-    .object({
-      shippedVersion: z.string().trim().min(7).max(100),
-      liveTree: z.string().regex(/^[0-9a-f]{40}$/u),
-      probe: z
-        .object({
-          route: z.string().trim().min(1).max(500),
-        })
-        .strict(),
-    })
-    .strict()
-    .safeParse(req.body ?? {});
-  if (!Number.isSafeInteger(defectId) || defectId < 1 || !parsed.success) {
-    res.status(400).json({
-      error: "Name the shipped version and attach its successful live route proof.",
-    });
-    return;
-  }
-  const liveIdentity = getServedBuildIdentity();
-  if (!("tree" in liveIdentity) || liveIdentity.tree !== parsed.data.liveTree) {
-    res.status(409).json({
-      error: "The live NabuFlow build does not match that proof. No ticket was resolved.",
-      code: "support_live_build_mismatch",
-      liveIdentity: "tree" in liveIdentity ? liveIdentity : { identity: "unknown" },
-    });
-    return;
-  }
-  const liveProbe = await proveCurrentNabuFlowRoute(req, parsed.data.probe.route);
-  if (!liveProbe) {
-    res.status(409).json({
-      error: "That NabuFlow route did not answer successfully. No ticket was resolved.",
-      code: "support_live_route_unproven",
-    });
-    return;
-  }
-  const result = await db.transaction(async (tx) => {
-    const [defect] = await tx
-      .update(platformDefectsTable)
-      .set({
-        status: "verified",
-        shippedVersion: parsed.data.shippedVersion,
-        shippedAt: new Date(),
-        verifiedAt: new Date(),
-        evidence: {
-          liveTree: parsed.data.liveTree,
-          liveProbe,
-        },
-        updatedAt: new Date(),
+router.post(
+  "/admin/support-defects/:id/verify",
+  requireAdmin,
+  requireSupportResolver,
+  async (req, res): Promise<void> => {
+    const defectId = Number(req.params.id);
+    const parsed = z
+      .object({
+        shippedVersion: z.string().trim().min(7).max(100),
+        liveTree: z.string().regex(/^[0-9a-f]{40}$/u),
+        probe: z
+          .object({
+            route: z.string().trim().min(1).max(500),
+          })
+          .strict(),
       })
-      .where(
-        and(
-          eq(platformDefectsTable.id, defectId),
-          inArray(platformDefectsTable.status, ["open", "fixing"]),
-        ),
-      )
-      .returning();
-    if (!defect) return null;
-    const linked = await tx
-      .select({
-        ticketId: supportTicketsTable.id,
-        userId: supportTicketsTable.userId,
-        projectId: supportTicketsTable.projectId,
-      })
-      .from(supportTicketDefectLinksTable)
-      .innerJoin(
-        supportTicketsTable,
-        eq(supportTicketsTable.id, supportTicketDefectLinksTable.ticketId),
-      )
-      .where(eq(supportTicketDefectLinksTable.defectId, defectId));
-    if (linked.length > 0) {
-      await tx
-        .update(supportTicketsTable)
+      .strict()
+      .safeParse(req.body ?? {});
+    if (!Number.isSafeInteger(defectId) || defectId < 1 || !parsed.success) {
+      res.status(400).json({
+        error: "Name the shipped version and attach its successful live route proof.",
+      });
+      return;
+    }
+    const liveIdentity = getServedBuildIdentity();
+    if (!("tree" in liveIdentity) || liveIdentity.tree !== parsed.data.liveTree) {
+      res.status(409).json({
+        error: "The live NabuFlow build does not match that proof. No ticket was resolved.",
+        code: "support_live_build_mismatch",
+        liveIdentity: "tree" in liveIdentity ? liveIdentity : { identity: "unknown" },
+      });
+      return;
+    }
+    const liveProbe = await proveCurrentNabuFlowRoute(req, parsed.data.probe.route);
+    if (!liveProbe) {
+      res.status(409).json({
+        error: "That NabuFlow route did not answer successfully. No ticket was resolved.",
+        code: "support_live_route_unproven",
+      });
+      return;
+    }
+    const resolvedAt = new Date();
+    const result = await db.transaction(async (tx) => {
+      const [defect] = await tx
+        .update(platformDefectsTable)
         .set({
-          status: "resolved",
-          resolutionEvidence: {
-            defectId,
-            shippedVersion: parsed.data.shippedVersion,
+          status: "verified",
+          shippedVersion: parsed.data.shippedVersion,
+          shippedAt: new Date(),
+          verifiedAt: new Date(),
+          evidence: {
             liveTree: parsed.data.liveTree,
             liveProbe,
-            resolvedTogether: true,
-            resolvedAt: new Date().toISOString(),
           },
           updatedAt: new Date(),
         })
         .where(
-          inArray(
-            supportTicketsTable.id,
-            linked.map((row) => row.ticketId),
+          and(
+            eq(platformDefectsTable.id, defectId),
+            inArray(platformDefectsTable.status, ["open", "fixing"]),
           ),
+        )
+        .returning();
+      if (!defect) return null;
+      const linked = await tx
+        .select({
+          ticketId: supportTicketsTable.id,
+          userId: supportTicketsTable.userId,
+          projectId: supportTicketsTable.projectId,
+        })
+        .from(supportTicketDefectLinksTable)
+        .innerJoin(
+          supportTicketsTable,
+          eq(supportTicketsTable.id, supportTicketDefectLinksTable.ticketId),
+        )
+        .where(eq(supportTicketDefectLinksTable.defectId, defectId));
+      if (linked.length > 0) {
+        await tx
+          .update(supportTicketsTable)
+          .set({
+            status: "resolved",
+            resolvedByUserId: req.userId!,
+            resolvedByRole: req.staffPrincipal!.role,
+            resolvedAt,
+            resolutionEvidence: {
+              defectId,
+              shippedVersion: parsed.data.shippedVersion,
+              liveTree: parsed.data.liveTree,
+              liveProbe,
+              resolvedTogether: true,
+              resolvedAt: resolvedAt.toISOString(),
+            },
+            updatedAt: new Date(),
+          })
+          .where(
+            inArray(
+              supportTicketsTable.id,
+              linked.map((row) => row.ticketId),
+            ),
+          );
+        await tx.insert(notificationsTable).values(
+          linked.map((row) => ({
+            recipientId: row.userId,
+            type: "support_platform_fix_shipped",
+            title: "The NabuFlow issue you reported has been fixed",
+            body: "The platform fix is live. Your linked support ticket has been updated automatically.",
+            actorId: req.userId!,
+            resourceType: "support_ticket",
+            resourceId: String(row.ticketId),
+            projectId: row.projectId,
+            metadata: { defectId, shippedVersion: parsed.data.shippedVersion },
+          })),
         );
-      await tx.insert(notificationsTable).values(
-        linked.map((row) => ({
-          recipientId: row.userId,
-          type: "support_platform_fix_shipped",
-          title: "The NabuFlow issue you reported has been fixed",
-          body: "The platform fix is live. Your linked support ticket has been updated automatically.",
-          actorId: req.userId!,
-          resourceType: "support_ticket",
-          resourceId: String(row.ticketId),
-          projectId: row.projectId,
-          metadata: { defectId, shippedVersion: parsed.data.shippedVersion },
-        })),
-      );
+      }
+      return { defect, linked };
+    });
+    if (!result) {
+      res.status(404).json({ error: "Open platform defect not found." });
+      return;
     }
-    return { defect, linked };
-  });
-  if (!result) {
-    res.status(404).json({ error: "Open platform defect not found." });
-    return;
-  }
-  const accountIds = [...new Set(result.linked.map((row) => row.userId))];
-  res.json({
-    defect: result.defect,
-    resolvedTicketCount: result.linked.length,
-    affectedAccountCount: accountIds.length,
-    affectedAccountIds: accountIds,
-    notificationsSent: result.linked.length,
-    affectedAccountsNotified: accountIds.length,
-  });
-});
+    const accountIds = [...new Set(result.linked.map((row) => row.userId))];
+    res.json({
+      defect: result.defect,
+      resolvedTicketCount: result.linked.length,
+      affectedAccountCount: accountIds.length,
+      affectedAccountIds: accountIds,
+      notificationsSent: result.linked.length,
+      affectedAccountsNotified: accountIds.length,
+    });
+  },
+);
 
 router.post(
   "/admin/support-tickets/:id/verify-project-resolution",
   requireAdmin,
+  requireSupportResolver,
   async (req, res): Promise<void> => {
     const ticketId = Number(req.params.id);
     const ticket = Number.isSafeInteger(ticketId) ? await readTicket(ticketId) : null;
@@ -911,6 +922,9 @@ router.post(
         .update(supportTicketsTable)
         .set({
           status: "resolved",
+          resolvedByUserId: req.userId!,
+          resolvedByRole: req.staffPrincipal!.role,
+          resolvedAt: new Date(),
           resolutionEvidence: {
             supportSessionId: session.id,
             taskId: session.taskId,
@@ -948,7 +962,7 @@ router.post("/support/tickets/:id/confirm-external-resolved", async (req, res): 
         eq(supportTicketsTable.id, ticketId),
         eq(supportTicketsTable.userId, req.userId!),
         eq(supportTicketsTable.resolutionClass, "external"),
-        eq(supportTicketsTable.status, "blocked"),
+        eq(supportTicketsTable.status, "blocked_on_third_party"),
       ),
     )
     .limit(1);
@@ -960,6 +974,9 @@ router.post("/support/tickets/:id/confirm-external-resolved", async (req, res): 
     .update(supportTicketsTable)
     .set({
       status: "resolved",
+      resolvedByUserId: req.userId!,
+      resolvedByRole: "requester",
+      resolvedAt: new Date(),
       resolutionEvidence: {
         ...boundedObject(ticket.resolutionEvidence),
         confirmedResolvedBy: req.userId!,

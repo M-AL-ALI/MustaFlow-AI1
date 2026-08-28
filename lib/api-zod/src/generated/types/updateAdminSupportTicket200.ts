@@ -5,10 +5,16 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { UpdateAdminSupportTicket200Priority } from './updateAdminSupportTicket200Priority';
 import type { UpdateAdminSupportTicket200Status } from './updateAdminSupportTicket200Status';
 
 export type UpdateAdminSupportTicket200 = {
   ok: boolean;
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   status: UpdateAdminSupportTicket200Status;
+  priority: UpdateAdminSupportTicket200Priority;
+  /** @nullable */
+  assignedToUserId?: string | null;
 };

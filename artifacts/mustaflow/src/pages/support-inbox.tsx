@@ -20,6 +20,9 @@ import {
   Bell,
   BellOff,
   FlaskConical,
+  Clock3,
+  UserCheck,
+  Flag,
 } from "lucide-react";
 import {
   useListAdminSupportTickets,
@@ -27,6 +30,7 @@ import {
   useUpdateAdminSupportTicket,
   useReplyAdminSupportTicket,
   useAddAdminSupportTicketNote,
+  useListAdminSupportAssignees,
   getListAdminSupportTicketsQueryKey,
   getGetAdminSupportTicketQueryKey,
 } from "@workspace/api-client-react";
@@ -48,7 +52,13 @@ import { presentSupportEmailStatus, type SupportUserDeliveryView } from "@/lib/s
 import { AdminBreadcrumbs } from "@/components/admin/admin-breadcrumbs";
 import { Link } from "wouter";
 
-type StatusFilter = "all" | "new" | "open" | "resolved";
+type StatusFilter =
+  | "all"
+  | "new"
+  | "open"
+  | "waiting_on_user"
+  | "blocked_on_third_party"
+  | "resolved";
 
 // Header control: send a diagnostic test email to SUPPORT_EMAIL.
 function TestEmailButton() {
@@ -163,6 +173,8 @@ const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "new", label: "New" },
   { value: "open", label: "Open" },
+  { value: "waiting_on_user", label: "Waiting" },
+  { value: "blocked_on_third_party", label: "Third party" },
   { value: "resolved", label: "Resolved" },
 ];
 
@@ -172,11 +184,32 @@ function statusBadgeClass(status: string): string {
       return "bg-blue-500/10 text-blue-500 border-blue-500/20";
     case "open":
       return "bg-amber-500/10 text-amber-500 border-amber-500/20";
+    case "waiting_on_user":
+      return "bg-violet-500/10 text-violet-500 border-violet-500/20";
+    case "blocked_on_third_party":
+      return "bg-orange-500/10 text-orange-600 border-orange-500/20";
     case "resolved":
       return "bg-green-500/10 text-green-500 border-green-500/20";
     default:
       return "bg-muted text-muted-foreground border-border";
   }
+}
+
+function statusLabel(status: string): string {
+  return status.replaceAll("_", " ");
+}
+
+function formatAge(minutes: number): string {
+  if (minutes < 60) return `${minutes}m old`;
+  if (minutes < 1_440) return `${Math.floor(minutes / 60)}h old`;
+  return `${Math.floor(minutes / 1_440)}d old`;
+}
+
+function priorityBadgeClass(priority: string): string {
+  if (priority === "urgent") return "bg-red-500/10 text-red-600 border-red-500/20";
+  if (priority === "high") return "bg-orange-500/10 text-orange-600 border-orange-500/20";
+  if (priority === "low") return "bg-slate-500/10 text-slate-500 border-slate-500/20";
+  return "bg-muted text-muted-foreground border-border";
 }
 
 function formatDate(iso: string): string {
@@ -199,7 +232,7 @@ function StatusBadge({ status }: { status: string }) {
         statusBadgeClass(status),
       )}
     >
-      {status}
+      {statusLabel(status)}
     </span>
   );
 }
@@ -222,13 +255,32 @@ export default function SupportInboxPage() {
     isFetching: listFetching,
     refetch: refetchList,
   } = useListAdminSupportTickets(params);
+  const { data: assigneeData } = useListAdminSupportAssignees();
+  const assigneeNames = useMemo(
+    () =>
+      new Map(
+        (assigneeData?.assignees ?? []).map((assignee) => [
+          assignee.userId,
+          assignee.displayName ?? assignee.userId,
+        ]),
+      ),
+    [assigneeData],
+  );
 
   const tickets = listData?.tickets ?? [];
-  const statusCounts = listData?.statusCounts ?? { new: 0, open: 0, resolved: 0 };
+  const statusCounts = listData?.statusCounts ?? {
+    new: 0,
+    open: 0,
+    waiting_on_user: 0,
+    blocked_on_third_party: 0,
+    resolved: 0,
+  };
 
   function tabCount(value: StatusFilter): number | null {
     if (value === "new") return statusCounts.new;
     if (value === "open") return statusCounts.open;
+    if (value === "waiting_on_user") return statusCounts.waiting_on_user;
+    if (value === "blocked_on_third_party") return statusCounts.blocked_on_third_party;
     if (value === "resolved") return statusCounts.resolved;
     return null;
   }
@@ -329,6 +381,11 @@ export default function SupportInboxPage() {
                 <TicketListItem
                   key={t.id}
                   ticket={t}
+                  assigneeName={
+                    t.assignedToUserId
+                      ? (assigneeNames.get(t.assignedToUserId) ?? "Assigned staff")
+                      : null
+                  }
                   active={t.id === selectedId}
                   onClick={() => setSelectedId(t.id)}
                 />
@@ -363,10 +420,12 @@ export default function SupportInboxPage() {
 
 function TicketListItem({
   ticket,
+  assigneeName,
   active,
   onClick,
 }: {
   ticket: AdminSupportTicketSummary;
+  assigneeName: string | null;
   active: boolean;
   onClick: () => void;
 }) {
@@ -381,7 +440,12 @@ function TicketListItem({
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="font-medium text-sm line-clamp-1">{ticket.subject}</p>
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold tracking-wide text-primary">
+            {ticket.ticketNumber}
+          </p>
+          <p className="font-medium text-sm line-clamp-1">{ticket.subject}</p>
+        </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {ticket.emailStatus === "failed" && (
             <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive">
@@ -397,6 +461,22 @@ function TicketListItem({
           )}
           <StatusBadge status={ticket.status} />
         </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium capitalize",
+            priorityBadgeClass(ticket.priority),
+          )}
+        >
+          <Flag className="h-2.5 w-2.5" /> {ticket.priority}
+        </span>
+        <span className="inline-flex items-center gap-1 text-muted-foreground">
+          <Clock3 className="h-3 w-3" /> {formatAge(ticket.ageMinutes)}
+        </span>
+        <span className="inline-flex items-center gap-1 text-muted-foreground">
+          <UserCheck className="h-3 w-3" /> {assigneeName ?? "Unassigned"}
+        </span>
       </div>
       <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
@@ -438,6 +518,7 @@ function TicketDetail({
 }) {
   const queryClient = useQueryClient();
   const { data: ticket, isLoading, isError, refetch } = useGetAdminSupportTicket(ticketId);
+  const { data: assigneeData } = useListAdminSupportAssignees();
   const [composerMode, setComposerMode] = useState<"reply" | "note">("reply");
   const [reply, setReply] = useState("");
   const [note, setNote] = useState("");
@@ -451,10 +532,34 @@ function TicketDetail({
     queryClient.invalidateQueries({ queryKey: getGetAdminSupportTicketQueryKey(ticketId) });
   }
 
-  function changeStatus(next: "new" | "open") {
+  function changeStatus(next: "new" | "open" | "waiting_on_user") {
     if (!ticket || ticket.status === next) return;
     updateStatus.mutate(
       { id: ticketId, data: { status: next } },
+      {
+        onSuccess: () => {
+          invalidateDetail();
+          onMutated();
+        },
+      },
+    );
+  }
+
+  function changePriority(next: "low" | "normal" | "high" | "urgent") {
+    updateStatus.mutate(
+      { id: ticketId, data: { priority: next } },
+      {
+        onSuccess: () => {
+          invalidateDetail();
+          onMutated();
+        },
+      },
+    );
+  }
+
+  function changeAssignee(next: string) {
+    updateStatus.mutate(
+      { id: ticketId, data: { assigneeUserId: next || null } },
       {
         onSuccess: () => {
           invalidateDetail();
@@ -551,6 +656,9 @@ function TicketDetail({
       <div className="px-5 py-4 border-b border-border">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
+            <p className="text-xs font-semibold tracking-wide text-primary">
+              {ticket.ticketNumber}
+            </p>
             <button
               onClick={onClose}
               className="lg:hidden inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mb-2"
@@ -566,6 +674,9 @@ function TicketDetail({
               </span>
               <span className="capitalize">Plan: {ticket.plan}</span>
               <span className="capitalize">Category: {ticket.category}</span>
+              <span className="inline-flex items-center gap-1">
+                <Clock3 className="h-3 w-3" /> {formatAge(ticket.ageMinutes)}
+              </span>
               {ticket.projectId != null && (
                 <span className="inline-flex items-center gap-1">
                   <FolderKanban className="h-3 w-3" />
@@ -602,9 +713,9 @@ function TicketDetail({
         </div>
 
         {/* Status controls */}
-        <div className="mt-3 flex items-center gap-1.5">
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-muted-foreground mr-1">Set status:</span>
-          {(["new", "open"] as const).map((s) => (
+          {(["new", "open", "waiting_on_user"] as const).map((s) => (
             <button
               key={s}
               onClick={() => changeStatus(s)}
@@ -616,13 +727,63 @@ function TicketDetail({
                   : "border-border text-muted-foreground hover:text-foreground hover:bg-muted",
               )}
             >
-              {s}
+              {statusLabel(s)}
             </button>
           ))}
         </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <Flag className="h-3 w-3" /> Priority
+            </span>
+            <select
+              aria-label="Ticket priority"
+              value={ticket.priority}
+              disabled={updateStatus.isPending}
+              onChange={(event) =>
+                changePriority(event.target.value as "low" | "normal" | "high" | "urgent")
+              }
+              className="w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm text-foreground"
+            >
+              {(["low", "normal", "high", "urgent"] as const).map((priority) => (
+                <option key={priority} value={priority}>
+                  {priority[0].toUpperCase() + priority.slice(1)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <UserCheck className="h-3 w-3" /> Assigned staff
+            </span>
+            <select
+              aria-label="Ticket assignee"
+              value={ticket.assignedToUserId ?? ""}
+              disabled={updateStatus.isPending}
+              onChange={(event) => changeAssignee(event.target.value)}
+              className="w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm text-foreground"
+            >
+              <option value="">Unassigned</option>
+              {(assigneeData?.assignees ?? [])
+                .filter((assignee) => assignee.assignable)
+                .map((assignee) => (
+                  <option key={assignee.userId} value={assignee.userId}>
+                    {assignee.displayName} · {assignee.role}
+                  </option>
+                ))}
+            </select>
+          </label>
+        </div>
+        {ticket.status === "resolved" && ticket.resolvedByUserId && (
+          <p className="mt-3 text-xs text-emerald-600">
+            Resolved by {ticket.resolvedByUserId}
+            {ticket.resolvedByRole ? ` (${ticket.resolvedByRole})` : ""}
+            {ticket.resolvedAt ? ` on ${formatDate(ticket.resolvedAt)}` : ""}.
+          </p>
+        )}
       </div>
 
-      <SupportOperationConsole ticketId={ticketId} />
+      <SupportOperationConsole ticketId={ticketId} ticketNumber={ticket.ticketNumber} />
 
       {/* Attachments */}
       {ticket.attachments.length > 0 && (

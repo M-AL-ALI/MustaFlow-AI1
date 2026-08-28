@@ -10,6 +10,8 @@ import type { SupportTicketSummaryStatus } from './supportTicketSummaryStatus';
 
 export interface SupportTicketSummary {
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   subject: string;
   category: string;
   status: SupportTicketSummaryStatus;

@@ -12,5 +12,5 @@ export type UpdateAdminSupportTicketBodyStatus = typeof UpdateAdminSupportTicket
 export const UpdateAdminSupportTicketBodyStatus = {
   new: 'new',
   open: 'open',
-  resolved: 'resolved',
+  waiting_on_user: 'waiting_on_user',
 } as const;

@@ -6,17 +6,23 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AdminSupportTicketAttachment } from './adminSupportTicketAttachment';
+import type { AdminSupportTicketDetailPriority } from './adminSupportTicketDetailPriority';
 import type { AdminSupportTicketDetailStatus } from './adminSupportTicketDetailStatus';
 import type { AdminSupportTicketMessage } from './adminSupportTicketMessage';
 
 export interface AdminSupportTicketDetail {
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   userId: string;
   /** @nullable */
   userEmail?: string | null;
   plan: string;
   category: string;
   status: AdminSupportTicketDetailStatus;
+  priority: AdminSupportTicketDetailPriority;
+  /** @nullable */
+  assignedToUserId?: string | null;
   subject: string;
   transcript: AdminSupportTicketMessage[];
   /** @nullable */
@@ -28,6 +34,14 @@ export interface AdminSupportTicketDetail {
   /** @nullable */
   supportEmailUsed?: string | null;
   emailStatus: string;
+  /** @nullable */
+  resolvedByUserId?: string | null;
+  /** @nullable */
+  resolvedByRole?: string | null;
+  /** @nullable */
+  resolvedAt?: Date | null;
+  /** @minimum 0 */
+  ageMinutes: number;
   createdAt: Date;
   updatedAt: Date;
 }

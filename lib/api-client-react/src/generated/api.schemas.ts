@@ -361,6 +361,8 @@ export const EscalateSupportOutputEmailStatus = {
 
 export interface EscalateSupportOutput {
   ticketId: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   emailStatus: EscalateSupportOutputEmailStatus;
   supportEmailUsed?: string | null;
 }
@@ -378,8 +380,9 @@ export type SupportTicketSummaryStatus = typeof SupportTicketSummaryStatus[keyof
 export const SupportTicketSummaryStatus = {
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
-  closed: 'closed',
 } as const;
 
 export type SupportTicketSummaryEmailStatus = typeof SupportTicketSummaryEmailStatus[keyof typeof SupportTicketSummaryEmailStatus];
@@ -393,6 +396,8 @@ export const SupportTicketSummaryEmailStatus = {
 
 export interface SupportTicketSummary {
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   subject: string;
   category: string;
   status: SupportTicketSummaryStatus;
@@ -413,8 +418,9 @@ export type SupportTicketDetailStatus = typeof SupportTicketDetailStatus[keyof t
 export const SupportTicketDetailStatus = {
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
-  closed: 'closed',
 } as const;
 
 export type SupportTicketDetailEmailStatus = typeof SupportTicketDetailEmailStatus[keyof typeof SupportTicketDetailEmailStatus];
@@ -428,6 +434,8 @@ export const SupportTicketDetailEmailStatus = {
 
 export interface SupportTicketDetail {
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   subject: string;
   category: string;
   status: SupportTicketDetailStatus;
@@ -3475,17 +3483,34 @@ export type AdminSupportTicketSummaryStatus = typeof AdminSupportTicketSummarySt
 export const AdminSupportTicketSummaryStatus = {
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
+} as const;
+
+export type AdminSupportTicketSummaryPriority = typeof AdminSupportTicketSummaryPriority[keyof typeof AdminSupportTicketSummaryPriority];
+
+
+export const AdminSupportTicketSummaryPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  urgent: 'urgent',
 } as const;
 
 export interface AdminSupportTicketSummary {
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   userId: string;
   /** @nullable */
   userEmail?: string | null;
   plan: string;
   category: string;
   status: AdminSupportTicketSummaryStatus;
+  priority: AdminSupportTicketSummaryPriority;
+  /** @nullable */
+  assignedToUserId?: string | null;
   subject: string;
   /** @nullable */
   projectId?: number | null;
@@ -3493,6 +3518,14 @@ export interface AdminSupportTicketSummary {
   projectName?: string | null;
   attachmentCount: number;
   emailStatus: string;
+  /** @nullable */
+  resolvedByUserId?: string | null;
+  /** @nullable */
+  resolvedByRole?: string | null;
+  /** @nullable */
+  resolvedAt?: string | null;
+  /** @minimum 0 */
+  ageMinutes: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -3500,6 +3533,8 @@ export interface AdminSupportTicketSummary {
 export type AdminSupportTicketPageStatusCounts = {
   new: number;
   open: number;
+  waiting_on_user: number;
+  blocked_on_third_party: number;
   resolved: number;
 };
 
@@ -3544,17 +3579,34 @@ export type AdminSupportTicketDetailStatus = typeof AdminSupportTicketDetailStat
 export const AdminSupportTicketDetailStatus = {
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
+} as const;
+
+export type AdminSupportTicketDetailPriority = typeof AdminSupportTicketDetailPriority[keyof typeof AdminSupportTicketDetailPriority];
+
+
+export const AdminSupportTicketDetailPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  urgent: 'urgent',
 } as const;
 
 export interface AdminSupportTicketDetail {
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   userId: string;
   /** @nullable */
   userEmail?: string | null;
   plan: string;
   category: string;
   status: AdminSupportTicketDetailStatus;
+  priority: AdminSupportTicketDetailPriority;
+  /** @nullable */
+  assignedToUserId?: string | null;
   subject: string;
   transcript: AdminSupportTicketMessage[];
   /** @nullable */
@@ -3566,8 +3618,35 @@ export interface AdminSupportTicketDetail {
   /** @nullable */
   supportEmailUsed?: string | null;
   emailStatus: string;
+  /** @nullable */
+  resolvedByUserId?: string | null;
+  /** @nullable */
+  resolvedByRole?: string | null;
+  /** @nullable */
+  resolvedAt?: string | null;
+  /** @minimum 0 */
+  ageMinutes: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export type AdminSupportAssigneeRole = typeof AdminSupportAssigneeRole[keyof typeof AdminSupportAssigneeRole];
+
+
+export const AdminSupportAssigneeRole = {
+  owner: 'owner',
+  operator: 'operator',
+  support: 'support',
+} as const;
+
+export interface AdminSupportAssignee {
+  userId: string;
+  role: AdminSupportAssigneeRole;
+  /** @nullable */
+  displayName?: string | null;
+  /** @nullable */
+  imageUrl?: string | null;
+  assignable: boolean;
 }
 
 export type AuditFindingCategory = typeof AuditFindingCategory[keyof typeof AuditFindingCategory];
@@ -6565,6 +6644,8 @@ export const ListAdminSupportTicketsStatus = {
   all: 'all',
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
 } as const;
 
@@ -6574,11 +6655,24 @@ export type UpdateAdminSupportTicketBodyStatus = typeof UpdateAdminSupportTicket
 export const UpdateAdminSupportTicketBodyStatus = {
   new: 'new',
   open: 'open',
-  resolved: 'resolved',
+  waiting_on_user: 'waiting_on_user',
+} as const;
+
+export type UpdateAdminSupportTicketBodyPriority = typeof UpdateAdminSupportTicketBodyPriority[keyof typeof UpdateAdminSupportTicketBodyPriority];
+
+
+export const UpdateAdminSupportTicketBodyPriority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  urgent: 'urgent',
 } as const;
 
 export type UpdateAdminSupportTicketBody = {
-  status: UpdateAdminSupportTicketBodyStatus;
+  status?: UpdateAdminSupportTicketBodyStatus;
+  priority?: UpdateAdminSupportTicketBodyPriority;
+  /** @nullable */
+  assigneeUserId?: string | null;
 };
 
 export type UpdateAdminSupportTicket200Status = typeof UpdateAdminSupportTicket200Status[keyof typeof UpdateAdminSupportTicket200Status];
@@ -6587,13 +6681,28 @@ export type UpdateAdminSupportTicket200Status = typeof UpdateAdminSupportTicket2
 export const UpdateAdminSupportTicket200Status = {
   new: 'new',
   open: 'open',
-  resolved: 'resolved',
+  waiting_on_user: 'waiting_on_user',
+} as const;
+
+export type UpdateAdminSupportTicket200Priority = typeof UpdateAdminSupportTicket200Priority[keyof typeof UpdateAdminSupportTicket200Priority];
+
+
+export const UpdateAdminSupportTicket200Priority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  urgent: 'urgent',
 } as const;
 
 export type UpdateAdminSupportTicket200 = {
   ok: boolean;
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   status: UpdateAdminSupportTicket200Status;
+  priority: UpdateAdminSupportTicket200Priority;
+  /** @nullable */
+  assignedToUserId?: string | null;
 };
 
 export type ReplyAdminSupportTicketBody = {
@@ -6619,6 +6728,8 @@ export type ReplyAdminSupportTicket200Status = typeof ReplyAdminSupportTicket200
 export const ReplyAdminSupportTicket200Status = {
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
 } as const;
 
@@ -6639,6 +6750,11 @@ export type AddAdminSupportTicketNoteBody = {
 export type AddAdminSupportTicketNote200 = {
   ok: boolean;
   message: AdminSupportTicketMessage;
+};
+
+export type ListAdminSupportAssignees200 = {
+  /** @maxItems 100 */
+  assignees: AdminSupportAssignee[];
 };
 
 export type ListAdminSkills200SkillsItem = { [key: string]: unknown };

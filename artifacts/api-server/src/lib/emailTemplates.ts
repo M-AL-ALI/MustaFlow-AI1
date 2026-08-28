@@ -6,6 +6,8 @@
  * compatibility. No external CSS or images.
  */
 
+import { formatSupportTicketNumber } from "./support-ticket-workflow";
+
 export interface EmailTemplate {
   subject: string;
   html: string;
@@ -231,6 +233,7 @@ export function supportTicketTemplate(opts: {
     projectId,
     deviceInfo,
   } = opts;
+  const ticketNumber = formatSupportTicketNumber(ticketId);
 
   const esc = (s: string): string =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -259,10 +262,10 @@ export function supportTicketTemplate(opts: {
           )
           .join("")}</ul>`;
 
-  const emailSubject = `[Support #${ticketId}] ${subject}`;
+  const emailSubject = `[Support ${ticketNumber}] ${subject}`;
 
   const html = wrap(`
-  <h2 style="margin-top:0;color:#111">New support ticket #${ticketId}</h2>
+  <h2 style="margin-top:0;color:#111">New support ticket ${ticketNumber}</h2>
   <p style="font-size:13px;color:#4b5563;margin:0 0 4px"><strong>From:</strong> ${
     userEmail ? esc(userEmail) : "(no email on file)"
   } (user ${esc(userId)})</p>
@@ -284,7 +287,7 @@ export function supportTicketTemplate(opts: {
   ${attachmentsHtml}`);
 
   const textLines = [
-    `New support ticket #${ticketId}: ${subject}`,
+    `New support ticket ${ticketNumber}: ${subject}`,
     `From: ${userEmail ?? "(no email)"} (user ${userId})`,
     `Plan: ${plan} | Category: ${category}${projectId != null ? ` | Project: ${projectId}` : ""}`,
     "",
@@ -307,26 +310,27 @@ export function supportTicketConfirmationTemplate(opts: {
   subject: string;
 }): EmailTemplate {
   const { ticketId, subject } = opts;
+  const ticketNumber = formatSupportTicketNumber(ticketId);
   const esc = (s: string): string =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const emailSubject = `Support ticket #${ticketId} received`;
+  const emailSubject = `Support ticket ${ticketNumber} received`;
 
   const html = wrap(`
   <h2 style="margin-top:0;color:#111">We received your support request</h2>
   <p>Thank you for reaching out to MustaFlow support. Your request has been logged and our team will review it shortly.</p>
   <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">
-    <strong>Ticket #${ticketId}</strong> &mdash; ${esc(subject)}
+    <strong>Ticket ${ticketNumber}</strong> &mdash; ${esc(subject)}
   </p>
   <p>We'll reach out to you as soon as possible to help resolve your issue.</p>
   <p style="font-size:13px;color:#4b5563">If you have additional details to share, simply reply to this email.</p>`);
 
   const text = [
-    `We received your support request — Ticket #${ticketId}`,
+    `We received your support request — Ticket ${ticketNumber}`,
     "",
     `Thank you for reaching out to MustaFlow support. Your request has been logged and our team will review it shortly.`,
     "",
-    `Ticket #${ticketId} — ${subject}`,
+    `Ticket ${ticketNumber} — ${subject}`,
     "",
     `We'll reach out to you as soon as possible to help resolve your issue.`,
     "",
@@ -347,16 +351,17 @@ export function supportAccessRequestTemplate(opts: {
   const esc = (value: string): string =>
     value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const expires = opts.requestExpiresAt.toUTCString();
-  const subject = `Project access request — ticket #${opts.ticketId}`;
+  const ticketNumber = formatSupportTicketNumber(opts.ticketId);
+  const subject = `Project access request — ticket ${ticketNumber}`;
   const html = wrap(`
   <h2 style="margin-top:0;color:#111">Your approval is required</h2>
   <p><strong>${esc(opts.staffName)}</strong> from NabuFlow Support is requesting temporary access to <strong>${esc(opts.projectName)}</strong>.</p>
   <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">${esc(opts.reason)}</p>
   <p>This request expires ${esc(expires)}. Opening the link does not grant access; sign in and choose Grant or Refuse inside NabuFlow.</p>
   ${ctaButton("Review request in NabuFlow", opts.decisionUrl)}
-  <p style="font-size:12px;color:#6b7280">Ticket #${opts.ticketId}</p>`);
+  <p style="font-size:12px;color:#6b7280">Ticket ${ticketNumber}</p>`);
   const text = [
-    `Your approval is required — ticket #${opts.ticketId}`,
+    `Your approval is required — ticket ${ticketNumber}`,
     "",
     `${opts.staffName} from NabuFlow Support is requesting temporary access to ${opts.projectName}.`,
     `Reason: ${opts.reason}`,
@@ -377,16 +382,17 @@ export function supportProposalReadyTemplate(opts: {
 }): EmailTemplate {
   const esc = (value: string): string =>
     value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const subject = `Review Zero's proposal — ticket #${opts.ticketId}`;
+  const ticketNumber = formatSupportTicketNumber(opts.ticketId);
+  const subject = `Review Zero's proposal — ticket ${ticketNumber}`;
   const html = wrap(`
   <h2 style="margin-top:0;color:#111">Zero prepared a proposal for your review</h2>
   <p><strong>${esc(opts.staffName)}</strong> completed a read-only diagnosis of <strong>${esc(opts.projectName)}</strong>.</p>
   <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">${esc(opts.summary)}</p>
   <p>Nothing has changed. Opening the link does not approve anything; sign in and review the proposal inside NabuFlow.</p>
   ${ctaButton("Review proposal in NabuFlow", opts.decisionUrl)}
-  <p style="font-size:12px;color:#6b7280">Ticket #${opts.ticketId}</p>`);
+  <p style="font-size:12px;color:#6b7280">Ticket ${ticketNumber}</p>`);
   const text = [
-    `Zero prepared a proposal — ticket #${opts.ticketId}`,
+    `Zero prepared a proposal — ticket ${ticketNumber}`,
     "",
     `${opts.staffName} completed a read-only diagnosis of ${opts.projectName}.`,
     opts.summary,
@@ -412,15 +418,16 @@ export function supportClassificationTemplate(opts: {
       : opts.classification === "platform"
         ? "a NabuFlow platform issue"
         : "blocked on a third party";
-  const emailSubject = `Ticket #${opts.ticketId} update: ${label}`;
+  const ticketNumber = formatSupportTicketNumber(opts.ticketId);
+  const emailSubject = `Ticket ${ticketNumber} update: ${label}`;
   const html = wrap(`
   <h2 style="margin-top:0;color:#111">We classified your support request</h2>
-  <p><strong>Ticket #${opts.ticketId}</strong> — ${esc(opts.subject)}</p>
+  <p><strong>Ticket ${ticketNumber}</strong> — ${esc(opts.subject)}</p>
   <p>We classified this as <strong>${esc(label)}</strong>.</p>
   <p style="font-size:14px;background:#f9fafb;border-left:3px solid #6366f1;padding:12px 16px;margin:16px 0">${esc(opts.explanation)}</p>
   ${ctaButton("View ticket in NabuFlow", opts.ticketUrl)}`);
   const text = [
-    `Ticket #${opts.ticketId} update`,
+    `Ticket ${ticketNumber} update`,
     opts.subject,
     "",
     `We classified this as ${label}.`,
@@ -437,22 +444,23 @@ export function supportReplyTemplate(opts: {
   replyBody: string;
 }): EmailTemplate {
   const { ticketId, subject, replyBody } = opts;
+  const ticketNumber = formatSupportTicketNumber(ticketId);
   const esc = (s: string): string =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const emailSubject = `Re: [Support #${ticketId}] ${subject}`;
+  const emailSubject = `Re: [Support ${ticketNumber}] ${subject}`;
   const bodyHtml = esc(replyBody).replace(/\n/g, "<br/>");
 
   const html = wrap(`
   <h2 style="margin-top:0;color:#111">A reply from MustaFlow Support</h2>
   <p style="font-size:13px;color:#4b5563;margin:0 0 16px">Regarding your request: <strong>${esc(
     subject,
-  )}</strong> (ticket #${ticketId})</p>
+  )}</strong> (ticket ${ticketNumber})</p>
   <div style="font-size:14px;line-height:1.6;color:#111;border-left:3px solid #6366f1;padding-left:14px">${bodyHtml}</div>
   <p style="font-size:13px;color:#4b5563;margin-top:20px">You can reply directly to this email to continue the conversation.</p>`);
 
   const text = [
-    `A reply from MustaFlow Support — ticket #${ticketId}`,
+    `A reply from MustaFlow Support — ticket ${ticketNumber}`,
     `Regarding: ${subject}`,
     "",
     replyBody,

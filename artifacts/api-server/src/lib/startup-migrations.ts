@@ -110,11 +110,43 @@ export async function applySupportOperationsMigration(client: MigrationClient): 
       ALTER TABLE support_tickets
         ADD COLUMN IF NOT EXISTS resolution_class TEXT,
         ADD COLUMN IF NOT EXISTS third_party_blocker TEXT,
-        ADD COLUMN IF NOT EXISTS resolution_evidence JSONB
+        ADD COLUMN IF NOT EXISTS resolution_evidence JSONB,
+        ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal',
+        ADD COLUMN IF NOT EXISTS assigned_to_user_id TEXT,
+        ADD COLUMN IF NOT EXISTS resolved_by_user_id TEXT,
+        ADD COLUMN IF NOT EXISTS resolved_by_role TEXT,
+        ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ
+    `);
+    await client.query(`
+      UPDATE support_tickets
+         SET status = 'blocked_on_third_party'
+       WHERE status = 'blocked'
     `);
     await client.query(`
       CREATE INDEX IF NOT EXISTS support_tickets_resolution_class_idx
         ON support_tickets(resolution_class, created_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_tickets_assignee_status_idx
+        ON support_tickets(assigned_to_user_id, status, updated_at)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS support_tickets_priority_status_idx
+        ON support_tickets(priority, status, updated_at)
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+           WHERE conname = 'support_tickets_priority_check'
+             AND conrelid = 'support_tickets'::regclass
+        ) THEN
+          ALTER TABLE support_tickets
+            ADD CONSTRAINT support_tickets_priority_check
+            CHECK (priority IN ('low','normal','high','urgent'));
+        END IF;
+      END $$
     `);
     await client.query(`
       CREATE TABLE IF NOT EXISTS support_access_grants (

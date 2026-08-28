@@ -30,7 +30,7 @@ vi.mock("@workspace/db", () => ({
 }));
 vi.mock("./logger", () => ({ logger: { error: vi.fn() } }));
 
-import { requireAdmin, staffRoleAllowsRequest } from "./adminAuth";
+import { requireAdmin, requireSupportResolver, staffRoleAllowsRequest } from "./adminAuth";
 import { decideStaffRemoval, decideStaffRoleChange } from "./admin-role-policy";
 
 function response() {
@@ -155,11 +155,45 @@ describe("Admin Page access foundation", () => {
     expect(staffRoleAllowsRequest("support", "POST", "/api/admin/support-defects/7/verify")).toBe(
       true,
     );
+    expect(staffRoleAllowsRequest("support", "GET", "/api/admin/support-assignees")).toBe(true);
     expect(staffRoleAllowsRequest("support", "GET", "/api/admin/stats")).toBe(false);
     expect(staffRoleAllowsRequest("analyst", "GET", "/api/admin/stats")).toBe(true);
     expect(staffRoleAllowsRequest("analyst", "GET", "/api/admin/records/projects")).toBe(true);
     expect(staffRoleAllowsRequest("support", "GET", "/api/admin/records/projects")).toBe(false);
+    expect(staffRoleAllowsRequest("analyst", "GET", "/api/admin/support-assignees")).toBe(false);
     expect(staffRoleAllowsRequest("analyst", "POST", "/api/admin/domains/7/suspend")).toBe(false);
+  });
+
+  it("requires a named operational role for an evidence-bearing resolution", async () => {
+    const analystReq = request("/api/admin/support-tickets/7/verify", "POST");
+    analystReq.staffPrincipal = {
+      userId: "analyst_test",
+      role: "analyst",
+      source: "user_roles",
+      grantedBy: "owner_test",
+    };
+    const analystResponse = response();
+    const analystNext = vi.fn() as unknown as NextFunction;
+    await requireSupportResolver(analystReq, analystResponse.res, analystNext);
+    expect(analystResponse.result).toEqual({
+      statusCode: 403,
+      body: {
+        error: "Your staff role cannot approve a support resolution.",
+        code: "support_resolver_required",
+      },
+    });
+    expect(analystNext).not.toHaveBeenCalled();
+
+    const supportReq = request("/api/admin/support-tickets/7/verify", "POST");
+    supportReq.staffPrincipal = {
+      userId: "support_test",
+      role: "support",
+      source: "user_roles",
+      grantedBy: "owner_test",
+    };
+    const supportNext = vi.fn() as unknown as NextFunction;
+    await requireSupportResolver(supportReq, response().res, supportNext);
+    expect(supportNext).toHaveBeenCalledOnce();
   });
 
   it("makes the last Owner structurally non-removable and non-demotable", () => {

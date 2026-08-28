@@ -636,3 +636,98 @@ P5 is lab-complete but not yet live-complete. Closure requires the exact merged-
 22-check release gate, production migration/identity proof, an actual dual-channel
 message accepted by the production email provider, owner and operator walkthroughs,
 screenshots, branch deletion and final drive receipts.
+
+### P5 provider boundary at the live gate
+
+The exact diagnostic head `6bb2c0ff3c2a6a7dc0c25fc3ae37a4099700aac3` passed the
+22-check release gate in the Replit production workspace. Replit then refused to
+begin either the authorized Republish or the clean deployment-preview retry. Its
+publishing control returned `Failed to fetch PostgreSQL major version for development
+database`, `Failed to validate database migrations`, and `Unexpected error attempting
+to continue hosting preview deployment`. No build or migration started and production
+remained unchanged. This is a provider control-plane blocker, not a failed application
+receipt. The sanitized database classifier is preserved on main for the first runtime
+that can boot; P5 stays honestly open until Replit's development-database control plane
+recovers and a real dual-channel delivery is proved live.
+
+## P6 — ticket workflow and evidence-bearing resolution
+
+P6 gives the user and operator one durable ticket identity, `NF-` followed by the
+zero-padded database primary key. The database key remains the routing identity; the
+formatted number is derived by one server contract and is never duplicated or allowed
+to drift. Creation confirmation, user ticket lists and details, staff inbox lists and
+details, support-presence labels, and every support email use that same number.
+
+The operational workflow is the closed set `new`, `open`, `waiting_on_user`,
+`blocked_on_third_party`, and `resolved`. Legacy `blocked` and `closed` rows are read
+through canonical aliases, and the idempotent support migration rewrites legacy blocked
+rows. Operators may directly move only among the three non-terminal working states.
+Blocked and resolved states remain reachable only through the existing three-way,
+evidence-bearing support operations; a generic PATCH returns the typed
+`support_resolution_proof_required` refusal.
+
+Every staff list item now names its ticket, age, priority, assignee, requester, project,
+and status. Age is derived from PostgreSQL `NOW()` and is never a second stored clock.
+Priority is a closed four-value contract. Assignment accepts only an active Owner,
+Operator or Support row whose shared account profile has a display name. One centrally
+guarded assignee endpoint supplies the selectable names. A related review finding found
+that endpoint initially outside the router's admin middleware prefix; it now has the
+same admin gate and central role policy as the inbox, with regression assertions for
+Support access and Analyst denial.
+
+All evidence-bearing resolution mutations now persist `resolved_by_user_id`,
+`resolved_by_role`, and `resolved_at`. Owner, Operator and Support may approve a terminal
+verdict; Analyst may inspect only the already-authorized read surfaces and cannot
+resolve. Project resolution still requires the applied Zero session, matching version,
+successful validation, ready preview and live preview receipt. Platform resolution
+still requires the serving tree and a successful bounded same-process route probe,
+then resolves every linked ticket and creates every affected-user notification in one
+transaction. External tickets stay visibly blocked on a named third party until the
+requester confirms the outside problem is gone.
+
+P6 is under lab implementation and verification on
+`codex/admin-page-p6-ticket-resolution`. It is not yet merged or live.
+
+### P6 lab verification and incidentals
+
+Database: none. Environment: lab. Store: `A:/NabuFlowLab/.pnpm-store/v10`.
+Kind: serial contract, route, UI, type, lint and full-suite verification in the
+one permanent A-drive worktree.
+
+- Focused workflow and authorization tests: 21 API tests passed. The dormant-
+  export guard and workflow contract then passed 7 tests after removing two
+  unused exports and making the generated assignee response codec part of the
+  live route.
+- Focused staff and requester UI tests: 10 tests passed.
+- Focused support-delivery tests: 34 passed / 1 intentionally skipped. A second
+  smoke group passed 4 tests; its database-backed ownership suite remained in
+  the recorded no-`DATABASE_URL` failure set rather than being granted a lab
+  database implicitly.
+- Root typecheck and root lint passed. Full web: 339 files and 1,232 tests
+  passed, zero failed.
+- Full API, serial: 897 files; 3,075 tests passed, 38 failed and 5 pending. The
+  final normalized failure set is unchanged across the two final runs, SHA-256
+  `a174e7e1f8dc70a67b0de0e5d78dab9e3428a77e6013935ce3ca4ab1163715b0`.
+  Compared with the P5 recorded 41-failure baseline, three stale support-email
+  integration assertions are now green and no new failure was introduced.
+- Startup migration count remains 149. Manifest and lockfile changes: none.
+
+Incidental findings closed in P6:
+
+1. The new assignee census initially sat outside the router's existing admin
+   middleware prefixes. The route now has explicit central `requireAdmin`
+   coverage, and role tests pin Support access plus Analyst denial.
+2. The generated assignee response type was produced but not consumed, while two
+   local workflow exports had no caller. The route now parses through the
+   generated codec and the unused exports were removed; the dormant-export gate
+   is the preventive.
+3. Existing escalation tests assumed only the staff email even though the live
+   path also sends the requester confirmation. They could therefore pass while
+   logging a failed auto-reply. The mocks and assertions now model both messages,
+   verify the canonical ticket number in the requester subject, and the three
+   stale full-suite failures became passes.
+
+P6 is lab-complete on the feature branch. It is not production-complete until
+the branch is merged, the exact merged tree passes the release gate, Replit can
+boot the 149-step schema, and the workflow is exercised on the live Admin and
+requester surfaces with captured evidence.

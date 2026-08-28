@@ -75,6 +75,15 @@ describe("consented support operations", () => {
     expect(first.join("\n")).toContain("DEFAULT 'diagnosing'");
     expect(first.join("\n")).toContain("'diagnosing','proposal_ready','approved'");
     expect(first.join("\n")).toContain("CREATE TABLE IF NOT EXISTS platform_defects");
+    expect(first.join("\n")).toContain(
+      "ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal'",
+    );
+    expect(first.join("\n")).toContain("ADD COLUMN IF NOT EXISTS assigned_to_user_id TEXT");
+    expect(first.join("\n")).toContain("ADD COLUMN IF NOT EXISTS resolved_by_user_id TEXT");
+    expect(first.join("\n")).toContain("ADD COLUMN IF NOT EXISTS resolved_by_role TEXT");
+    expect(first.join("\n")).toContain("ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ");
+    expect(first.join("\n")).toContain("support_tickets_priority_check");
+    expect(first.join("\n")).toContain("SET status = 'blocked_on_third_party'");
     expect(first.join("\n")).not.toMatch(/\b(DROP\s+TABLE|TRUNCATE\s+TABLE|DELETE\s+FROM)\b/i);
   });
 
@@ -151,6 +160,11 @@ describe("consented support operations", () => {
     expect(route).toContain("affectedAccountsNotified: accountIds.length");
     expect(route).toContain("readDefectImpact");
     expect(admin).toContain("support_resolution_proof_required");
+    expect(admin).toContain('router.use("/admin/support-assignees", requireAdmin)');
+    expect(route.match(/resolvedByUserId: req\.userId!/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(
+      route.match(/resolvedByRole: req\.staffPrincipal!\.role/g)?.length,
+    ).toBeGreaterThanOrEqual(2);
   });
 
   it("allows only same-process route paths for automatic defect proof", async () => {
@@ -168,8 +182,10 @@ describe("consented support operations", () => {
     expect(server).toContain("identity?.displayName || !identity.imageUrl");
     expect(server).toContain("ws.terminate()");
     expect(server).toContain("findLiveSupportGrant");
-    expect(server).toContain("/^Support ticket #\\d{1,10}$/u");
-    expect(server).toContain("`Support ticket #${supportGrant.ticketId}`");
+    expect(server).toContain("/^Support ticket NF-\\d{6,}$/u");
+    expect(server).toContain(
+      "`Support ticket ${formatSupportTicketNumber(supportGrant.ticketId)}`",
+    );
     expect(server.match(/support_presence_read_only/g)).toHaveLength(2);
     expect(server).not.toMatch(/function publicPeer[\s\S]{0,300}userId:/);
     expect(panel).toContain("Revoke ${peer.name}'s support access");

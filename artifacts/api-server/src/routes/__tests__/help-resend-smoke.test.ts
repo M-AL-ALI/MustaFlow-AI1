@@ -98,6 +98,11 @@ vi.mock("../../lib/emailTemplates", () => ({
     html: "<p>ticket</p>",
     text: "ticket",
   })),
+  supportTicketConfirmationTemplate: vi.fn(({ ticketId }: { ticketId: number }) => ({
+    subject: `Support ticket NF-${String(ticketId).padStart(6, "0")} received`,
+    html: "<p>confirmation</p>",
+    text: "confirmation",
+  })),
 }));
 
 vi.mock("../../lib/clerk-users", () => ({
@@ -184,6 +189,13 @@ describe("POST /help/support/escalate — Resend email delivery", () => {
     expect(sendCall).toBeDefined();
     expect(sendCall?.[0].to).toBe("support-override@example.com");
     expect(sendCall?.[0].subject).toContain("ticket");
+    expect(vi.mocked(sendEmailWithStatus)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(sendEmailWithStatus).mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        to: "smoker@example.com",
+        subject: "Support ticket NF-000001 received",
+      }),
+    );
   });
 
   it("saves ticket with emailStatus 'failed' when Resend throws, still returns 201", async () => {

@@ -9,6 +9,8 @@ import type { EscalateSupportOutputEmailStatus } from './escalateSupportOutputEm
 
 export interface EscalateSupportOutput {
   ticketId: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   emailStatus: EscalateSupportOutputEmailStatus;
   supportEmailUsed?: string | null;
 }

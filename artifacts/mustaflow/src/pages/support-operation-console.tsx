@@ -10,7 +10,13 @@ import { ProjectPresence } from "@/pages/projects/components/project-presence";
 
 type Feedback = { kind: "ok" | "error"; text: string } | null;
 
-export function SupportOperationConsole({ ticketId }: { ticketId: number }) {
+export function SupportOperationConsole({
+  ticketId,
+  ticketNumber,
+}: {
+  ticketId: number;
+  ticketNumber: string;
+}) {
   const [operations, setOperations] = useState<SupportOperationsView | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -338,7 +344,7 @@ export function SupportOperationConsole({ ticketId }: { ticketId: number }) {
               <>
                 <ProjectPresence
                   projectId={activeGrant.projectId}
-                  location={`Support ticket #${ticketId}`}
+                  location={`Support ticket ${ticketNumber}`}
                   canRevokeSupport={false}
                 />
                 <button

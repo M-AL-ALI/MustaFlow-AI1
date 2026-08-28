@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { adminAccessReceiptsTable, db, userRolesTable, type StaffRole } from "@workspace/db";
 import type { Request, Response, NextFunction } from "express";
 import { logger } from "./logger";
+import { staffRoleCanResolveSupportTicket } from "./support-ticket-workflow";
 
 const STAFF_ROLE_SET = new Set<StaffRole>(["owner", "operator", "support", "analyst"]);
 const RECEIPT_ATTACHED = Symbol("admin-receipt-attached");
@@ -132,7 +133,7 @@ export function staffRoleAllowsRequest(role: StaffRole, method: string, path: st
   if (role === "support") {
     return (
       path === "/api/admin/me" ||
-      /^\/api\/admin\/support-(?:tickets|grants|zero-sessions|defects)(?:\/|$)/.test(path)
+      /^\/api\/admin\/support-(?:tickets|assignees|grants|zero-sessions|defects)(?:\/|$)/.test(path)
     );
   }
   if (role === "analyst") {
@@ -235,5 +236,28 @@ export async function requireOwner(req: Request, res: Response, next: NextFuncti
   res.status(403).json({
     error: "Only an Owner can change Admin Page access.",
     code: "admin_owner_required",
+  });
+}
+
+/**
+ * Central resolver gate for evidence-bearing support closure. Analysts may
+ * inspect operational data but can never approve a terminal ticket verdict.
+ */
+export async function requireSupportResolver(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const principal = req.staffPrincipal;
+  if (principal && staffRoleCanResolveSupportTicket(principal.role)) {
+    next();
+    return;
+  }
+  if (principal) {
+    await recordRefusal(req, principal.userId, principal.role, "support_resolver_required");
+  }
+  res.status(403).json({
+    error: "Your staff role cannot approve a support resolution.",
+    code: "support_resolver_required",
   });
 }

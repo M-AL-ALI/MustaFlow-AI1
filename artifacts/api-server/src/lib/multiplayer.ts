@@ -33,6 +33,7 @@ import { logger } from "./logger";
 import { checkProjectAccess } from "./auth";
 import { getSharedAccountProfile } from "./clerk-users";
 import { findLiveSupportGrant } from "./support-access";
+import { formatSupportTicketNumber } from "./support-ticket-workflow";
 
 // y-protocols message tags (from y-websocket reference impl).
 const MESSAGE_SYNC = 0;
@@ -81,7 +82,7 @@ export function parsePresenceLocation(value: unknown): string {
   if (PRESENCE_LOCATIONS.has(value)) return value;
   // Staff support sessions name only the bounded ticket number; arbitrary
   // client text never becomes another user's presence label.
-  return /^Support ticket #\d{1,10}$/u.test(value) ? value : "Project workspace";
+  return /^Support ticket NF-\d{6,}$/u.test(value) ? value : "Project workspace";
 }
 
 function publicPeer(peer: Peer) {
@@ -213,7 +214,7 @@ export function createMultiplayerServer(): MultiplayerServer {
       imageUrl: identity.imageUrl,
       kind: supportGrant ? "staff" : project.ownerId === userId ? "owner" : "teammate",
       location: supportGrant
-        ? `Support ticket #${supportGrant.ticketId}`
+        ? `Support ticket ${formatSupportTicketNumber(supportGrant.ticketId)}`
         : parsePresenceLocation(sp.get("location")),
       grantId: supportGrant?.id ?? null,
       grantExpiresAt: supportGrant?.expiresAt?.toISOString() ?? null,

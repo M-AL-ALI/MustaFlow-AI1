@@ -9,5 +9,7 @@
 export type AdminSupportTicketPageStatusCounts = {
   new: number;
   open: number;
+  waiting_on_user: number;
+  blocked_on_third_party: number;
   resolved: number;
 };

@@ -181,6 +181,7 @@ import type {
   ListAdminRoles200,
   ListAdminSkillDrafts200,
   ListAdminSkills200,
+  ListAdminSupportAssignees200,
   ListAdminSupportTicketsParams,
   ListAgentInboxParams,
   ListBackgroundJobsParams,
@@ -19316,7 +19317,7 @@ export const getUpdateAdminSupportTicketUrl = (id: number,) => {
 }
 
 /**
- * @summary Update a support ticket's status
+ * @summary Update a support ticket's non-terminal workflow fields
  */
 export const updateAdminSupportTicket = async (id: number,
     updateAdminSupportTicketBody: UpdateAdminSupportTicketBody, options?: RequestInit): Promise<UpdateAdminSupportTicket200> => {
@@ -19366,7 +19367,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateAdminSupportTicketMutationError = ErrorType<ApiError>
 
     /**
- * @summary Update a support ticket's status
+ * @summary Update a support ticket's non-terminal workflow fields
  */
 export const useUpdateAdminSupportTicket = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAdminSupportTicket>>, TError,{id: number;data: BodyType<UpdateAdminSupportTicketBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -19522,6 +19523,83 @@ export const useAddAdminSupportTicketNote = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getAddAdminSupportTicketNoteMutationOptions(options));
     }
+
+export const getListAdminSupportAssigneesUrl = () => {
+
+
+
+
+  return `/api/admin/support-assignees`
+}
+
+/**
+ * @summary List staff identities eligible to own or resolve support tickets
+ */
+export const listAdminSupportAssignees = async ( options?: RequestInit): Promise<ListAdminSupportAssignees200> => {
+
+  return customFetch<ListAdminSupportAssignees200>(getListAdminSupportAssigneesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAdminSupportAssigneesQueryKey = () => {
+    return [
+    `/api/admin/support-assignees`
+    ] as const;
+    }
+
+
+export const getListAdminSupportAssigneesQueryOptions = <TData = Awaited<ReturnType<typeof listAdminSupportAssignees>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminSupportAssignees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAdminSupportAssigneesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminSupportAssignees>>> = ({ signal }) => listAdminSupportAssignees({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAdminSupportAssignees>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAdminSupportAssigneesQueryResult = NonNullable<Awaited<ReturnType<typeof listAdminSupportAssignees>>>
+export type ListAdminSupportAssigneesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List staff identities eligible to own or resolve support tickets
+ */
+
+export function useListAdminSupportAssignees<TData = Awaited<ReturnType<typeof listAdminSupportAssignees>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAdminSupportAssignees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAdminSupportAssigneesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getListAdminSkillsUrl = () => {
 

@@ -7195,25 +7195,37 @@ export const listAdminSupportTicketsQueryOffsetMin = 0;
 
 
 export const ListAdminSupportTicketsQueryParams = zod.object({
-  "status": zod.enum(['all', 'new', 'open', 'resolved']).default(listAdminSupportTicketsQueryStatusDefault),
+  "status": zod.enum(['all', 'new', 'open', 'waiting_on_user', 'blocked_on_third_party', 'resolved']).default(listAdminSupportTicketsQueryStatusDefault),
   "q": zod.coerce.string().optional(),
   "limit": zod.coerce.number().min(1).max(listAdminSupportTicketsQueryLimitMax).default(listAdminSupportTicketsQueryLimitDefault),
   "offset": zod.coerce.number().min(listAdminSupportTicketsQueryOffsetMin).default(listAdminSupportTicketsQueryOffsetDefault)
 })
 
+export const listAdminSupportTicketsResponseTicketsItemTicketNumberRegExp = new RegExp('^NF-[0-9]{6,}$');
+export const listAdminSupportTicketsResponseTicketsItemAgeMinutesMin = 0;
+
+
+
 export const ListAdminSupportTicketsResponse = zod.object({
   "tickets": zod.array(zod.object({
   "id": zod.number(),
+  "ticketNumber": zod.string().regex(listAdminSupportTicketsResponseTicketsItemTicketNumberRegExp),
   "userId": zod.string(),
   "userEmail": zod.string().nullish(),
   "plan": zod.string(),
   "category": zod.string(),
-  "status": zod.enum(['new', 'open', 'resolved']),
+  "status": zod.enum(['new', 'open', 'waiting_on_user', 'blocked_on_third_party', 'resolved']),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "assignedToUserId": zod.string().nullish(),
   "subject": zod.string(),
   "projectId": zod.number().nullish(),
   "projectName": zod.string().nullish(),
   "attachmentCount": zod.number(),
   "emailStatus": zod.string(),
+  "resolvedByUserId": zod.string().nullish(),
+  "resolvedByRole": zod.string().nullish(),
+  "resolvedAt": zod.coerce.date().nullish(),
+  "ageMinutes": zod.number().min(listAdminSupportTicketsResponseTicketsItemAgeMinutesMin),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })),
@@ -7221,6 +7233,8 @@ export const ListAdminSupportTicketsResponse = zod.object({
   "statusCounts": zod.object({
   "new": zod.number(),
   "open": zod.number(),
+  "waiting_on_user": zod.number(),
+  "blocked_on_third_party": zod.number(),
   "resolved": zod.number()
 }),
   "limit": zod.number(),
@@ -7235,13 +7249,21 @@ export const GetAdminSupportTicketParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getAdminSupportTicketResponseTicketNumberRegExp = new RegExp('^NF-[0-9]{6,}$');
+export const getAdminSupportTicketResponseAgeMinutesMin = 0;
+
+
+
 export const GetAdminSupportTicketResponse = zod.object({
   "id": zod.number(),
+  "ticketNumber": zod.string().regex(getAdminSupportTicketResponseTicketNumberRegExp),
   "userId": zod.string(),
   "userEmail": zod.string().nullish(),
   "plan": zod.string(),
   "category": zod.string(),
-  "status": zod.enum(['new', 'open', 'resolved']),
+  "status": zod.enum(['new', 'open', 'waiting_on_user', 'blocked_on_third_party', 'resolved']),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "assignedToUserId": zod.string().nullish(),
   "subject": zod.string(),
   "transcript": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
@@ -7263,26 +7285,38 @@ export const GetAdminSupportTicketResponse = zod.object({
   "deviceInfo": zod.unknown().optional(),
   "supportEmailUsed": zod.string().nullish(),
   "emailStatus": zod.string(),
+  "resolvedByUserId": zod.string().nullish(),
+  "resolvedByRole": zod.string().nullish(),
+  "resolvedAt": zod.coerce.date().nullish(),
+  "ageMinutes": zod.number().min(getAdminSupportTicketResponseAgeMinutesMin),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
 
 
 /**
- * @summary Update a support ticket's status
+ * @summary Update a support ticket's non-terminal workflow fields
  */
 export const UpdateAdminSupportTicketParams = zod.object({
   "id": zod.coerce.number()
 })
 
 export const UpdateAdminSupportTicketBody = zod.object({
-  "status": zod.enum(['new', 'open', 'resolved'])
+  "status": zod.enum(['new', 'open', 'waiting_on_user']).optional(),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']).optional(),
+  "assigneeUserId": zod.string().nullish()
 })
+
+export const updateAdminSupportTicketResponseTicketNumberRegExp = new RegExp('^NF-[0-9]{6,}$');
+
 
 export const UpdateAdminSupportTicketResponse = zod.object({
   "ok": zod.boolean(),
   "id": zod.number(),
-  "status": zod.enum(['new', 'open', 'resolved'])
+  "ticketNumber": zod.string().regex(updateAdminSupportTicketResponseTicketNumberRegExp),
+  "status": zod.enum(['new', 'open', 'waiting_on_user']),
+  "priority": zod.enum(['low', 'normal', 'high', 'urgent']),
+  "assignedToUserId": zod.string().nullish()
 })
 
 
@@ -7304,7 +7338,7 @@ export const ReplyAdminSupportTicketBody = zod.object({
 export const ReplyAdminSupportTicketResponse = zod.object({
   "ok": zod.boolean(),
   "emailStatus": zod.enum(['sent', 'skipped', 'failed']),
-  "status": zod.enum(['new', 'open', 'resolved'])
+  "status": zod.enum(['new', 'open', 'waiting_on_user', 'blocked_on_third_party', 'resolved'])
 })
 
 
@@ -7333,6 +7367,24 @@ export const AddAdminSupportTicketNoteResponse = zod.object({
   "authorId": zod.string().optional(),
   "at": zod.string().optional()
 })
+})
+
+
+/**
+ * @summary List staff identities eligible to own or resolve support tickets
+ */
+export const listAdminSupportAssigneesResponseAssigneesMax = 100;
+
+
+
+export const ListAdminSupportAssigneesResponse = zod.object({
+  "assignees": zod.array(zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['owner', 'operator', 'support']),
+  "displayName": zod.string().nullish(),
+  "imageUrl": zod.string().nullish(),
+  "assignable": zod.boolean()
+})).max(listAdminSupportAssigneesResponseAssigneesMax)
 })
 
 
@@ -8568,12 +8620,16 @@ export const GetSupportConversationResponse = zod.object({
 /**
  * @summary List the signed-in user's own support tickets.
  */
+export const listSupportTicketsResponseTicketsItemTicketNumberRegExp = new RegExp('^NF-[0-9]{6,}$');
+
+
 export const ListSupportTicketsResponse = zod.object({
   "tickets": zod.array(zod.object({
   "id": zod.number(),
+  "ticketNumber": zod.string().regex(listSupportTicketsResponseTicketsItemTicketNumberRegExp),
   "subject": zod.string(),
   "category": zod.string(),
-  "status": zod.enum(['new', 'open', 'resolved', 'closed']),
+  "status": zod.enum(['new', 'open', 'waiting_on_user', 'blocked_on_third_party', 'resolved']),
   "projectId": zod.number().nullish(),
   "attachmentCount": zod.number(),
   "emailStatus": zod.enum(['sent', 'skipped', 'failed']),
@@ -8590,11 +8646,15 @@ export const GetSupportTicketParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getSupportTicketResponseTicketNumberRegExp = new RegExp('^NF-[0-9]{6,}$');
+
+
 export const GetSupportTicketResponse = zod.object({
   "id": zod.number(),
+  "ticketNumber": zod.string().regex(getSupportTicketResponseTicketNumberRegExp),
   "subject": zod.string(),
   "category": zod.string(),
-  "status": zod.enum(['new', 'open', 'resolved', 'closed']),
+  "status": zod.enum(['new', 'open', 'waiting_on_user', 'blocked_on_third_party', 'resolved']),
   "projectId": zod.number().nullish(),
   "emailStatus": zod.enum(['sent', 'skipped', 'failed']),
   "createdAt": zod.string(),

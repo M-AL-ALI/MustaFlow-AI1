@@ -5,8 +5,12 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { UpdateAdminSupportTicketBodyPriority } from './updateAdminSupportTicketBodyPriority';
 import type { UpdateAdminSupportTicketBodyStatus } from './updateAdminSupportTicketBodyStatus';
 
 export type UpdateAdminSupportTicketBody = {
-  status: UpdateAdminSupportTicketBodyStatus;
+  status?: UpdateAdminSupportTicketBodyStatus;
+  priority?: UpdateAdminSupportTicketBodyPriority;
+  /** @nullable */
+  assigneeUserId?: string | null;
 };

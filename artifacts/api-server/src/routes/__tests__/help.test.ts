@@ -116,6 +116,11 @@ vi.mock("../../lib/emailTemplates", () => ({
     html: "<p>ticket</p>",
     text: "ticket",
   })),
+  supportTicketConfirmationTemplate: vi.fn(({ ticketId }: { ticketId: number }) => ({
+    subject: `Support ticket NF-${String(ticketId).padStart(6, "0")} received`,
+    html: "<p>confirmation</p>",
+    text: "confirmation",
+  })),
 }));
 
 vi.mock("../../lib/clerk-users", () => ({
@@ -484,6 +489,7 @@ describe("POST /help/support/escalate", () => {
       .send({ subject: "Cannot publish", transcript: [{ role: "user", content: "stuck" }] });
     expect(res.status).toBe(201);
     expect(res.body.ticketId).toBe(555);
+    expect(res.body.ticketNumber).toBe("NF-000555");
     expect(res.body.emailStatus).toBe("sent");
 
     // Ordering: the ticket insert must happen before the email send.

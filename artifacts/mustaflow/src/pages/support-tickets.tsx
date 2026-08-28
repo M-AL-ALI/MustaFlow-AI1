@@ -39,7 +39,7 @@ function formatDate(value: string): string {
 // A ticket is "active" while it's still being handled (new = untouched,
 // open = being worked); "resolved"/"closed" means it's done.
 function isActiveStatus(status: string): boolean {
-  return status === "new" || status === "open";
+  return status !== "resolved" && status !== "closed";
 }
 
 function statusLabel(status: string): string {
@@ -48,6 +48,10 @@ function statusLabel(status: string): string {
       return "New";
     case "open":
       return "Open";
+    case "waiting_on_user":
+      return "Waiting on you";
+    case "blocked_on_third_party":
+      return "Blocked on a third party";
     case "resolved":
     case "closed":
       return "Resolved";
@@ -131,7 +135,7 @@ function TicketDetail({ ticketId }: { ticketId: number }) {
           <StatusBadge status={data.status} />
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          <span>Ticket #{data.id}</span>
+          <span>{data.ticketNumber}</span>
           <span className="rounded-full bg-muted px-2 py-0.5">{data.category}</span>
           <span>Submitted {formatDate(data.createdAt)}</span>
           {data.attachments.length > 0 && (
@@ -270,7 +274,7 @@ function TicketList() {
               <StatusBadge status={t.status} />
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <span>#{t.id}</span>
+              <span>{t.ticketNumber}</span>
               <span className="rounded-full bg-muted px-2 py-0.5">{t.category}</span>
               <span>{formatDate(t.createdAt)}</span>
               {t.attachmentCount > 0 && (

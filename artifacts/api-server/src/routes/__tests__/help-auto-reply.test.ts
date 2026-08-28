@@ -170,6 +170,7 @@ describe("POST /help/support/escalate — auto-reply confirmation", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.ticketId).toBe(42);
+    expect(res.body.ticketNumber).toBe("NF-000042");
 
     // Both team email AND auto-reply must have been attempted.
     const calls = vi.mocked(sendEmailWithStatus).mock.calls;
@@ -202,6 +203,7 @@ describe("POST /help/support/escalate — auto-reply confirmation", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.ticketId).toBe(43);
+    expect(res.body.ticketNumber).toBe("NF-000043");
 
     // Only the team notification — no auto-reply call.
     const calls = vi.mocked(sendEmailWithStatus).mock.calls;

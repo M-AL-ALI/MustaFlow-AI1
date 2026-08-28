@@ -18,6 +18,10 @@ import { getClerkUserById } from "../lib/clerk-users";
 import { broadcastNewTicket } from "../lib/support-alerts";
 import { supportChatLimiter, supportEscalateLimiter } from "../lib/rateLimit";
 import { resolveSupportRecipient } from "../lib/support-contact";
+import {
+  formatSupportTicketNumber,
+  normalizeSupportTicketStatus,
+} from "../lib/support-ticket-workflow";
 
 async function resolveUserEmail(userId: string): Promise<string | null> {
   try {
@@ -413,6 +417,7 @@ router.get("/help/support/conversations", async (req, res) => {
     res.json({
       conversations: rows.map((r) => ({
         id: r.id,
+        ticketNumber: formatSupportTicketNumber(r.id),
         title: r.title,
         createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt),
         updatedAt: r.updatedAt?.toISOString?.() ?? String(r.updatedAt),
@@ -529,7 +534,7 @@ router.get("/help/support/tickets", async (req, res) => {
         id: r.id,
         subject: r.subject,
         category: r.category,
-        status: r.status,
+        status: normalizeSupportTicketStatus(r.status),
         projectId: r.projectId,
         attachmentCount: ticketAttachmentCount(r.attachments),
         emailStatus: r.emailStatus,
@@ -588,9 +593,10 @@ router.get("/help/support/tickets/:id", async (req, res) => {
 
     res.json({
       id: row.id,
+      ticketNumber: formatSupportTicketNumber(row.id),
       subject: row.subject,
       category: row.category,
-      status: row.status,
+      status: normalizeSupportTicketStatus(row.status),
       projectId: row.projectId,
       emailStatus: row.emailStatus,
       createdAt: row.createdAt?.toISOString?.() ?? String(row.createdAt),
@@ -870,7 +876,13 @@ router.post("/help/support/escalate", supportEscalateLimiter, async (req, res) =
     }
   }
 
-  res.status(201).json({ ticketId, emailStatus, supportEmailUsed: recipient, autoReplyStatus });
+  res.status(201).json({
+    ticketId,
+    ticketNumber: formatSupportTicketNumber(ticketId),
+    emailStatus,
+    supportEmailUsed: recipient,
+    autoReplyStatus,
+  });
 });
 
 export default router;

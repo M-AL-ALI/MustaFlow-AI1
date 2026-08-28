@@ -12,5 +12,7 @@ export type ReplyAdminSupportTicket200Status = typeof ReplyAdminSupportTicket200
 export const ReplyAdminSupportTicket200Status = {
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
 } as const;

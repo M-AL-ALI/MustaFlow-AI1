@@ -12,5 +12,5 @@ export type UpdateAdminSupportTicket200Status = typeof UpdateAdminSupportTicket2
 export const UpdateAdminSupportTicket200Status = {
   new: 'new',
   open: 'open',
-  resolved: 'resolved',
+  waiting_on_user: 'waiting_on_user',
 } as const;

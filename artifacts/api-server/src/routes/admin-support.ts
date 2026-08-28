@@ -17,14 +17,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router, type IRouter } from "express";
-import { and, eq, desc, count, sql, ilike, or } from "drizzle-orm";
+import { ListAdminSupportAssigneesResponse } from "@workspace/api-zod";
+import { and, eq, desc, count, sql, ilike, inArray, or } from "drizzle-orm";
 import {
   db,
   supportTicketsTable,
   projectsTable,
+  userRolesTable,
   oraAssetsTable,
-  SUPPORT_TICKET_STATUSES,
-  type SupportTicketStatus,
+  type StaffRole,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { requireAdmin, writeAdminReceipt } from "../lib/adminAuth";
@@ -33,11 +34,19 @@ import { sendEmailWithStatus } from "../lib/emailClient";
 import { supportReplyTemplate } from "../lib/emailTemplates";
 import { resolveDefaultSender, resolveSupportRecipient } from "../lib/support-contact";
 import { deliverSupportConsequence } from "../lib/support-user-delivery";
+import { getSharedAccountProfile } from "../lib/clerk-users";
+import {
+  formatSupportTicketNumber,
+  isSupportTicketPriority,
+  normalizeSupportTicketStatus,
+  SUPPORT_TICKET_RESOLVER_ROLES,
+} from "../lib/support-ticket-workflow";
 
 const router: IRouter = Router();
 
 // All routes here are admin-only.
 router.use("/admin/support-tickets", requireAdmin);
+router.use("/admin/support-assignees", requireAdmin);
 router.use("/admin/email", requireAdmin);
 
 async function recordTicketReceipt(
@@ -128,13 +137,7 @@ function toIso(d: Date | string | null | undefined): string {
   return String(d);
 }
 
-// Normalise a stored status for display: legacy "closed" maps to "resolved".
-function normalizeStatus(raw: string): SupportTicketStatus {
-  if (raw === "closed") return "resolved";
-  return (SUPPORT_TICKET_STATUSES as readonly string[]).includes(raw)
-    ? (raw as SupportTicketStatus)
-    : "new";
-}
+type PublicTicketStatus = ReturnType<typeof normalizeSupportTicketStatus>;
 
 // ── GET /api/admin/support-tickets ────────────────────────────────────────────
 // Query params: status (new|open|blocked|resolved|all), q (subject/email/user search),
@@ -154,6 +157,13 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
         // Treat legacy "closed" as resolved so old tickets remain visible.
         conditions.push(
           or(eq(supportTicketsTable.status, "resolved"), eq(supportTicketsTable.status, "closed")),
+        );
+      } else if (statusParam === "blocked_on_third_party") {
+        conditions.push(
+          or(
+            eq(supportTicketsTable.status, "blocked_on_third_party"),
+            eq(supportTicketsTable.status, "blocked"),
+          ),
         );
       } else {
         conditions.push(eq(supportTicketsTable.status, statusParam));
@@ -180,6 +190,8 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
           plan: supportTicketsTable.plan,
           category: supportTicketsTable.category,
           status: supportTicketsTable.status,
+          priority: supportTicketsTable.priority,
+          assignedToUserId: supportTicketsTable.assignedToUserId,
           resolutionClass: supportTicketsTable.resolutionClass,
           thirdPartyBlocker: supportTicketsTable.thirdPartyBlocker,
           subject: supportTicketsTable.subject,
@@ -187,6 +199,10 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
           projectName: projectsTable.name,
           attachmentCount: sql<number>`coalesce(jsonb_array_length(${supportTicketsTable.attachments}), 0)::int`,
           emailStatus: supportTicketsTable.emailStatus,
+          resolvedByUserId: supportTicketsTable.resolvedByUserId,
+          resolvedByRole: supportTicketsTable.resolvedByRole,
+          resolvedAt: supportTicketsTable.resolvedAt,
+          ageMinutes: sql<number>`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - ${supportTicketsTable.createdAt})) / 60))::int`,
           createdAt: supportTicketsTable.createdAt,
           updatedAt: supportTicketsTable.updatedAt,
         })
@@ -203,25 +219,29 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
         .groupBy(supportTicketsTable.status),
     ]);
 
-    const statusCounts: Record<SupportTicketStatus, number> = {
+    const statusCounts: Record<PublicTicketStatus, number> = {
       new: 0,
       open: 0,
-      blocked: 0,
+      waiting_on_user: 0,
+      blocked_on_third_party: 0,
       resolved: 0,
     };
     for (const r of statusCountRows) {
-      const s = normalizeStatus(r.status);
+      const s = normalizeSupportTicketStatus(r.status);
       statusCounts[s] += Number(r.n);
     }
 
     res.json({
       tickets: rows.map((r) => ({
         id: r.id,
+        ticketNumber: formatSupportTicketNumber(r.id),
         userId: r.userId,
         userEmail: r.userEmail,
         plan: r.plan,
         category: r.category,
-        status: normalizeStatus(r.status),
+        status: normalizeSupportTicketStatus(r.status),
+        priority: r.priority,
+        assignedToUserId: r.assignedToUserId,
         resolutionClass: r.resolutionClass,
         thirdPartyBlocker: r.thirdPartyBlocker,
         subject: r.subject,
@@ -229,6 +249,10 @@ router.get("/admin/support-tickets", async (req, res): Promise<void> => {
         projectName: r.projectId != null ? (r.projectName ?? "(deleted)") : null,
         attachmentCount: Number(r.attachmentCount ?? 0),
         emailStatus: r.emailStatus,
+        resolvedByUserId: r.resolvedByUserId,
+        resolvedByRole: r.resolvedByRole,
+        resolvedAt: toIso(r.resolvedAt),
+        ageMinutes: Number(r.ageMinutes ?? 0),
         createdAt: toIso(r.createdAt),
         updatedAt: toIso(r.updatedAt),
       })),
@@ -259,6 +283,8 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
         plan: supportTicketsTable.plan,
         category: supportTicketsTable.category,
         status: supportTicketsTable.status,
+        priority: supportTicketsTable.priority,
+        assignedToUserId: supportTicketsTable.assignedToUserId,
         resolutionClass: supportTicketsTable.resolutionClass,
         thirdPartyBlocker: supportTicketsTable.thirdPartyBlocker,
         resolutionEvidence: supportTicketsTable.resolutionEvidence,
@@ -270,6 +296,10 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
         deviceInfo: supportTicketsTable.deviceInfo,
         supportEmailUsed: supportTicketsTable.supportEmailUsed,
         emailStatus: supportTicketsTable.emailStatus,
+        resolvedByUserId: supportTicketsTable.resolvedByUserId,
+        resolvedByRole: supportTicketsTable.resolvedByRole,
+        resolvedAt: supportTicketsTable.resolvedAt,
+        ageMinutes: sql<number>`GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (NOW() - ${supportTicketsTable.createdAt})) / 60))::int`,
         createdAt: supportTicketsTable.createdAt,
         updatedAt: supportTicketsTable.updatedAt,
       })
@@ -300,11 +330,14 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
 
     res.json({
       id: row.id,
+      ticketNumber: formatSupportTicketNumber(row.id),
       userId: row.userId,
       userEmail: row.userEmail,
       plan: row.plan,
       category: row.category,
-      status: normalizeStatus(row.status),
+      status: normalizeSupportTicketStatus(row.status),
+      priority: row.priority,
+      assignedToUserId: row.assignedToUserId,
       resolutionClass: row.resolutionClass,
       thirdPartyBlocker: row.thirdPartyBlocker,
       resolutionEvidence: row.resolutionEvidence,
@@ -316,6 +349,10 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
       deviceInfo: (row.deviceInfo as Record<string, unknown> | null) ?? null,
       supportEmailUsed: row.supportEmailUsed,
       emailStatus: row.emailStatus,
+      resolvedByUserId: row.resolvedByUserId,
+      resolvedByRole: row.resolvedByRole,
+      resolvedAt: toIso(row.resolvedAt),
+      ageMinutes: Number(row.ageMinutes ?? 0),
       createdAt: toIso(row.createdAt),
       updatedAt: toIso(row.updatedAt),
     });
@@ -326,41 +363,140 @@ router.get("/admin/support-tickets/:id", async (req, res): Promise<void> => {
 });
 
 // ── PATCH /api/admin/support-tickets/:id ──────────────────────────────────────
-// Body: { status: "new" | "open" }. Resolution is evidence-gated and uses
-// the class-specific operations in support-operations.ts.
+// Body may update the non-terminal workflow status, priority and/or assignee.
+// Resolution is evidence-gated and uses class-specific operations.
 router.patch("/admin/support-tickets/:id", async (req, res): Promise<void> => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     res.status(400).json({ error: "Invalid ticket id" });
     return;
   }
-  const status = (req.body as { status?: string })?.status;
-  if (status !== "new" && status !== "open") {
+  const input = (req.body ?? {}) as {
+    status?: unknown;
+    priority?: unknown;
+    assigneeUserId?: unknown;
+  };
+  const hasStatus = input.status !== undefined;
+  const hasPriority = input.priority !== undefined;
+  const hasAssignee = Object.prototype.hasOwnProperty.call(input, "assigneeUserId");
+  if (!hasStatus && !hasPriority && !hasAssignee) {
+    res.status(400).json({ error: "Choose a status, priority or assignee to update." });
+    return;
+  }
+  if (
+    hasStatus &&
+    input.status !== "new" &&
+    input.status !== "open" &&
+    input.status !== "waiting_on_user"
+  ) {
     res.status(409).json({
-      error: "Choose the ticket's outcome and complete its proof before resolving it.",
+      error: "Blocked and resolved states require their evidence-bearing support action.",
       code: "support_resolution_proof_required",
     });
     return;
   }
+  if (hasPriority && !isSupportTicketPriority(input.priority)) {
+    res.status(400).json({ error: "Choose low, normal, high or urgent priority." });
+    return;
+  }
+  const assigneeUserId =
+    input.assigneeUserId === null
+      ? null
+      : typeof input.assigneeUserId === "string" && input.assigneeUserId.length <= 256
+        ? input.assigneeUserId.trim()
+        : undefined;
+  if (hasAssignee && assigneeUserId === undefined) {
+    res.status(400).json({ error: "Choose a valid staff assignee or leave it unassigned." });
+    return;
+  }
   try {
+    if (assigneeUserId) {
+      const [assignee] = await db
+        .select({ role: userRolesTable.role })
+        .from(userRolesTable)
+        .where(eq(userRolesTable.userId, assigneeUserId));
+      if (
+        !assignee ||
+        !(SUPPORT_TICKET_RESOLVER_ROLES as readonly string[]).includes(assignee.role)
+      ) {
+        res.status(409).json({
+          error: "Choose an active Owner, Operator or Support staff member.",
+          code: "support_assignee_not_eligible",
+        });
+        return;
+      }
+      const identity = await getSharedAccountProfile(assigneeUserId);
+      if (!identity?.displayName) {
+        res.status(409).json({
+          error: "That staff member needs a display name before tickets can be assigned to them.",
+          code: "support_assignee_identity_required",
+        });
+        return;
+      }
+    }
+    const changes: {
+      status?: "new" | "open" | "waiting_on_user";
+      priority?: "low" | "normal" | "high" | "urgent";
+      assignedToUserId?: string | null;
+      updatedAt: Date;
+    } = { updatedAt: new Date() };
+    if (hasStatus) changes.status = input.status as typeof changes.status;
+    if (hasPriority) changes.priority = input.priority as typeof changes.priority;
+    if (hasAssignee) changes.assignedToUserId = assigneeUserId ?? null;
     const [row] = await db
       .update(supportTicketsTable)
-      .set({ status, updatedAt: new Date() })
+      .set(changes)
       .where(eq(supportTicketsTable.id, id))
       .returning({
         id: supportTicketsTable.id,
         status: supportTicketsTable.status,
+        priority: supportTicketsTable.priority,
+        assignedToUserId: supportTicketsTable.assignedToUserId,
         userId: supportTicketsTable.userId,
       });
     if (!row) {
       res.status(404).json({ error: "Ticket not found" });
       return;
     }
-    await recordTicketReceipt(req, "support_ticket_status_changed", row.userId);
-    res.json({ ok: true, id: row.id, status: normalizeStatus(row.status) });
+    await recordTicketReceipt(req, "support_ticket_workflow_updated", row.userId);
+    res.json({
+      ok: true,
+      id: row.id,
+      ticketNumber: formatSupportTicketNumber(row.id),
+      status: normalizeSupportTicketStatus(row.status),
+      priority: row.priority,
+      assignedToUserId: row.assignedToUserId,
+    });
   } catch (err) {
     logger.error({ component: "admin-support", err }, "Failed to update ticket status");
     res.status(500).json({ error: "Failed to update ticket" });
+  }
+});
+
+router.get("/admin/support-assignees", async (_req, res): Promise<void> => {
+  try {
+    const rows = await db
+      .select({ userId: userRolesTable.userId, role: userRolesTable.role })
+      .from(userRolesTable)
+      .where(inArray(userRolesTable.role, [...SUPPORT_TICKET_RESOLVER_ROLES]))
+      .orderBy(userRolesTable.userId)
+      .limit(100);
+    const assignees = await Promise.all(
+      rows.map(async (row) => {
+        const profile = await getSharedAccountProfile(row.userId);
+        return {
+          userId: row.userId,
+          role: row.role as StaffRole,
+          displayName: profile?.displayName ?? null,
+          imageUrl: profile?.imageUrl ?? null,
+          assignable: Boolean(profile?.displayName),
+        };
+      }),
+    );
+    res.json(ListAdminSupportAssigneesResponse.parse({ assignees }));
+  } catch (err) {
+    logger.error({ component: "admin-support", err }, "Failed to list support assignees");
+    res.status(500).json({ error: "Failed to load support assignees" });
   }
 });
 
@@ -415,7 +551,7 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
       kind: "ticket_reply",
       notification: {
         type: "support_ticket_reply",
-        title: `NabuFlow Support replied to ticket #${id}`,
+        title: `NabuFlow Support replied to ticket ${formatSupportTicketNumber(id)}`,
         body,
       },
       email: tpl,
@@ -432,7 +568,10 @@ router.post("/admin/support-tickets/:id/reply", async (req, res): Promise<void> 
       deliveryId: delivery.id,
       deliveryStatus: delivery.emailStatus,
     });
-    const nextStatus = normalizeStatus(row.status) === "new" ? "open" : normalizeStatus(row.status);
+    const nextStatus =
+      normalizeSupportTicketStatus(row.status) === "new"
+        ? "open"
+        : normalizeSupportTicketStatus(row.status);
 
     await db
       .update(supportTicketsTable)

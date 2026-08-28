@@ -12,6 +12,7 @@ export type SupportTicketDetailStatus = typeof SupportTicketDetailStatus[keyof t
 export const SupportTicketDetailStatus = {
   new: 'new',
   open: 'open',
+  waiting_on_user: 'waiting_on_user',
+  blocked_on_third_party: 'blocked_on_third_party',
   resolved: 'resolved',
-  closed: 'closed',
 } as const;

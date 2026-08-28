@@ -45,6 +45,11 @@ vi.mock("../../lib/emailClient", () => ({
 }));
 vi.mock("../../lib/emailTemplates", () => ({
   supportTicketTemplate: vi.fn(() => ({ subject: "s", html: "h", text: "t" })),
+  supportTicketConfirmationTemplate: vi.fn(({ ticketId }: { ticketId: number }) => ({
+    subject: `Support ticket NF-${String(ticketId).padStart(6, "0")} received`,
+    html: "h",
+    text: "t",
+  })),
 }));
 vi.mock("../../lib/clerk-users", () => ({
   getClerkUserById: vi.fn(async () => ({ userId: "u", email: "user@example.com" })),

@@ -6335,7 +6335,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [all, new, open, resolved]
+            enum: [all, new, open, waiting_on_user, blocked_on_third_party, resolved]
             default: all
         - name: q
           in: query
@@ -6386,7 +6386,7 @@ paths:
     patch:
       operationId: updateAdminSupportTicket
       tags: [admin]
-      summary: Update a support ticket's status
+      summary: Update a support ticket's non-terminal workflow fields
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       requestBody:
@@ -6395,11 +6395,15 @@ paths:
           application/json:
             schema:
               type: object
-              required: [status]
               properties:
                 status:
                   type: string
-                  enum: [new, open, resolved]
+                  enum: [new, open, waiting_on_user]
+                priority:
+                  type: string
+                  enum: [low, normal, high, urgent]
+                assigneeUserId:
+                  type: [string, "null"]
       responses:
         "200":
           description: Status updated
@@ -6407,11 +6411,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, id, status]
+                required: [ok, id, ticketNumber, status, priority]
                 properties:
                   ok: { type: boolean }
                   id: { type: integer }
-                  status: { type: string, enum: [new, open, resolved] }
+                  ticketNumber: { type: string, pattern: "^NF-[0-9]{6,}$" }
+                  status: { type: string, enum: [new, open, waiting_on_user] }
+                  priority: { type: string, enum: [low, normal, high, urgent] }
+                  assignedToUserId: { type: [string, "null"] }
         "400":
           description: Validation error
           content:
@@ -6452,7 +6459,9 @@ paths:
                 properties:
                   ok: { type: boolean }
                   emailStatus: { type: string, enum: [sent, skipped, failed] }
-                  status: { type: string, enum: [new, open, resolved] }
+                  status:
+                    type: string
+                    enum: [new, open, waiting_on_user, blocked_on_third_party, resolved]
         "400":
           description: Validation error
           content:
@@ -6506,6 +6515,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+  /admin/support-assignees:
+    get:
+      operationId: listAdminSupportAssignees
+      tags: [admin]
+      summary: List staff identities eligible to own or resolve support tickets
+      responses:
+        "200":
+          description: Eligible support assignees
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assignees]
+                properties:
+                  assignees:
+                    type: array
+                    maxItems: 100
+                    items:
+                      $ref: "#/components/schemas/AdminSupportAssignee"
 
   /admin/skills:
     get:
@@ -8187,9 +8216,10 @@ components:
 
     EscalateSupportOutput:
       type: object
-      required: [ticketId, emailStatus]
+      required: [ticketId, ticketNumber, emailStatus]
       properties:
         ticketId: { type: integer }
+        ticketNumber: { type: string, pattern: "^NF-[0-9]{6,}$" }
         emailStatus:
           type: string
           enum: [sent, skipped, failed]
@@ -8208,14 +8238,26 @@ components:
 
     SupportTicketSummary:
       type: object
-      required: [id, subject, category, status, attachmentCount, emailStatus, createdAt, updatedAt]
+      required:
+        [
+          id,
+          ticketNumber,
+          subject,
+          category,
+          status,
+          attachmentCount,
+          emailStatus,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id: { type: integer }
+        ticketNumber: { type: string, pattern: "^NF-[0-9]{6,}$" }
         subject: { type: string }
         category: { type: string }
         status:
           type: string
-          enum: [new, open, resolved, closed]
+          enum: [new, open, waiting_on_user, blocked_on_third_party, resolved]
         projectId:
           type: integer
           nullable: true
@@ -8237,14 +8279,26 @@ components:
     SupportTicketDetail:
       type: object
       required:
-        [id, subject, category, status, emailStatus, createdAt, updatedAt, transcript, attachments]
+        [
+          id,
+          ticketNumber,
+          subject,
+          category,
+          status,
+          emailStatus,
+          createdAt,
+          updatedAt,
+          transcript,
+          attachments,
+        ]
       properties:
         id: { type: integer }
+        ticketNumber: { type: string, pattern: "^NF-[0-9]{6,}$" }
         subject: { type: string }
         category: { type: string }
         status:
           type: string
-          enum: [new, open, resolved, closed]
+          enum: [new, open, waiting_on_user, blocked_on_third_party, resolved]
         projectId:
           type: integer
           nullable: true
@@ -10809,28 +10863,40 @@ components:
       required:
         [
           id,
+          ticketNumber,
           userId,
           plan,
           category,
           status,
+          priority,
           subject,
           attachmentCount,
           emailStatus,
           createdAt,
           updatedAt,
+          ageMinutes,
         ]
       properties:
         id: { type: integer }
+        ticketNumber: { type: string, pattern: "^NF-[0-9]{6,}$" }
         userId: { type: string }
         userEmail: { type: ["string", "null"] }
         plan: { type: string }
         category: { type: string }
-        status: { type: string, enum: [new, open, resolved] }
+        status:
+          type: string
+          enum: [new, open, waiting_on_user, blocked_on_third_party, resolved]
+        priority: { type: string, enum: [low, normal, high, urgent] }
+        assignedToUserId: { type: [string, "null"] }
         subject: { type: string }
         projectId: { type: ["integer", "null"] }
         projectName: { type: ["string", "null"] }
         attachmentCount: { type: integer }
         emailStatus: { type: string }
+        resolvedByUserId: { type: [string, "null"] }
+        resolvedByRole: { type: [string, "null"] }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        ageMinutes: { type: integer, minimum: 0 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -10845,10 +10911,12 @@ components:
         total: { type: integer }
         statusCounts:
           type: object
-          required: [new, open, resolved]
+          required: [new, open, waiting_on_user, blocked_on_third_party, resolved]
           properties:
             new: { type: integer }
             open: { type: integer }
+            waiting_on_user: { type: integer }
+            blocked_on_third_party: { type: integer }
             resolved: { type: integer }
         limit: { type: integer }
         offset: { type: integer }
@@ -10879,24 +10947,32 @@ components:
       required:
         [
           id,
+          ticketNumber,
           userId,
           plan,
           category,
           status,
+          priority,
           subject,
           transcript,
           attachments,
           emailStatus,
           createdAt,
           updatedAt,
+          ageMinutes,
         ]
       properties:
         id: { type: integer }
+        ticketNumber: { type: string, pattern: "^NF-[0-9]{6,}$" }
         userId: { type: string }
         userEmail: { type: ["string", "null"] }
         plan: { type: string }
         category: { type: string }
-        status: { type: string, enum: [new, open, resolved] }
+        status:
+          type: string
+          enum: [new, open, waiting_on_user, blocked_on_third_party, resolved]
+        priority: { type: string, enum: [low, normal, high, urgent] }
+        assignedToUserId: { type: [string, "null"] }
         subject: { type: string }
         transcript:
           type: array
@@ -10911,8 +10987,22 @@ components:
         deviceInfo: {}
         supportEmailUsed: { type: ["string", "null"] }
         emailStatus: { type: string }
+        resolvedByUserId: { type: [string, "null"] }
+        resolvedByRole: { type: [string, "null"] }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        ageMinutes: { type: integer, minimum: 0 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    AdminSupportAssignee:
+      type: object
+      required: [userId, role, assignable]
+      properties:
+        userId: { type: string }
+        role: { type: string, enum: [owner, operator, support] }
+        displayName: { type: [string, "null"] }
+        imageUrl: { type: [string, "null"] }
+        assignable: { type: boolean }
 
     AuditFinding:
       type: object

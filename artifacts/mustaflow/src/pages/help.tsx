@@ -290,6 +290,7 @@ function SupportChat() {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [escalateResult, setEscalateResult] = useState<{
     ticketId: number;
+    ticketNumber: string;
     emailStatus: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -522,13 +523,17 @@ function SupportChat() {
           })),
         },
       });
-      setEscalateResult({ ticketId: res.ticketId, emailStatus: res.emailStatus });
+      setEscalateResult({
+        ticketId: res.ticketId,
+        ticketNumber: res.ticketNumber,
+        emailStatus: res.emailStatus,
+      });
       setShowEscalate(false);
       setSubject("");
       setAttachments([]);
       toast({
         title: "Support request sent",
-        description: `Ticket #${res.ticketId} created. Our team will follow up by email.`,
+        description: `Ticket ${res.ticketNumber} created. Our team will follow up by email.`,
       });
     } catch {
       toast({
@@ -696,19 +701,19 @@ function SupportChat() {
             <div className="space-y-1.5">
               <p>
                 {escalateResult.emailStatus === "sent"
-                  ? `Ticket #${escalateResult.ticketId} created and support team was emailed.`
+                  ? `Ticket ${escalateResult.ticketNumber} created and support team was emailed.`
                   : escalateResult.emailStatus === "failed"
-                    ? `Ticket #${escalateResult.ticketId} created, but email notification failed; staff can still see it in the support inbox.`
+                    ? `Ticket ${escalateResult.ticketNumber} created, but email notification failed; staff can still see it in the support inbox.`
                     : escalateResult.emailStatus === "skipped"
-                      ? `Ticket #${escalateResult.ticketId} created, but email delivery was unavailable; staff can still see it in the support inbox.`
-                      : `Ticket #${escalateResult.ticketId} created. Our team will review it shortly.`}
+                      ? `Ticket ${escalateResult.ticketNumber} created, but email delivery was unavailable; staff can still see it in the support inbox.`
+                      : `Ticket ${escalateResult.ticketNumber} created. Our team will review it shortly.`}
               </p>
               <Link
                 href={ticketDetailPath(escalateResult.ticketId)}
                 className="inline-flex items-center gap-1 text-primary hover:underline"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
-                View ticket #{escalateResult.ticketId}
+                View ticket {escalateResult.ticketNumber}
               </Link>
             </div>
           </div>

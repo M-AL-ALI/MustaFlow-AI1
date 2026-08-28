@@ -200,11 +200,11 @@ describe("Escalation → supportTicketTemplate fidelity (no live network)", () =
       .send({ subject: "Cannot publish my app", category: "publishing", transcript: TRANSCRIPT });
 
     expect(res.status).toBe(201);
-    expect(capturedSendCalls).toHaveLength(1);
+    expect(capturedSendCalls).toHaveLength(2);
     const call = capturedSendCalls[0]!;
     expect(call.to).toBe("support@mustaflow.app");
-    // Real template: "[Support #<id>] <subject>"
-    expect(call.subject).toMatch(/^\[Support #\d+\] Cannot publish my app$/);
+    expect(call.subject).toBe("[Support NF-000077] Cannot publish my app");
+    expect(capturedSendCalls[1]?.subject).toBe("Support ticket NF-000077 received");
   });
 
   it("includes ticketId, user email, plan, and transcript in the real template payload", async () => {
@@ -215,11 +215,12 @@ describe("Escalation → supportTicketTemplate fidelity (no live network)", () =
       .send({ subject: "Credits missing", category: "billing", transcript: TRANSCRIPT });
 
     expect(res.status).toBe(201);
-    expect(capturedSendCalls).toHaveLength(1);
+    expect(capturedSendCalls).toHaveLength(2);
     const { html, text, subject } = capturedSendCalls[0]!;
 
     // Subject contains ticket number
-    expect(subject).toMatch(/\[Support #\d+\]/);
+    expect(subject).toContain("[Support NF-000088]");
+    expect(capturedSendCalls[1]?.subject).toBe("Support ticket NF-000088 received");
 
     // HTML contains MustaFlow branding from wrap()
     expect(html).toContain("MustaFlow");
@@ -248,8 +249,8 @@ describe("Escalation → supportTicketTemplate fidelity (no live network)", () =
       .send({ subject: "No-key test", transcript: TRANSCRIPT });
 
     expect(res.status).toBe(201);
-    // sendEmailWithStatus was still called (template evaluated), returned skipped
-    expect(capturedSendCalls).toHaveLength(1);
+    // Both the team notice and requester confirmation were attempted.
+    expect(capturedSendCalls).toHaveLength(2);
     expect(res.body.emailStatus).toBe("skipped");
   });
 });

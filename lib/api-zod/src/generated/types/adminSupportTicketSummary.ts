@@ -5,16 +5,22 @@
  * MustaFlow AI API
  * OpenAPI spec version: 0.1.0
  */
+import type { AdminSupportTicketSummaryPriority } from './adminSupportTicketSummaryPriority';
 import type { AdminSupportTicketSummaryStatus } from './adminSupportTicketSummaryStatus';
 
 export interface AdminSupportTicketSummary {
   id: number;
+  /** @pattern ^NF-[0-9]{6,}$ */
+  ticketNumber: string;
   userId: string;
   /** @nullable */
   userEmail?: string | null;
   plan: string;
   category: string;
   status: AdminSupportTicketSummaryStatus;
+  priority: AdminSupportTicketSummaryPriority;
+  /** @nullable */
+  assignedToUserId?: string | null;
   subject: string;
   /** @nullable */
   projectId?: number | null;
@@ -22,6 +28,14 @@ export interface AdminSupportTicketSummary {
   projectName?: string | null;
   attachmentCount: number;
   emailStatus: string;
+  /** @nullable */
+  resolvedByUserId?: string | null;
+  /** @nullable */
+  resolvedByRole?: string | null;
+  /** @nullable */
+  resolvedAt?: Date | null;
+  /** @minimum 0 */
+  ageMinutes: number;
   createdAt: Date;
   updatedAt: Date;
 }
