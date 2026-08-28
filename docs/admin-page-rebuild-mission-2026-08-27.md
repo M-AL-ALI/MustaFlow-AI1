@@ -457,3 +457,10 @@ passed, and the full suite returned to exact-base failure parity. This is the
 preventive: new runtime exports must have a production consumer or be explicitly
 declared dormant; an unused privilege predicate cannot quietly become a second
 authority surface.
+
+The first exact merged-head release gate then rejected the two Ora account-
+consistency files changed by the billing-privilege rename because the feature
+registry's billing-plan declaration did not name that route family. The registry
+now explicitly owns `ora-account-consistency`, so every future change to that
+cross-product billing view is routed through the account/billing manual checklist
+instead of passing as an unmatched Ora change.

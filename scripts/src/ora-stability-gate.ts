@@ -374,6 +374,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /quota/i,
       /settings/i,
       /proration/i,
+      /ora-account-consistency/i,
     ],
     manualWebsite: "Verify tier/usage/paywall/deep links and paid-user quota behavior.",
     manualMobile:
