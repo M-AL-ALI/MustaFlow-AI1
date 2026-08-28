@@ -31,18 +31,18 @@ without evidence.
 
 ## Binding phase sequence
 
-| Phase | Scope                                                      | State                    |
-| ----- | ---------------------------------------------------------- | ------------------------ |
-| P0    | Read-only survey and owed identity decisions               | Accepted                 |
-| P1    | Shell, navigation and KEEP-panel hierarchy                 | Authorized / in progress |
-| P2    | Panel declarations and developer-tool exile                | Not authorized           |
-| P3    | Drill-in for every number                                  | Not authorized           |
-| P4    | One Admin authority source                                 | Planned only             |
-| P5    | In-product and email consent delivery                      | Not authorized           |
-| P6    | Ticket identity, ownership and resolution                  | Not authorized           |
-| P7    | Per-project invitations, members, roles and presence       | Not authorized           |
-| P8    | Ticket-to-Zero and completed triage                        | Not authorized           |
-| P9    | Serving-tree operator walkthrough and documentation parity | Not authorized           |
+| Phase | Scope                                                      | State                   |
+| ----- | ---------------------------------------------------------- | ----------------------- |
+| P0    | Read-only survey and owed identity decisions               | Accepted                |
+| P1    | Shell, navigation and KEEP-panel hierarchy                 | Complete / live         |
+| P2    | Panel declarations and developer-tool exile                | Candidate / in progress |
+| P3    | Drill-in for every number                                  | Not authorized          |
+| P4    | One Admin authority source                                 | Planned only            |
+| P5    | In-product and email consent delivery                      | Not authorized          |
+| P6    | Ticket identity, ownership and resolution                  | Not authorized          |
+| P7    | Per-project invitations, members, roles and presence       | Not authorized          |
+| P8    | Ticket-to-Zero and completed triage                        | Not authorized          |
+| P9    | Serving-tree operator walkthrough and documentation parity | Not authorized          |
 
 ## P0 acceptance record
 
@@ -151,6 +151,46 @@ mission can close.
 | Browser-back-free preview walkthrough | Pending the clean-head preview gate                                                 | P1 cannot claim completion from unit tests alone                                                                 |
 | P2 panel cull                         | Not built                                                                           | P2 is not authorized                                                                                             |
 | P4 authority consolidation            | Not built                                                                           | Amendment is planning-only until P4 authorization                                                                |
+
+## P2 candidate — panel declarations and developer-tool exile
+
+Tag: `ADMIN-PAGE-REBUILD-P2-2026-08-28`
+
+- Every retained operator-panel family now renders one visible, consistently labelled
+  declaration: **Purpose**, **Operator action**, and **Freshness**. Shared card and section
+  components carry the contract so newly added instances cannot silently omit it.
+- Prompt Eval, Ora Routing Inspector, Architect Review, Top skills used, and Builder Skills
+  no longer render in the day-to-day Admin Page. They render together at
+  `/admin/developer-tools`, linked only for an Owner and guarded by the server-backed Admin
+  identity response plus an explicit Owner-role check.
+- The developer panels were moved, not deleted or duplicated. Their existing controls and
+  data sources are unchanged.
+- A non-Owner reaching the route directly is refused and returned to the Admin Page with a
+  plain Owner-access message. A user without Admin access remains subject to the existing
+  Admin guard and never reaches the Owner check.
+- No API route, schema, migration, manifest, lockfile, provider, or production resource changed.
+
+### P2 preventive guards
+
+- `admin-panel-declarations.test.tsx` pins the three visible declaration labels across every
+  retained panel family, all five developer-panel placements, the Owner-only guard, and the
+  complete breadcrumb path.
+- `admin-navigation-hierarchy.test.tsx` now pins the operational ordering followed by the
+  owner-only developer-tools entry rather than preserving the obsolete main-page exile group.
+- The first focused run exposed an over-specific test assumption: it searched the parent for
+  text owned by `TopSkillsPanel`. The guard now checks the component placement and the helper's
+  user-visible label independently, preventing a refactor from producing a false failure.
+
+### P2 honest completion matrix
+
+| Requirement                       | Candidate state | Refusal / boundary                                                                           |
+| --------------------------------- | --------------- | -------------------------------------------------------------------------------------------- |
+| Purpose, action and freshness     | Built           | Developer-only panels use a page-level warning because they are not retained operator panels |
+| Five-panel exile from Admin Page  | Built           | Owner-only internal route; no new public or unauthenticated surface                          |
+| Owner-only route enforcement      | Built           | Non-Owner Admins return to `/admin`; non-Admins remain denied by `AdminGuard`                |
+| Existing developer-tool behavior  | Preserved       | No tool API or mutation semantics changed                                                    |
+| Focused regressions and typecheck | Passing         | Live and merged-head evidence still required                                                 |
+| Live production visual proof      | Pending         | P2 cannot close until the serving tree is independently identified and captured              |
 
 ### P1 exact-base verification receipt
 

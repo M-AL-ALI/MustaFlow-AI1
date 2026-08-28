@@ -54,6 +54,7 @@ const SupportTicketsPage = lazy(() => import("./pages/support-tickets"));
 const StatusPage = lazy(() => import("./pages/status"));
 const AdminPage = builderLazy(() => import("./pages/admin"));
 const SupportInboxPage = builderLazy(() => import("./pages/support-inbox"));
+const AdminDeveloperToolsPage = builderLazy(() => import("./pages/admin-developer-tools"));
 const TrashPage = builderLazy(() => import("./pages/trash"));
 const BillingUsagePage = builderLazy(() => import("./pages/billing-usage"));
 const PublishedPage = builderLazy(() => import("./pages/published"));
@@ -301,6 +302,40 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
         </button>
       </div>
     );
+  }
+
+  return <>{children}</>;
+}
+
+function OwnerAdminRedirect() {
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    toast({
+      title: "Owner access is required",
+      description: "Developer tools are available only to an Admin Owner.",
+      variant: "destructive",
+    });
+    setLocation("/admin", { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null;
+}
+
+function OwnerAdminGuard({ children }: { children: React.ReactNode }) {
+  const meQuery = useGetAdminMe();
+
+  if (meQuery.isPending) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="h-5 w-5 rounded-full border-2 border-border border-t-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (meQuery.isError || meQuery.data?.role !== "owner") {
+    return <OwnerAdminRedirect />;
   }
 
   return <>{children}</>;
@@ -648,6 +683,19 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                           <AppLayout>
                             <SupportInboxPage />
                           </AppLayout>
+                        </AdminGuard>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/admin/developer-tools">
+                    <Protected>
+                      <BuilderGuard>
+                        <AdminGuard>
+                          <OwnerAdminGuard>
+                            <AppLayout>
+                              <AdminDeveloperToolsPage />
+                            </AppLayout>
+                          </OwnerAdminGuard>
                         </AdminGuard>
                       </BuilderGuard>
                     </Protected>

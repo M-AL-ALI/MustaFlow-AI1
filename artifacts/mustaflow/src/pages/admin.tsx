@@ -22,6 +22,7 @@ import {
   Bug,
   Layers,
   LifeBuoy,
+  Wrench,
 } from "lucide-react";
 import {
   useGetAdminMe,
@@ -244,6 +245,11 @@ export default function AdminPage() {
               </button>
             </div>
           </div>
+          <PanelDeclaration
+            purpose="Shows whether every launch-blocking requirement is currently passing."
+            action="Open a failing check, resolve it, then refresh before launching."
+            freshness="Fetched on page load and whenever an operator refreshes it."
+          />
           {readiness && (
             <div className="divide-y divide-border">
               {readiness.checks.map((c) => (
@@ -325,24 +331,36 @@ export default function AdminPage() {
               label="Total Projects"
               value={statValue(stats?.projects.total)}
               sub="across all users"
+              purpose="Shows the total project estate visible to operators."
+              action="Use project records to investigate ownership or lifecycle questions."
+              freshness="Fetched with the current Admin statistics response."
             />
             <StatCard
               icon={Globe}
               label="Published"
               value={statValue(stats?.projects.published)}
               sub="live projects"
+              purpose="Shows how many projects currently have a published release."
+              action="Use publishing records when the count needs investigation."
+              freshness="Fetched with the current Admin statistics response."
             />
             <StatCard
               icon={Users}
               label="Users with Credits"
               value={statValue(stats?.users.withCredits)}
               sub="active accounts"
+              purpose="Shows how many accounts currently hold usable credits."
+              action="Use account and billing records when a user reports a credit problem."
+              freshness="Fetched with the current Admin statistics response."
             />
             <StatCard
               icon={CreditCard}
               label="Transactions"
               value={statValue(stats?.transactions)}
               sub="credit transactions"
+              purpose="Shows the total number of recorded credit transactions."
+              action="Use billing records to investigate an unexpected transaction count."
+              freshness="Fetched with the current Admin statistics response."
             />
           </>
         )}
@@ -357,6 +375,12 @@ export default function AdminPage() {
             </h3>
             {rolesLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
           </div>
+
+          <PanelDeclaration
+            purpose="Controls which trusted staff accounts can enter the operator console."
+            action="Add, change, or revoke a staff role; the final Owner cannot be removed."
+            freshness="Loaded from the current access records and refreshed after every change."
+          />
 
           <div className="px-4 py-4 border-b border-border space-y-3">
             <p className="text-xs text-muted-foreground">
@@ -506,6 +530,12 @@ export default function AdminPage() {
             </div>
           </div>
 
+          <PanelDeclaration
+            purpose="Provides the immutable receipt trail for sensitive administrative actions."
+            action="Review events, pause live updates when investigating, or refresh on demand."
+            freshness="Refreshes every 10 seconds while Live is enabled."
+          />
+
           {!auditPage && auditLoading && (
             <div className="px-4 py-6 text-sm text-muted-foreground text-center">
               Loading audit log…
@@ -567,7 +597,12 @@ export default function AdminPage() {
 
       {canViewAnalytics && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <AdminSection title="Security">
+          <AdminSection
+            title="Security"
+            purpose="Summarizes the safeguards that protect accounts and stored credentials."
+            action="Investigate any warning before changing production access or secrets."
+            freshness="Derived from the current Admin and launch-readiness responses."
+          >
             <AdminItem label="Encryption" value="AES-256-GCM active" status="ok" />
             <AdminItem label="Auth provider" value="Clerk (managed)" status="ok" />
             <AdminItem
@@ -579,7 +614,12 @@ export default function AdminPage() {
             <AdminItem label="Secret rotation" value="Manual (script available)" status="warn" />
           </AdminSection>
 
-          <AdminSection title="Infrastructure">
+          <AdminSection
+            title="Infrastructure"
+            purpose="Shows whether the core services required to operate NabuFlow are configured."
+            action="Resolve a warning before depending on the affected service."
+            freshness="Derived from the current Admin statistics and readiness checks."
+          >
             <AdminItem label="Database" value="PostgreSQL (Replit)" status="ok" />
             <AdminItem label="AI provider" value="OpenAI via Replit proxy" status="ok" />
             <AdminItem
@@ -600,14 +640,24 @@ export default function AdminPage() {
             />
           </AdminSection>
 
-          <AdminSection title="Publishing">
+          <AdminSection
+            title="Publishing"
+            purpose="Summarizes the storage, routing, and audit foundations used by published apps."
+            action="Use the linked operational records when a publish needs investigation."
+            freshness="Derived from the current Admin statistics response."
+          >
             <AdminItem label="Public URLs" value="Slug-based (/api/p/:slug/)" status="ok" />
             <AdminItem label="Snapshot storage" value="DB (project_versions)" status="ok" />
             <AdminItem label="Deployment logs" value="Active" status="ok" />
             <AdminItem label="Audit trail" value="Secret audit log active" status="ok" />
           </AdminSection>
 
-          <AdminSection title="Billing">
+          <AdminSection
+            title="Billing"
+            purpose="Shows credit enforcement, payment readiness, and recorded transaction volume."
+            action="Resolve payment warnings before asking a user to retry billing."
+            freshness="Derived from the current Admin statistics and readiness checks."
+          >
             <AdminItem label="Starter credits" value="100 per user (auto-grant)" status="ok" />
             <AdminItem
               label="Credit enforcement"
@@ -634,102 +684,76 @@ export default function AdminPage() {
         </div>
       )}
 
-      <section
-        data-admin-tier="phase-2-exile"
-        aria-label="Panels scheduled for later review"
-        className="space-y-8"
-      >
-        {canViewAnalytics && <EvalResultsTile />}
-
-        {canOperate && <OraRoutingDiagnosticsPanel />}
-
-        {canViewAnalytics &&
-          stats &&
-          (() => {
-            const arch = stats.architectReviews;
-            if (!arch) return null;
-            return (
-              <div className="border border-border rounded-xl bg-card overflow-hidden">
-                <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                    <BrainCircuit className="h-3.5 w-3.5 text-violet-400" />
-                    Architect Review (last {arch.windowDays} days)
-                  </h3>
-                  <span className="text-xs text-muted-foreground">
-                    {arch.reviewed} reviewed build{arch.reviewed === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border/40">
-                  <ArchitectMetric
-                    label="Avg findings / build"
-                    value={arch.avgFindingsPerBuild.toFixed(2)}
-                    tone="neutral"
-                  />
-                  <ArchitectMetric label="Pass" value={String(arch.passCount)} tone="ok" />
-                  <ArchitectMetric label="Partial" value={String(arch.partialCount)} tone="warn" />
-                  <ArchitectMetric label="Fail" value={String(arch.failCount)} tone="error" />
-                  <ArchitectMetric
-                    label="Auto-fixes queued"
-                    value={String(arch.autoFixesQueued)}
-                    tone="info"
-                  />
-                </div>
-              </div>
-            );
-          })()}
-
-        {canViewAnalytics &&
-          stats &&
-          (() => {
-            const ts = (
-              stats as {
-                topSkills?: {
-                  windowDays: number;
-                  totalBuildsWithSkills: number;
-                  skills: Array<{ name: string; count: number }>;
-                };
-              }
-            ).topSkills;
-            if (!ts || ts.skills.length === 0) return null;
-            const max = ts.skills[0]?.count ?? 1;
-            return (
-              <div className="border border-border rounded-xl bg-card overflow-hidden">
-                <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                    <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                    Top skills used (last {ts.windowDays} days)
-                  </h3>
-                  <span className="text-xs text-muted-foreground">
-                    {ts.totalBuildsWithSkills} build{ts.totalBuildsWithSkills === 1 ? "" : "s"}{" "}
-                    loaded skills
-                  </span>
-                </div>
-                <ul className="divide-y divide-border">
-                  {ts.skills.map((s, i) => {
-                    const pct = max > 0 ? Math.max(4, Math.round((s.count / max) * 100)) : 0;
-                    return (
-                      <li key={s.name} className="px-4 py-2 flex items-center gap-3 text-sm">
-                        <span className="w-6 text-xs text-muted-foreground tabular-nums">
-                          {i + 1}.
-                        </span>
-                        <span className="flex-1 min-w-0 truncate font-mono text-xs">{s.name}</span>
-                        <div className="hidden sm:block w-32 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div className="h-full bg-amber-400/70" style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="w-12 text-right tabular-nums text-muted-foreground">
-                          {s.count}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            );
-          })()}
-
-        {canOperate && <SkillsPanel />}
-      </section>
+      {isOwner && (
+        <a
+          href="/admin/developer-tools"
+          className="block border border-border rounded-xl bg-card p-4 hover:bg-muted/40 transition-colors"
+        >
+          <div className="flex items-center gap-2 font-semibold">
+            <Wrench className="h-4 w-4" />
+            Developer tools
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Owner-only diagnostics, evaluations, skill controls, and architecture telemetry.
+          </p>
+        </a>
+      )}
     </div>
+  );
+}
+
+export function AdminDeveloperTools() {
+  const statsQuery = useGetAdminStats();
+  const stats = statsQuery.data;
+
+  return (
+    <section data-admin-tier="owner-developer-tools" className="space-y-8">
+      <EvalResultsTile />
+      <OraRoutingDiagnosticsPanel />
+      {stats?.architectReviews && (
+        <div className="border border-border rounded-xl bg-card overflow-hidden">
+          <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <BrainCircuit className="h-3.5 w-3.5 text-violet-400" />
+              Architect Review (last {stats.architectReviews.windowDays} days)
+            </h3>
+            <span className="text-xs text-muted-foreground">
+              {stats.architectReviews.reviewed} reviewed build
+              {stats.architectReviews.reviewed === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-border/40">
+            <ArchitectMetric
+              label="Avg findings / build"
+              value={stats.architectReviews.avgFindingsPerBuild.toFixed(2)}
+              tone="neutral"
+            />
+            <ArchitectMetric
+              label="Pass"
+              value={String(stats.architectReviews.passCount)}
+              tone="ok"
+            />
+            <ArchitectMetric
+              label="Partial"
+              value={String(stats.architectReviews.partialCount)}
+              tone="warn"
+            />
+            <ArchitectMetric
+              label="Fail"
+              value={String(stats.architectReviews.failCount)}
+              tone="error"
+            />
+            <ArchitectMetric
+              label="Auto-fixes queued"
+              value={String(stats.architectReviews.autoFixesQueued)}
+              tone="info"
+            />
+          </div>
+        </div>
+      )}
+      <TopSkillsPanel stats={stats} />
+      <SkillsPanel />
+    </section>
   );
 }
 
@@ -1146,6 +1170,11 @@ function ProdErrorsTile({
           {failed ? "unknown" : loading ? "…" : `${last14Days.toLocaleString()} total`}
         </span>
       </div>
+      <PanelDeclaration
+        purpose="Shows the production error volume recorded during the last 14 days."
+        action="Investigate any non-zero day before treating production as healthy."
+        freshness="Fetched with the current Admin statistics response."
+      />
       <div className="px-4 py-4">
         {failed ? (
           <p className="text-sm text-destructive text-center py-4">
@@ -1250,6 +1279,56 @@ function ArchitectMetric({
   );
 }
 
+function TopSkillsPanel({
+  stats,
+}: {
+  stats:
+    | {
+        topSkills?: {
+          windowDays: number;
+          totalBuildsWithSkills: number;
+          skills: Array<{ name: string; count: number }>;
+        };
+      }
+    | undefined;
+}) {
+  const topSkills = stats?.topSkills;
+  if (!topSkills || topSkills.skills.length === 0) return null;
+  const max = topSkills.skills[0]?.count ?? 1;
+
+  return (
+    <div className="border border-border rounded-xl bg-card overflow-hidden">
+      <div className="px-4 py-3 bg-muted/40 border-b border-border flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+          Top skills used (last {topSkills.windowDays} days)
+        </h3>
+        <span className="text-xs text-muted-foreground">
+          {topSkills.totalBuildsWithSkills} build
+          {topSkills.totalBuildsWithSkills === 1 ? "" : "s"} loaded skills
+        </span>
+      </div>
+      <ul className="divide-y divide-border">
+        {topSkills.skills.map((skill, index) => {
+          const width = max > 0 ? Math.max(4, Math.round((skill.count / max) * 100)) : 0;
+          return (
+            <li key={skill.name} className="px-4 py-2 flex items-center gap-3 text-sm">
+              <span className="w-6 text-xs text-muted-foreground tabular-nums">{index + 1}.</span>
+              <span className="flex-1 min-w-0 truncate font-mono text-xs">{skill.name}</span>
+              <div className="hidden sm:block w-32 h-1.5 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-amber-400/70" style={{ width: `${width}%` }} />
+              </div>
+              <span className="w-12 text-right tabular-nums text-muted-foreground">
+                {skill.count}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function SupportTicketsTile() {
   const { data } = useListAdminSupportTickets(
     { limit: 1 },
@@ -1283,6 +1362,12 @@ function SupportTicketsTile() {
       </div>
       <div className="text-2xl font-bold">{data ? newCount : "…"}</div>
       <div className="text-xs text-muted-foreground">new · {openCount} open — view inbox</div>
+      <PanelDeclaration
+        compact
+        purpose="Surfaces support work waiting for an operator."
+        action="Open the inbox and select a ticket."
+        freshness="Refreshes every 60 seconds and when this window regains focus."
+      />
     </a>
   );
 }
@@ -1292,11 +1377,17 @@ function StatCard({
   label,
   value,
   sub,
+  purpose,
+  action,
+  freshness,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   sub: string;
+  purpose: string;
+  action: string;
+  freshness: string;
 }) {
   return (
     <div className="border border-border rounded-xl p-4 bg-card space-y-2">
@@ -1306,11 +1397,24 @@ function StatCard({
       </div>
       <div className="text-2xl font-bold">{value}</div>
       <div className="text-xs text-muted-foreground">{sub}</div>
+      <PanelDeclaration compact purpose={purpose} action={action} freshness={freshness} />
     </div>
   );
 }
 
-function AdminSection({ title, children }: { title: string; children: React.ReactNode }) {
+function AdminSection({
+  title,
+  purpose,
+  action,
+  freshness,
+  children,
+}: {
+  title: string;
+  purpose: string;
+  action: string;
+  freshness: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="border border-border rounded-xl bg-card overflow-hidden">
       <div className="px-4 py-2.5 bg-muted/40 border-b border-border">
@@ -1318,8 +1422,43 @@ function AdminSection({ title, children }: { title: string; children: React.Reac
           {title}
         </h3>
       </div>
+      <PanelDeclaration purpose={purpose} action={action} freshness={freshness} />
       <div className="divide-y divide-border">{children}</div>
     </div>
+  );
+}
+
+function PanelDeclaration({
+  purpose,
+  action,
+  freshness,
+  compact = false,
+}: {
+  purpose: string;
+  action: string;
+  freshness: string;
+  compact?: boolean;
+}) {
+  return (
+    <dl
+      data-admin-panel-declaration
+      className={`grid gap-2 border-b border-border bg-muted/15 text-muted-foreground ${
+        compact ? "mt-2 border rounded-md p-2 text-[10px]" : "px-4 py-3 text-xs md:grid-cols-3"
+      }`}
+    >
+      <div>
+        <dt className="font-semibold text-foreground">Purpose</dt>
+        <dd>{purpose}</dd>
+      </div>
+      <div>
+        <dt className="font-semibold text-foreground">Operator action</dt>
+        <dd>{action}</dd>
+      </div>
+      <div>
+        <dt className="font-semibold text-foreground">Freshness</dt>
+        <dd>{freshness}</dd>
+      </div>
+    </dl>
   );
 }
 
@@ -1386,6 +1525,11 @@ function InboxRecentUnreadTile() {
         </h3>
         <span className="text-xs text-muted-foreground">{data?.totalUnread ?? 0} unread total</span>
       </div>
+      <PanelDeclaration
+        purpose="Shows unread user feedback that may need an operator response."
+        action="Open the linked project to review the feedback in context."
+        freshness="Loaded when the Admin Page opens."
+      />
       {items.length === 0 ? (
         <div className="p-4 text-sm text-muted-foreground">No unread feedback right now.</div>
       ) : (
@@ -1679,6 +1823,12 @@ function JobQueueTile() {
           </button>
         </div>
       </div>
+
+      <PanelDeclaration
+        purpose="Shows whether durable background work is moving, waiting, or failing."
+        action="Investigate failed or stalled jobs before asking a user to retry."
+        freshness="Refreshes every 15 seconds and records the last successful refresh time."
+      />
 
       {!data && loading && (
         <div className="px-4 py-6 text-sm text-muted-foreground text-center">Loading…</div>

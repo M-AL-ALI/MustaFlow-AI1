@@ -28,19 +28,13 @@ describe("Admin navigation and operational hierarchy", () => {
     const errors = adminSource.indexOf("<ProdErrorsTile");
     const jobs = adminSource.indexOf("<JobQueueTile");
     const informationalStats = adminSource.indexOf('className="grid grid-cols-2 md:grid-cols-4');
-    const exile = adminSource.indexOf('data-admin-tier="phase-2-exile"');
-    const evalPanel = adminSource.indexOf("<EvalResultsTile", exile);
-    const routingPanel = adminSource.indexOf("<OraRoutingDiagnosticsPanel", exile);
-    const skillsPanel = adminSource.indexOf("<SkillsPanel", exile);
+    const developerTools = adminSource.indexOf('href="/admin/developer-tools"');
 
     expect(readiness).toBeGreaterThan(0);
     expect(errors).toBeGreaterThan(readiness);
     expect(jobs).toBeGreaterThan(errors);
     expect(informationalStats).toBeGreaterThan(jobs);
-    expect(exile).toBeGreaterThan(informationalStats);
-    expect(evalPanel).toBeGreaterThan(exile);
-    expect(routingPanel).toBeGreaterThan(exile);
-    expect(skillsPanel).toBeGreaterThan(exile);
+    expect(developerTools).toBeGreaterThan(informationalStats);
   });
 
   it("never presents failed operational reads as healthy or empty", () => {
