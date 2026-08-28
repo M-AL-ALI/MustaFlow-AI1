@@ -29,6 +29,14 @@ The `ora-stability-gate` workflow runner itself gets OOM-killed after ~3 minutes
 
 **Key:** web-build requires PORT and BASE_PATH env vars (vite.config.ts throws without them). From bash without PORT set, use `PORT=5000 BASE_PATH=/ pnpm --filter @workspace/mustaflow run build`.
 
+### Resumed release-check preventive
+
+A resumed release check is a valid acceptance receipt only when it inherits the release gate's wrapper environment, including `PORT=5000` and `BASE_PATH=/`. A manually resumed command without that environment is diagnostic-only and must not be classified as a product failure or release result.
+
+**Why:** The first standalone website-build retry omitted the wrapper variables and failed before Vite could evaluate the product, producing an invalid acceptance receipt.
+
+**How to apply:** When resuming checks after a runner timeout, preserve the gate wrapper environment exactly; otherwise discard the result and rerun the check correctly.
+
 ## pnpm install concurrent with gate = vitest "Command not found"
 
 Running `pnpm install` (or `pnpm add`) while the stability gate is active causes pnpm's per-package `.bin` directory to be temporarily unlinked mid-gate. Bundles that run DURING the relinking window fail with `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "vitest" not found` even though the binary exists before and after.
