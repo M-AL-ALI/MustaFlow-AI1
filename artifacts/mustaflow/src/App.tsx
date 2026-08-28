@@ -29,6 +29,7 @@ const HomePage = lazy(() => import("./pages/home"));
 const ProjectsPage = builderLazy(() => import("./pages/projects"));
 const NewProjectPage = builderLazy(() => import("./pages/projects/new"));
 const ProjectWorkspacePage = builderLazy(() => import("./pages/projects/[id]"));
+const ProjectInviteAcceptPage = builderLazy(() => import("./pages/project-invite-accept"));
 const ModeSelectPage = lazy(() => import("./pages/mode-select"));
 const OraPage = lazy(() => import("./pages/ora"));
 const OraLibraryPage = lazy(() => import("./pages/ora-library"));
@@ -628,6 +629,13 @@ function AppShellBody({ isE2E }: { isE2E: boolean }) {
                         <AppLayout>
                           <NewProjectPage />
                         </AppLayout>
+                      </BuilderGuard>
+                    </Protected>
+                  </Route>
+                  <Route path="/projects/invites/:token">
+                    <Protected>
+                      <BuilderGuard>
+                        <ProjectInviteAcceptPage />
                       </BuilderGuard>
                     </Protected>
                   </Route>

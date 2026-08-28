@@ -24,6 +24,96 @@ type MigrationStep = {
 
 type MigrationClient = Pick<import("pg").PoolClient, "query">;
 
+export async function applyProjectCollaborationMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      DO $$
+      BEGIN
+        CREATE TYPE project_collaborator_role AS ENUM ('owner', 'publisher', 'editor', 'viewer');
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
+    `);
+    await client.query(`
+      DO $$
+      BEGIN
+        CREATE TYPE project_invite_state AS ENUM ('pending', 'accepted', 'revoked', 'expired');
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_collaborators (
+        project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        user_id      TEXT NOT NULL,
+        role         project_collaborator_role NOT NULL,
+        invited_by   TEXT NOT NULL,
+        joined_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT project_collaborators_pk PRIMARY KEY (project_id, user_id)
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_invites (
+        id           SERIAL PRIMARY KEY,
+        project_id   INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        workspace_id INTEGER NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        email        TEXT,
+        token_hash   TEXT NOT NULL UNIQUE,
+        role         project_collaborator_role NOT NULL,
+        status       project_invite_state NOT NULL DEFAULT 'pending',
+        invited_by   TEXT NOT NULL,
+        accepted_by  TEXT,
+        expires_at   TIMESTAMPTZ NOT NULL,
+        accepted_at  TIMESTAMPTZ,
+        revoked_at   TIMESTAMPTZ,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS project_collaborators_user_idx
+        ON project_collaborators(user_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS project_collaborators_workspace_idx
+        ON project_collaborators(workspace_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS project_collaborators_project_role_idx
+        ON project_collaborators(project_id, role)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS project_invites_project_status_idx
+        ON project_invites(project_id, status)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS project_invites_email_idx
+        ON project_invites(email)
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS project_invites_pending_email_uq
+        ON project_invites(project_id, email)
+        WHERE status = 'pending' AND email IS NOT NULL
+    `);
+    // Every project owner is represented explicitly so the member list and
+    // access predicate read the same source for legacy and new projects.
+    await client.query(`
+      INSERT INTO project_collaborators
+        (project_id, workspace_id, user_id, role, invited_by, joined_at, updated_at)
+      SELECT id, workspace_id, owner_id, 'owner', owner_id, created_at, NOW()
+        FROM projects
+      ON CONFLICT (project_id, user_id) DO UPDATE
+        SET role = 'owner',
+            workspace_id = EXCLUDED.workspace_id,
+            updated_at = NOW()
+    `);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function applyAdminAccessFoundationMigration(client: MigrationClient): Promise<void> {
   await client.query("BEGIN");
   try {
@@ -6629,6 +6719,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-support-operations",
     async run(client) {
       await applySupportOperationsMigration(client);
+    },
+  },
+  {
+    name: "migrate-project-collaboration",
+    async run(client) {
+      await applyProjectCollaborationMigration(client);
     },
   },
 ];

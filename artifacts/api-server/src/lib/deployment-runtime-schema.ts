@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 
-export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v1" as const;
+export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v2" as const;
 
 export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "admin_authority_missing",
@@ -9,6 +9,7 @@ export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "support_delivery_constraints_missing",
   "support_delivery_indexes_missing",
   "prompt_queue_missing",
+  "project_collaboration_missing",
 ] as const;
 
 export type DeploymentRuntimeSchemaViolation =
@@ -40,6 +41,7 @@ type RuntimeSchemaObservation = {
   supportDeliveryConstraintsReady: boolean;
   supportDeliveryIndexesReady: boolean;
   promptQueueReady: boolean;
+  projectCollaborationReady: boolean;
 };
 
 /**
@@ -98,7 +100,11 @@ export async function assessDeploymentRuntimeSchema(
            AND index_row.indisready
       ) AS "supportDeliveryIndexesReady",
       to_regclass('public.zero_prompt_queue_items') IS NOT NULL
-        AS "promptQueueReady"
+        AS "promptQueueReady",
+      (
+        to_regclass('public.project_collaborators') IS NOT NULL
+        AND to_regclass('public.project_invites') IS NOT NULL
+      ) AS "projectCollaborationReady"
   `);
 
   const observation = result.rows[0];
@@ -123,6 +129,8 @@ export async function assessDeploymentRuntimeSchema(
   if (observation?.supportDeliveryIndexesReady !== true)
     violations.push("support_delivery_indexes_missing");
   if (observation?.promptQueueReady !== true) violations.push("prompt_queue_missing");
+  if (observation?.projectCollaborationReady !== true)
+    violations.push("project_collaboration_missing");
 
   return violations.length === 0
     ? {

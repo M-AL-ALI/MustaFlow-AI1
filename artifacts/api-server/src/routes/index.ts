@@ -118,6 +118,7 @@ import { oraxDesktopAuthPublicRouter, oraxDesktopAuthRouter } from "./orax-deskt
 import oraxProjectsRouter from "./orax-projects";
 import zeroPromptQueueRouter from "./zero-prompt-queue";
 import accountProfileRouter from "./account-profile";
+import projectCollaborationRouter from "./project-collaboration";
 import supportAccessRouter from "./support-access";
 import supportOperationsRouter from "./support-operations";
 import snapshotObserveRouter from "./snapshot-observe";
@@ -333,6 +334,7 @@ router.use(builderHandoffRouter);
 router.use(workspacesRouter);
 router.use(workspaceDomainsRouter);
 router.use(projectsRouter);
+router.use(projectCollaborationRouter);
 router.use(messagesRouter);
 router.use(snapshotObserveRouter);
 router.use(tasksRouter);
