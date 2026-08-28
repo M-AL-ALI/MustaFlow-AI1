@@ -4812,7 +4812,60 @@ components:
       type: object
       properties:
         status: { type: string }
-      required: [status]
+        containerSubsystem:
+          type: string
+          enum: [unknown, ok, unconfigured, partial-config, error]
+        encryptionKey:
+          type: string
+          enum: [ok, missing, invalid]
+        startupMigrations:
+          type: string
+          enum: [unknown, ok, error]
+        startupMigrationFailureSteps:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          items: { type: string, pattern: "^[a-z0-9-]{1,80}$" }
+        queueSchemaContract:
+          type: string
+          enum: [unknown, ok, error]
+        queueSchemaContractViolations:
+          type: array
+          maxItems: 18
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - catalog_query_failed
+              - table_missing
+              - column_missing
+              - column_type_mismatch
+              - column_nullability_mismatch
+              - constraint_missing
+              - constraint_type_mismatch
+              - constraint_unvalidated
+              - constraint_delete_action_mismatch
+              - constraint_definition_mismatch
+              - index_missing
+              - index_table_mismatch
+              - index_uniqueness_mismatch
+              - index_invalid
+              - index_not_ready
+              - index_definition_mismatch
+              - index_predicate_mismatch
+              - verification_stale
+        buildCommit:
+          type: string
+          pattern: "^(unknown|[0-9a-f]{40})$"
+      required:
+        [
+          status,
+          containerSubsystem,
+          encryptionKey,
+          startupMigrations,
+          queueSchemaContract,
+          buildCommit,
+        ]
 
     ApiError:
       type: object

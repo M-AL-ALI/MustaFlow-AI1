@@ -9,6 +9,7 @@ import type { HealthStatusContainerSubsystem } from './healthStatusContainerSubs
 import type { HealthStatusEncryptionKey } from './healthStatusEncryptionKey';
 import type { HealthStatusMissingRuntimeBindingsItem } from './healthStatusMissingRuntimeBindingsItem';
 import type { HealthStatusQueueSchemaContract } from './healthStatusQueueSchemaContract';
+import type { HealthStatusQueueSchemaContractViolationsItem } from './healthStatusQueueSchemaContractViolationsItem';
 import type { HealthStatusStartupMigrations } from './healthStatusStartupMigrations';
 
 export interface HealthStatus {
@@ -22,9 +23,19 @@ export interface HealthStatus {
   /** Cached startup-migration state. "unknown" = migrations have not completed yet. "ok" = every migration passed. "error" = one or more migrations failed.
    */
   startupMigrations: HealthStatusStartupMigrations;
+  /**
+     * Allowlisted migration step names present only when startup migrations fail.
+     * @maxItems 10
+     */
+  startupMigrationFailureSteps?: string[];
   /** Cached Zero prompt queue schema-contract state. "unknown" = the first verification has not completed yet. "ok" = the contract is ready. "error" = the contract is unready.
    */
   queueSchemaContract: HealthStatusQueueSchemaContract;
+  /**
+     * Sanitized contract evidence present only while the queue schema is unready.
+     * @maxItems 18
+     */
+  queueSchemaContractViolations?: HealthStatusQueueSchemaContractViolationsItem[];
   /**
      * Exact commit of the serving API build, or "unknown" when build-info is unavailable.
      * @pattern ^(unknown|[0-9a-f]{40})$

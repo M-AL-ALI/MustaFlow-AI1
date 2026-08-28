@@ -325,7 +325,10 @@ server.listen(port, (err?: Error) => {
 // verify Fly.io exec connectivity.
 void runStartupMigrations()
   .then(async (result) => {
-    startupHealthState.recordMigrations(result.failed === 0 ? "ok" : "error");
+    startupHealthState.recordMigrations(
+      result.failed === 0 ? "ok" : "error",
+      result.errors.map((error) => error.name),
+    );
     if (result.failed !== 0) {
       logger.error(
         { failedMigrations: result.failed },
@@ -343,7 +346,7 @@ void runStartupMigrations()
   })
   .catch((err) => {
     // Non-fatal: log and continue — a partial schema is better than no server.
-    startupHealthState.recordMigrations("error");
+    startupHealthState.recordMigrations("error", ["unexpected-startup-migration-error"]);
     logger.error({ err }, "startup-migrations: unexpected error (continuing)");
   })
   .then(async () => {

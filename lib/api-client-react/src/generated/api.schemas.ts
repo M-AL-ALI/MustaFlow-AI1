@@ -59,6 +59,30 @@ export const HealthStatusQueueSchemaContract = {
   error: 'error',
 } as const;
 
+export type HealthStatusQueueSchemaContractViolationsItem = typeof HealthStatusQueueSchemaContractViolationsItem[keyof typeof HealthStatusQueueSchemaContractViolationsItem];
+
+
+export const HealthStatusQueueSchemaContractViolationsItem = {
+  catalog_query_failed: 'catalog_query_failed',
+  table_missing: 'table_missing',
+  column_missing: 'column_missing',
+  column_type_mismatch: 'column_type_mismatch',
+  column_nullability_mismatch: 'column_nullability_mismatch',
+  constraint_missing: 'constraint_missing',
+  constraint_type_mismatch: 'constraint_type_mismatch',
+  constraint_unvalidated: 'constraint_unvalidated',
+  constraint_delete_action_mismatch: 'constraint_delete_action_mismatch',
+  constraint_definition_mismatch: 'constraint_definition_mismatch',
+  index_missing: 'index_missing',
+  index_table_mismatch: 'index_table_mismatch',
+  index_uniqueness_mismatch: 'index_uniqueness_mismatch',
+  index_invalid: 'index_invalid',
+  index_not_ready: 'index_not_ready',
+  index_definition_mismatch: 'index_definition_mismatch',
+  index_predicate_mismatch: 'index_predicate_mismatch',
+  verification_stale: 'verification_stale',
+} as const;
+
 export type HealthStatusMissingRuntimeBindingsItem = typeof HealthStatusMissingRuntimeBindingsItem[keyof typeof HealthStatusMissingRuntimeBindingsItem];
 
 
@@ -83,9 +107,19 @@ export interface HealthStatus {
   /** Cached startup-migration state. "unknown" = migrations have not completed yet. "ok" = every migration passed. "error" = one or more migrations failed.
    */
   startupMigrations: HealthStatusStartupMigrations;
+  /**
+     * Allowlisted migration step names present only when startup migrations fail.
+     * @maxItems 10
+     */
+  startupMigrationFailureSteps?: string[];
   /** Cached Zero prompt queue schema-contract state. "unknown" = the first verification has not completed yet. "ok" = the contract is ready. "error" = the contract is unready.
    */
   queueSchemaContract: HealthStatusQueueSchemaContract;
+  /**
+     * Sanitized contract evidence present only while the queue schema is unready.
+     * @maxItems 18
+     */
+  queueSchemaContractViolations?: HealthStatusQueueSchemaContractViolationsItem[];
   /**
      * Exact commit of the serving API build, or "unknown" when build-info is unavailable.
      * @pattern ^(unknown|[0-9a-f]{40})$
@@ -2921,11 +2955,18 @@ export const AdminMeRole = {
   analyst: 'analyst',
 } as const;
 
+export type AdminMeAuthoritySource = typeof AdminMeAuthoritySource[keyof typeof AdminMeAuthoritySource];
+
+
+export const AdminMeAuthoritySource = {
+  user_roles: 'user_roles',
+} as const;
+
 export interface AdminMe {
   userId: string;
   role: AdminMeRole;
   isAdmin: boolean;
-  authoritySource: 'user_roles';
+  authoritySource: AdminMeAuthoritySource;
   /** @nullable */
   grantedBy?: string | null;
 }

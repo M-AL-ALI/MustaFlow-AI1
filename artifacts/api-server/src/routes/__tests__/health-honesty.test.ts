@@ -89,8 +89,14 @@ describe("health startup honesty", () => {
 
   it("reports completed failures as data while preserving the existing 200 response", async () => {
     mocks.containerSubsystem.mockReturnValue("error");
-    mocks.startup.mockReturnValue({ migrations: "error" });
-    mocks.queueSchemaContract.mockReturnValue({ status: "unready" });
+    mocks.startup.mockReturnValue({
+      migrations: "error",
+      failureSteps: ["verify-deployment-runtime-schema"],
+    });
+    mocks.queueSchemaContract.mockReturnValue({
+      status: "unready",
+      violations: ["constraint_missing", "index_invalid"],
+    });
 
     const response = await request(app()).get("/api/healthz");
 
@@ -100,7 +106,9 @@ describe("health startup honesty", () => {
       containerSubsystem: "error",
       encryptionKey: "ok",
       startupMigrations: "error",
+      startupMigrationFailureSteps: ["verify-deployment-runtime-schema"],
       queueSchemaContract: "error",
+      queueSchemaContractViolations: ["constraint_missing", "index_invalid"],
       buildCommit: "unknown",
     });
   });

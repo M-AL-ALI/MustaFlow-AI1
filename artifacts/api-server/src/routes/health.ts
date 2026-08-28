@@ -15,6 +15,7 @@ router.get("/healthz", (_req, res) => {
   const subsystem = getContainerSubsystemStatus();
   const runtimeConfiguration = getTenantRuntimeConfigurationStatus();
   const startup = startupHealthState.read();
+  const startupFailureSteps = startup.failureSteps ?? [];
   const queueSchemaContract = zeroPromptQueueSchemaContractState.read();
   const queueSchemaContractStatus: StartupCheckStatus =
     queueSchemaContract.status === "starting"
@@ -27,7 +28,13 @@ router.get("/healthz", (_req, res) => {
     containerSubsystem: subsystem ?? "unknown",
     encryptionKey: getEncryptionKeyStatus(),
     startupMigrations: startup.migrations,
+    ...(startup.migrations === "error" && startupFailureSteps.length > 0
+      ? { startupMigrationFailureSteps: startupFailureSteps }
+      : {}),
     queueSchemaContract: queueSchemaContractStatus,
+    ...(queueSchemaContract.status === "unready"
+      ? { queueSchemaContractViolations: queueSchemaContract.violations }
+      : {}),
     buildCommit: getServedBuildCommit(),
   });
   res.status(200).json(data);

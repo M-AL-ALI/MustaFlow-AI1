@@ -5,6 +5,7 @@ import { assessDeploymentRuntimeSchema } from "./deployment-runtime-schema";
 function observation(overrides: Record<string, boolean> = {}) {
   return {
     canCreateSchemaObjects: false,
+    canMutateExistingObjects: false,
     adminAuthorityReady: true,
     workspaceMembershipReady: true,
     supportDeliveryReady: true,
@@ -49,12 +50,30 @@ describe("deployment runtime schema boundary", () => {
 
   it("preserves the existing idempotent migration path for mutable database roles", async () => {
     const query = vi.fn(async () => ({
-      rows: [observation({ canCreateSchemaObjects: true, supportDeliveryReady: false })],
+      rows: [
+        observation({
+          canCreateSchemaObjects: true,
+          canMutateExistingObjects: true,
+          supportDeliveryReady: false,
+        }),
+      ],
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
       contractId: "deployment_runtime_schema_v1",
       mode: "mutable",
+      violations: [],
+    });
+  });
+
+  it("treats a deployment role that can create but cannot alter existing objects as read-only", async () => {
+    const query = vi.fn(async () => ({
+      rows: [observation({ canCreateSchemaObjects: true })],
+    }));
+
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
+      contractId: "deployment_runtime_schema_v1",
+      mode: "read-only-ready",
       violations: [],
     });
   });

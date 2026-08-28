@@ -2,6 +2,7 @@ export type StartupCheckStatus = "unknown" | "ok" | "error";
 
 export type StartupHealthSnapshot = {
   migrations: StartupCheckStatus;
+  failureSteps: readonly string[];
 };
 
 /**
@@ -12,13 +13,18 @@ export type StartupHealthSnapshot = {
  */
 export class StartupHealthState {
   private migrations: StartupCheckStatus = "unknown";
+  private failureSteps: readonly string[] = [];
 
   read(): StartupHealthSnapshot {
-    return { migrations: this.migrations };
+    return { migrations: this.migrations, failureSteps: [...this.failureSteps] };
   }
 
-  recordMigrations(status: Exclude<StartupCheckStatus, "unknown">): void {
+  recordMigrations(
+    status: Exclude<StartupCheckStatus, "unknown">,
+    failureSteps: readonly string[] = [],
+  ): void {
     this.migrations = status;
+    this.failureSteps = status === "error" ? failureSteps.slice(0, 10) : [];
   }
 }
 

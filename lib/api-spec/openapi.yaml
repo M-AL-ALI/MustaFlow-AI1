@@ -7781,12 +7781,46 @@ components:
           description: >
             Cached startup-migration state. "unknown" = migrations have not completed yet.
             "ok" = every migration passed. "error" = one or more migrations failed.
+        startupMigrationFailureSteps:
+          type: array
+          maxItems: 10
+          uniqueItems: true
+          description: Allowlisted migration step names present only when startup migrations fail.
+          items:
+            type: string
+            pattern: "^[a-z0-9-]{1,80}$"
         queueSchemaContract:
           type: string
           enum: [unknown, ok, error]
           description: >
             Cached Zero prompt queue schema-contract state. "unknown" = the first verification
             has not completed yet. "ok" = the contract is ready. "error" = the contract is unready.
+        queueSchemaContractViolations:
+          type: array
+          maxItems: 18
+          uniqueItems: true
+          description: Sanitized contract evidence present only while the queue schema is unready.
+          items:
+            type: string
+            enum:
+              - catalog_query_failed
+              - table_missing
+              - column_missing
+              - column_type_mismatch
+              - column_nullability_mismatch
+              - constraint_missing
+              - constraint_type_mismatch
+              - constraint_unvalidated
+              - constraint_delete_action_mismatch
+              - constraint_definition_mismatch
+              - index_missing
+              - index_table_mismatch
+              - index_uniqueness_mismatch
+              - index_invalid
+              - index_not_ready
+              - index_definition_mismatch
+              - index_predicate_mismatch
+              - verification_stale
         buildCommit:
           type: string
           pattern: "^(unknown|[0-9a-f]{40})$"

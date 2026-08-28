@@ -11,6 +11,11 @@ import * as zod from 'zod';
 /**
  * @summary Health check
  */
+export const healthCheckResponseStartupMigrationFailureStepsItemRegExp = new RegExp('^[a-z0-9-]{1,80}$');
+export const healthCheckResponseStartupMigrationFailureStepsMax = 10;
+
+export const healthCheckResponseQueueSchemaContractViolationsMax = 18;
+
 export const healthCheckResponseBuildCommitRegExp = new RegExp('^(unknown|[0-9a-f]{40})$');
 export const healthCheckResponseMissingRuntimeBindingsMax = 4;
 
@@ -21,7 +26,9 @@ export const HealthCheckResponse = zod.object({
   "containerSubsystem": zod.enum(['unknown', 'ok', 'unconfigured', 'partial-config', 'error']).describe('Status of the Fly.io container subsystem. \"unknown\" = the startup check has not completed yet. \"ok\" = token is configured and API is reachable. \"unconfigured\" = FLY_API_TOKEN is not set (feature disabled, not an error). \"partial-config\" = the selected runtime provider configuration is incomplete. \"error\" = token is set but API call failed at startup.\n'),
   "encryptionKey": zod.enum(['ok', 'missing', 'invalid']).describe('Encryption key health. \"ok\" = key is present and AES-256-GCM round-trip passes. \"missing\" = ENCRYPTION_KEY is not set (falls back to plaintext in dev, crashes in prod). \"invalid\" = key is set but validation failed (wrong length, bad base64, or round-trip mismatch).\n'),
   "startupMigrations": zod.enum(['unknown', 'ok', 'error']).describe('Cached startup-migration state. \"unknown\" = migrations have not completed yet. \"ok\" = every migration passed. \"error\" = one or more migrations failed.\n'),
+  "startupMigrationFailureSteps": zod.array(zod.string().regex(healthCheckResponseStartupMigrationFailureStepsItemRegExp)).max(healthCheckResponseStartupMigrationFailureStepsMax).optional().describe('Allowlisted migration step names present only when startup migrations fail.'),
   "queueSchemaContract": zod.enum(['unknown', 'ok', 'error']).describe('Cached Zero prompt queue schema-contract state. \"unknown\" = the first verification has not completed yet. \"ok\" = the contract is ready. \"error\" = the contract is unready.\n'),
+  "queueSchemaContractViolations": zod.array(zod.enum(['catalog_query_failed', 'table_missing', 'column_missing', 'column_type_mismatch', 'column_nullability_mismatch', 'constraint_missing', 'constraint_type_mismatch', 'constraint_unvalidated', 'constraint_delete_action_mismatch', 'constraint_definition_mismatch', 'index_missing', 'index_table_mismatch', 'index_uniqueness_mismatch', 'index_invalid', 'index_not_ready', 'index_definition_mismatch', 'index_predicate_mismatch', 'verification_stale'])).max(healthCheckResponseQueueSchemaContractViolationsMax).optional().describe('Sanitized contract evidence present only while the queue schema is unready.'),
   "buildCommit": zod.string().regex(healthCheckResponseBuildCommitRegExp).describe('Exact commit of the serving API build, or \"unknown\" when build-info is unavailable.'),
   "missingRuntimeBindings": zod.array(zod.enum(['CLOUDFLARE_RUNTIME_CONTROL_URL', 'CLOUDFLARE_RUNTIME_CONTROL_TOKEN', 'CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE', 'FLY_API_TOKEN', 'FLY_APP_NAME', 'FLY_ORG_SLUG', 'FLY_REGION'])).max(healthCheckResponseMissingRuntimeBindingsMax).optional().describe('Required runtime binding names absent from a partial provider configuration.')
 })
@@ -6991,7 +6998,7 @@ export const GetAdminMeResponse = zod.object({
   "userId": zod.string(),
   "role": zod.enum(['owner', 'operator', 'support', 'analyst']),
   "isAdmin": zod.boolean(),
-  "authoritySource": zod.literal("user_roles"),
+  "authoritySource": zod.enum(['user_roles']),
   "grantedBy": zod.string().nullish()
 })
 
@@ -8626,4 +8633,3 @@ export const EscalateSupportBody = zod.object({
 })).optional(),
   "deviceInfo": zod.record(zod.string(), zod.unknown()).nullish()
 })
-

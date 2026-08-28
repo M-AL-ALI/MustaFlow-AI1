@@ -33,6 +33,7 @@ export type DeploymentRuntimeSchemaAssessment =
 
 type RuntimeSchemaObservation = {
   canCreateSchemaObjects: boolean;
+  canMutateExistingObjects: boolean;
   adminAuthorityReady: boolean;
   workspaceMembershipReady: boolean;
   supportDeliveryReady: boolean;
@@ -54,6 +55,14 @@ export async function assessDeploymentRuntimeSchema(
     SELECT
       has_schema_privilege(current_user, current_schema(), 'CREATE')
         AS "canCreateSchemaObjects",
+      NOT EXISTS (
+        SELECT 1
+          FROM pg_catalog.pg_class relation
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = current_schema()
+           AND relation.relkind = ANY(ARRAY['r', 'p', 'S', 'v', 'm']::"char"[])
+           AND NOT pg_has_role(current_user, relation.relowner, 'USAGE')
+      ) AS "canMutateExistingObjects",
       to_regclass('public.user_roles') IS NOT NULL
         AS "adminAuthorityReady",
       to_regclass('public.workspace_members') IS NOT NULL
@@ -93,7 +102,10 @@ export async function assessDeploymentRuntimeSchema(
   `);
 
   const observation = result.rows[0];
-  if (observation?.canCreateSchemaObjects === true) {
+  if (
+    observation?.canCreateSchemaObjects === true &&
+    observation.canMutateExistingObjects === true
+  ) {
     return {
       contractId: DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID,
       mode: "mutable",

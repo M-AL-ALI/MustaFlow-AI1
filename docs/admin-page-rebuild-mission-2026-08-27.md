@@ -569,6 +569,23 @@ successfully`, but the running preview still attempted all startup DDL and
    closed with allowlisted violations and performs zero DDL. Four regression
    guards pin the complete read-only path, the incomplete refusal, the mutable
    path and the fact that this decision executes before any migration step.
+7. The first deployment-runtime preventive still classified the preview role as
+   mutable because PostgreSQL reported schema `CREATE` privilege even though the
+   role did not own the existing deployment objects. The boundary now requires
+   both schema creation and ownership-compatible access to every existing public
+   table, partition, sequence, view and materialized view before it permits the
+   149-step DDL path. A deployment role that can create but cannot alter existing
+   objects is read-only. A dedicated regression test pins this exact mixed-
+   privilege signature. Health receipts now carry bounded, allowlisted migration
+   step names and queue-contract violation codes only on failure, so another
+   preview cannot collapse actionable evidence into two unexplained `error`
+   strings. Raw SQL, transport detail, values and credentials remain absent.
+8. Regenerating the canonical OpenAPI clients revealed that the checked-in Admin
+   authority source type lagged behind the already-authoritative specification.
+   The generated clients and the public health mirror were refreshed from the
+   canonical spec. The prevention is the existing code-generation plus forced
+   library-build gate: generated declarations must match the canonical schema on
+   every publish candidate.
 
 ### P5 lab verification
 
@@ -576,7 +593,7 @@ Database: none. Environment: lab. Package store:
 `A:/NabuFlowLab/.pnpm-store/v10`. Kind: serial static, type, lint and test
 verification in the one permanent A-drive worktree.
 
-- Focused API after the deployment-runtime preventive: 2 files, 11 tests passed;
+- Focused API after the deployment-runtime preventives: 3 files, 14 tests passed;
   the complete P5 focused set remains green.
 - Focused web: 3 files, 12 tests passed after the brand-boundary preventive was
   applied.
@@ -584,12 +601,14 @@ verification in the one permanent A-drive worktree.
 - Root lint: all 20 workspace packages with lint scripts passed.
 - API exact-base parity against `f578e1ec2453a808fd4eaf22483f1d8730afc5a2`:
   base 41 failed / 3,037 passed / 5 pending; candidate 41 failed / 3,054 passed /
-  5 pending. Both normalized failure sets contain the same 41 entries and SHA-256
+  5 pending on the first preventive, then 41 failed / 3,055 passed / 5 pending
+  after the mixed-privilege and evidence guards. The normalized failure set
+  remains unchanged. Both normalized failure sets contain the same 41 entries and SHA-256
   `4a20dc4e4667f56b13afdeba3b422c51bd2448db95da2c992c88be6d1897c573`;
   base-only 0, candidate-only 0. P5 adds seventeen passing API guards across the
   consent path and its deployment-runtime prevention work.
-- Web exact-base parity: base 1,220 passed / 0 failed; candidate 1,224 passed /
-  0 failed. P5 adds four passing web guards.
+- Web exact-base parity: base 1,220 passed / 0 failed; the current candidate is
+  1,229 passed / 0 failed.
 - Manifest and lockfile changes: none. Secret-pattern findings: none.
 - Opening at `2026-08-28T14:50:04.5967128Z`: C free `4,916,584,448`
   bytes; A free `74,489,081,856` bytes. C remained above the standing
