@@ -1,9 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Superuser allowlist — single source of truth (Task #1303)
+// Billing privilege allowlist — single source of truth (Task #1303, P4)
 //
-// A small, hard-coded allowlist of email addresses that receive complete free
-// full-access to the platform:
-//   • treated as admin everywhere `requireAdmin` is enforced (see adminAuth.ts)
+// A small, hard-coded allowlist of email addresses that receive free account
+// entitlements only:
 //   • unlimited usage with zero credit charges, regardless of CREDITS_ENFORCEMENT
 //     (see credits.ts + the build/refine/image/EAS preflight gates)
 //   • free switching between all workspace plan tiers with no Stripe payment
@@ -21,15 +20,15 @@ import { findClerkUserByEmail } from "./clerk-users";
 
 // Ora treats the allowlisted owner as Core when no explicit paid Ora
 // subscription row exists. Real Core/Wave subscriptions still take precedence.
-export const SUPERUSER_ORA_TIER = "core";
+export const BILLING_PRIVILEGE_ORA_TIER = "core";
 
 // Case-insensitive email allowlist. Compared in lowercase.
-const SUPERUSER_EMAILS: ReadonlyArray<string> = [
+const BILLING_PRIVILEGE_EMAILS: ReadonlyArray<string> = [
   "mus_192@yahoo.com",
   "alialmshhdany0@gmail.com",
 ].map((e) => e.trim().toLowerCase());
 
-// Clerk user IDs resolved from SUPERUSER_EMAILS. Populated lazily and cached
+// Clerk user IDs resolved from BILLING_PRIVILEGE_EMAILS. Populated lazily and cached
 // for the process lifetime once successfully resolved.
 const resolvedIds = new Set<string>();
 
@@ -41,13 +40,13 @@ let lastResolveAt = 0;
 let resolving: Promise<void> | null = null;
 
 async function ensureResolved(): Promise<void> {
-  if (resolvedIds.size >= SUPERUSER_EMAILS.length) return;
+  if (resolvedIds.size >= BILLING_PRIVILEGE_EMAILS.length) return;
   if (resolving) return resolving;
   if (lastResolveAt !== 0 && Date.now() - lastResolveAt < RETRY_INTERVAL_MS) return;
 
   resolving = (async () => {
     lastResolveAt = Date.now();
-    for (const email of SUPERUSER_EMAILS) {
+    for (const email of BILLING_PRIVILEGE_EMAILS) {
       try {
         const user = await findClerkUserByEmail(email);
         if (user?.userId) resolvedIds.add(user.userId);
@@ -63,27 +62,30 @@ async function ensureResolved(): Promise<void> {
 }
 
 /**
- * Async check: is this Clerk user ID a superuser? Resolves the email allowlist
+ * Async check: does this Clerk user ID have the named billing privilege?
  * to user IDs on first call (cached afterwards). Returns false for unknown or
  * empty IDs, and when Clerk is not configured / the user does not exist.
  */
-export async function isSuperuser(userId: string | null | undefined): Promise<boolean> {
+export async function isBillingPrivileged(userId: string | null | undefined): Promise<boolean> {
   if (!userId) return false;
   if (resolvedIds.has(userId)) return true;
   await ensureResolved();
   return resolvedIds.has(userId);
 }
 
-/**
- * Synchronous check for hot paths. Only returns true once the ID has already
- * been resolved (e.g. by a prior isSuperuser call). Never triggers a Clerk
- * lookup. Prefer the async variant unless you are certain resolution ran.
- */
-export function isSuperuserSync(userId: string | null | undefined): boolean {
-  return !!userId && resolvedIds.has(userId);
+/** Test/diagnostic helper — the configured allowlist emails (lowercased). */
+export function billingPrivilegeEmails(): ReadonlyArray<string> {
+  return BILLING_PRIVILEGE_EMAILS;
 }
 
-/** Test/diagnostic helper — the configured allowlist emails (lowercased). */
-export function superuserEmails(): ReadonlyArray<string> {
-  return SUPERUSER_EMAILS;
+/** Resolve every configured billing-privilege identity for the Admin bootstrap migration. */
+export async function resolveBillingPrivilegeIdentities(): Promise<
+  ReadonlyArray<{ email: string; userId: string }>
+> {
+  const identities: Array<{ email: string; userId: string }> = [];
+  for (const email of BILLING_PRIVILEGE_EMAILS) {
+    const user = await findClerkUserByEmail(email);
+    if (user?.userId) identities.push({ email, userId: user.userId });
+  }
+  return identities;
 }

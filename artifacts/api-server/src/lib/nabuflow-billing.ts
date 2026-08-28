@@ -4,7 +4,7 @@
 // Single server-side authority for:
 //   • the canBuild gate — plan ∧ card-on-file ∧ under spend cap ∧ not
 //     dunning-paused ∧ engine-mode ladder (Pro/Deep counters) — with
-//     BILLING_EXEMPT_ALLOWLIST / superuser full bypass,
+//     BILLING_EXEMPT_ALLOWLIST / named billing-privilege bypass,
 //   • cycle accounting — included credits drawn first (honoring rollover),
 //     then metered pay-as-you-go overage recorded for Stripe invoicing,
 //   • Pro/Deep metered counters (atomic with the charge),
@@ -43,7 +43,7 @@ import {
   type NabuflowPlanConfig,
   type NabuflowPlanId,
 } from "./nabuflow-plans";
-import { isSuperuser } from "./superusers";
+import { isBillingPrivileged } from "./billing-privileges";
 import { getClerkUserById } from "./clerk-users";
 import { logger } from "./logger";
 import { enqueueBillingSettlement } from "./billing-settlement-outbox";
@@ -173,9 +173,9 @@ export async function isSealedStagingAcceptanceExempt(userId: string): Promise<b
   }
 }
 
-/** Superuser OR explicit billing exemption allowlist — full billing bypass. */
+/** Named billing privilege OR explicit billing exemption allowlist — full billing bypass. */
 export async function isNabuflowBillingExempt(userId: string): Promise<boolean> {
-  if (await isSuperuser(userId)) return true;
+  if (await isBillingPrivileged(userId)) return true;
   return isBuilderAllowlistExempt(userId);
 }
 
@@ -411,7 +411,7 @@ export interface NabuflowGateError {
 }
 
 export type NabuflowGateBypass =
-  | "superuser"
+  | "billing_privilege"
   | "allowlist"
   | "enforcement_disabled"
   | "test"
@@ -469,7 +469,7 @@ function remainingOf(limit: number | null, used: number): number | null {
 
 /**
  * Pure canBuild evaluation — every rule of the NabuFlow gate in one place.
- * Bypass (superuser/allowlist/enforcement-off) is handled by the resolver.
+ * Bypass (billing privilege/allowlist/enforcement-off) is handled by the resolver.
  */
 export function evaluateNabuflowGate(
   state: NabuflowGateState,
@@ -716,7 +716,7 @@ export async function resolveNabuflowBuildGate(
 ): Promise<NabuflowGateDecision> {
   if (!creditsEnforcementEnabled()) return { allowed: true, bypass: "enforcement_disabled" };
   if (nabuflowTestBypassActive()) return { allowed: true, bypass: "test" };
-  if (await isSuperuser(userId)) return { allowed: true, bypass: "superuser" };
+  if (await isBillingPrivileged(userId)) return { allowed: true, bypass: "billing_privilege" };
   if (await isBuilderAllowlistExempt(userId)) return { allowed: true, bypass: "allowlist" };
   if (await isSealedStagingAcceptanceExempt(userId)) {
     return { allowed: true, bypass: "staging_acceptance" };

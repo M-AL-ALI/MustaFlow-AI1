@@ -10,10 +10,10 @@ import type { Request } from "express";
 // hoisted vi.mock factories below reference it.
 const mockState = vi.hoisted(() => ({
   getAuthMock: vi.fn(),
-  isSuperuserMock: vi.fn(),
+  isBillingPrivilegedMock: vi.fn(),
   subscriptionRows: [] as Array<{ tier: string | null; status: string }>,
 }));
-const { getAuthMock, isSuperuserMock } = mockState;
+const { getAuthMock, isBillingPrivilegedMock } = mockState;
 function setSubscriptionRows(rows: Array<{ tier: string | null; status: string }>): void {
   mockState.subscriptionRows = rows;
 }
@@ -22,9 +22,9 @@ vi.mock("@clerk/express", () => ({
   getAuth: (...args: unknown[]) => mockState.getAuthMock(...args),
 }));
 
-vi.mock("../../../lib/superusers", () => ({
-  SUPERUSER_ORA_TIER: "core",
-  isSuperuser: (...args: unknown[]) => mockState.isSuperuserMock(...args),
+vi.mock("../../../lib/billing-privileges", () => ({
+  BILLING_PRIVILEGE_ORA_TIER: "core",
+  isBillingPrivileged: (...args: unknown[]) => mockState.isBillingPrivilegedMock(...args),
 }));
 
 // Chainable db.select().from().where() stub whose resolved rows are controlled
@@ -55,8 +55,8 @@ function makeReq(headers: Record<string, string> = {}): Request {
 describe("resolveAuthedOraUser — test-only authenticated path", () => {
   beforeEach(() => {
     getAuthMock.mockReset();
-    isSuperuserMock.mockReset();
-    isSuperuserMock.mockResolvedValue(false);
+    isBillingPrivilegedMock.mockReset();
+    isBillingPrivilegedMock.mockResolvedValue(false);
     setSubscriptionRows([]);
     // The 60s in-memory tier cache in authed-user.ts survives across tests in
     // the same file; evict the user IDs this suite exercises so each test
@@ -155,7 +155,7 @@ describe("resolveAuthedOraUser — test-only authenticated path", () => {
 
   it("real Clerk session, superuser without paid subscription resolves to Core tier", async () => {
     getAuthMock.mockReturnValue({ userId: "owner-user" });
-    isSuperuserMock.mockResolvedValue(true);
+    isBillingPrivilegedMock.mockResolvedValue(true);
     setSubscriptionRows([]);
     const result = await resolveAuthedOraUser(makeReq({}));
     expect(result).toEqual({ userId: "owner-user", tier: "core", isPaid: true });
@@ -163,7 +163,7 @@ describe("resolveAuthedOraUser — test-only authenticated path", () => {
 
   it("real Clerk session, superuser with explicit Wave subscription keeps Wave tier", async () => {
     getAuthMock.mockReturnValue({ userId: "owner-user" });
-    isSuperuserMock.mockResolvedValue(true);
+    isBillingPrivilegedMock.mockResolvedValue(true);
     setSubscriptionRows([{ tier: "wave", status: "active" }]);
     const result = await resolveAuthedOraUser(makeReq({}));
     expect(result).toEqual({ userId: "owner-user", tier: "wave", isPaid: true });

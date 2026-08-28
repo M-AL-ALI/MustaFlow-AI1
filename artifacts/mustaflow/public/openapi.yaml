@@ -6296,12 +6296,14 @@ components:
 
     AdminMe:
       type: object
-      required: [userId, role, isAdmin, grantedViaEnv]
+      required: [userId, role, isAdmin, authoritySource]
       properties:
         userId: { type: string }
         role: { type: string }
         isAdmin: { type: boolean }
-        grantedViaEnv: { type: boolean }
+        authoritySource:
+          type: string
+          enum: [user_roles]
         grantedBy: { type: ["string", "null"] }
 
     AdminStats:

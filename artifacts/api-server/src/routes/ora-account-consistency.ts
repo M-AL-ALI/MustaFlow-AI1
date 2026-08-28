@@ -14,7 +14,7 @@ import type { OraAccountConsistency } from "@workspace/ora-contracts";
 import { logger } from "../lib/logger";
 import { resolveTierForUser } from "../lib/public-ai/authed-user";
 import { getOraUsage } from "../lib/public-ai/ora-usage";
-import { isSuperuser } from "../lib/superusers";
+import { isBillingPrivileged } from "../lib/billing-privileges";
 import { getClerkUserById } from "../lib/clerk-users";
 
 const router = Router();
@@ -54,13 +54,13 @@ router.get("/ora/account-consistency", async (req, res) => {
     const userIdHash = createHash("sha256").update(userId).digest("hex").slice(0, 12);
     const clerkUserIdLast4 = userId.length >= 4 ? userId.slice(-4) : null;
 
-    // Effective tier (subscription status + superuser fallback) — the SAME
+    // Effective tier (subscription status + billing-privilege fallback) — the SAME
     // resolver the chat path uses, so billing tier and chat tier always agree
     // for a given user. Raw subscription metadata is read separately for the
     // source tier / status / period display.
-    const [effective, superuser, subRows, clerkUser] = await Promise.all([
+    const [effective, billingPrivileged, subRows, clerkUser] = await Promise.all([
       resolveTierForUser(userId),
-      isSuperuser(userId),
+      isBillingPrivileged(userId),
       db
         .select({
           tier: userSubscriptionsTable.tier,
@@ -210,7 +210,7 @@ router.get("/ora/account-consistency", async (req, res) => {
         billingTier: effective.tier,
         sourceTier: sub?.tier ?? "free",
         status: sub?.status ?? null,
-        isSuperuser: superuser,
+        isBillingPrivileged: billingPrivileged,
         currentPeriodEnd: isoOrNull(sub?.currentPeriodEnd),
         cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
       },

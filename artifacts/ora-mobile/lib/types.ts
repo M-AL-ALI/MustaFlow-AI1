@@ -924,7 +924,7 @@ export interface BillingSubscription {
   tier: BillingTierId;
   status: "active" | "trialing" | "grace_period" | "past_due" | "canceled" | string;
   sourceTier?: BillingTierId;
-  isSuperuser?: boolean;
+  isBillingPrivileged?: boolean;
   currentPeriodEnd: string | null;
   gracePeriodEnd?: string | null;
   cancelAtPeriodEnd?: boolean;

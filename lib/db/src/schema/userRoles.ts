@@ -6,8 +6,9 @@ export type StaffRole = (typeof STAFF_ROLES)[number];
 export const USER_ROLES = ["user", ...STAFF_ROLES] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
-// Per-user role. userId is unique — one role per user.
-// Bootstrap: users listed in ADMIN_USER_IDS env var are always admin regardless of this table.
+// Per-user role. userId is unique — one role per user. This table is the sole
+// runtime authority for Admin Page access. ADMIN_USER_IDS is consumed only by
+// the idempotent empty-table bootstrap and never grants request-time access.
 export const userRolesTable = pgTable("user_roles", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().unique(),

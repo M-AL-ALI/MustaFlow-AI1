@@ -142,7 +142,7 @@ export default function TrustPage() {
             Role-based access control (RBAC): Owner, Admin, Member, Viewer roles per organization.
           </li>
           <li>Project ownership is enforced server-side on every route — no client-side bypass.</li>
-          <li>Admin dashboard is protected by a separate role-based gate (ADMIN_USER_IDS).</li>
+          <li>Admin Page access is protected by the server-side user_roles ledger.</li>
           <li>
             Rate limiting is enforced on AI calls (20/min), publish/export (10–15/min), and globally
             (300/15 min).

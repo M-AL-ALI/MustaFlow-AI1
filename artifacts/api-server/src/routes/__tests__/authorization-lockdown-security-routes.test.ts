@@ -14,7 +14,7 @@ vi.mock("@workspace/db", async (importOriginal) => {
   const insert = vi.fn(() => ({ values: vi.fn(async () => undefined) }));
   return { ...original, db: { ...original.db, select, insert } };
 });
-vi.mock("../../lib/superusers", () => ({ isSuperuser: vi.fn(async () => false) }));
+vi.mock("../../lib/billing-privileges", () => ({ isBillingPrivileged: vi.fn(async () => false) }));
 vi.mock("../../lib/sbom", () => ({ generateSbom: vi.fn() }));
 vi.mock("../../lib/checks/cve-scanner", () => ({ runCveAudit: vi.fn() }));
 vi.mock("../../lib/cve-scheduler", () => ({

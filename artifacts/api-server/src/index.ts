@@ -29,6 +29,7 @@ import {
   resolvePreviewRoutingHost,
 } from "./middlewares/previewSubdomainGateway";
 import { runStartupMigrations } from "./lib/startup-migrations";
+import { reconcileAdminAuthorityAtBoot } from "./lib/admin-authority-bootstrap";
 import { startupHealthState } from "./lib/startup-health-state";
 import { isOraSecretConfigured } from "./lib/public-ai/session";
 import { initSpendLedger } from "./lib/public-ai/ora-spend-cap";
@@ -323,8 +324,22 @@ server.listen(port, (err?: Error) => {
 // Task #1194 — After migrations, run the container subsystem self-check to
 // verify Fly.io exec connectivity.
 void runStartupMigrations()
-  .then((result) => {
+  .then(async (result) => {
     startupHealthState.recordMigrations(result.failed === 0 ? "ok" : "error");
+    if (result.failed !== 0) {
+      logger.error(
+        { failedMigrations: result.failed },
+        "Admin authority reconciliation skipped because startup migrations did not pass",
+      );
+      return;
+    }
+    try {
+      await reconcileAdminAuthorityAtBoot();
+    } catch (error) {
+      // Runtime authorization remains database-only and fail-closed. Existing
+      // user_roles grants keep working; no legacy environment door is reopened.
+      logger.error({ error }, "Admin authority reconciliation failed closed");
+    }
   })
   .catch((err) => {
     // Non-fatal: log and continue — a partial schema is better than no server.

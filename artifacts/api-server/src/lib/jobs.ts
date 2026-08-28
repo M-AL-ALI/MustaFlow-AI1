@@ -77,7 +77,7 @@ import { readProjectMemoryReconciliationSummary } from "./memory-reconciliation-
 import { readProjectMemoryVersionLineage } from "./project-memory-versioning";
 import type { DiffSummary } from "@workspace/db";
 import { getOrCreateCredits, refundCredits, CREDITS_ENFORCEMENT_ENABLED } from "../lib/credits";
-import { isSuperuser } from "./superusers";
+import { isBillingPrivileged } from "./billing-privileges";
 import { extractPageMap } from "./page-map";
 import { publishTaskEvent } from "./event-bus";
 import {
@@ -2702,7 +2702,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     // gate. One server-side resolver: active plan ∧ card on file ∧ under spend
     // cap ∧ not dunning-paused ∧ engine-mode ladder (Orbit 3 Pro/no Deep,
     // Comet unlimited Pro/10 Deep, Nova unlimited + exclusive Pro+Deep).
-    // Superuser/BUILDER_ALLOWLIST bypass entirely. Tasks whose credits were
+    // Billing privilege/BUILDER_ALLOWLIST bypass entirely. Tasks whose credits were
     // reserved at enqueue already passed usage checks and consumed their
     // counters, so the drain-time re-check skips usage (it can never block the
     // task that used the last slot) but still honors plan/card/pause state.
@@ -2746,7 +2746,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       CREDITS_ENFORCEMENT_ENABLED &&
       project.ownerId &&
       !creditsAlreadyReserved &&
-      !(await isSuperuser(project.ownerId)) &&
+      !(await isBillingPrivileged(project.ownerId)) &&
       !(await (await import("./nabuflow-billing")).nabuflowChargeActive(project.ownerId))
     ) {
       const credits = await getOrCreateCredits(project.ownerId);

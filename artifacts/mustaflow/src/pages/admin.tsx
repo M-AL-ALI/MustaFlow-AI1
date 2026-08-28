@@ -314,8 +314,8 @@ export default function AdminPage() {
           <div>
             <span className="font-semibold">Admin Page access is active.</span> Signed in as{" "}
             <code className="font-mono text-xs">{me.role}</code>
-            {me.grantedViaEnv && " (granted via ADMIN_USER_IDS env var)"}
-            {!me.grantedViaEnv && me.grantedBy && ` (granted by ${me.grantedBy})`}.
+            {me.grantedBy && ` (granted by ${me.grantedBy})`}. Authority is read from the Admin Page
+            role ledger.
           </div>
         </div>
       )}

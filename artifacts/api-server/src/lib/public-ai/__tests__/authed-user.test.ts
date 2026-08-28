@@ -40,12 +40,12 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn(() => ({})),
 }));
 
-// isSuperuser check — default false so most tests exercise the subscription path.
-const isSuperuserMock = vi.hoisted(() => vi.fn());
+// isBillingPrivileged check — default false so most tests exercise the subscription path.
+const isBillingPrivilegedMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../superusers", () => ({
-  isSuperuser: isSuperuserMock,
-  SUPERUSER_ORA_TIER: "wave",
+vi.mock("../../billing-privileges", () => ({
+  isBillingPrivileged: isBillingPrivilegedMock,
+  BILLING_PRIVILEGE_ORA_TIER: "wave",
 }));
 
 import { resolveTierForUser, evictTierCache } from "../authed-user";
@@ -59,7 +59,7 @@ beforeEach(() => {
   // clears history, leaving unconsumed mockResolvedValueOnce entries to leak
   // into the next test when a call is skipped via a cache hit).
   vi.resetAllMocks();
-  isSuperuserMock.mockResolvedValue(false);
+  isBillingPrivilegedMock.mockResolvedValue(false);
   // Evict any cached result so each test starts from a clean state.
   evictTierCache("user-1");
   evictTierCache("user-2");
@@ -188,22 +188,22 @@ describe("evictTierCache — forced fresh lookup", () => {
   });
 });
 
-describe("isSuperuser fallback", () => {
+describe("isBillingPrivileged fallback", () => {
   it("returns wave tier for a superuser regardless of subscription", async () => {
     dbWhereMock.mockResolvedValue([]);
-    isSuperuserMock.mockResolvedValueOnce(true);
+    isBillingPrivilegedMock.mockResolvedValueOnce(true);
 
     const result = await resolveTierForUser("superuser");
     expect(result.tier).toBe("wave");
     expect(result.isPaid).toBe(true);
   });
 
-  it("does not call isSuperuser when a paid subscription already exists", async () => {
+  it("does not call isBillingPrivileged when a paid subscription already exists", async () => {
     dbWhereMock.mockResolvedValue([{ tier: "core", status: "active" }]);
 
     await resolveTierForUser("user-1");
 
-    // isSuperuser should NOT have been called — the paid sub short-circuits.
-    expect(isSuperuserMock).not.toHaveBeenCalled();
+    // isBillingPrivileged should NOT have been called — the paid sub short-circuits.
+    expect(isBillingPrivilegedMock).not.toHaveBeenCalled();
   });
 });

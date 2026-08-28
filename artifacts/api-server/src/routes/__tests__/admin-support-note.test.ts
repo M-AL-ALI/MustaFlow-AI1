@@ -13,13 +13,10 @@ import { eq, inArray } from "drizzle-orm";
  * genuinely exercised.
  */
 
-// requireAdmin reads ADMIN_USER_IDS at module-load time, so it must be set before
-// the router (which transitively imports adminAuth) is imported.
 const SUFFIX = Date.now();
 const ADMIN_USER = `admin-note-${SUFFIX}`;
 const NON_ADMIN_USER = `nonadmin-note-${SUFFIX}`;
 const TICKET_OWNER = `ticket-owner-note-${SUFFIX}`;
-process.env.ADMIN_USER_IDS = ADMIN_USER;
 
 // Side-effecting deps are mocked; if a note ever tried to send an email this spy
 // would catch it.
@@ -34,7 +31,7 @@ vi.mock("../../lib/cloudflare", () => ({
   r2GetObject: vi.fn(async () => null),
 }));
 
-import { adminAccessReceiptsTable, db, supportTicketsTable } from "@workspace/db";
+import { adminAccessReceiptsTable, db, supportTicketsTable, userRolesTable } from "@workspace/db";
 
 let ticketId: number;
 
@@ -55,6 +52,11 @@ function buildAppAs(userId: string | null) {
 }
 
 beforeAll(async () => {
+  await db.insert(userRolesTable).values({
+    userId: ADMIN_USER,
+    role: "support",
+    grantedBy: "admin-support-note-test",
+  });
   const [row] = await db
     .insert(supportTicketsTable)
     .values({
@@ -73,6 +75,7 @@ afterAll(async () => {
     .where(
       inArray(adminAccessReceiptsTable.actorUserId, [ADMIN_USER, NON_ADMIN_USER, TICKET_OWNER]),
     );
+  await db.delete(userRolesTable).where(eq(userRolesTable.userId, ADMIN_USER));
 });
 
 describe("POST /api/admin/support-tickets/:id/note", () => {

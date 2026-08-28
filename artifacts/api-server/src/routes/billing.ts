@@ -57,7 +57,7 @@ import {
   stripePriceIdForPlan,
   resolveWorkspacePlan,
 } from "../lib/plans";
-import { isSuperuser, SUPERUSER_ORA_TIER } from "../lib/superusers";
+import { isBillingPrivileged, BILLING_PRIVILEGE_ORA_TIER } from "../lib/billing-privileges";
 import { logger } from "../lib/logger";
 import { publicNabuflowPlanCatalog } from "../lib/nabuflow-public-plans";
 
@@ -1322,12 +1322,12 @@ router.get("/billing/subscription", async (req, res): Promise<void> => {
     return;
   }
   const sub = await refreshOraSubscriptionFromStripe(await getOrCreateSubscription(userId));
-  const superuser = await isSuperuser(userId);
+  const billingPrivileged = await isBillingPrivileged(userId);
   const effectiveTier =
     sub.tier === "core" || sub.tier === "wave"
       ? sub.tier
-      : superuser
-        ? SUPERUSER_ORA_TIER
+      : billingPrivileged
+        ? BILLING_PRIVILEGE_ORA_TIER
         : sub.tier;
   const tierMeta =
     SUBSCRIPTION_TIERS_META.find((t) => t.id === effectiveTier) ?? SUBSCRIPTION_TIERS_META[0];
@@ -1337,7 +1337,7 @@ router.get("/billing/subscription", async (req, res): Promise<void> => {
     tier: effectiveTier,
     status: sub.status,
     sourceTier: sub.tier,
-    isSuperuser: superuser,
+    isBillingPrivileged: billingPrivileged,
     currentPeriodEnd: sub.currentPeriodEnd,
     gracePeriodEnd: sub.gracePeriodEnd,
     cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
@@ -1937,7 +1937,7 @@ router.get("/billing/subscription/:workspaceId", async (req, res): Promise<void>
   res.json({
     workspaceId,
     effectivePlan,
-    isSuperuser: await isSuperuser(userId),
+    isBillingPrivileged: await isBillingPrivileged(userId),
     subscription: sub
       ? {
           planTier: sub.planTier,
@@ -2045,7 +2045,7 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     res.status(400).json({ error: "workspaceId is required for workspace plan upgrades" });
     return;
   }
-  // Validate the target tier. Superusers may select any tier (including free);
+  // Validate the target tier. Billing-privilege accounts may select any tier (including free);
   // normal users cannot "checkout" the free tier (handled below).
   if (!planTier || !(PLAN_TIERS as readonly string[]).includes(planTier)) {
     res.status(400).json({
@@ -2054,7 +2054,7 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     return;
   }
 
-  // Ownership check (needed before any plan change, Stripe or superuser bypass).
+  // Ownership check (needed before any plan change, Stripe or billing-privilege bypass).
   const [ws] = await db
     .select({ id: workspacesTable.id, ownerUserId: workspacesTable.ownerUserId })
     .from(workspacesTable)
@@ -2068,11 +2068,11 @@ router.post("/billing/subscription/checkout", async (req, res): Promise<void> =>
     return;
   }
 
-  // ── Superuser bypass: apply the chosen tier instantly, no Stripe payment ────
+  // ── Billing-privilege bypass: apply the chosen tier instantly, no Stripe payment ──
   // Persist an active workspace_subscriptions row with no Stripe IDs so
   // resolveWorkspacePlan() reflects the selected tier immediately. Accepts any
   // tier including 'free' (switch back down). NO checkout session is created.
-  if (await isSuperuser(userId)) {
+  if (await isBillingPrivileged(userId)) {
     await db
       .insert(workspaceSubscriptionsTable)
       .values({

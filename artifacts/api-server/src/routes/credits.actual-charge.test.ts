@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { extractTryStatementContainingIdentifier } from "../lib/source-ast-test-helper";
 
 const mocks = vi.hoisted(() => ({
-  isSuperuser: vi.fn(),
+  isBillingPrivileged: vi.fn(),
   isBuilderAllowlistExempt: vi.fn(),
   recordZeroChargeUsage: vi.fn(),
   maybeChargeNabuflow: vi.fn(),
@@ -84,8 +84,8 @@ vi.mock("../lib/clerk-users", () => ({
   getClerkUserById: vi.fn(),
 }));
 
-vi.mock("../lib/superusers", () => ({
-  isSuperuser: mocks.isSuperuser,
+vi.mock("../lib/billing-privileges", () => ({
+  isBillingPrivileged: mocks.isBillingPrivileged,
 }));
 
 vi.mock("../lib/logger", () => ({
@@ -126,7 +126,7 @@ function creditRow(balance = 50) {
 describe("deductCreditsAtomic actual charge reporting", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.isSuperuser.mockResolvedValue(false);
+    mocks.isBillingPrivileged.mockResolvedValue(false);
     mocks.isBuilderAllowlistExempt.mockResolvedValue(false);
     mocks.maybeChargeNabuflow.mockResolvedValue(null);
     mocks.selectWhere.mockResolvedValue([creditRow()]);
@@ -192,7 +192,7 @@ describe("deductCreditsAtomic actual charge reporting", () => {
 
   it("records one idempotent zero-value usage event for a retried superuser build", async () => {
     const usageRows = new Map<string, { userId: string; opts: Record<string, unknown> }>();
-    mocks.isSuperuser.mockResolvedValue(true);
+    mocks.isBillingPrivileged.mockResolvedValue(true);
     mocks.recordZeroChargeUsage.mockImplementation(
       async (userId: string, opts: Record<string, unknown>) => {
         const settlementKey = opts.settlementKey;
@@ -239,7 +239,7 @@ describe("deductCreditsAtomic actual charge reporting", () => {
   });
 
   it("keeps a best-effort superuser ledger failure non-blocking without a settlement key", async () => {
-    mocks.isSuperuser.mockResolvedValue(true);
+    mocks.isBillingPrivileged.mockResolvedValue(true);
     mocks.recordZeroChargeUsage.mockRejectedValueOnce(new Error("ledger unavailable"));
     const deductCreditsAtomic = await loadDeduction(true);
 
@@ -252,7 +252,7 @@ describe("deductCreditsAtomic actual charge reporting", () => {
   });
 
   it("throws a superuser ledger failure when durable settlement can retry it", async () => {
-    mocks.isSuperuser.mockResolvedValue(true);
+    mocks.isBillingPrivileged.mockResolvedValue(true);
     mocks.recordZeroChargeUsage.mockRejectedValueOnce(new Error("ledger unavailable"));
     const deductCreditsAtomic = await loadDeduction(true);
 

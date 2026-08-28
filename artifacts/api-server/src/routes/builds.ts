@@ -13,7 +13,7 @@ import { db, projectsTable, deploymentLogsTable, secretsTable } from "@workspace
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
 import { getOrCreateCredits, deductCreditsAtomic, CREDITS_ENFORCEMENT_ENABLED } from "./credits";
-import { isSuperuser } from "../lib/superusers";
+import { isBillingPrivileged } from "../lib/billing-privileges";
 import { logger } from "../lib/logger";
 import { getEasBuildLogs } from "../lib/eas";
 import { enqueueEasJob, EAS_BUILD_CREDIT_COST, extractAppJsonSummary } from "../lib/jobs";
@@ -88,10 +88,10 @@ router.post("/projects/:id/builds", requireProjectOwnership, async (req, res): P
     }
 
     const credits = await getOrCreateCredits(project.ownerId);
-    const ownerIsSuperuser = await isSuperuser(project.ownerId);
+    const ownerIsBillingPrivileged = await isBillingPrivileged(project.ownerId);
     if (
       CREDITS_ENFORCEMENT_ENABLED &&
-      !ownerIsSuperuser &&
+      !ownerIsBillingPrivileged &&
       !(await nabuflowChargeActive(project.ownerId)) &&
       credits.balance < EAS_BUILD_CREDIT_COST
     ) {
