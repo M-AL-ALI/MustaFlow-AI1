@@ -586,6 +586,19 @@ successfully`, but the running preview still attempted all startup DDL and
    canonical spec. The prevention is the existing code-generation plus forced
    library-build gate: generated declarations must match the canonical schema on
    every publish candidate.
+9. The next exact-tree deployment preview served the application and reported its
+   container subsystem healthy, but every database probe failed immediately. The
+   Replit publishing surface simultaneously reported that it could not fetch the
+   development PostgreSQL major version. The existing public status endpoint
+   collapsed every provider, transport, TLS and configuration failure into the
+   same `DB probe failed` sentence, leaving the preview unpublishable but not
+   diagnosable. Database failures now pass through one closed classifier that
+   exposes only an allowlisted cause while preserving the generic human message;
+   the status logger records that same cause instead of the raw error, and raw
+   connection strings, hosts, users and provider text never cross either the
+   public or log boundary. A table-driven route regression covers every cause
+   and proves a credential-shaped raw error is absent from the serialized
+   response.
 
 ### P5 lab verification
 
@@ -595,6 +608,9 @@ verification in the one permanent A-drive worktree.
 
 - Focused API after the deployment-runtime preventives: 3 files, 14 tests passed;
   the complete P5 focused set remains green.
+- Focused database-failure diagnostics: 1 file, 12 tests passed; every closed
+  failure cause is pinned and a credential-shaped raw error remains absent from
+  the response and structured log.
 - Focused web: 3 files, 12 tests passed after the brand-boundary preventive was
   applied.
 - Root typecheck: all referenced libraries, eight artifacts and scripts passed.
@@ -605,8 +621,10 @@ verification in the one permanent A-drive worktree.
   after the mixed-privilege and evidence guards. The normalized failure set
   remains unchanged. Both normalized failure sets contain the same 41 entries and SHA-256
   `4a20dc4e4667f56b13afdeba3b422c51bd2448db95da2c992c88be6d1897c573`;
-  base-only 0, candidate-only 0. P5 adds seventeen passing API guards across the
-  consent path and its deployment-runtime prevention work.
+  base-only 0, candidate-only 0. The diagnostic candidate completed with 41
+  failed / 3,067 passed / 5 pending, preserving that exact failure set. P5 adds
+  twenty-nine passing API guards across the consent path, deployment-runtime
+  prevention and sanitized database diagnostics.
 - Web exact-base parity: base 1,220 passed / 0 failed; the current candidate is
   1,229 passed / 0 failed.
 - Manifest and lockfile changes: none. Secret-pattern findings: none.

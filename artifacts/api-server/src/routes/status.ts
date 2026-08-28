@@ -14,6 +14,10 @@ import { pool } from "@workspace/db";
 import { ALL_BREAKERS } from "../lib/resilience";
 import { getQueueStats } from "../lib/durable-queue";
 import { logger } from "../lib/logger";
+import {
+  classifyDatabaseFailure,
+  type DatabaseFailureCause,
+} from "../lib/database-failure-classification";
 
 const router: IRouter = Router();
 
@@ -24,6 +28,7 @@ interface ComponentHealth {
   status: ComponentStatus;
   latencyMs?: number;
   message?: string;
+  cause?: DatabaseFailureCause;
 }
 
 interface StatusResponse {
@@ -45,11 +50,13 @@ async function checkDatabase(): Promise<ComponentHealth> {
     client.release();
     return { name: "Database", status: "operational", latencyMs: Date.now() - start };
   } catch (err) {
-    logger.warn({ err }, "Status check: database probe failed");
+    const cause = classifyDatabaseFailure(err);
+    logger.warn({ cause }, "Status check: database probe failed");
     return {
       name: "Database",
       status: "outage",
       message: "DB probe failed",
+      cause,
       latencyMs: Date.now() - start,
     };
   }
