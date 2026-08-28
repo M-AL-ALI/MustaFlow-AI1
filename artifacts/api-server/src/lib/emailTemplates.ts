@@ -184,6 +184,32 @@ export function orgInviteTemplate(opts: {
   return { subject, html, text };
 }
 
+export function projectInviteTemplate(opts: {
+  projectName: string;
+  inviterName: string | null;
+  role: string;
+  acceptUrl: string;
+  expiresAt: Date;
+}): EmailTemplate {
+  const { projectName, inviterName, role, acceptUrl, expiresAt } = opts;
+  const inviter = inviterName ?? "A teammate";
+  const expiresStr = expiresAt.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const subject = `${inviter} invited you to ${projectName} on NabuFlow`;
+  const html = wrap(`
+  <h2 style="margin-top:0">Join ${projectName}</h2>
+  <p>${inviter} invited you to work on <strong>${projectName}</strong> as a <strong>${role}</strong>.</p>
+  <p>Your work may use the workspace owner's NabuFlow credits. The owner can remove access at any time.</p>
+  ${ctaButton("Open project invitation", acceptUrl, "#4a90e2")}
+  <p style="font-size:13px;color:#444">Or paste this link into your browser:<br><span style="color:#666">${acceptUrl}</span></p>
+  <p style="font-size:12px;color:#666">This single-use invitation expires on ${expiresStr}. If you did not expect it, you can ignore this email.</p>`);
+  const text = `${inviter} invited you to work on ${projectName} as a ${role}. Your work may use the workspace owner's NabuFlow credits.\n\nAccept: ${acceptUrl}\n\nExpires: ${expiresStr}`;
+  return { subject, html, text };
+}
+
 // ── Domain renewal failure ────────────────────────────────────────────────────
 
 export function domainRenewalFailureTemplate(opts: {

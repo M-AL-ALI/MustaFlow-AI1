@@ -38,10 +38,23 @@ describe("authorization lockdown: canonical project access", () => {
   });
 
   it("grants a live organization collaborator whose role meets the minimum", async () => {
-    mocks.selectResults = [[{ ownerId: "owner", organizationId: 81 }], [{ role: "admin" }]];
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: 81 }], [], [{ role: "admin" }]];
     const { checkProjectAccess } = await import("../auth");
 
     await expect(checkProjectAccess("collaborator", 1402, "member")).resolves.toBe("granted");
+  });
+
+  it("enforces explicit project collaborator roles before legacy organization access", async () => {
+    const { checkProjectAccess } = await import("../auth");
+
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: null }], [{ role: "editor" }]];
+    await expect(checkProjectAccess("editor", 1412, "member")).resolves.toBe("granted");
+
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: null }], [{ role: "editor" }]];
+    await expect(checkProjectAccess("editor", 1412, "admin")).resolves.toBe("insufficient_role");
+
+    mocks.selectResults = [[{ ownerId: "owner", organizationId: null }], [{ role: "publisher" }]];
+    await expect(checkProjectAccess("publisher", 1412, "admin")).resolves.toBe("granted");
   });
 
   it("denies when no live organization membership survives the active-org join", async () => {
@@ -149,13 +162,17 @@ describe("authorization lockdown: canonical project access", () => {
     const missing = await invoke([[], []]);
     const nonMember = await invoke([[{ ownerId: "owner", organizationId: 84 }], []]);
 
-    expect(nonMember).toEqual(missing);
+    expect({ ...nonMember, selectCalls: undefined }).toEqual({
+      ...missing,
+      selectCalls: undefined,
+    });
     expect(missing).toEqual({
       status: [[404]],
       body: [[{ error: "Project not found" }]],
       nextCalls: 0,
-      selectCalls: 2,
+      selectCalls: 1,
     });
+    expect(nonMember.selectCalls).toBe(3);
   });
 
   it("gives a current under-role collaborator an actionable distinct denial", async () => {

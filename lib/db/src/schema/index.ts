@@ -1,5 +1,6 @@
 export * from "./workspaces";
 export * from "./projects";
+export * from "./project-collaboration";
 export * from "./messages";
 export * from "./tasks";
 export * from "./task-events";

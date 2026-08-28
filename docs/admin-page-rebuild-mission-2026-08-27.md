@@ -31,18 +31,18 @@ without evidence.
 
 ## Binding phase sequence
 
-| Phase | Scope                                                      | State           |
-| ----- | ---------------------------------------------------------- | --------------- |
-| P0    | Read-only survey and owed identity decisions               | Accepted        |
-| P1    | Shell, navigation and KEEP-panel hierarchy                 | Complete / live |
-| P2    | Panel declarations and developer-tool exile                | Complete / live |
-| P3    | Drill-in for every number                                  | Complete / live |
-| P4    | One Admin authority source                                 | Live and proven |
-| P5    | In-product and email consent delivery                      | In progress     |
-| P6    | Ticket identity, ownership and resolution                  | Not authorized  |
-| P7    | Per-project invitations, members, roles and presence       | Not authorized  |
-| P8    | Ticket-to-Zero and completed triage                        | Not authorized  |
-| P9    | Serving-tree operator walkthrough and documentation parity | Not authorized  |
+| Phase | Scope                                                      | State                             |
+| ----- | ---------------------------------------------------------- | --------------------------------- |
+| P0    | Read-only survey and owed identity decisions               | Accepted                          |
+| P1    | Shell, navigation and KEEP-panel hierarchy                 | Complete / live                   |
+| P2    | Panel declarations and developer-tool exile                | Complete / live                   |
+| P3    | Drill-in for every number                                  | Complete / live                   |
+| P4    | One Admin authority source                                 | Live and proven                   |
+| P5    | In-product and email consent delivery                      | Complete / live                   |
+| P6    | Ticket identity, ownership and resolution                  | Complete / live                   |
+| P7    | Per-project invitations, members, roles and presence       | In progress                       |
+| P8    | Ticket-to-Zero and completed triage                        | Built / live; final proof pending |
+| P9    | Serving-tree operator walkthrough and documentation parity | Pending                           |
 
 ## P0 acceptance record
 
@@ -731,3 +731,79 @@ P6 is lab-complete on the feature branch. It is not production-complete until
 the branch is merged, the exact merged tree passes the release gate, Replit can
 boot the 149-step schema, and the workflow is exercised on the live Admin and
 requester surfaces with captured evidence.
+
+### P6 serving closure
+
+P6 is live on production at commit `3ff132853bcf61dd25801ea3af3c94c9b80c6980`
+and accepted tree `b470db5e67c815ced416422511691142c1a63661`. Replit first
+published a memory-drifted tree, which was rejected. It then restored the exact
+accepted tree and republished it. The public identity receipt reported
+`treeMatches: true`; health, container subsystem, encryption key, startup
+migrations and the queue schema contract all reported `ok`. The live Admin inbox
+showed canonical ticket numbers, the complete status set, priority, age and named
+assignment. Ticket `NF-000006` showed its project link, three resolution classes,
+support-access receipt and the consented Zero proposal. The project-to-Admin-to-
+ticket-to-project-to-Admin navigation loop completed without browser Back. The P6
+branch was absent locally and remotely afterward, and the permanent tree remained
+clean on main.
+
+### P7 — per-project collaboration candidate
+
+P7 is being built from the exact P6 serving source on
+`codex/admin-page-p7-project-collaboration`. It adds one project-scoped access
+ledger and one project-scoped invitation ledger. Every existing project owner is
+backfilled as the immutable owner entry. Invitations may be sent by email or
+copied as a private single-use link, expire after seven days, store only a SHA-256
+digest, and bind one role: Owner, Publisher, Editor or Read-only. Expired pending
+rows are settled by the next invitation mutation so an old partial-unique row
+cannot block a replacement; reads remain pure.
+
+The central project-access predicate now reads explicit project collaboration
+before legacy organization membership. Project lists include projects shared
+directly with the caller. An accepted invitation does **not** create workspace
+membership; exact-project access stays exact. The accept mutation claims the
+pending invitation atomically before it inserts or updates the collaborator, so
+one token cannot be used twice under a race. Project owners and collaborator
+Owners may invite, change roles, revoke pending invitations and remove members.
+The original project owner cannot be demoted or removed.
+
+The project header now carries the member/invite control beside the existing live
+presence indicator. The same shared Clerk account profile supplies name and image
+for the member list, teammate presence and consented staff presence. A two-second
+server-side access watch closes an already-open collaborator socket after removal;
+the client clears the roster and self identity on the typed `access_removed`
+terminal. Existing heartbeat termination and awareness cleanup remain the dropped-
+connection ghost prevention.
+
+P7 lab evidence at the candidate gate: shared-library build, API typecheck, web
+typecheck and root lint pass. Five focused API files passed 30 tests and the
+collaboration web contract passed 3 tests. The full API suite ran serially: 249
+files passed, 40 files failed and 3 skipped; 3,082 tests passed, the exact inherited
+38-test failure set failed and 5 tests skipped. No new failure was introduced. The
+full web suite ran serially with 136 files and 1,235 tests passed, zero failed.
+Changed-file Prettier, diff-whitespace and secret-pattern checks pass. Startup
+migration count advances from 149 to 150. No manifest or lockfile changed and no
+provider or real database was touched.
+
+P7 incidental findings closed before commit:
+
+1. The first invitation acceptance draft inserted workspace membership. That
+   could have widened an exact-project grant into a broader workspace identity.
+   The workspace write and cleanup were removed. A route contract now asserts
+   that the acceptance path never references `workspaceMembersTable`.
+2. Expired pending email invitations remained covered by the database's pending
+   unique index even though the reader truthfully presented them as expired. The
+   invitation mutation now settles those rows before replacement; a regression
+   guard pins the expiry predicate.
+3. Email-provider failure initially returned a usable private link but the dialog
+   did not say the email failed. The surface now names delivery failure plainly and
+   tells the owner to copy the already-created private link. A UI guard pins that
+   refusal copy.
+4. The first exact merged-head release gate classified `project-collaboration` as
+   Ora only because its broad page matcher found the letters `ora` inside the word
+   `collaboration`; the two collaboration UI files then had no honest registry
+   owner. Ora discovery now uses a token-bound `ora`/`orax` path rule, collaboration
+   files have an explicit path and `auth-compliance-support` owner, and the release
+   operational contract forbids the old broad matcher while requiring both new
+   declarations. The evidence run passed 21 checks and failed only
+   `feature-registry`; publication remained blocked as designed.

@@ -12,6 +12,7 @@ function observation(overrides: Record<string, boolean> = {}) {
     supportDeliveryConstraintsReady: true,
     supportDeliveryIndexesReady: true,
     promptQueueReady: true,
+    projectCollaborationReady: true,
     ...overrides,
   };
 }
@@ -24,7 +25,7 @@ describe("deployment runtime schema boundary", () => {
     });
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v1",
+      contractId: "deployment_runtime_schema_v2",
       mode: "read-only-ready",
       violations: [],
     });
@@ -42,7 +43,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v1",
+      contractId: "deployment_runtime_schema_v2",
       mode: "read-only-incomplete",
       violations: ["support_delivery_constraints_missing", "prompt_queue_missing"],
     });
@@ -60,7 +61,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v1",
+      contractId: "deployment_runtime_schema_v2",
       mode: "mutable",
       violations: [],
     });
@@ -72,7 +73,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v1",
+      contractId: "deployment_runtime_schema_v2",
       mode: "read-only-ready",
       violations: [],
     });
