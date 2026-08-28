@@ -880,12 +880,6 @@ export async function applyWorkspaceTenancyMigration(
   legacyOwnerId: string | undefined = process.env.LEGACY_ADOPTION_OWNER_ID,
 ): Promise<WorkspaceTenancyBackfillResult> {
   const normalizedOwnerId = legacyOwnerId?.trim();
-  if (!normalizedOwnerId) {
-    throw new Error("legacy_adoption_owner_id_missing");
-  }
-  if (normalizedOwnerId === "demo-user") {
-    throw new Error("legacy_adoption_owner_id_invalid");
-  }
 
   await client.query("BEGIN");
   try {
@@ -917,31 +911,47 @@ export async function applyWorkspaceTenancyMigration(
       throw new Error("legacy_adoption_workspace_identity_ambiguous");
     }
 
+    const pendingLegacyRows = await client.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+        FROM projects
+       WHERE owner_id = 'demo-user'
+    `);
+    const pendingLegacyCount = Number(pendingLegacyRows.rows[0]?.count ?? "0");
+
     let legacyWorkspaceId: number;
-    let effectiveLegacyOwnerId = normalizedOwnerId;
+    let effectiveLegacyOwnerId: string;
     let legacyWorkspaceCreated = 0;
     const existingLegacy = existingLegacyWorkspace.rows[0];
     if (existingLegacy) {
-      if (existingLegacy.owner_user_id !== normalizedOwnerId) {
-        const pendingLegacyRows = await client.query<{ count: string }>(`
-          SELECT COUNT(*)::text AS count
-            FROM projects
-           WHERE owner_id = 'demo-user'
-        `);
-        if (Number(pendingLegacyRows.rows[0]?.count ?? "0") !== 0) {
+      if (pendingLegacyCount === 0) {
+        // Deployment previews may omit or replace environment-specific adoption
+        // identity. Once no legacy rows remain, the durable workspace owner is
+        // the only authority needed for this idempotent no-op.
+        effectiveLegacyOwnerId = existingLegacy.owner_user_id;
+      } else {
+        if (!normalizedOwnerId) {
+          throw new Error("legacy_adoption_owner_id_missing");
+        }
+        if (normalizedOwnerId === "demo-user") {
+          throw new Error("legacy_adoption_owner_id_invalid");
+        }
+        if (existingLegacy.owner_user_id !== normalizedOwnerId) {
           throw new Error("legacy_adoption_workspace_owner_mismatch");
         }
-        // Deployment previews are isolated database copies whose runtime identity
-        // overlay can differ from the source environment. Once adoption is complete,
-        // the durable workspace owner is authoritative; a copied preview must not
-        // fail or re-own anything merely because its environment overlay differs.
-        effectiveLegacyOwnerId = existingLegacy.owner_user_id;
+        effectiveLegacyOwnerId = normalizedOwnerId;
       }
       if (existingLegacy.deleted_at !== null) {
         throw new Error("legacy_adoption_workspace_deleted");
       }
       legacyWorkspaceId = existingLegacy.id;
     } else {
+      if (!normalizedOwnerId) {
+        throw new Error("legacy_adoption_owner_id_missing");
+      }
+      if (normalizedOwnerId === "demo-user") {
+        throw new Error("legacy_adoption_owner_id_invalid");
+      }
+      effectiveLegacyOwnerId = normalizedOwnerId;
       const created = await client.query<{ id: number }>(
         `INSERT INTO workspaces (owner_user_id, system_key, name, type)
          VALUES ($1, $2, 'Legacy tests', 'personal')

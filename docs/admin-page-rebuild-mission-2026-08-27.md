@@ -541,7 +541,20 @@ accept a P5 message, the UI must show `failed` and the phase does not close.
    that decision. Separately, `.kirk.prod.repl.run` preview hosts use Clerk's
    publishable-key endpoint directly instead of the canonical production proxy. A
    fresh private preview must prove both corrections before P5 can be approved for
-   production.
+   production. That next preview proved the exact P5 commit but exposed one more
+   boundary: the migration still rejected a missing runtime owner before it read
+   the completed durable adoption record. It now reads the locked database state
+   first. A missing environment owner is accepted only when the Legacy-tests
+   workspace already exists and the count of `demo-user` projects is zero;
+   first-time or incomplete adoption still fails closed. Separate regression tests
+   pin the completed-preview no-op and the first-time refusal.
+5. The first Replit development-boot harness launched a background command whose
+   wrapper exited successfully without supervising the child; it produced a
+   zero-byte log and no listening process. That wrapper exit was rejected as a boot
+   receipt. The clean retry ran the server in the foreground under one managed task,
+   proved the exact port and health/version receipts, then proved both the task and
+   port absent after termination. Foreground supervision plus positive endpoint and
+   negative post-stop checks are now required for every such boot receipt.
 
 ### P5 lab verification
 

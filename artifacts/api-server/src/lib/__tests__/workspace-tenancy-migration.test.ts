@@ -189,14 +189,41 @@ describe("workspace tenancy startup migration", () => {
     );
   });
 
-  it("fails explicitly before beginning when the adoption owner is missing", async () => {
+  it("fails explicitly when first-time adoption has no owner", async () => {
     const client = new WorkspaceTenancyMigrationClient();
     delete process.env.LEGACY_ADOPTION_OWNER_ID;
 
     await expect(
       applyWorkspaceTenancyMigration(migrationClient(client), undefined),
     ).rejects.toThrow("legacy_adoption_owner_id_missing");
-    expect(client.statements).toEqual([]);
+    expect(client.statements).toContain("ROLLBACK");
+  });
+
+  it("uses completed durable adoption state when a deployment preview has no owner", async () => {
+    const client = new WorkspaceTenancyMigrationClient();
+    await applyWorkspaceTenancyMigration(migrationClient(client), "founder-fixture");
+    const stateAfterAdoption = structuredClone({
+      workspaces: client.workspaces,
+      members: [...client.members.entries()],
+      projects: client.projects,
+    });
+
+    const previewRun = await applyWorkspaceTenancyMigration(migrationClient(client), undefined);
+
+    expect(previewRun).toEqual({
+      legacyWorkspaceCreated: 0,
+      legacyOwnerMembershipsCreatedOrCorrected: 0,
+      demoProjectsAdoptedActive: 0,
+      demoProjectsAdoptedSoftDeleted: 0,
+      projectsBackfilledActive: 0,
+      projectsBackfilledSoftDeleted: 0,
+      projectsWithNullWorkspace: 0,
+    });
+    expect({
+      workspaces: client.workspaces,
+      members: [...client.members.entries()],
+      projects: client.projects,
+    }).toEqual(stateAfterAdoption);
   });
 
   it("uses completed durable adoption state when a deployment preview carries another owner", async () => {
@@ -242,6 +269,24 @@ describe("workspace tenancy startup migration", () => {
     await expect(
       applyWorkspaceTenancyMigration(migrationClient(client), "preview-owner-fixture"),
     ).rejects.toThrow("legacy_adoption_workspace_owner_mismatch");
+    expect(client.projects.find((project) => project.id === 6)).toEqual(
+      expect.objectContaining({ owner_id: "demo-user", workspace_id: null }),
+    );
+  });
+
+  it("requires an explicit owner when a completed copy gains a new legacy row", async () => {
+    const client = new WorkspaceTenancyMigrationClient();
+    await applyWorkspaceTenancyMigration(migrationClient(client), "founder-fixture");
+    client.projects.push({
+      id: 6,
+      owner_id: "demo-user",
+      workspace_id: null,
+      deleted_at: null,
+    });
+
+    await expect(
+      applyWorkspaceTenancyMigration(migrationClient(client), undefined),
+    ).rejects.toThrow("legacy_adoption_owner_id_missing");
     expect(client.projects.find((project) => project.id === 6)).toEqual(
       expect.objectContaining({ owner_id: "demo-user", workspace_id: null }),
     );
