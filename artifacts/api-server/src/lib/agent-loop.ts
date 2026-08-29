@@ -76,6 +76,7 @@ import {
   agentToolCallsTable,
   agentTasksTable,
   projectsTable,
+  projectVersionsTable,
 } from "@workspace/db";
 import { ContainerUnavailableError } from "./errors";
 import {
@@ -102,6 +103,14 @@ import {
 import { checkZeroSealedFinalizeContract } from "./zero-sealed-finalize-check";
 import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
 import { applyZeroSteeringAtBoundary } from "./zero-queue-steering";
+import {
+  checkZeroVisualEvidence,
+  pendingZeroVisualEvidencePairs,
+  recordZeroVisualEvidence,
+  type ZeroVisualEvidenceGeometry,
+  type ZeroVisualEvidencePhase,
+  type ZeroVisualEvidenceState,
+} from "./zero-visual-evidence";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1109,7 +1118,7 @@ export const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "take_screenshot",
       description:
-        "Capture a PNG screenshot of the project's live preview URL (or any http(s) URL). Use to visually verify layout, before/after refactors, or design feedback. Shares a 5MB per-task screenshot budget with run_e2e — exceeding the budget returns an error.",
+        "Capture a durable PNG screenshot of the project's live preview URL (or any http(s) URL) and show it in the user's thread. For a visual mutation, capture evidence_phase=before with a pair_id before editing, then evidence_phase=after with the same URL, viewport, full_page value, and clip. Standalone diagnosis uses evidence_phase=evidence. Shares a 5MB per-task screenshot budget with run_e2e — exceeding the budget returns an error.",
       parameters: {
         type: "object",
         properties: {
@@ -1121,6 +1130,27 @@ export const TOOLS: ChatCompletionTool[] = [
           width: { type: "integer", description: "Viewport width (default 1280, max 1920)." },
           height: { type: "integer", description: "Viewport height (default 800, max 1200)." },
           full_page: { type: "boolean", description: "Capture the full scrollable page." },
+          clip: {
+            type: "object",
+            description: "Optional viewport-relative region. Do not combine with full_page.",
+            properties: {
+              x: { type: "number" },
+              y: { type: "number" },
+              width: { type: "number" },
+              height: { type: "number" },
+            },
+            required: ["x", "y", "width", "height"],
+            additionalProperties: false,
+          },
+          evidence_phase: {
+            type: "string",
+            enum: ["before", "after", "evidence"],
+            description: "Use before/after for a visual change pair; evidence for diagnosis only.",
+          },
+          pair_id: {
+            type: "string",
+            description: "Required stable identifier for before/after evidence pairs.",
+          },
         },
         additionalProperties: false,
       },
@@ -1859,6 +1889,7 @@ Containers have constrained memory. If npm install is killed (exit 137 / SIGKILL
     "- Never include a file with empty content in a write_files batch — every entry must contain the complete real file content, including package.json.",
     "- Request an architect reviewer only after writing files.",
     "- After meaningful edits, run the checks for this stack to verify your work. Fix failures, then re-run.",
+    "- For any change whose result is visual, call take_screenshot with evidence_phase=before and a pair_id before the first mutation. After the change, call it again with evidence_phase=after, the same pair_id, and the exact same URL, viewport, full_page value, and clip. Name what you actually see before acting. Both images are shown to the user and saved with the project. A run cannot finalize with an unmatched before image.",
     "- Call `finalize` only after all required checks pass. Provide a short, accurate summary.",
     "",
     "## Failure modes to avoid",
@@ -2094,6 +2125,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const e2eResults: E2eRunSummary[] = [];
   // Task-level screenshot budget (5MB) shared across smoke, run_e2e tool, and re-run.
   const screenshotBudget = { remaining: 5 * 1024 * 1024 };
+  const visualEvidenceState: { value: ZeroVisualEvidenceState } = { value: {} };
   // Task #529: combined budget for web_fetch + web_search + extract_branding.
   // 20 calls / task — keeps cost predictable and bounds total egress.
   const fetchBudget = { remaining: 20 };
@@ -2588,7 +2620,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     // commands, hit credit-metered async budgets, or must terminate the loop
     // run SERIALLY. Pure reads (read_file/list_files/search), narration
     // (report_progress), asset surfacing (present_asset), network senses
-    // (web_fetch/web_search/take_screenshot/extract_branding) and skill
+    // (web_fetch/web_search/extract_branding) and skill
     // loading are safe to parallelize.
     //
     // File mutation tools stay serial because each one performs an async
@@ -2606,6 +2638,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       "fetch_prod_logs",
       "run_e2e",
       "run_tests",
+      // Visual evidence mutates a task-local pair contract and durable asset
+      // quota. Serial execution prevents budget and before/after races.
+      "take_screenshot",
       "finalize",
       "write_file",
       "write_files",
@@ -2877,6 +2912,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               loadedSkills,
               e2eResults,
               screenshotBudget,
+              visualEvidenceState,
               fetchBudget,
               senseCounts,
               creativeBudget,
@@ -2945,6 +2981,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           loadedSkills,
           e2eResults,
           screenshotBudget,
+          visualEvidenceState,
           fetchBudget,
           senseCounts,
           creativeBudget,
@@ -3700,6 +3737,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
               loadedSkills,
               e2eResults,
               screenshotBudget,
+              visualEvidenceState,
               fetchBudget,
               senseCounts,
               creativeBudget,
@@ -4411,6 +4449,8 @@ export interface ToolCtx {
    * run decrements it by the sum of its base64-decoded screenshot sizes.
    */
   screenshotBudget: { remaining: number };
+  /** Task-local visual evidence pairs. The value changes only after durable storage succeeds. */
+  visualEvidenceState?: { value: ZeroVisualEvidenceState };
   /** Per-task budget for combined web sense calls (web_fetch + web_search +
    *  extract_branding). Default 20. Each call decrements by 1; calls past the
    *  budget return an ERROR observation without making the network request. */
@@ -6979,6 +7019,66 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           observation: `ERROR: screenshot budget exhausted (${ctx.screenshotBudget.remaining} bytes left).`,
         };
       }
+      const width = Math.min(
+        Math.max(typeof args.width === "number" ? args.width : 1280, 320),
+        1920,
+      );
+      const height = Math.min(
+        Math.max(typeof args.height === "number" ? args.height : 800, 240),
+        1200,
+      );
+      const fullPage = args.full_page === true;
+      const rawClip =
+        args.clip && typeof args.clip === "object" ? (args.clip as Record<string, unknown>) : null;
+      const clip = rawClip
+        ? {
+            x: Number(rawClip.x),
+            y: Number(rawClip.y),
+            width: Number(rawClip.width),
+            height: Number(rawClip.height),
+          }
+        : null;
+      if (
+        clip &&
+        (!Number.isFinite(clip.x) ||
+          !Number.isFinite(clip.y) ||
+          !Number.isFinite(clip.width) ||
+          !Number.isFinite(clip.height) ||
+          clip.x < 0 ||
+          clip.y < 0 ||
+          clip.width <= 0 ||
+          clip.height <= 0 ||
+          clip.x + clip.width > width ||
+          clip.y + clip.height > height)
+      ) {
+        return { ok: false, observation: "ERROR: visual_evidence_region_invalid" };
+      }
+      if (clip && fullPage) {
+        return { ok: false, observation: "ERROR: visual_evidence_region_full_page_conflict" };
+      }
+      const phase: ZeroVisualEvidencePhase = ["before", "after", "evidence"].includes(
+        String(args.evidence_phase),
+      )
+        ? (String(args.evidence_phase) as ZeroVisualEvidencePhase)
+        : "evidence";
+      const pairId =
+        typeof args.pair_id === "string" && /^[a-zA-Z0-9._:-]{1,80}$/.test(args.pair_id.trim())
+          ? args.pair_id.trim()
+          : null;
+      const evidenceState = ctx.visualEvidenceState ?? { value: {} };
+      const requestedGeometry: ZeroVisualEvidenceGeometry = {
+        url: targetUrl || "(inline)",
+        width,
+        height,
+        fullPage,
+        clip,
+      };
+      const preflight = checkZeroVisualEvidence(evidenceState.value, {
+        phase,
+        pairId,
+        geometry: requestedGeometry,
+      });
+      if (!preflight.ok) return { ok: false, observation: `ERROR: ${preflight.code}` };
       await safeEvent(
         input.onEvent,
         "take_screenshot",
@@ -6987,9 +7087,10 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
       const shot = await takeScreenshot({
         url: targetUrl,
         inlineHtml: !requestedUrl && !previewUrl ? (fallbackHtml ?? undefined) : undefined,
-        width: typeof args.width === "number" ? args.width : undefined,
-        height: typeof args.height === "number" ? args.height : undefined,
-        fullPage: args.full_page === true,
+        width,
+        height,
+        fullPage,
+        clip: clip ?? undefined,
         signal: input.signal,
       });
       ctx.senseCounts.screenshot += 1;
@@ -7008,6 +7109,132 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         };
       }
       ctx.screenshotBudget.remaining = Math.max(ctx.screenshotBudget.remaining - actualBytes, 0);
+      if (!shot.base64 || actualBytes <= 0) {
+        return { ok: false, observation: "ERROR: visual_evidence_capture_empty" };
+      }
+      const geometry: ZeroVisualEvidenceGeometry = {
+        ...requestedGeometry,
+        url: shot.finalUrl ?? requestedGeometry.url,
+        // Pair identity is the viewport plus clip, not the resulting crop's
+        // pixel dimensions (which equal clip.width/height).
+        width,
+        height,
+      };
+      const evidenceCheck = checkZeroVisualEvidence(evidenceState.value, {
+        phase,
+        pairId,
+        geometry,
+      });
+      if (!evidenceCheck.ok) {
+        return { ok: false, observation: `ERROR: ${evidenceCheck.code}` };
+      }
+
+      const screenshotBuffer = Buffer.from(shot.base64, "base64");
+      const { eq, desc } = await import("drizzle-orm");
+      const [project] = await db
+        .select({ ownerId: projectsTable.ownerId })
+        .from(projectsTable)
+        .where(eq(projectsTable.id, input.projectId))
+        .limit(1);
+      if (!project?.ownerId) {
+        return { ok: false, observation: "ERROR: visual_evidence_project_unavailable" };
+      }
+      let actorUserId = input.queuePromotionActorId ?? project.ownerId;
+      if (input.taskId) {
+        const [task] = await db
+          .select({ provenanceActorUserId: agentTasksTable.provenanceActorUserId })
+          .from(agentTasksTable)
+          .where(eq(agentTasksTable.id, input.taskId))
+          .limit(1);
+        actorUserId = task?.provenanceActorUserId ?? actorUserId;
+      }
+      const [latestVersion] = await db
+        .select({ id: projectVersionsTable.id })
+        .from(projectVersionsTable)
+        .where(eq(projectVersionsTable.projectId, input.projectId))
+        .orderBy(desc(projectVersionsTable.id))
+        .limit(1);
+      const { reserveAsset, completeAsset, rejectReservedAsset } = await import("./asset-registry");
+      const { assetR2Configured, putAssetBuffer, deleteAssetObject } = await import("./asset-r2");
+      if (!assetR2Configured()) {
+        return { ok: false, observation: "ERROR: visual_evidence_storage_unavailable" };
+      }
+      let reservation: Awaited<ReturnType<typeof reserveAsset>>;
+      try {
+        reservation = await reserveAsset({
+          ownerUserId: project.ownerId,
+          actorUserId,
+          projectId: input.projectId,
+          threadKey: `project:${input.projectId}`,
+          scope: "project",
+          kind: "snapshot",
+          source: "zero-agent-screenshot",
+          filename: `zero-${phase}-${pairId ?? input.taskId ?? "evidence"}.png`,
+          mimeType: "image/png",
+          sizeBytes: screenshotBuffer.length,
+          versionId: latestVersion?.id ?? null,
+          taskId: input.taskId ?? null,
+          context: {
+            route: geometry.url,
+            viewport: { width: geometry.width, height: geometry.height, deviceMode: "custom" },
+            region: geometry.clip ?? undefined,
+            consoleErrors: shot.consoleErrors ?? [],
+            visualEvidencePhase: phase,
+            visualEvidencePairId: pairId,
+          },
+        });
+      } catch (error) {
+        const code =
+          error && typeof error === "object" && "code" in error
+            ? String((error as { code: unknown }).code)
+            : "visual_evidence_storage_unavailable";
+        return { ok: false, observation: `ERROR: ${code}` };
+      }
+      try {
+        await putAssetBuffer({
+          key: reservation.storageKey,
+          body: screenshotBuffer,
+          contentType: "image/png",
+        });
+        const { createHash } = await import("node:crypto");
+        await completeAsset({
+          assetId: reservation.id,
+          ownerUserId: project.ownerId,
+          actorUserId,
+          sha256: createHash("sha256").update(screenshotBuffer).digest("hex"),
+          scanState: "not-required",
+        });
+      } catch (error) {
+        await rejectReservedAsset({
+          assetId: reservation.id,
+          ownerUserId: project.ownerId,
+          actorUserId,
+          code: "asset_storage_unavailable",
+        }).catch(() => undefined);
+        await deleteAssetObject(reservation.storageKey).catch(() => undefined);
+        logger.warn(
+          { error, projectId: input.projectId, taskId: input.taskId ?? null },
+          "zero visual evidence storage failed",
+        );
+        return { ok: false, observation: "ERROR: visual_evidence_storage_unavailable" };
+      }
+      evidenceState.value = recordZeroVisualEvidence(
+        evidenceState.value,
+        { phase, pairId, geometry },
+        reservation.id,
+      );
+      const contentUrl = `/api/assets/${reservation.id}/content`;
+      await safeEvent(
+        input.onEvent,
+        "visual_evidence",
+        JSON.stringify({
+          assetId: reservation.id,
+          contentUrl,
+          phase,
+          pairId,
+          label: phase === "before" ? "Before" : phase === "after" ? "After" : "Visual evidence",
+        }),
+      );
       // Task #533: return the base64 separately so the loop can attach it as
       // an image_url block on a follow-up user message and switch to the
       // provider's VISION_MODEL for the next turn. The tool observation
@@ -7023,6 +7250,10 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           mimeType: "image/png",
           budgetRemaining: ctx.screenshotBudget.remaining,
           attachedToNextTurn: true,
+          assetId: reservation.id,
+          contentUrl,
+          evidencePhase: phase,
+          evidencePairId: pairId,
         }),
         imageBase64: shot.base64 ?? undefined,
         imageMimeType: "image/png",
@@ -7657,6 +7888,13 @@ ${inventory || "(empty workspace)"}`;
       }
     }
     case "finalize": {
+      const pending = pendingZeroVisualEvidencePairs(ctx.visualEvidenceState?.value ?? {});
+      if (pending.length > 0) {
+        return {
+          ok: false,
+          observation: `ERROR: visual_evidence_after_required (${pending.join(",")})`,
+        };
+      }
       return { ok: true, observation: "finalized" };
     }
     case "list_blueprints": {

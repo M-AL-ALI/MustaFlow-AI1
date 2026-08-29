@@ -41,6 +41,7 @@ export type ToolCallEventType =
   | "web_search"
   | "web_fetch"
   | "take_screenshot"
+  | "visual_evidence"
   | "generate_image"
   | "file_diff"
   | "tool_call"
@@ -65,6 +66,7 @@ const EVENT_ICON: Record<string, React.ElementType> = {
   web_search: Search,
   web_fetch: Globe,
   take_screenshot: Camera,
+  visual_evidence: Camera,
   generate_image: Sparkles,
   file_diff: FilePen,
   tool_call: Wrench,
@@ -81,6 +83,7 @@ const EVENT_LABEL: Record<string, string> = {
   web_search: "Web search",
   web_fetch: "Fetching URL",
   take_screenshot: "Taking screenshot",
+  visual_evidence: "Visual evidence",
   generate_image: "Generating image",
   file_diff: "File diff",
   tool_call: "Tool call",
@@ -97,6 +100,7 @@ const EVENT_COLOR: Record<string, string> = {
   web_search: "text-violet-400 bg-violet-500/8 border-violet-500/20",
   web_fetch: "text-violet-400 bg-violet-500/8 border-violet-500/20",
   take_screenshot: "text-indigo-400 bg-indigo-500/8 border-indigo-500/20",
+  visual_evidence: "text-indigo-400 bg-indigo-500/8 border-indigo-500/20",
   generate_image: "text-pink-400 bg-pink-500/8 border-pink-500/20",
   file_diff: "text-amber-400 bg-amber-500/8 border-amber-500/20",
   tool_call: "text-amber-400 bg-amber-500/8 border-amber-500/20",
@@ -141,6 +145,14 @@ type CommandOutputPayload = {
   stdout?: string;
   stderr?: string;
   exitCode?: number;
+};
+
+type VisualEvidencePayload = {
+  assetId?: number;
+  contentUrl?: string;
+  phase?: "before" | "after" | "evidence";
+  pairId?: string | null;
+  label?: string;
 };
 
 function parseCommandOutput(msg: string): CommandOutputPayload | null {
@@ -207,6 +219,10 @@ export function ToolCallCard({
     event.eventType === "command_output" || event.eventType === "shell_command"
       ? parseCommandOutput(event.message)
       : null;
+  const visualEvidence =
+    event.eventType === "visual_evidence"
+      ? (tryJson<VisualEvidencePayload>(event.message) ?? null)
+      : null;
 
   // Inline summary shown in the collapsed header
   const inlineSummary = (() => {
@@ -226,6 +242,14 @@ export function ToolCallCard({
         </span>
       );
     }
+    if (visualEvidence?.label) {
+      return (
+        <span className="font-medium opacity-80 truncate flex-1">
+          {visualEvidence.label}
+          {visualEvidence.pairId ? ` · ${visualEvidence.pairId}` : ""}
+        </span>
+      );
+    }
     return (
       <span className="font-mono opacity-70 truncate flex-1">{truncate(event.message, 60)}</span>
     );
@@ -233,7 +257,10 @@ export function ToolCallCard({
 
   // Whether there is expandable detail
   const hasDetail =
-    diff?.diff || (cmdOut && (cmdOut.stdout || cmdOut.stderr)) || event.message.length > 60;
+    visualEvidence?.contentUrl ||
+    diff?.diff ||
+    (cmdOut && (cmdOut.stdout || cmdOut.stderr)) ||
+    event.message.length > 60;
 
   return (
     <div className={cn("rounded-lg border text-[10px] overflow-hidden", colorClass)}>
@@ -265,7 +292,18 @@ export function ToolCallCard({
       {expanded && hasDetail && (
         <div className="px-2.5 pb-2 border-t border-current/10">
           {/* file_diff: rich diff body with +/- line coloring */}
-          {diff?.diff ? (
+          {visualEvidence?.contentUrl ? (
+            <figure className="mt-2 space-y-1">
+              <img
+                src={visualEvidence.contentUrl}
+                alt={visualEvidence.label ?? "Zero visual evidence"}
+                className="w-full max-h-72 rounded-md border border-current/15 object-contain bg-black/20"
+              />
+              <figcaption className="text-[9px] text-muted-foreground/70">
+                Saved with this project
+              </figcaption>
+            </figure>
+          ) : diff?.diff ? (
             <DiffBody diff={diff.diff} />
           ) : /* command_output: command header + stdout/stderr */
           cmdOut ? (
@@ -348,6 +386,7 @@ export function ToolCallGroup({
     "web_search",
     "web_fetch",
     "take_screenshot",
+    "visual_evidence",
     "generate_image",
     "file_diff",
     "tool_call",

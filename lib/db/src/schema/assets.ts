@@ -42,6 +42,8 @@ export type AssetContext = {
   brandRole?: "none" | "logo" | "icon" | "palette" | "font" | "reference";
   derivativeOfAssetId?: number;
   derivativePreset?: string;
+  visualEvidencePhase?: "before" | "after" | "evidence";
+  visualEvidencePairId?: string | null;
 };
 
 export const assetsTable = pgTable(
