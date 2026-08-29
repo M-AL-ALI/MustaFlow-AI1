@@ -30,7 +30,13 @@ function receiptDetailLines(event: SupportGrantEventView): string[] {
   return lines;
 }
 
-export function SupportOwnerActions({ ticketId }: { ticketId: number }) {
+export function SupportOwnerActions({
+  ticketId,
+  onMutated,
+}: {
+  ticketId: number;
+  onMutated: () => void | Promise<unknown>;
+}) {
   const [operations, setOperations] = useState<SupportOperationsView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -54,6 +60,7 @@ export function SupportOwnerActions({ ticketId }: { ticketId: number }) {
       try {
         await postSupportOperation(path, data);
         await load();
+        await onMutated();
         setMessage("Your decision was recorded.");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "That decision did not complete.");
@@ -61,7 +68,7 @@ export function SupportOwnerActions({ ticketId }: { ticketId: number }) {
         setBusy(null);
       }
     },
-    [load],
+    [load, onMutated],
   );
 
   if (!operations) {

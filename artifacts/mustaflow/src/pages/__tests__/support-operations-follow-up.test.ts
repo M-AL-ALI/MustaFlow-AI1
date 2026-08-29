@@ -58,6 +58,7 @@ describe("support resolution and presence surfaces", () => {
 
   it("keeps the full grant receipt and the owner's external-blocker control visible", () => {
     const owner = source("../support-owner-actions.tsx");
+    const tickets = source("../support-tickets.tsx");
     expect(owner).toContain("Full support access receipt #");
     expect(owner).toContain("event.actorDisplayName");
     expect(owner).toContain("receiptDetailLines(event)");
@@ -65,5 +66,9 @@ describe("support resolution and presence surfaces", () => {
     expect(owner).toContain("I fixed it with the third party");
     expect(owner).toContain('operations.ticket.status === "blocked_on_third_party"');
     expect(owner).not.toContain('operations.ticket.status === "blocked"');
+    expect(owner).toContain("await onMutated();");
+    expect(tickets).toContain(
+      "<SupportOwnerActions ticketId={ticketId} onMutated={() => refetch()} />",
+    );
   });
 });
