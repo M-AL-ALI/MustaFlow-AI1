@@ -233,8 +233,15 @@ export default function AdminPage() {
                   {readiness.partial > 0 && (
                     <span className="text-yellow-500">{readiness.partial} partial</span>
                   )}
-                  {readiness.failed > 0 && (
-                    <span className="text-destructive">{readiness.failed} fail</span>
+                  {readiness.blockingFailCount > 0 && (
+                    <span className="text-destructive">
+                      {readiness.blockingFailCount} blocking fail
+                    </span>
+                  )}
+                  {readiness.failed - readiness.blockingFailCount > 0 && (
+                    <span className="text-yellow-500">
+                      {readiness.failed - readiness.blockingFailCount} non-blocking fail
+                    </span>
                   )}
                 </>
               )}
@@ -247,7 +254,7 @@ export default function AdminPage() {
             </div>
           </div>
           <PanelDeclaration
-            purpose="Shows whether every launch-blocking requirement is currently passing."
+            purpose="Shows every launch-readiness check and identifies which failures block launch."
             action="Open a failing check, resolve it, then refresh before launching."
             freshness="Fetched on page load and whenever an operator refreshes it."
           />
@@ -1243,6 +1250,11 @@ function ReadinessRow({ check }: { check: AdminLaunchCheck }) {
           {check.blocking && check.status === "fail" && (
             <span className="text-[9px] font-bold uppercase text-destructive border border-destructive/40 rounded px-1">
               blocking
+            </span>
+          )}
+          {!check.blocking && check.status === "fail" && (
+            <span className="text-[9px] font-bold uppercase text-yellow-500 border border-yellow-500/40 rounded px-1">
+              non-blocking
             </span>
           )}
         </div>
