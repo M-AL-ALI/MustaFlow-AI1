@@ -35,6 +35,8 @@ import {
   ArrowRight,
   Home,
   Camera,
+  Crosshair,
+  EyeOff,
   ListTree,
   MousePointerClick,
   Type as TypeIcon,
@@ -100,6 +102,22 @@ type ConsoleEntry = {
   ts: number;
   isCrash?: boolean;
 };
+
+type CaptureRect = { x: number; y: number; width: number; height: number };
+
+function normalizedCaptureRect(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+): CaptureRect {
+  return {
+    x: Math.round(Math.min(startX, endX)),
+    y: Math.round(Math.min(startY, endY)),
+    width: Math.round(Math.abs(endX - startX)),
+    height: Math.round(Math.abs(endY - startY)),
+  };
+}
 
 type Project = {
   id: number;
@@ -255,6 +273,22 @@ export function PreviewTab({
     | { kind: "success"; message: string }
     | { kind: "error"; message: string }
   >({ kind: "idle" });
+  const [regionCaptureOpen, setRegionCaptureOpen] = useState(false);
+  const [captureRegion, setCaptureRegion] = useState<CaptureRect | null>(null);
+  const [captureRedactions, setCaptureRedactions] = useState<CaptureRect[]>([]);
+  const [captureAnnotation, setCaptureAnnotation] = useState("");
+  const [markingRedaction, setMarkingRedaction] = useState(false);
+  const [captureDrag, setCaptureDrag] = useState<{
+    kind: "region" | "redaction";
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+  const pointContextWaiterRef = useRef<{
+    requestId: string;
+    resolve: (domPath: string | undefined) => void;
+  } | null>(null);
   const [readinessExpanded, setReadinessExpanded] = useState(false);
   const [testEnvironmentStatus, setTestEnvironmentStatus] = useState<TestEnvironmentStatus | null>(
     null,
@@ -538,15 +572,42 @@ export function PreviewTab({
     color: string;
     backgroundColor: string;
     padding: string;
+    margin: string;
+    width: string;
+    height: string;
+    display: string;
+    textAlign: string;
+    fontFamily: string;
+    fontWeight: string;
+    href: string;
+    src: string;
     rect: { top: number; left: number; width: number; height: number };
   };
   const [editMode, setEditMode] = useState(false);
+  const [veSessionId, setVeSessionId] = useState<string | null>(null);
+  const [veCanUndo, setVeCanUndo] = useState(false);
   const [veSelection, setVeSelection] = useState<VeSelection | null>(null);
-  const [vePanel, setVePanel] = useState<null | "text" | "color" | "background" | "padding">(null);
+  const [veSelections, setVeSelections] = useState<VeSelection[]>([]);
+  const [vePanel, setVePanel] = useState<
+    null | "text" | "color" | "background" | "padding" | "layout" | "font" | "link"
+  >(null);
   const [veDraftText, setVeDraftText] = useState("");
   const [veDraftColor, setVeDraftColor] = useState("#ffffff");
   const [veDraftPadding, setVeDraftPadding] = useState("");
+  const [veDraftValue, setVeDraftValue] = useState("");
   const [veToast, setVeToast] = useState<string | null>(null);
+  const [veDirectDrag, setVeDirectDrag] = useState<{
+    kind: "resize" | "reorder";
+    startX: number;
+    startY: number;
+    width: number;
+    height: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+  const referenceOverlayInputRef = useRef<HTMLInputElement>(null);
+  const [referenceOverlay, setReferenceOverlay] = useState<string | null>(null);
+  const [referenceOpacity, setReferenceOpacity] = useState(50);
   // Tracks whether the in-iframe bridge has signalled "ready" for the current
   // iframe load (reset whenever iframeKey changes so reloads re-handshake).
   const veReadyRef = useRef(false);
@@ -567,11 +628,66 @@ export function PreviewTab({
     }
     if (!editMode) {
       setVeSelection(null);
+      setVeSelections([]);
       setVePanel(null);
     }
   }, [editMode, iframeKey]);
+  useEffect(() => {
+    let cancelled = false;
+    if (editMode && !veSessionId) {
+      void authFetch(`/api/projects/${project.id}/visual-edit/sessions`, {
+        method: "POST",
+        credentials: "include",
+      })
+        .then(async (response) => {
+          const body = (await response.json().catch(() => null)) as {
+            sessionId?: string;
+            error?: string;
+          } | null;
+          if (!response.ok || !body?.sessionId) throw new Error("visual edit session unavailable");
+          if (!cancelled) setVeSessionId(body.sessionId);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setVeToast("Visual editing could not start. Nothing was changed.");
+          setEditMode(false);
+        });
+    }
+    if (!editMode && veSessionId) {
+      const closingSessionId = veSessionId;
+      void authFetch(`/api/projects/${project.id}/visual-edit/sessions/${closingSessionId}/close`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summary: "Restyled the current page" }),
+      })
+        .then(async (response) => {
+          const body = (await response.json().catch(() => null)) as {
+            versionId?: number | null;
+          } | null;
+          if (!response.ok) throw new Error("visual edit close unavailable");
+          if (!cancelled) {
+            setVeSessionId(null);
+            setVeCanUndo(false);
+            if (body?.versionId) {
+              setVeToast(`Saved as restorable version #${body.versionId}`);
+              setTimeout(() => setVeToast(null), 3000);
+            }
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setVeToast("The edits remain saved, but the restorable version is still open.");
+          }
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [editMode, project.id, veSessionId]);
   const closeVe = useCallback(() => {
     setVeSelection(null);
+    setVeSelections([]);
     setVePanel(null);
   }, []);
   // Apply edit — direct-patch fast path, with refine fallback
@@ -581,9 +697,84 @@ export function PreviewTab({
         | { kind: "text"; newText: string }
         | { kind: "color"; target: "color" | "background"; newColor: string }
         | { kind: "padding"; newPadding: string }
+        | {
+            kind: "style";
+            property:
+              | "width"
+              | "height"
+              | "margin"
+              | "text-align"
+              | "display"
+              | "object-fit"
+              | "font-family"
+              | "font-weight";
+            value: string;
+          }
+        | { kind: "attribute"; attribute: "href" | "src"; value: string }
+        | { kind: "reorder"; direction: "up" | "down" }
         | { kind: "delete" },
     ) => {
-      if (!veSelection) return;
+      if (!veSelection || !veSessionId) {
+        setVeToast("Visual editing is still starting. Please try that change again.");
+        return;
+      }
+      const bulkEligible =
+        payload.kind === "color" ||
+        payload.kind === "padding" ||
+        payload.kind === "style" ||
+        payload.kind === "delete";
+      if (veSelections.length > 1 && bulkEligible) {
+        try {
+          for (const selection of veSelections) {
+            const body: Record<string, unknown> = {
+              mfmId: selection.mfmId,
+              sessionId: veSessionId,
+              breakpoint: device,
+              text: selection.text,
+            };
+            if (payload.kind === "color") {
+              body.kind = "color";
+              body.target = payload.target;
+              body.oldColor =
+                payload.target === "background" ? selection.backgroundColor : selection.color;
+              body.newColor = payload.newColor;
+            } else if (payload.kind === "padding") {
+              body.kind = "padding";
+              body.oldPadding = selection.padding;
+              body.newPadding = payload.newPadding;
+            } else if (payload.kind === "style") {
+              body.kind = "style";
+              body.property = payload.property;
+              body.value = payload.value;
+            } else {
+              body.kind = "delete";
+            }
+            const response = await authFetch(`/api/projects/${project.id}/visual-edit`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+              credentials: "include",
+            });
+            const result = (await response.json().catch(() => null)) as {
+              patched?: boolean;
+              suggestedPrompt?: string;
+            } | null;
+            if (!response.ok || !result?.patched) {
+              throw new Error(result?.suggestedPrompt ?? "bulk visual edit unavailable");
+            }
+          }
+          setVeCanUndo(true);
+          setVeToast(`Saved the change to ${veSelections.length} selected elements`);
+          setIframeKey((key) => key + 1);
+        } catch {
+          setVeToast(
+            "The group change stopped before every element was updated. Review it or undo the session.",
+          );
+        }
+        setTimeout(() => setVeToast(null), 3000);
+        closeVe();
+        return;
+      }
       const win = iframeRef.current?.contentWindow;
       // Optimistic preview update
       try {
@@ -620,6 +811,44 @@ export function PreviewTab({
             },
             "*",
           );
+        } else if (payload.kind === "style") {
+          const camelProperty = payload.property.replace(/-([a-z])/gu, (_match, letter: string) =>
+            letter.toUpperCase(),
+          );
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "setStyle",
+              mfmId: veSelection.mfmId,
+              property: camelProperty,
+              value: payload.value,
+            },
+            "*",
+          );
+        } else if (payload.kind === "attribute") {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "setAttribute",
+              mfmId: veSelection.mfmId,
+              attribute: payload.attribute,
+              value: payload.value,
+            },
+            "*",
+          );
+        } else if (payload.kind === "reorder") {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "move",
+              mfmId: veSelection.mfmId,
+              direction: payload.direction,
+            },
+            "*",
+          );
         } else if (payload.kind === "delete") {
           win?.postMessage(
             {
@@ -636,7 +865,11 @@ export function PreviewTab({
       }
       // Persist server-side (direct patch or refine fallback)
       try {
-        const body: Record<string, unknown> = { mfmId: veSelection.mfmId };
+        const body: Record<string, unknown> = {
+          mfmId: veSelection.mfmId,
+          sessionId: veSessionId,
+          breakpoint: device,
+        };
         if (payload.kind === "text") {
           body.kind = "text";
           body.oldText = veSelection.text;
@@ -652,6 +885,21 @@ export function PreviewTab({
           body.kind = "padding";
           body.oldPadding = veSelection.padding;
           body.newPadding = payload.newPadding;
+          body.text = veSelection.text;
+        } else if (payload.kind === "style") {
+          body.kind = "style";
+          body.property = payload.property;
+          body.value = payload.value;
+          body.text = veSelection.text;
+        } else if (payload.kind === "attribute") {
+          body.kind = "attribute";
+          body.attribute = payload.attribute;
+          body.value = payload.value;
+          body.oldValue = payload.attribute === "href" ? veSelection.href : veSelection.src;
+          body.text = veSelection.text;
+        } else if (payload.kind === "reorder") {
+          body.kind = "reorder";
+          body.direction = payload.direction;
           body.text = veSelection.text;
         } else {
           body.kind = "delete";
@@ -671,6 +919,7 @@ export function PreviewTab({
           suggestedPrompt?: string;
         };
         if (json.patched) {
+          setVeCanUndo(true);
           setVeToast(`Saved to ${json.filePath ?? "file"}`);
           setTimeout(() => setVeToast(null), 2500);
           // Sync the patched file into the WebContainer FS so Vite HMR delivers the
@@ -710,6 +959,7 @@ export function PreviewTab({
           target(json.suggestedPrompt);
           setVeToast("Sent to NabuFlow…");
           setTimeout(() => setVeToast(null), 2500);
+          setEditMode(false);
         }
       } catch {
         setVeToast("Visual edit failed");
@@ -717,8 +967,98 @@ export function PreviewTab({
       }
       closeVe();
     },
-    [veSelection, project.id, onAutoSendPrompt, onFixPrompt, closeVe, wc],
+    [
+      veSelection,
+      veSelections,
+      veSessionId,
+      project.id,
+      device,
+      onAutoSendPrompt,
+      onFixPrompt,
+      closeVe,
+      wc,
+    ],
   );
+
+  useEffect(() => {
+    if (!veDirectDrag || !veSelection) return;
+    const onMove = (event: PointerEvent) => {
+      setVeDirectDrag((current) =>
+        current ? { ...current, currentX: event.clientX, currentY: event.clientY } : null,
+      );
+      if (veDirectDrag.kind !== "resize") return;
+      const width = Math.max(
+        16,
+        Math.round(veDirectDrag.width + event.clientX - veDirectDrag.startX),
+      );
+      const height = Math.max(
+        16,
+        Math.round(veDirectDrag.height + event.clientY - veDirectDrag.startY),
+      );
+      try {
+        const win = iframeRef.current?.contentWindow;
+        for (const [property, value] of [
+          ["width", `${width}px`],
+          ["height", `${height}px`],
+        ] as const) {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "setStyle",
+              mfmId: veSelection.mfmId,
+              property,
+              value,
+            },
+            "*",
+          );
+        }
+      } catch {
+        // The persisted edit remains authoritative if an optimistic frame update is unavailable.
+      }
+    };
+    const onUp = (event: PointerEvent) => {
+      const drag = veDirectDrag;
+      setVeDirectDrag(null);
+      if (drag.kind === "reorder") {
+        const delta = event.clientY - drag.startY;
+        if (Math.abs(delta) >= 20) {
+          void applyVisualEdit({ kind: "reorder", direction: delta < 0 ? "up" : "down" });
+        }
+        return;
+      }
+      const width = Math.max(16, Math.round(drag.width + event.clientX - drag.startX));
+      const height = Math.max(16, Math.round(drag.height + event.clientY - drag.startY));
+      void (async () => {
+        await applyVisualEdit({ kind: "style", property: "width", value: `${width}px` });
+        await applyVisualEdit({ kind: "style", property: "height", value: `${height}px` });
+      })();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [applyVisualEdit, veDirectDrag, veSelection]);
+
+  const undoVisualEdit = useCallback(async () => {
+    if (!veSessionId || !veCanUndo) return;
+    try {
+      const response = await authFetch(
+        `/api/projects/${project.id}/visual-edit/sessions/${veSessionId}/undo`,
+        { method: "POST", credentials: "include" },
+      );
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(body?.error ?? "undo unavailable");
+      setVeToast("Last visual change undone");
+      setVeCanUndo(false);
+      setIframeKey((key) => key + 1);
+    } catch (error) {
+      setVeToast(error instanceof Error ? error.message : "That change could not be undone.");
+    }
+    setTimeout(() => setVeToast(null), 2500);
+  }, [project.id, veCanUndo, veSessionId]);
 
   // EAS build status — fetch latest completed build for native QR
   type EasBuildEntry = {
@@ -1011,6 +1351,14 @@ export function PreviewTab({
       if (!data || typeof data !== "object") return;
       // ── Visual Edit messages (Task #539) ──
       if (data.__mustaflow_edit) {
+        if (data.type === "pointContext") {
+          const waiter = pointContextWaiterRef.current;
+          if (waiter && waiter.requestId === data.requestId) {
+            waiter.resolve(typeof data.mfmId === "string" ? data.mfmId : undefined);
+            pointContextWaiterRef.current = null;
+          }
+          return;
+        }
         if (data.type === "ready") {
           veReadyRef.current = true;
           // Replay current edit mode now that the bridge is listening.
@@ -1032,9 +1380,26 @@ export function PreviewTab({
             color: String(data.color ?? ""),
             backgroundColor: String(data.backgroundColor ?? ""),
             padding: String(data.padding ?? ""),
+            margin: String(data.margin ?? ""),
+            width: String(data.width ?? ""),
+            height: String(data.height ?? ""),
+            display: String(data.display ?? ""),
+            textAlign: String(data.textAlign ?? ""),
+            fontFamily: String(data.fontFamily ?? ""),
+            fontWeight: String(data.fontWeight ?? ""),
+            href: String(data.href ?? ""),
+            src: String(data.src ?? ""),
             rect: data.rect ?? { top: 0, left: 0, width: 0, height: 0 },
           };
-          setVeSelection(sel);
+          setVeSelections((current) => {
+            const next = !data.additive
+              ? [sel]
+              : !data.selected
+                ? current.filter((item) => item.mfmId !== sel.mfmId)
+                : [...current.filter((item) => item.mfmId !== sel.mfmId), sel].slice(-20);
+            setVeSelection(next.at(-1) ?? null);
+            return next;
+          });
           setVeDraftText(sel.text);
           setVeDraftColor(rgbToHex(sel.color) || "#ffffff");
           setVeDraftPadding(sel.padding || "");
@@ -1123,17 +1488,58 @@ export function PreviewTab({
   const errorCount = consoleEntries.filter((e) => e.level === "error").length;
   const warnCount = consoleEntries.filter((e) => e.level === "warn").length;
 
+  const previewCaptureGeometry = useCallback(() => {
+    const bounds = iframeRef.current?.getBoundingClientRect();
+    const cssWidth = Math.max(1, Math.round(bounds?.width ?? 1280));
+    const cssHeight = Math.max(1, Math.round(bounds?.height ?? 800));
+    return {
+      bounds,
+      cssWidth,
+      cssHeight,
+      viewport: {
+        width: Math.min(1920, Math.max(320, cssWidth)),
+        height: Math.min(1200, Math.max(240, cssHeight)),
+      },
+    };
+  }, []);
+
+  const askPreviewPointContext = useCallback(
+    async (point: { x: number; y: number }): Promise<string | undefined> => {
+      const target = iframeRef.current?.contentWindow;
+      if (!target) return undefined;
+      const requestId = crypto.randomUUID();
+      return await new Promise<string | undefined>((resolve) => {
+        const timer = window.setTimeout(() => {
+          if (pointContextWaiterRef.current?.requestId === requestId) {
+            pointContextWaiterRef.current = null;
+          }
+          resolve(undefined);
+        }, 800);
+        pointContextWaiterRef.current = {
+          requestId,
+          resolve: (value) => {
+            window.clearTimeout(timer);
+            resolve(value);
+          },
+        };
+        target.postMessage(
+          { __mustaflow_edit: true, type: "describePoint", requestId, ...point },
+          "*",
+        );
+      });
+    },
+    [],
+  );
+
   const snapshotToAi = useCallback(async () => {
     if (!onSnapshotObserve || snapshotObserveState.kind === "sending") return;
-    const bounds = iframeRef.current?.getBoundingClientRect();
-    const width = Math.min(1920, Math.max(320, Math.round(bounds?.width ?? 1280)));
-    const height = Math.min(1200, Math.max(240, Math.round(bounds?.height ?? 800)));
+    const { viewport } = previewCaptureGeometry();
     setSnapshotObserveState({ kind: "sending" });
     try {
       const result = await onSnapshotObserve({
         path: currentPath,
         previewSource: webContainerLive ? "webcontainer" : "server",
-        viewport: { width, height },
+        viewport,
       });
       setSnapshotObserveState(
         result.ok
@@ -1146,7 +1552,76 @@ export function PreviewTab({
         message: "I couldn't capture this preview safely. Please try again.",
       });
     }
-  }, [currentPath, onSnapshotObserve, snapshotObserveState.kind, webContainerLive]);
+  }, [
+    currentPath,
+    onSnapshotObserve,
+    previewCaptureGeometry,
+    snapshotObserveState.kind,
+    webContainerLive,
+  ]);
+
+  const closeRegionCapture = useCallback(() => {
+    setRegionCaptureOpen(false);
+    setCaptureRegion(null);
+    setCaptureRedactions([]);
+    setCaptureAnnotation("");
+    setMarkingRedaction(false);
+    setCaptureDrag(null);
+  }, []);
+
+  const sendRegionToAi = useCallback(async () => {
+    if (!onSnapshotObserve || !captureRegion || snapshotObserveState.kind === "sending") return;
+    const { cssWidth, cssHeight, viewport } = previewCaptureGeometry();
+    const scaleX = viewport.width / cssWidth;
+    const scaleY = viewport.height / cssHeight;
+    const scaleRect = (rect: CaptureRect): CaptureRect => ({
+      x: Math.max(0, Math.round(rect.x * scaleX)),
+      y: Math.max(0, Math.round(rect.y * scaleY)),
+      width: Math.max(16, Math.round(rect.width * scaleX)),
+      height: Math.max(16, Math.round(rect.height * scaleY)),
+    });
+    const region = scaleRect(captureRegion);
+    region.width = Math.min(region.width, viewport.width - region.x);
+    region.height = Math.min(region.height, viewport.height - region.y);
+    const domPath = await askPreviewPointContext({
+      x: captureRegion.x + captureRegion.width / 2,
+      y: captureRegion.y + captureRegion.height / 2,
+    });
+    setSnapshotObserveState({ kind: "sending" });
+    try {
+      const result = await onSnapshotObserve({
+        path: currentPath,
+        previewSource: webContainerLive ? "webcontainer" : "server",
+        viewport,
+        region,
+        domPath,
+        annotation: captureAnnotation.trim() || undefined,
+        redactions: captureRedactions.map(scaleRect),
+      });
+      setSnapshotObserveState(
+        result.ok
+          ? { kind: "success", message: "Zero received this exact region in Chat." }
+          : { kind: "error", message: result.message },
+      );
+      if (result.ok) closeRegionCapture();
+    } catch {
+      setSnapshotObserveState({
+        kind: "error",
+        message: "I couldn't capture this preview safely. Please try again.",
+      });
+    }
+  }, [
+    askPreviewPointContext,
+    captureAnnotation,
+    captureRedactions,
+    captureRegion,
+    closeRegionCapture,
+    currentPath,
+    onSnapshotObserve,
+    previewCaptureGeometry,
+    snapshotObserveState.kind,
+    webContainerLive,
+  ]);
 
   // Shared iframe renderer.
   // For react-vite projects with a live WebContainer dev server, the iframe points
@@ -1199,6 +1674,17 @@ export function PreviewTab({
       />
     );
   };
+
+  const renderReferenceOverlay = () =>
+    referenceOverlay ? (
+      <img
+        src={referenceOverlay}
+        alt="Visual reference overlay"
+        className="pointer-events-none absolute inset-0 z-20 h-full w-full object-fill"
+        style={{ opacity: referenceOpacity / 100 }}
+        data-testid="preview-reference-overlay"
+      />
+    ) : null;
 
   // Boot progress overlay — shown in the preview area while WC is initialising.
   const renderWcBootOverlay = () => (
@@ -1266,6 +1752,15 @@ export function PreviewTab({
     const left = iframeRect.left + veSelection.rect.left;
     return { position: "fixed", top, left, zIndex: 60 };
   })();
+  const captureBounds = regionCaptureOpen ? iframeRef.current?.getBoundingClientRect() : null;
+  const activeCaptureRect = captureDrag
+    ? normalizedCaptureRect(
+        captureDrag.startX,
+        captureDrag.startY,
+        captureDrag.currentX,
+        captureDrag.currentY,
+      )
+    : null;
 
   return (
     <div className="flex flex-col h-full bg-background">
@@ -1282,6 +1777,182 @@ export function PreviewTab({
           {veToast}
         </div>
       )}
+      {regionCaptureOpen && captureBounds && (
+        <>
+          <div
+            className="fixed z-[65] cursor-crosshair bg-black/5 ring-2 ring-cyan-400/70"
+            style={{
+              left: captureBounds.left,
+              top: captureBounds.top,
+              width: captureBounds.width,
+              height: captureBounds.height,
+              touchAction: "none",
+            }}
+            aria-label={
+              markingRedaction
+                ? "Drag over private information to hide it"
+                : "Drag over the preview region for Zero"
+            }
+            onPointerDown={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              const point = {
+                x: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+                y: Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
+              };
+              setCaptureDrag({
+                kind: markingRedaction ? "redaction" : "region",
+                startX: point.x,
+                startY: point.y,
+                currentX: point.x,
+                currentY: point.y,
+              });
+            }}
+            onPointerMove={(event) => {
+              if (!captureDrag) return;
+              const rect = event.currentTarget.getBoundingClientRect();
+              setCaptureDrag((current) =>
+                current
+                  ? {
+                      ...current,
+                      currentX: Math.max(0, Math.min(rect.width, event.clientX - rect.left)),
+                      currentY: Math.max(0, Math.min(rect.height, event.clientY - rect.top)),
+                    }
+                  : null,
+              );
+            }}
+            onPointerUp={(event) => {
+              if (!captureDrag) return;
+              event.currentTarget.releasePointerCapture(event.pointerId);
+              const rect = normalizedCaptureRect(
+                captureDrag.startX,
+                captureDrag.startY,
+                captureDrag.currentX,
+                captureDrag.currentY,
+              );
+              if (rect.width >= 16 && rect.height >= 16) {
+                if (captureDrag.kind === "redaction") {
+                  setCaptureRedactions((current) => [...current, rect].slice(0, 12));
+                  setMarkingRedaction(false);
+                } else {
+                  setCaptureRegion(rect);
+                }
+              }
+              setCaptureDrag(null);
+            }}
+          >
+            {captureRegion && (
+              <div
+                className="absolute border-2 border-cyan-400 bg-cyan-400/10"
+                style={{
+                  left: captureRegion.x,
+                  top: captureRegion.y,
+                  width: captureRegion.width,
+                  height: captureRegion.height,
+                }}
+              />
+            )}
+            {captureRedactions.map((rect, index) => (
+              <div
+                key={`${rect.x}-${rect.y}-${index}`}
+                className="absolute bg-black ring-1 ring-white/70"
+                style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+              />
+            ))}
+            {activeCaptureRect && (
+              <div
+                className={cn(
+                  "absolute border-2",
+                  captureDrag?.kind === "redaction"
+                    ? "border-white bg-black/80"
+                    : "border-cyan-300 bg-cyan-300/10",
+                )}
+                style={{
+                  left: activeCaptureRect.x,
+                  top: activeCaptureRect.y,
+                  width: activeCaptureRect.width,
+                  height: activeCaptureRect.height,
+                }}
+              />
+            )}
+            {!captureRegion && !captureDrag && (
+              <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-md bg-zinc-950/95 px-3 py-2 text-xs text-white shadow-xl">
+                Drag over what you want Zero to see.
+              </div>
+            )}
+          </div>
+          {captureRegion && (
+            <div
+              className="fixed z-[66] flex w-[min(520px,calc(100vw-24px))] flex-col gap-2 rounded-lg border border-cyan-500/40 bg-zinc-950/95 p-3 text-white shadow-2xl"
+              style={{
+                left: Math.max(12, Math.min(captureBounds.left, window.innerWidth - 532)),
+                top: Math.max(12, Math.min(captureBounds.bottom + 8, window.innerHeight - 156)),
+              }}
+            >
+              <label className="text-xs font-medium" htmlFor="snapshot-annotation">
+                What should Zero notice? <span className="text-zinc-500">Optional</span>
+              </label>
+              <input
+                id="snapshot-annotation"
+                value={captureAnnotation}
+                onChange={(event) => setCaptureAnnotation(event.target.value.slice(0, 200))}
+                onPointerDown={(event) => event.stopPropagation()}
+                placeholder="For example: this button does nothing"
+                className="rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-xs outline-none focus:border-cyan-500"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" size="sm" variant="ghost" onClick={closeRegionCapture}>
+                  Cancel
+                </Button>
+                {captureRedactions.length > 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setCaptureRedactions((current) => current.slice(0, -1))}
+                  >
+                    Undo hide
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={markingRedaction ? "default" : "outline"}
+                  className="gap-1.5"
+                  onClick={() => setMarkingRedaction(true)}
+                >
+                  <EyeOff className="h-3.5 w-3.5" /> Hide private area
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="ml-auto gap-1.5"
+                  disabled={snapshotObserveState.kind === "sending" || markingRedaction}
+                  onClick={() => void sendRegionToAi()}
+                >
+                  {snapshotObserveState.kind === "sending" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Crosshair className="h-3.5 w-3.5" />
+                  )}
+                  Send exact region
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {editMode && veDirectDrag && (
+        <div className="pointer-events-none fixed inset-0 z-[69]" aria-hidden="true">
+          <div className="absolute left-1/2 top-0 h-full border-l border-cyan-400/70" />
+          <div className="absolute left-0 top-1/2 w-full border-t border-cyan-400/70" />
+          <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded bg-cyan-950/90 px-2 py-1 text-[10px] text-cyan-100">
+            {veDirectDrag.kind === "resize"
+              ? "Release to save this size"
+              : "Release above or below to reorder"}
+          </div>
+        </div>
+      )}
       {/* Visual Edit inline toolbar — anchored under the selected iframe element */}
       {editMode && veSelection && veOverlayStyle && (
         <div
@@ -1295,8 +1966,76 @@ export function PreviewTab({
               {veSelection.tag}
             </span>
             <span className="text-[10px] text-zinc-500 truncate flex-1">
-              {veSelection.text.slice(0, 40) || "(no text)"}
+              {veSelections.length > 1
+                ? `${veSelections.length} elements selected · changes to style, spacing, visibility, and delete apply to all`
+                : veSelection.text.slice(0, 40) || "(no text)"}
             </span>
+            <button
+              type="button"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                setVeDirectDrag({
+                  kind: "reorder",
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  width: veSelection.rect.width,
+                  height: veSelection.rect.height,
+                  currentX: event.clientX,
+                  currentY: event.clientY,
+                });
+              }}
+              className="inline-flex cursor-ns-resize items-center justify-center rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+              title="Drag up or down to reorder"
+              aria-label="Drag selected element to reorder"
+            >
+              <ListTree className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                setVeDirectDrag({
+                  kind: "resize",
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  width: veSelection.rect.width,
+                  height: veSelection.rect.height,
+                  currentX: event.clientX,
+                  currentY: event.clientY,
+                });
+              }}
+              className="inline-flex cursor-nwse-resize items-center justify-center rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+              title="Drag to resize"
+              aria-label="Drag selected element to resize"
+            >
+              <Maximize2 className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void applyVisualEdit({ kind: "reorder", direction: "up" })}
+              className="inline-flex items-center justify-center text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+              title="Move before the previous sibling"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => void applyVisualEdit({ kind: "reorder", direction: "down" })}
+              className="inline-flex items-center justify-center text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+              title="Move after the next sibling"
+            >
+              ↓
+            </button>
+            {veCanUndo && (
+              <button
+                type="button"
+                onClick={() => void undoVisualEdit()}
+                className="text-[10px] text-zinc-400 hover:text-violet-300 px-1"
+                title="Undo last visual change"
+              >
+                Undo
+              </button>
+            )}
             {onOpenFileInEditor && (
               <button
                 type="button"
@@ -1340,7 +2079,7 @@ export function PreviewTab({
             </button>
           </div>
           {vePanel === null && (
-            <div className="flex items-center gap-1 px-1 pb-1">
+            <div className="grid grid-cols-4 items-center gap-1 px-1 pb-1">
               <button
                 type="button"
                 onClick={() => setVePanel("text")}
@@ -1365,6 +2104,41 @@ export function PreviewTab({
               >
                 <LayoutTemplate className="h-3 w-3" /> Pad
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVeDraftValue(veSelection.width);
+                  setVePanel("layout");
+                }}
+                className="inline-flex items-center justify-center gap-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                title="Size, margin, alignment, or visibility"
+              >
+                Layout
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setVeDraftValue(veSelection.fontFamily);
+                  setVePanel("font");
+                }}
+                className="inline-flex items-center justify-center gap-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                title="Font and weight"
+              >
+                Font
+              </button>
+              {(veSelection.tag === "a" || veSelection.tag === "img") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVeDraftValue(veSelection.tag === "a" ? veSelection.href : veSelection.src);
+                    setVePanel("link");
+                  }}
+                  className="inline-flex items-center justify-center gap-1 text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+                  title={veSelection.tag === "a" ? "Change link destination" : "Replace image"}
+                >
+                  {veSelection.tag === "a" ? "Link" : "Image"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1516,10 +2290,201 @@ export function PreviewTab({
               </div>
             </div>
           )}
+          {vePanel === "layout" && (
+            <div className="px-1 pb-1 flex flex-col gap-1.5">
+              <input
+                value={veDraftValue}
+                onChange={(event) => setVeDraftValue(event.target.value)}
+                placeholder="For example: 320px or 50%"
+                className="w-full text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500 font-mono"
+              />
+              <div className="grid grid-cols-3 gap-1">
+                {(["width", "height", "margin"] as const).map((property) => (
+                  <button
+                    key={property}
+                    type="button"
+                    onClick={() =>
+                      void applyVisualEdit({ kind: "style", property, value: veDraftValue })
+                    }
+                    disabled={!veDraftValue}
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] capitalize text-zinc-100 hover:bg-zinc-700 disabled:opacity-40"
+                  >
+                    {property}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {(["left", "center", "right"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      void applyVisualEdit({ kind: "style", property: "text-align", value })
+                    }
+                    className="rounded bg-zinc-800 px-1 py-1 text-[10px] capitalize text-zinc-100 hover:bg-zinc-700"
+                  >
+                    {value}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    void applyVisualEdit({ kind: "style", property: "display", value: "none" })
+                  }
+                  className="rounded bg-amber-600/20 px-1 py-1 text-[10px] text-amber-200 hover:bg-amber-600/30"
+                >
+                  Hide
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setVePanel(null)}
+                className="self-start text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+          {vePanel === "font" && (
+            <div className="px-1 pb-1 flex flex-col gap-1.5">
+              <input
+                value={veDraftValue}
+                onChange={(event) => setVeDraftValue(event.target.value)}
+                placeholder="Font family"
+                className="w-full text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500"
+              />
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void applyVisualEdit({
+                      kind: "style",
+                      property: "font-family",
+                      value: veDraftValue,
+                    })
+                  }
+                  disabled={!veDraftValue}
+                  className="rounded bg-violet-600 px-2 py-1 text-[10px] text-white disabled:opacity-40"
+                >
+                  Apply family
+                </button>
+                {(["400", "600", "700"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      void applyVisualEdit({ kind: "style", property: "font-weight", value })
+                    }
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {vePanel === "link" && (
+            <div className="px-1 pb-1 flex flex-col gap-1.5">
+              <input
+                value={veDraftValue}
+                onChange={(event) => setVeDraftValue(event.target.value)}
+                placeholder={veSelection.tag === "a" ? "https://example.com" : "Image URL"}
+                className="w-full text-[12px] px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 focus:outline-none focus:border-violet-500"
+              />
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setVePanel(null)}
+                  className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void applyVisualEdit({
+                      kind: "attribute",
+                      attribute: veSelection.tag === "a" ? "href" : "src",
+                      value: veDraftValue,
+                    })
+                  }
+                  disabled={!veDraftValue}
+                  className="ml-auto rounded bg-violet-600 px-2 py-1 text-[10px] text-white disabled:opacity-40"
+                >
+                  Apply
+                </button>
+              </div>
+              {veSelection.tag === "img" && (
+                <div className="grid grid-cols-3 gap-1 border-t border-zinc-800 pt-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void applyVisualEdit({
+                        kind: "style",
+                        property: "object-fit",
+                        value: "cover",
+                      })
+                    }
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+                  >
+                    Crop to frame
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = onAutoSendPrompt ?? onFixPrompt;
+                      target?.(
+                        `Remove the background from the selected image at ${veSelection.mfmId}. Use the shared Assets & Image Studio pipeline, replace the project reference, and keep the rest of the page unchanged.`,
+                      );
+                      setVeToast("Sent the selected image to Zero for background removal");
+                      setEditMode(false);
+                    }}
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+                  >
+                    Remove background
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = onAutoSendPrompt ?? onFixPrompt;
+                      target?.(
+                        `Generate a replacement for the selected image at ${veSelection.mfmId}. Use the shared Assets & Image Studio pipeline, ask one focused question only if the desired image is ambiguous, and keep the rest of the page unchanged.`,
+                      );
+                      setVeToast("Sent the selected image to Zero for replacement");
+                      setEditMode(false);
+                    }}
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+                  >
+                    Generate
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       {/* Preview toolbar */}
       <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 border-b border-border bg-card">
+        <input
+          ref={referenceOverlayInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            if (file.size > 25 * 1024 * 1024) {
+              setVeToast("Choose a reference image smaller than 25 MB.");
+              return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+              if (typeof reader.result === "string") setReferenceOverlay(reader.result);
+            };
+            reader.readAsDataURL(file);
+          }}
+        />
         {/* Device size switcher */}
         <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0">
           {(["desktop", "tablet", "mobile"] as DeviceFrame[]).map((d) => {
@@ -1542,6 +2507,36 @@ export function PreviewTab({
             );
           })}
         </div>
+
+        {referenceOverlay ? (
+          <div className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1">
+            <span className="text-[10px] font-medium text-violet-300">Reference</span>
+            <input
+              type="range"
+              min={5}
+              max={95}
+              value={referenceOpacity}
+              onChange={(event) => setReferenceOpacity(Number(event.target.value))}
+              aria-label="Reference overlay opacity"
+              className="w-20 accent-violet-500"
+            />
+            <button
+              type="button"
+              onClick={() => setReferenceOverlay(null)}
+              className="text-[10px] text-violet-200 hover:text-white"
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => referenceOverlayInputRef.current?.click()}
+            className="rounded-lg border border-border bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            Add reference overlay
+          </button>
+        )}
 
         {/* iOS / Android platform toggle — mobile projects only */}
         {isMobile && (
@@ -2143,20 +3138,39 @@ export function PreviewTab({
             />
           )}
           {hasFiles && onSnapshotObserve && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={snapshotToAi}
-              disabled={snapshotObserveState.kind === "sending"}
-              title="Ask Zero to observe this preview"
-            >
-              {snapshotObserveState.kind === "sending" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Camera className="h-3.5 w-3.5" />
-              )}
-            </Button>
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={snapshotToAi}
+                disabled={snapshotObserveState.kind === "sending"}
+                title="Ask Zero to observe this preview"
+              >
+                {snapshotObserveState.kind === "sending" ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Camera className="h-3.5 w-3.5" />
+                )}
+              </Button>
+              <Button
+                variant={regionCaptureOpen ? "default" : "ghost"}
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => {
+                  setEditMode(false);
+                  setRegionCaptureOpen(true);
+                  setCaptureRegion(null);
+                  setCaptureRedactions([]);
+                  setCaptureAnnotation("");
+                }}
+                disabled={snapshotObserveState.kind === "sending"}
+                title="Point to a region for Zero"
+                aria-pressed={regionCaptureOpen}
+              >
+                <Crosshair className="h-3.5 w-3.5" />
+              </Button>
+            </>
           )}
           {(snapshotObserveState.kind === "success" || snapshotObserveState.kind === "error") && (
             <span
@@ -2795,6 +3809,7 @@ export function PreviewTab({
                   ["booting", "installing", "starting"].includes(wc.status) &&
                   renderWcBootOverlay()}
                 {renderIframe("h-full")}
+                {renderReferenceOverlay()}
               </div>
             </div>
           ) : device === "mobile" ? (
@@ -2843,6 +3858,7 @@ export function PreviewTab({
                     ["booting", "installing", "starting"].includes(wc.status) &&
                     renderWcBootOverlay()}
                   {renderIframe(undefined, { height: 780 })}
+                  {renderReferenceOverlay()}
                 </div>
                 {/* Home bar (iOS) / Nav bar (Android) */}
                 {platform === "android" ? (
@@ -2875,6 +3891,7 @@ export function PreviewTab({
                     ["booting", "installing", "starting"].includes(wc.status) &&
                     renderWcBootOverlay()}
                   {renderIframe(undefined, { height: 970 })}
+                  {renderReferenceOverlay()}
                 </div>
                 {/* Home bar */}
                 <div className="shrink-0 bg-zinc-900 flex justify-center py-2">

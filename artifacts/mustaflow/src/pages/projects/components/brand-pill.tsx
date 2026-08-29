@@ -9,6 +9,7 @@ type BrandProfile = {
   accentColor: string;
   fontPairing: string;
   tone: string;
+  logoContentUrl?: string | null;
 };
 
 export function BrandPill() {
@@ -53,7 +54,15 @@ export function BrandPill() {
       )}
       title="Your saved brand profile is applied to every new build. Click to edit."
     >
-      <Palette className="h-3 w-3 shrink-0 text-purple-400" />
+      {profile.logoContentUrl ? (
+        <img
+          src={profile.logoContentUrl}
+          alt=""
+          className="h-4 w-4 shrink-0 rounded object-contain"
+        />
+      ) : (
+        <Palette className="h-3 w-3 shrink-0 text-purple-400" />
+      )}
       <span className="font-semibold text-purple-300">Your brand</span>
       {profile.primaryColor && (
         <span

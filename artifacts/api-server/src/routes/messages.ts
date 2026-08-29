@@ -766,7 +766,7 @@ router.post(
           const dataUri =
             supportRun && att.url.startsWith("data:image/")
               ? att.url
-              : await fetchAttachmentAsDataUri(att.url);
+              : await fetchAttachmentAsDataUri(att.url, project.id);
           if (dataUri) visionParts.push({ dataUri, alt: att.alt });
         }
 
@@ -1345,7 +1345,7 @@ router.post(
         const dataUri =
           supportRun && att.url.startsWith("data:image/")
             ? att.url
-            : await fetchAttachmentAsDataUri(att.url);
+            : await fetchAttachmentAsDataUri(att.url, project.id);
         if (dataUri) builderImageAttachments.push({ dataUri, alt: att.alt });
       }
       const jobImageAttachments =
@@ -2195,7 +2195,7 @@ router.post(
     try {
       const visionParts: ConverseImageAttachment[] = [];
       for (const att of imageAttachments) {
-        const dataUri = await fetchAttachmentAsDataUri(att.url);
+        const dataUri = await fetchAttachmentAsDataUri(att.url, project.id);
         if (dataUri) visionParts.push({ dataUri, alt: att.alt });
       }
 

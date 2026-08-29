@@ -117,6 +117,7 @@ const requireOwner: RequestHandler = (req, res, next) => {
 
 function buildApp(store = new TestQueueStore()) {
   let nextId = 0;
+  const assertAssets = vi.fn(async () => undefined);
   const app = express();
   app.use(express.json({ limit: "32kb" }));
   app.use(
@@ -125,9 +126,10 @@ function buildApp(store = new TestQueueStore()) {
       requireOwner,
       createId: () => `server-id-${++nextId}`,
       now: () => "2026-08-20T00:00:00.000Z",
+      assertAssets,
     }),
   );
-  return { app, store };
+  return { app, store, assertAssets };
 }
 
 describe("Zero prompt queue governed API", () => {
@@ -230,6 +232,24 @@ describe("Zero prompt queue governed API", () => {
     expect(promoteNext.mock.calls[0]?.[0]).toBe(1);
     expect(edit.mock.calls[0]?.[1].provenance.actorId).toBe(OWNER_ONE);
     expect(remove.mock.calls[0]?.[1].deletedBy).toBe(OWNER_ONE);
+  });
+
+  it("binds only validated project assets to a queued prompt", async () => {
+    const { app, store, assertAssets } = buildApp();
+    const enqueue = vi.spyOn(store, "enqueue");
+
+    const response = await request(app)
+      .post("/projects/1/prompt-queue")
+      .set("x-test-user", OWNER_ONE)
+      .send({ position: 1, text: "Use these files", assetIds: [42, 42, 7] });
+
+    expect(response.status).toBe(201);
+    expect(assertAssets).toHaveBeenCalledWith({
+      ownerUserId: OWNER_ONE,
+      projectId: 1,
+      assetIds: [42, 7],
+    });
+    expect(enqueue.mock.calls[0]?.[1]).toMatchObject({ assetIds: [42, 7] });
   });
 
   it("bounds list responses and rejects an oversized requested page", async () => {

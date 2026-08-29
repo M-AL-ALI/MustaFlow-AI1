@@ -384,6 +384,8 @@ function humanizeTool(tool: string, args: Record<string, unknown>): string {
       return "Listing uploads";
     case "read_upload":
       return "Reading upload";
+    case "place_upload":
+      return "Adding upload to project";
     case "read_inbox":
       return "Reading inbox";
     case "load_skill": {
@@ -604,6 +606,7 @@ const TOOL_ICON: Record<string, React.ElementType> = {
   read_diagnostics: AlertCircle,
   list_uploads: Database,
   read_upload: Database,
+  place_upload: FilePen,
   read_inbox: BookOpen,
   load_skill: BookOpen,
   call_skill: BookOpen,

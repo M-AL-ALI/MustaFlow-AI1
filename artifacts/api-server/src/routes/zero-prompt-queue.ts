@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
 import { requireProjectOwnership } from "../lib/auth";
+import { AssetAdmissionError, assertReadyProjectAssets } from "../lib/asset-registry";
 import {
   ZERO_PROMPT_QUEUE_MAX_ITEMS,
   ZERO_PROMPT_QUEUE_MAX_TEXT_CHARS,
@@ -15,6 +16,7 @@ import {
 
 const MAX_IDENTIFIER_CHARS = 128;
 const MAX_REFERENCES = ZERO_PROMPT_QUEUE_MAX_ITEMS;
+const MAX_QUEUE_ASSETS = 10;
 
 type QueueStore = Pick<
   ZeroPromptQueueStore,
@@ -26,7 +28,25 @@ export type ZeroPromptQueueRouterDependencies = {
   requireOwner?: RequestHandler;
   createId?: () => string;
   now?: () => string;
+  assertAssets?: typeof assertReadyProjectAssets;
 };
+
+function assetIds(value: unknown, res: Response): readonly number[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_QUEUE_ASSETS) {
+    res.status(400).json({
+      code: "queue_request_invalid",
+      error: "Attach no more than 10 files to one queued prompt.",
+    });
+    return null;
+  }
+  const ids = [...new Set(value)];
+  if (ids.some((id) => !Number.isSafeInteger(id) || Number(id) < 1)) {
+    res.status(400).json({ code: "queue_request_invalid", error: "Choose valid attachments." });
+    return null;
+  }
+  return ids.map(Number);
+}
 
 function projectId(req: Request, res: Response): number | null {
   const value = Number(req.params.id);
@@ -149,6 +169,10 @@ function mutationProvenance(actor: string, createId: () => string, now: () => st
 }
 
 function respondWithQueueError(res: Response, error: unknown): void {
+  if (error instanceof AssetAdmissionError) {
+    res.status(error.status).json({ code: error.code, error: error.message });
+    return;
+  }
   const response = zeroPromptQueueHttpError(error);
   res.status(response.status).json(response.body);
 }
@@ -171,6 +195,7 @@ export function createZeroPromptQueueRouter(
   const requireOwner = dependencies.requireOwner ?? requireProjectOwnership;
   const createId = dependencies.createId ?? randomUUID;
   const now = dependencies.now ?? (() => new Date().toISOString());
+  const assertAssets = dependencies.assertAssets ?? assertReadyProjectAssets;
 
   router.get("/projects/:id/prompt-queue", requireOwner, async (req, res): Promise<void> => {
     const id = projectId(req, res);
@@ -204,16 +229,19 @@ export function createZeroPromptQueueRouter(
     const nextPosition = position(req.body?.position, res);
     const currentText = text(req.body?.text, res);
     const itemReferences = references(req.body?.references, res);
+    const attachments = assetIds(req.body?.assetIds, res);
     if (
       id === null ||
       actor === null ||
       nextPosition === null ||
       currentText === null ||
-      itemReferences === null
+      itemReferences === null ||
+      attachments === null
     ) {
       return;
     }
     try {
+      await assertAssets({ ownerUserId: actor, projectId: id, assetIds: attachments });
       const result = await store.enqueue(id, {
         kind: "enqueue",
         order: 1,
@@ -221,6 +249,7 @@ export function createZeroPromptQueueRouter(
         projectId: String(id),
         position: nextPosition,
         text: currentText,
+        assetIds: attachments,
         references: itemReferences,
         provenance: mutationProvenance(actor, createId, now),
       });
