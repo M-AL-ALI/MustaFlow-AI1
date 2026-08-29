@@ -134,3 +134,4 @@
 - [Prod terminal lookup via task_events](prod-task-events-vs-agent-tasks.md) — agent_tasks blocked in prod; use task_events event_type='completed', data column has full terminal JSON.
 - [stopEvidence inside evidence wrapper](stop-evidence-in-evidence-wrapper.md) — TIP5 fix: evidence.stopEvidence.providerReason (not top-level); disease had no stopEvidence at all.
 - [Env-only Republish receipt child](env-only-republish-receipt-child.md) — env-change-only Republish yields new commit hash but same tree; TREE is the binding identity for ceremony closure.
+- [Detached gate wrapper](detached-gate-wrapper.md) — ShellExec already backgrounds run_in_background commands; nesting another shell background can end before the child writes its receipt.

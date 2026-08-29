@@ -2,8 +2,20 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const routeSource = readFileSync(new URL("../routes/assets.ts", import.meta.url), "utf8");
+const routeIndexSource = readFileSync(new URL("../routes/index.ts", import.meta.url), "utf8");
 
 describe("unified asset delivery contract", () => {
+  it("keeps unified asset routes reachable through the authenticated API guard", () => {
+    const knownPrefixes = routeIndexSource.slice(
+      routeIndexSource.indexOf("const KNOWN_PREFIXES"),
+      routeIndexSource.indexOf("router.use((req, res, next)"),
+    );
+    expect(knownPrefixes).toContain('"/assets"');
+    expect(routeIndexSource.indexOf("router.use(assetsRouter)")).toBeGreaterThan(
+      routeIndexSource.indexOf("const KNOWN_PREFIXES"),
+    );
+  });
+
   it("marks structurally accepted private formats as scan-not-required", () => {
     expect(routeSource).toContain('scanState: "not-required"');
     expect(routeSource).not.toContain(
