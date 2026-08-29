@@ -92,6 +92,26 @@ export type SupportOperationsView = {
   deliveries: SupportUserDeliveryView[];
 };
 
+export function presentSupportResolutionSummary(
+  ticket: SupportOperationsView["ticket"],
+): string | null {
+  if (!ticket.resolutionClass) {
+    return null;
+  }
+
+  const article = ticket.resolutionClass === "external" ? "an" : "a";
+  const classification = `This is classified as ${article} ${ticket.resolutionClass} issue.`;
+  if (!ticket.thirdPartyBlocker) {
+    return classification;
+  }
+
+  if (ticket.status === "resolved") {
+    return `This was classified as an external issue. You confirmed it was fixed with ${ticket.thirdPartyBlocker}.`;
+  }
+
+  return `${classification} It is waiting on ${ticket.thirdPartyBlocker}.`;
+}
+
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await authFetch(path, {
     ...init,

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { presentSupportResolutionSummary } from "../../lib/support-operations";
 
 function source(relative: string): string {
   return readFileSync(new URL(relative, import.meta.url), "utf8");
@@ -70,5 +71,29 @@ describe("support resolution and presence surfaces", () => {
     expect(tickets).toContain(
       "<SupportOwnerActions ticketId={ticketId} onMutated={() => refetch()} />",
     );
+  });
+
+  it("never describes a resolved external ticket as still waiting", () => {
+    expect(
+      presentSupportResolutionSummary({
+        id: 12,
+        status: "blocked_on_third_party",
+        resolutionClass: "external",
+        thirdPartyBlocker: "Acceptance Test Provider",
+      }),
+    ).toBe("This is classified as an external issue. It is waiting on Acceptance Test Provider.");
+    expect(
+      presentSupportResolutionSummary({
+        id: 12,
+        status: "resolved",
+        resolutionClass: "external",
+        thirdPartyBlocker: "Acceptance Test Provider",
+      }),
+    ).toBe(
+      "This was classified as an external issue. You confirmed it was fixed with Acceptance Test Provider.",
+    );
+
+    const owner = source("../support-owner-actions.tsx");
+    expect(owner).toContain('operations.ticket.status !== "resolved"');
   });
 });
