@@ -30,6 +30,9 @@ import type {
   AddDomainResponse,
   AddNabuflowOrgSeat201,
   AddNabuflowOrgSeatBody,
+  AdminAccountAccessChangeInput,
+  AdminAccountAccessChangeResponse,
+  AdminAccountAccessResponse,
   AdminAuditLogPage,
   AdminInboxRecentUnread,
   AdminJobQueue,
@@ -210,6 +213,7 @@ import type {
   ListTestRunsParams,
   ListVaultEntries200,
   ListVaultEntriesParams,
+  LookupAdminAccountParams,
   MobileAppSettings,
   MobileAppSettingsInput,
   MobileBuildInput,
@@ -18977,6 +18981,234 @@ export const useRevokeAdminRole = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRevokeAdminRoleMutationOptions(options));
+    }
+
+export const getLookupAdminAccountUrl = (params: LookupAdminAccountParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/admin/accounts/lookup?${stringifiedParams}` : `/api/admin/accounts/lookup`
+}
+
+/**
+ * @summary Look up one account for an Owner access decision
+ */
+export const lookupAdminAccount = async (params: LookupAdminAccountParams, options?: RequestInit): Promise<AdminAccountAccessResponse> => {
+
+  return customFetch<AdminAccountAccessResponse>(getLookupAdminAccountUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getLookupAdminAccountQueryKey = (params?: LookupAdminAccountParams,) => {
+    return [
+    `/api/admin/accounts/lookup`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getLookupAdminAccountQueryOptions = <TData = Awaited<ReturnType<typeof lookupAdminAccount>>, TError = ErrorType<ApiError>>(params: LookupAdminAccountParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof lookupAdminAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getLookupAdminAccountQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof lookupAdminAccount>>> = ({ signal }) => lookupAdminAccount(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof lookupAdminAccount>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type LookupAdminAccountQueryResult = NonNullable<Awaited<ReturnType<typeof lookupAdminAccount>>>
+export type LookupAdminAccountQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Look up one account for an Owner access decision
+ */
+
+export function useLookupAdminAccount<TData = Awaited<ReturnType<typeof lookupAdminAccount>>, TError = ErrorType<ApiError>>(
+ params: LookupAdminAccountParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof lookupAdminAccount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getLookupAdminAccountQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSuspendAdminAccountUrl = (userId: string,) => {
+
+
+
+
+  return `/api/admin/accounts/${userId}/suspend`
+}
+
+/**
+ * @summary Reversibly suspend one account from signing in
+ */
+export const suspendAdminAccount = async (userId: string,
+    adminAccountAccessChangeInput: AdminAccountAccessChangeInput, options?: RequestInit): Promise<AdminAccountAccessChangeResponse> => {
+
+  return customFetch<AdminAccountAccessChangeResponse>(getSuspendAdminAccountUrl(userId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      adminAccountAccessChangeInput,)
+  }
+);}
+
+
+
+
+export const getSuspendAdminAccountMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof suspendAdminAccount>>, TError,{userId: string;data: BodyType<AdminAccountAccessChangeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof suspendAdminAccount>>, TError,{userId: string;data: BodyType<AdminAccountAccessChangeInput>}, TContext> => {
+
+const mutationKey = ['suspendAdminAccount'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof suspendAdminAccount>>, {userId: string;data: BodyType<AdminAccountAccessChangeInput>}> = (props) => {
+          const {userId,data} = props ?? {};
+
+          return  suspendAdminAccount(userId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SuspendAdminAccountMutationResult = NonNullable<Awaited<ReturnType<typeof suspendAdminAccount>>>
+    export type SuspendAdminAccountMutationBody = BodyType<AdminAccountAccessChangeInput>
+    export type SuspendAdminAccountMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Reversibly suspend one account from signing in
+ */
+export const useSuspendAdminAccount = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof suspendAdminAccount>>, TError,{userId: string;data: BodyType<AdminAccountAccessChangeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof suspendAdminAccount>>,
+        TError,
+        {userId: string;data: BodyType<AdminAccountAccessChangeInput>},
+        TContext
+      > => {
+      return useMutation(getSuspendAdminAccountMutationOptions(options));
+    }
+
+export const getRestoreAdminAccountUrl = (userId: string,) => {
+
+
+
+
+  return `/api/admin/accounts/${userId}/restore`
+}
+
+/**
+ * @summary Restore a reversibly suspended account
+ */
+export const restoreAdminAccount = async (userId: string,
+    adminAccountAccessChangeInput: AdminAccountAccessChangeInput, options?: RequestInit): Promise<AdminAccountAccessChangeResponse> => {
+
+  return customFetch<AdminAccountAccessChangeResponse>(getRestoreAdminAccountUrl(userId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      adminAccountAccessChangeInput,)
+  }
+);}
+
+
+
+
+export const getRestoreAdminAccountMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreAdminAccount>>, TError,{userId: string;data: BodyType<AdminAccountAccessChangeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restoreAdminAccount>>, TError,{userId: string;data: BodyType<AdminAccountAccessChangeInput>}, TContext> => {
+
+const mutationKey = ['restoreAdminAccount'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restoreAdminAccount>>, {userId: string;data: BodyType<AdminAccountAccessChangeInput>}> = (props) => {
+          const {userId,data} = props ?? {};
+
+          return  restoreAdminAccount(userId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestoreAdminAccountMutationResult = NonNullable<Awaited<ReturnType<typeof restoreAdminAccount>>>
+    export type RestoreAdminAccountMutationBody = BodyType<AdminAccountAccessChangeInput>
+    export type RestoreAdminAccountMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Restore a reversibly suspended account
+ */
+export const useRestoreAdminAccount = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restoreAdminAccount>>, TError,{userId: string;data: BodyType<AdminAccountAccessChangeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof restoreAdminAccount>>,
+        TError,
+        {userId: string;data: BodyType<AdminAccountAccessChangeInput>},
+        TContext
+      > => {
+      return useMutation(getRestoreAdminAccountMutationOptions(options));
     }
 
 export const getGetAdminAuditLogUrl = (params?: GetAdminAuditLogParams,) => {

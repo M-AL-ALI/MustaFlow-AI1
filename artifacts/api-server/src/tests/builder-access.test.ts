@@ -35,7 +35,7 @@ describe("AI Builder cohort access", () => {
     ]).toEqual(["owner@example.com", "tester@example.com"]);
   });
 
-  it("keeps the production Builder cohort limited to the two approved accounts", () => {
+  it("keeps the production Builder cohort out of the public deployment manifest", () => {
     const configPath = fileURLToPath(new URL("../../../../.replit", import.meta.url));
     const config = readFileSync(configPath, "utf8");
     const productionSection = config.match(
@@ -43,13 +43,7 @@ describe("AI Builder cohort access", () => {
     )?.[1];
 
     expect(productionSection).toBeDefined();
-    const configuredAllowlist = productionSection?.match(
-      /^BUILDER_ALLOWLIST\s*=\s*"([^"]*)"$/m,
-    )?.[1];
-    expect([...parseBuilderAllowlist(configuredAllowlist)]).toEqual([
-      "mus_192@yahoo.com",
-      "alialmshhdany0@gmail.com",
-    ]);
+    expect(productionSection).not.toMatch(/^BUILDER_ALLOWLIST\s*=/m);
   });
 
   it("allows only matching emails when the launch override is off", () => {

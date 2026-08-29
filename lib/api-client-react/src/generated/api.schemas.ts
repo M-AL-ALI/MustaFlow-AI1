@@ -3105,6 +3105,51 @@ export interface AdminAccessReceipt {
   createdAt: string;
 }
 
+/**
+ * @nullable
+ */
+export type AdminAccountAccessStaffRole = typeof AdminAccountAccessStaffRole[keyof typeof AdminAccountAccessStaffRole] | null;
+
+
+export const AdminAccountAccessStaffRole = {
+  owner: 'owner',
+  operator: 'operator',
+  support: 'support',
+  analyst: 'analyst',
+} as const;
+
+export interface AdminAccountAccess {
+  userId: string;
+  /** @nullable */
+  email: string | null;
+  /** @nullable */
+  displayName: string | null;
+  /** @nullable */
+  imageUrl: string | null;
+  banned: boolean;
+  locked: boolean;
+  /** @nullable */
+  staffRole: AdminAccountAccessStaffRole;
+}
+
+export interface AdminAccountAccessResponse {
+  account: AdminAccountAccess;
+}
+
+export interface AdminAccountAccessChangeInput {
+  /**
+     * @minLength 8
+     * @maxLength 500
+     */
+  reason: string;
+}
+
+export interface AdminAccountAccessChangeResponse {
+  ok: boolean;
+  changed: boolean;
+  account: AdminAccountAccess;
+}
+
 export interface AnalyticsPingInput {
   path: string;
   referrer?: string;
@@ -6605,6 +6650,13 @@ export type RevokeAdminRole200 = {
   ok: boolean;
   userId: string;
   note?: string;
+};
+
+export type LookupAdminAccountParams = {
+/**
+ * @maxLength 320
+ */
+email: string;
 };
 
 export type GetAdminAuditLogParams = {

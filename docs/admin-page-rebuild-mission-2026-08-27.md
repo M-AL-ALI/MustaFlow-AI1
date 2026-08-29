@@ -807,3 +807,35 @@ P7 incidental findings closed before commit:
    operational contract forbids the old broad matcher while requiring both new
    declarations. The evidence run passed 21 checks and failed only
    `feature-registry`; publication remained blocked as designed.
+
+### P9 — Owner account-access controls and final proof candidate
+
+P9 closes the remaining Owner operations gap without creating a second identity
+authority. An Owner can look up exactly one account by email, suspend its NabuFlow
+sign-in through Clerk's native reversible ban, and restore it. The operation requires
+an 8–500 character audit reason. The reason is stored on the existing Admin receipt,
+and a failed receipt triggers a compensating Clerk rollback. If both receipt and
+rollback fail, the route returns a typed urgent-review terminal rather than claiming
+success. The Owner cannot suspend their own account or another Owner; the Owner role
+must first be transferred or removed through the existing staff-role control.
+
+The UI is Owner-only and consumes the generated authenticated React client. The API
+consumes the generated request, path and response codecs, so client, route and public
+contract cannot drift into parallel validators. Exact lookup avoids exposing an
+account estate. Account suspension is reversible and does not delete projects, user
+data or history. Staff authority remains a separate, explicit grant and can be
+revoked independently.
+
+The Builder cohort is no longer committed as personal email addresses in the public
+deployment manifest. The public manifest now carries no `BUILDER_ALLOWLIST`; the
+production value belongs in Replit's hidden environment store. A regression guard
+prevents a future personal allowlist from silently returning to the public manifest.
+
+P9 lab evidence before promotion: the generated-client and generated-codec
+reachability gate passes; focused account, access-policy and UI families pass; API
+and web typechecks and lints pass. The full API suite ran serially with 3,091 passing,
+38 inherited lab-environment failures and 5 skipped — exact normalized failure-set
+parity with the recorded base. The full web suite ran serially with 137 files and
+1,238 tests passing, zero failed. Startup migration count remains 150. No manifest,
+package or lockfile changed. Publication and the two-account production walkthrough
+remain required before P9 and the overall Admin mission can be declared closed.

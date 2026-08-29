@@ -27,6 +27,7 @@ export type AdminReceiptInput = {
   targetWorkspaceId?: number | null;
   previousRole?: string | null;
   nextRole?: string | null;
+  reason?: string | null;
   outcome: string;
   requestMethod?: string | null;
   requestPath?: string | null;
@@ -105,6 +106,7 @@ export async function writeAdminReceipt(input: AdminReceiptInput): Promise<void>
     targetWorkspaceId: input.targetWorkspaceId ?? null,
     previousRole: input.previousRole ?? null,
     nextRole: input.nextRole ?? null,
+    reason: input.reason ?? null,
     outcome: input.outcome,
     requestMethod: input.requestMethod ?? null,
     requestPath: input.requestPath ?? null,
@@ -113,6 +115,7 @@ export async function writeAdminReceipt(input: AdminReceiptInput): Promise<void>
 
 const OWNER_ONLY_PATHS: ReadonlyArray<RegExp> = [
   /^\/api\/admin\/roles(?:\/|$)/,
+  /^\/api\/admin\/accounts(?:\/|$)/,
   /^\/api\/admin\/billing\/refund(?:\/|$)/,
   /^\/api\/admin\/(?:providers|spend-ceilings|global-pause|unmask)(?:\/|$)/,
 ];
