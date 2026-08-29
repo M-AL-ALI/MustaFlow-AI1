@@ -771,6 +771,26 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "place_upload",
+      description:
+        "Place a ready upload into this project's restorable source history. Use this before referencing an uploaded image or file in app source; never link a private /api/assets URL from the app.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "integer", description: "Upload id from list_uploads." },
+          path: {
+            type: "string",
+            description: "Optional safe project path, normally under public/assets/.",
+          },
+        },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "list_files",
       description:
         "List paths of files currently in the project (relative to project root). Returns a flat array of strings.",
@@ -5360,12 +5380,29 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
   switch (name) {
     case "list_uploads": {
       try {
-        const { assetsTable, db } = await import("@workspace/db");
-        const { and, eq, desc } = await import("drizzle-orm");
+        const { assetsTable, db, projectsTable } = await import("@workspace/db");
+        const { and, eq, desc, isNull, or, sql } = await import("drizzle-orm");
+        const [project] = await db
+          .select({ ownerUserId: projectsTable.ownerId })
+          .from(projectsTable)
+          .where(eq(projectsTable.id, input.projectId));
+        if (!project) return { ok: false, observation: "ERROR: project not found" };
         const rows = await db
           .select()
           .from(assetsTable)
-          .where(and(eq(assetsTable.projectId, input.projectId), eq(assetsTable.state, "ready")))
+          .where(
+            and(
+              eq(assetsTable.state, "ready"),
+              or(
+                eq(assetsTable.projectId, input.projectId),
+                and(
+                  eq(assetsTable.ownerUserId, project.ownerUserId),
+                  isNull(assetsTable.projectId),
+                  sql`${assetsTable.context}->>'brandRole' = 'logo'`,
+                ),
+              ),
+            ),
+          )
           .orderBy(desc(assetsTable.createdAt))
           .limit(51);
         if (rows.length === 0) return { ok: true, observation: "(no uploads)" };
@@ -5440,16 +5477,28 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
       const id = typeof args.id === "number" ? Math.floor(args.id) : NaN;
       if (!Number.isFinite(id)) return { ok: false, observation: "ERROR: id is required" };
       try {
-        const { assetsTable, db } = await import("@workspace/db");
-        const { and, eq } = await import("drizzle-orm");
+        const { assetsTable, db, projectsTable } = await import("@workspace/db");
+        const { and, eq, isNull, or, sql } = await import("drizzle-orm");
+        const [project] = await db
+          .select({ ownerUserId: projectsTable.ownerId })
+          .from(projectsTable)
+          .where(eq(projectsTable.id, input.projectId));
+        if (!project) return { ok: false, observation: "ERROR: project not found" };
         const [row] = await db
           .select()
           .from(assetsTable)
           .where(
             and(
               eq(assetsTable.id, id),
-              eq(assetsTable.projectId, input.projectId),
               eq(assetsTable.state, "ready"),
+              or(
+                eq(assetsTable.projectId, input.projectId),
+                and(
+                  eq(assetsTable.ownerUserId, project.ownerUserId),
+                  isNull(assetsTable.projectId),
+                  sql`${assetsTable.context}->>'brandRole' = 'logo'`,
+                ),
+              ),
             ),
           );
         if (!row) return { ok: false, observation: `ERROR: upload #${id} not found` };
@@ -5465,6 +5514,35 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         return {
           ok: false,
           observation: `ERROR: read_upload failed — ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+    }
+    case "place_upload": {
+      const id = typeof args.id === "number" ? Math.floor(args.id) : NaN;
+      if (!Number.isFinite(id)) return { ok: false, observation: "ERROR: id is required" };
+      try {
+        const { db, projectsTable } = await import("@workspace/db");
+        const { eq } = await import("drizzle-orm");
+        const [project] = await db
+          .select({ ownerUserId: projectsTable.ownerId })
+          .from(projectsTable)
+          .where(eq(projectsTable.id, input.projectId));
+        if (!project) return { ok: false, observation: "ERROR: project not found" };
+        const { materializeProjectAsset } = await import("../routes/assets");
+        const receipt = await materializeProjectAsset({
+          userId: project.ownerUserId,
+          projectId: input.projectId,
+          assetId: id,
+          path: args.path,
+        });
+        return {
+          ok: true,
+          observation: `Upload #${id} is now a restorable project file at ${receipt.path}. Reference it as ${receipt.src}.`,
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          observation: `ERROR: place_upload failed — ${err instanceof Error ? err.message : String(err)}`,
         };
       }
     }

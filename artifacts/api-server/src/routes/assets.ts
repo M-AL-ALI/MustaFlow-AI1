@@ -113,7 +113,7 @@ async function loadMaterializableAsset(input: {
   return { id: asset.id, filename: asset.filename, mimeType: asset.mimeType, bytes };
 }
 
-async function materializeProjectAsset(input: {
+export async function materializeProjectAsset(input: {
   userId: string;
   projectId: number;
   assetId: number;
