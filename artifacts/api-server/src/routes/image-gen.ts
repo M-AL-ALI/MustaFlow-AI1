@@ -31,6 +31,7 @@ import {
 import { storeUploadedImage, getImageBuffer } from "../lib/image-storage";
 import { IMAGE_CREDIT_COSTS } from "./image-credits";
 import { logger } from "../lib/logger";
+import { presentPrivateImage } from "../lib/image-presentation";
 import { checkProjectAccess } from "../lib/auth";
 import { resolveTierForUser } from "../lib/public-ai/authed-user";
 import { consumeOraQuota, refundOraQuota } from "../lib/public-ai/ora-usage";
@@ -292,10 +293,10 @@ router.post(
 
       res.status(201).json({
         imageId,
-        fileUrl,
-        thumbnailUrl,
+        fileUrl: `/api/images/${imageId}/file`,
+        thumbnailUrl: `/api/images/${imageId}/file`,
         creditCost: 0,
-        image: updated,
+        image: presentPrivateImage(updated),
       });
     } catch (err) {
       logger.warn({ err }, "image-gen: unexpected error in /images/upload");
@@ -333,8 +334,8 @@ router.get("/images/status/:jobId", async (req, res): Promise<void> => {
     jobId: job.jobId,
     imageId: job.imageId,
     status: job.status,
-    fileUrl: job.status === "completed" ? (job.fileUrl ?? null) : null,
-    thumbnailUrl: job.status === "completed" ? (job.thumbnailUrl ?? null) : null,
+    fileUrl: job.status === "completed" ? `/api/images/${job.imageId}/file` : null,
+    thumbnailUrl: job.status === "completed" ? `/api/images/${job.imageId}/file` : null,
     error: job.status === "failed" ? (job.error ?? null) : null,
   });
 });
@@ -395,7 +396,7 @@ router.get("/images", async (req, res): Promise<void> => {
     .where(and(...conditions));
 
   res.json({
-    images: rows,
+    images: rows.map(presentPrivateImage),
     total: countResult?.count ?? 0,
     limit,
     offset,
@@ -432,7 +433,7 @@ router.get("/images/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(row);
+  res.json(presentPrivateImage(row));
 });
 
 // ── GET /images/:id/file ─────────────────────────────────────────────────────

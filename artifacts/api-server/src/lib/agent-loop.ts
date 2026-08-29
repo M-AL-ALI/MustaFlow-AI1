@@ -5316,18 +5316,18 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
   switch (name) {
     case "list_uploads": {
       try {
-        const { db, projectUploadsTable } = await import("@workspace/db");
-        const { eq, desc } = await import("drizzle-orm");
+        const { assetsTable, db } = await import("@workspace/db");
+        const { and, eq, desc } = await import("drizzle-orm");
         const rows = await db
           .select()
-          .from(projectUploadsTable)
-          .where(eq(projectUploadsTable.projectId, input.projectId))
-          .orderBy(desc(projectUploadsTable.createdAt));
+          .from(assetsTable)
+          .where(and(eq(assetsTable.projectId, input.projectId), eq(assetsTable.state, "ready")))
+          .orderBy(desc(assetsTable.createdAt));
         if (rows.length === 0) return { ok: true, observation: "(no uploads)" };
         const summary = rows
           .map(
             (r) =>
-              `#${r.id}  ${r.filename}  (${r.mimeType}, ${r.sizeBytes} bytes${r.textPreview ? ", textPreview" : ""})`,
+              `#${r.id}  ${r.filename}  (${r.mimeType}, ${r.sizeBytes} bytes${r.textPreview ? ", readable text" : ""}; source ${r.source}; version ${r.versionId ?? "unbound"})`,
           )
           .join("\n");
         return { ok: true, observation: summary };
@@ -5388,13 +5388,17 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
       const id = typeof args.id === "number" ? Math.floor(args.id) : NaN;
       if (!Number.isFinite(id)) return { ok: false, observation: "ERROR: id is required" };
       try {
-        const { db, projectUploadsTable } = await import("@workspace/db");
+        const { assetsTable, db } = await import("@workspace/db");
         const { and, eq } = await import("drizzle-orm");
         const [row] = await db
           .select()
-          .from(projectUploadsTable)
+          .from(assetsTable)
           .where(
-            and(eq(projectUploadsTable.id, id), eq(projectUploadsTable.projectId, input.projectId)),
+            and(
+              eq(assetsTable.id, id),
+              eq(assetsTable.projectId, input.projectId),
+              eq(assetsTable.state, "ready"),
+            ),
           );
         if (!row) return { ok: false, observation: `ERROR: upload #${id} not found` };
         if (row.textPreview) {

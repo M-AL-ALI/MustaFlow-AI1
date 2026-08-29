@@ -1,4 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
+import { formatAssetBytes, uploadProjectAsset } from "@/lib/asset-upload";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   X,
@@ -77,17 +78,20 @@ type ZeroMessage = {
   planMode: boolean;
   plan?: Record<string, unknown> | null;
   origin?: string | null;
+  attachments?: Array<{ kind: string; url?: string; alt?: string; assetId?: number }> | null;
   createdAt: string;
 };
 
 type PendingAttachment = {
   kind: "image" | "file";
   name: string;
-  /** objectPath stored in R2/local storage for images */
+  /** Authenticated content route for the shared asset registry. */
   url?: string;
-  /** For non-image uploads registered in project uploads */
-  uploadId?: number;
+  assetId?: number;
   uploading?: boolean;
+  progress?: number;
+  resized?: boolean;
+  abortController?: AbortController;
   error?: string;
 };
 
@@ -210,37 +214,6 @@ function savePersistedMode(mode: AgentMode) {
   } catch {
     /* ignore */
   }
-}
-
-/** Resize an image file to ≤ 1500 px on either side for the vision model. */
-async function resizeImageForVision(file: File): Promise<Blob> {
-  const MAX = 1500;
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width <= MAX && height <= MAX) {
-        resolve(file);
-        return;
-      }
-      const scale = Math.min(MAX / width, MAX / height);
-      width = Math.round(width * scale);
-      height = Math.round(height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob((b) => resolve(b ?? file), file.type, 0.92);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(file);
-    };
-    img.src = url;
-  });
 }
 
 // Spec: user messages LEFT, Zero messages RIGHT
@@ -446,6 +419,11 @@ export function ZeroAgentPanel({
   const appliedScrollTaskIdRef = useRef<number | null>(null);
   const appliedSupportSessionRef = useRef<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
+  const [assetQuota, setAssetQuota] = useState<{
+    usedBytes: number;
+    reservedBytes: number;
+    limitBytes: number;
+  } | null>(null);
   const creditCosts = useBuilderCreditCosts();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -543,115 +521,88 @@ export function ZeroAgentPanel({
     savePersistedMode(m);
   }, []);
 
+  const loadAssetQuota = useCallback(async () => {
+    const response = await authFetch(`/api/projects/${projectId}/assets/quota`);
+    if (!response.ok) return;
+    setAssetQuota(
+      (await response.json()) as {
+        usedBytes: number;
+        reservedBytes: number;
+        limitBytes: number;
+      },
+    );
+  }, [projectId]);
+
+  useEffect(() => {
+    if (isOpen) void loadAssetQuota();
+  }, [isOpen, loadAssetQuota]);
+
   // ── File upload ──────────────────────────────────────────────────────────
-  const uploadImage = useCallback(
-    async (file: File): Promise<PendingAttachment | null> => {
-      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) return null;
-      if (file.size > 5 * 1024 * 1024) return null;
-      setUploadingCount((c) => c + 1);
-      try {
-        const blob = await resizeImageForVision(file);
-        const res = await authFetch(`/api/projects/${projectId}/attachments/upload-url`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ contentType: blob.type || file.type, sizeBytes: blob.size }),
-        });
-        if (!res.ok) return null;
-        const { uploadUrl, objectPath } = (await res.json()) as {
-          uploadUrl: string;
-          objectPath: string;
-        };
-        const put = await fetch(uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": blob.type || file.type },
-          body: blob,
-        });
-        if (!put.ok) return null;
-        return { kind: "image", name: file.name, url: objectPath };
-      } catch {
-        return null;
-      } finally {
-        setUploadingCount((c) => Math.max(0, c - 1));
-      }
-    },
-    [projectId],
-  );
-
-  const uploadNonImage = useCallback(
-    async (file: File): Promise<PendingAttachment | null> => {
-      setUploadingCount((c) => c + 1);
-      try {
-        const reqRes = await authFetch(`/api/projects/${projectId}/uploads/request-url`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            name: file.name,
-            size: file.size,
-            contentType: file.type || "application/octet-stream",
-          }),
-        });
-        if (!reqRes.ok) return null;
-        const { uploadURL, objectPath } = (await reqRes.json()) as {
-          uploadURL: string;
-          objectPath: string;
-        };
-        const put = await fetch(uploadURL, {
-          method: "PUT",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file,
-        });
-        if (!put.ok) return null;
-        const regRes = await authFetch(`/api/projects/${projectId}/uploads`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            objectPath,
-            name: file.name,
-            sizeBytes: file.size,
-            contentType: file.type || "application/octet-stream",
-          }),
-        });
-        if (!regRes.ok) return null;
-        const row = (await regRes.json()) as { id: number; filename: string };
-        return { kind: "file", name: row.filename, uploadId: row.id };
-      } catch {
-        return null;
-      } finally {
-        setUploadingCount((c) => Math.max(0, c - 1));
-      }
-    },
-    [projectId],
-  );
-
   const handleFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const list = Array.from(files).slice(0, 4);
+    async (files: FileList | File[], source: "picker" | "paste" | "drop" = "picker") => {
+      const list = Array.from(files);
       for (const file of list) {
-        const placeholder: PendingAttachment = { kind: "image", name: file.name, uploading: true };
+        const abortController = new AbortController();
+        const placeholder: PendingAttachment = {
+          kind: file.type.startsWith("image/") ? "image" : "file",
+          name: file.name,
+          uploading: true,
+          progress: 0,
+          abortController,
+        };
         setAttachments((prev) => [...prev, placeholder]);
-        const result = file.type.startsWith("image/")
-          ? await uploadImage(file)
-          : await uploadNonImage(file);
-        setAttachments((prev) =>
-          prev.map((a) =>
-            a === placeholder
-              ? result
-                ? { ...result, uploading: false }
-                : {
-                    kind: "file" as const,
-                    name: file.name,
+        setUploadingCount((count) => count + 1);
+        try {
+          const result = await uploadProjectAsset({
+            projectId,
+            file,
+            source,
+            signal: abortController.signal,
+            onProgress: (progress) => {
+              setAttachments((current) =>
+                current.map((item) => (item === placeholder ? { ...item, progress } : item)),
+              );
+            },
+          });
+          setAttachments((current) =>
+            current.map((item) =>
+              item === placeholder
+                ? {
+                    kind: result.mimeType.startsWith("image/") ? "image" : "file",
+                    name: result.name,
+                    assetId: result.assetId,
+                    url: result.contentUrl,
+                    resized: result.resized,
                     uploading: false,
-                    error: "Upload failed",
+                    progress: 100,
                   }
-              : a,
-          ),
-        );
+                : item,
+            ),
+          );
+        } catch (error) {
+          setAttachments((current) =>
+            current.map((item) =>
+              item === placeholder
+                ? {
+                    ...item,
+                    uploading: false,
+                    error:
+                      error instanceof DOMException && error.name === "AbortError"
+                        ? "Upload cancelled"
+                        : error instanceof Error
+                          ? error.message
+                          : "The upload could not be completed.",
+                  }
+                : item,
+            ),
+          );
+        } finally {
+          setUploadingCount((count) => Math.max(0, count - 1));
+          void loadAssetQuota();
+        }
       }
     },
-    [uploadImage, uploadNonImage],
+    [loadAssetQuota, projectId],
   );
 
   // ── Auto-scroll ──────────────────────────────────────────────────────────
@@ -706,7 +657,7 @@ export function ZeroAgentPanel({
       // Non-image file uploads: append file names to message so the agent can
       // access them via list_uploads/read_upload tools (API only accepts image kind)
       const fileAttachments = attachments.filter(
-        (a) => a.kind === "file" && a.uploadId && !a.uploading && !a.error,
+        (a) => a.kind === "file" && a.assetId && !a.uploading && !a.error,
       );
       const fileContext =
         fileAttachments.length > 0
@@ -1039,6 +990,14 @@ export function ZeroAgentPanel({
           isDetached && "top-10 bottom-10 right-6 rounded-xl border shadow-2xl",
         )}
         style={{ width }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer.files.length) return;
+          event.preventDefault();
+          void handleFiles(event.dataTransfer.files, "drop");
+        }}
       >
         {/* ── Header ── */}
         <div className="shrink-0 flex items-center gap-2 px-3 h-11 border-b border-border bg-card/80 backdrop-blur-sm">
@@ -1234,7 +1193,17 @@ export function ZeroAgentPanel({
                       )}
                     >
                       {isUser ? (
-                        <UserBubble text={msg.content} />
+                        <UserBubble
+                          text={msg.content}
+                          attachments={(msg.attachments ?? [])
+                            .filter((attachment) => attachment.kind === "image" && attachment.url)
+                            .map((attachment) => ({
+                              kind: "image" as const,
+                              name: attachment.alt ?? "Attached image",
+                              url: attachment.url,
+                              assetId: attachment.assetId,
+                            }))}
+                        />
                       ) : isPlanCard ? (
                         <ZeroPlanBubble
                           plan={planPayload as StructuredPlan}
@@ -1355,8 +1324,14 @@ export function ZeroAgentPanel({
                     <Paperclip className="h-2.5 w-2.5 shrink-0" />
                   )}
                   <span className="truncate">{a.name}</span>
+                  {a.uploading && <span className="tabular-nums">{a.progress ?? 0}%</span>}
+                  {a.resized && !a.uploading && <span title="Resized before upload">resized</span>}
+                  {a.error && <span className="text-destructive truncate">{a.error}</span>}
                   <button
-                    onClick={() => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+                    onClick={() => {
+                      a.abortController?.abort();
+                      setAttachments((prev) => prev.filter((_, j) => j !== i));
+                    }}
                     className="ml-0.5 text-muted-foreground/50 hover:text-foreground shrink-0"
                   >
                     ×
@@ -1435,7 +1410,7 @@ export function ZeroAgentPanel({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.txt,.md,.csv,.json"
+              accept=".pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.webm,.mp4"
               multiple
               className="hidden"
               onChange={(e) => {
@@ -1451,12 +1426,21 @@ export function ZeroAgentPanel({
                 e.preventDefault();
                 fileInputRef.current?.click();
               }}
-              disabled={isBusy || attachments.length >= 4}
+              disabled={isBusy}
               className="shrink-0 flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               title="Attach image (right-click for file)"
             >
               <Paperclip className="h-3.5 w-3.5" />
             </button>
+            {assetQuota && (
+              <span
+                className="shrink-0 text-[9px] text-muted-foreground/60 tabular-nums"
+                title="Storage used by all uploads on this account"
+              >
+                {formatAssetBytes(assetQuota.usedBytes + assetQuota.reservedBytes)} /{" "}
+                {formatAssetBytes(assetQuota.limitBytes)}
+              </span>
+            )}
 
             {/* Textarea — drag-resizable vertically */}
             <textarea
@@ -1464,6 +1448,11 @@ export function ZeroAgentPanel({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={(event) => {
+                if (!event.clipboardData.files.length) return;
+                event.preventDefault();
+                void handleFiles(event.clipboardData.files, "paste");
+              }}
               placeholder={
                 planMode
                   ? "Describe what to plan…"

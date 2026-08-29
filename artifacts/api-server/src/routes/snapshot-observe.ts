@@ -1,12 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   agentTasksTable,
   chatMessagesTable,
   db,
   projectFilesTable,
+  projectVersionsTable,
   projectsTable,
 } from "@workspace/db";
 import type { AgentMode } from "../lib/ai";
@@ -25,6 +26,8 @@ import {
   responseSucceededTerminal,
 } from "@workspace/ora-contracts";
 import { persistZeroTerminal, zeroTerminalRef } from "../lib/zero-terminal-persistence";
+import { completeAsset, rejectReservedAsset, reserveAsset } from "../lib/asset-registry";
+import { deleteAssetObject, putAssetBuffer } from "../lib/asset-r2";
 
 export const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 const SNAPSHOT_UNAVAILABLE_MESSAGE =
@@ -69,6 +72,7 @@ export type SnapshotProject = {
   builderMode: string;
   containerId: string | null;
   containerStatus: string;
+  versionId?: number | null;
 };
 
 export type SnapshotCompletionInput = {
@@ -76,6 +80,8 @@ export type SnapshotCompletionInput = {
   previewClass: SnapshotPreviewClass;
   dataUri: string;
   actorUserId: string;
+  path: string;
+  viewport: { width: number; height: number; deviceMode: string };
 };
 
 export type SnapshotObserveDependencies = {
@@ -233,6 +239,16 @@ export function createSnapshotObserveRouter(
         previewClass: snapshotPreviewClass(project),
         dataUri,
         actorUserId,
+        path: parsed.data.path,
+        viewport: {
+          ...parsed.data.viewport,
+          deviceMode:
+            parsed.data.viewport.width <= 480
+              ? "phone"
+              : parsed.data.viewport.width <= 900
+                ? "tablet"
+                : "desktop",
+        },
       });
       res.status(200).json(result);
     } catch (error) {
@@ -250,25 +266,78 @@ export function createSnapshotObserveRouter(
 }
 
 async function loadSnapshotProject(projectId: number): Promise<SnapshotProject | null> {
-  const [project] = await db
-    .select({
-      id: projectsTable.id,
-      name: projectsTable.name,
-      ownerId: projectsTable.ownerId,
-      status: projectsTable.status,
-      agentMode: projectsTable.agentMode,
-      builderMode: projectsTable.builderMode,
-      containerId: projectsTable.containerId,
-      containerStatus: projectsTable.containerStatus,
-    })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
-  return project ?? null;
+  const [[project], [version]] = await Promise.all([
+    db
+      .select({
+        id: projectsTable.id,
+        name: projectsTable.name,
+        ownerId: projectsTable.ownerId,
+        status: projectsTable.status,
+        agentMode: projectsTable.agentMode,
+        builderMode: projectsTable.builderMode,
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId)),
+    db
+      .select({ id: projectVersionsTable.id })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.projectId, projectId))
+      .orderBy(desc(projectVersionsTable.id))
+      .limit(1),
+  ]);
+  return project ? { ...project, versionId: version?.id ?? null } : null;
 }
 
 async function completeSnapshotObservation(
   input: SnapshotCompletionInput,
 ): Promise<Record<string, unknown>> {
+  const png = Buffer.from(input.dataUri.slice(input.dataUri.indexOf(",") + 1), "base64");
+  const asset = await reserveAsset({
+    ownerUserId: input.project.ownerId,
+    actorUserId: input.actorUserId,
+    projectId: input.project.id,
+    threadKey: `project:${input.project.id}`,
+    scope: "project",
+    kind: "snapshot",
+    source: "observe",
+    filename: `preview-${randomUUID()}.png`,
+    mimeType: "image/png",
+    sizeBytes: png.length,
+    versionId: input.project.versionId,
+    context: { route: input.path, viewport: input.viewport },
+  });
+  try {
+    await putAssetBuffer({ key: asset.storageKey, body: png, contentType: "image/png" });
+    await completeAsset({
+      assetId: asset.id,
+      ownerUserId: input.project.ownerId,
+      actorUserId: input.actorUserId,
+      sha256: createHash("sha256").update(png).digest("hex"),
+      scanState: "not-required",
+    });
+  } catch (error) {
+    try {
+      await deleteAssetObject(asset.storageKey);
+    } catch {
+      // The rejected registry row is the durable truth when provider cleanup is unavailable.
+    }
+    await rejectReservedAsset({
+      assetId: asset.id,
+      ownerUserId: input.project.ownerId,
+      actorUserId: input.actorUserId,
+      code: "asset_storage_unavailable",
+    });
+    throw error;
+  }
+  const persistedAttachment = {
+    kind: "image",
+    url: `/api/assets/${asset.id}/content`,
+    alt: `${input.previewClass} preview at ${input.path}`,
+    assetId: asset.id,
+    versionId: input.project.versionId,
+  };
   const deduction = await deductCreditsAtomic(input.actorUserId, 1, {
     type: "converse",
     description: `Project observation — project ${input.project.id}`,
@@ -315,6 +384,7 @@ async function completeSnapshotObservation(
       planMode: false,
       origin: "snapshot_control",
       intentReceiptId: receipt.receiptId,
+      attachments: [persistedAttachment],
     })
     .returning();
   if (!userMessage) throw new Error("snapshot observation message unavailable");
@@ -448,6 +518,7 @@ async function completeSnapshotObservation(
     assistantMessageId: assistantMessage.id,
     taskId: task.id,
     terminalRef: zeroTerminalRef(terminal),
+    asset: persistedAttachment,
   };
 }
 

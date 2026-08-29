@@ -1,4 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
+import { formatAssetBytes, uploadAccountAsset } from "@/lib/asset-upload";
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
   ImagePlus,
@@ -15,6 +16,8 @@ import {
   Upload,
   Pencil,
   X,
+  FileText,
+  HardDrive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +59,25 @@ interface JobStatusResponse {
   fileUrl?: string;
   thumbnailUrl?: string;
   error?: string;
+}
+
+interface UnifiedAsset {
+  id: number;
+  kind: string;
+  source: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  scanState: string;
+  contentUrl: string;
+  createdAt: string;
+}
+
+interface StoragePlan {
+  sku: string;
+  label: string;
+  allowanceBytes: number;
+  monthlyCents: number;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -255,6 +277,15 @@ export default function ImageStudioPage() {
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [loadingImages, setLoadingImages] = useState(true);
+  const [assets, setAssets] = useState<UnifiedAsset[]>([]);
+  const [quota, setQuota] = useState<{
+    usedBytes: number;
+    reservedBytes: number;
+    limitBytes: number;
+  }>();
+  const [storagePlans, setStoragePlans] = useState<StoragePlan[]>([]);
+  const [storageBusy, setStorageBusy] = useState<string | null>(null);
+  const [assetNotice, setAssetNotice] = useState<string | null>(null);
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingJobsRef = useRef<Set<string>>(new Set());
@@ -286,9 +317,29 @@ export default function ImageStudioPage() {
     }
   }, []);
 
+  const fetchAssets = useCallback(async () => {
+    const [assetResponse, storageResponse] = await Promise.all([
+      authFetch("/api/assets?limit=100"),
+      authFetch("/api/assets/storage-plans"),
+    ]);
+    if (assetResponse.ok) {
+      const body = (await assetResponse.json()) as { assets?: UnifiedAsset[] };
+      setAssets(body.assets ?? []);
+    }
+    if (storageResponse.ok) {
+      const body = (await storageResponse.json()) as {
+        quota?: { usedBytes: number; reservedBytes: number; limitBytes: number };
+        plans?: StoragePlan[];
+      };
+      setQuota(body.quota);
+      setStoragePlans(body.plans ?? []);
+    }
+  }, []);
+
   useEffect(() => {
     void fetchImages();
-  }, [fetchImages]);
+    void fetchAssets();
+  }, [fetchAssets, fetchImages]);
 
   // Polling for pending jobs
   useEffect(() => {
@@ -386,21 +437,57 @@ export default function ImageStudioPage() {
     if (!file) return;
     e.target.value = "";
     setUploadError(null);
+    setAssetNotice(null);
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("image", file);
-      const res = await authFetch("/api/images/upload", { method: "POST", body: formData });
-      const body = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        setUploadError(body.error ?? "Upload failed");
-        return;
-      }
-      await fetchImages();
-    } catch {
-      setUploadError("Network error — please try again");
+      const uploaded = await uploadAccountAsset({ file, source: "picker" });
+      setAssetNotice(
+        uploaded.resized
+          ? "The image was resized for a faster app while keeping full visual detail."
+          : `${uploaded.name} is ready in your private asset library.`,
+      );
+      await fetchAssets();
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Network error — please try again");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleAssetDelete = async (asset: UnifiedAsset) => {
+    setUploadError(null);
+    const response = await authFetch(`/api/assets/${asset.id}`, { method: "DELETE" });
+    const body = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      setUploadError(body.error ?? "This asset could not be deleted.");
+      return;
+    }
+    setAssets((current) => current.filter((entry) => entry.id !== asset.id));
+    await fetchAssets();
+  };
+
+  const startStorageCheckout = async (sku: string) => {
+    setStorageBusy(sku);
+    setUploadError(null);
+    try {
+      const response = await authFetch("/api/assets/storage-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        checkoutUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !body.checkoutUrl) {
+        setUploadError(body.error ?? "Storage checkout is temporarily unavailable.");
+        return;
+      }
+      window.location.assign(body.checkoutUrl);
+    } catch {
+      setUploadError("Storage checkout is temporarily unavailable.");
+    } finally {
+      setStorageBusy(null);
     }
   };
 
@@ -455,8 +542,10 @@ export default function ImageStudioPage() {
           <ImagePlus className="h-5 w-5 text-primary" />
         </div>
         <div>
-          <h1 className="text-base font-semibold">Image Studio</h1>
-          <p className="text-xs text-muted-foreground">Generate AI images for your projects</p>
+          <h1 className="text-base font-semibold">Assets &amp; Image Studio</h1>
+          <p className="text-xs text-muted-foreground">
+            Upload once, see where assets are used, and generate project-ready images
+          </p>
         </div>
       </div>
 
@@ -702,14 +791,15 @@ export default function ImageStudioPage() {
 
           {/* Upload section */}
           <div className="border-t border-border pt-4 space-y-2">
-            <p className="text-xs font-medium text-foreground">Upload image</p>
+            <p className="text-xs font-medium text-foreground">Upload an asset</p>
             <p className="text-[10px] text-muted-foreground">
-              Add an existing image to your gallery (free). You can then edit it with AI.
+              Images, screenshots, documents, spreadsheets and short recordings share one private
+              library and one 500 MB allowance.
             </p>
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
+              accept="image/*,.pdf,.txt,.md,.csv,.json,.docx,.xlsx,.pptx,.webm,.mp4"
               className="hidden"
               onChange={(e) => void handleFileChange(e)}
             />
@@ -740,11 +830,115 @@ export default function ImageStudioPage() {
                 {uploadError}
               </p>
             )}
+            {assetNotice && <p className="text-[10px] text-emerald-500">{assetNotice}</p>}
+          </div>
+
+          <div className="border-t border-border pt-4 space-y-2" data-testid="asset-quota-panel">
+            <div className="flex items-center gap-2">
+              <HardDrive className="h-3.5 w-3.5 text-primary" />
+              <p className="text-xs font-medium text-foreground">Storage</p>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              {quota
+                ? `${formatAssetBytes(quota.usedBytes + quota.reservedBytes)} used of ${formatAssetBytes(quota.limitBytes)}`
+                : "Reading your private storage allowance…"}
+            </p>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full bg-primary transition-all"
+                style={{
+                  width: `${Math.min(100, quota ? ((quota.usedBytes + quota.reservedBytes) / quota.limitBytes) * 100 : 0)}%`,
+                }}
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-1.5 pt-1">
+              {storagePlans.map((plan) => (
+                <button
+                  key={plan.sku}
+                  type="button"
+                  onClick={() => void startStorageCheckout(plan.sku)}
+                  disabled={storageBusy !== null}
+                  className="flex items-center justify-between rounded-lg border border-border bg-muted px-2.5 py-2 text-[10px] hover:text-foreground disabled:opacity-50"
+                >
+                  <span>Add {plan.label}</span>
+                  <span className="font-semibold">
+                    ${(plan.monthlyCents / 100).toFixed(2)}/month
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
         {/* Right panel — Gallery */}
         <div className="flex-1 overflow-y-auto p-4">
+          <section className="mb-6" data-testid="unified-asset-library">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Private asset library</h2>
+                <p className="text-[10px] text-muted-foreground">
+                  Every stored asset has a tenant-scoped receipt. Referenced assets cannot be
+                  deleted.
+                </p>
+              </div>
+              <span className="text-[10px] text-muted-foreground">{assets.length} recent</span>
+            </div>
+            {assets.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
+                Upload an asset or ask Zero to observe a preview. It will appear here.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                {assets.map((asset) => (
+                  <article
+                    key={asset.id}
+                    className="overflow-hidden rounded-xl border border-border bg-card"
+                  >
+                    {asset.mimeType.startsWith("image/") ? (
+                      <img
+                        src={asset.contentUrl}
+                        alt={asset.filename}
+                        className="aspect-square w-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="flex aspect-square items-center justify-center bg-muted">
+                        <FileText className="h-8 w-8 text-muted-foreground/50" />
+                      </div>
+                    )}
+                    <div className="space-y-1 p-2">
+                      <p className="truncate text-[11px] font-medium" title={asset.filename}>
+                        {asset.filename}
+                      </p>
+                      <p className="text-[9px] text-muted-foreground">
+                        {formatAssetBytes(asset.sizeBytes)} · {asset.source}
+                      </p>
+                      <div className="flex gap-1">
+                        <a
+                          href={asset.contentUrl}
+                          className="flex-1 rounded bg-muted px-2 py-1 text-center text-[9px] hover:text-foreground"
+                        >
+                          Open
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => void handleAssetDelete(asset)}
+                          className="rounded bg-muted p-1 text-muted-foreground hover:text-destructive"
+                          aria-label={`Delete ${asset.filename}`}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="mb-3 border-t border-border pt-4">
+            <h2 className="text-sm font-semibold">Generated images</h2>
+          </div>
           {loadingImages ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
