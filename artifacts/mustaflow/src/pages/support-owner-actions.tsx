@@ -3,6 +3,7 @@ import { Clock3, Loader2, MailCheck, ShieldCheck } from "lucide-react";
 import {
   getOwnerSupportOperations,
   postSupportOperation,
+  presentSupportResolutionSummary,
   presentSupportEmailStatus,
   type SupportGrantEventView,
   type SupportOperationsView,
@@ -83,7 +84,11 @@ export function SupportOwnerActions({
   const activeGrants = operations.grants.filter((grant) => grant.status === "active");
   const proposals = operations.sessions.filter((session) => session.status === "proposal_ready");
   const evidence = operations.ticket.resolutionEvidence ?? {};
-  const guidance = typeof evidence.guidance === "string" ? evidence.guidance : null;
+  const guidance =
+    operations.ticket.status !== "resolved" && typeof evidence.guidance === "string"
+      ? evidence.guidance
+      : null;
+  const resolutionSummary = presentSupportResolutionSummary(operations.ticket);
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-card p-5">
@@ -92,14 +97,7 @@ export function SupportOwnerActions({
         <h3 className="text-sm font-semibold">Consent and resolution</h3>
       </div>
 
-      {operations.ticket.resolutionClass && (
-        <p className="text-sm">
-          This is classified as a <strong>{operations.ticket.resolutionClass} issue</strong>.
-          {operations.ticket.thirdPartyBlocker
-            ? ` It is waiting on ${operations.ticket.thirdPartyBlocker}.`
-            : ""}
-        </p>
-      )}
+      {resolutionSummary && <p className="text-sm">{resolutionSummary}</p>}
       {guidance && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{guidance}</p>}
 
       {operations.deliveries.length > 0 && (
