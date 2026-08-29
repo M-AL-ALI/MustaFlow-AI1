@@ -197,6 +197,7 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
 import { loadPrimaryArtifactFiles } from "./artifacts";
+import { canonicalizePrimaryArtifactFiles } from "./primary-artifact-files";
 
 /**
  * Pre-build gate for agentic projects.
@@ -8126,11 +8127,13 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
     content: string;
     mimeType: string;
   }>;
-  const builderFiles: BuilderFile[] = stagingFiles.map((f) => ({
-    path: f.path,
-    content: f.content,
-    mimeType: f.mimeType,
-  }));
+  const builderFiles: BuilderFile[] = canonicalizePrimaryArtifactFiles(
+    stagingFiles.map((f) => ({
+      path: f.path,
+      content: f.content,
+      mimeType: f.mimeType,
+    })),
+  );
 
   const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
   if (!project) throw new Error("Project not found");

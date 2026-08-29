@@ -15,6 +15,20 @@ export interface PrimaryArtifactFile {
 }
 
 /**
+ * Canonicalize an in-memory primary-artifact snapshot before it crosses the
+ * trusted-build boundary. Staged agent reviews may contain the same path more
+ * than once while a draft is assembled; the final occurrence is the accepted
+ * draft value. Trusted builds require one UTF-8-sorted entry per path.
+ */
+export function canonicalizePrimaryArtifactFiles(
+  files: readonly PrimaryArtifactFile[],
+): PrimaryArtifactFile[] {
+  const filesByPath = new Map<string, PrimaryArtifactFile>();
+  for (const file of files) filesByPath.set(file.path, { ...file });
+  return [...filesByPath.values()].sort((left, right) => compareUtf8(left.path, right.path));
+}
+
+/**
  * Keep an app's executable file set inside one artifact boundary.
  *
  * A project may contain several artifacts with legitimate overlapping paths
@@ -41,5 +55,5 @@ export function selectPrimaryArtifactFiles(
       mimeType: row.mimeType,
     });
   }
-  return [...filesByPath.values()].sort((left, right) => compareUtf8(left.path, right.path));
+  return canonicalizePrimaryArtifactFiles([...filesByPath.values()]);
 }

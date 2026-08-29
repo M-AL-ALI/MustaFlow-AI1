@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { compareUtf8 } from "@workspace/tenant-runtime-contracts";
-import { selectPrimaryArtifactFiles } from "./primary-artifact-files";
+import {
+  canonicalizePrimaryArtifactFiles,
+  selectPrimaryArtifactFiles,
+} from "./primary-artifact-files";
 
 const PROJECT_52_ROWS = [
   {
@@ -84,6 +87,26 @@ const PROJECT_52_ROWS = [
 ] as const;
 
 describe("primary artifact file boundary", () => {
+  it("canonicalizes a repeated staged path before trusted-build validation", () => {
+    const selected = canonicalizePrimaryArtifactFiles([
+      { path: "src/z.ts", content: "z", mimeType: "text/typescript" },
+      { path: "src/a.ts", content: "old", mimeType: "text/typescript" },
+      { path: "src/a.ts", content: "accepted", mimeType: "text/typescript" },
+    ]);
+
+    expect(selected).toEqual([
+      { path: "src/a.ts", content: "accepted", mimeType: "text/typescript" },
+      { path: "src/z.ts", content: "z", mimeType: "text/typescript" },
+    ]);
+  });
+
+  it("routes reviewed staging snapshots through the canonicalizer", () => {
+    const jobs = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
+
+    expect(jobs).toContain("canonicalizePrimaryArtifactFiles(");
+    expect(jobs).toMatch(/canonicalizePrimaryArtifactFiles\(\s*stagingFiles\.map/);
+  });
+
   it("composes Project 52's legacy base with primary overrides and excludes siblings", () => {
     const selected = selectPrimaryArtifactFiles(PROJECT_52_ROWS, 52, 100);
 

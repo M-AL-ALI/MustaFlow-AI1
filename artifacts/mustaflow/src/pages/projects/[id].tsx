@@ -3477,7 +3477,13 @@ export default function ProjectWorkspacePage() {
                     : "bg-muted text-muted-foreground border-border",
             )}
           >
-            {project.status}
+            {project.status === "failed"
+              ? "Last build failed"
+              : project.status === "building"
+                ? "Building"
+                : project.status === "published"
+                  ? "Published"
+                  : project.status}
           </span>
           <ProjectPresence
             projectId={projectId}
