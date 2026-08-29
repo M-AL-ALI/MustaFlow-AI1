@@ -684,7 +684,10 @@ function isSafeCssPropertyValue(property: string, value: string): boolean {
 }
 
 function isSafeAttributeValue(attribute: "href" | "src", value: string): boolean {
-  if (!value || value.length > 2_000 || /[\u0000-\u001F<>"'`]/u.test(value)) return false;
+  const unsafe = [...value].some(
+    (character) => character.charCodeAt(0) <= 31 || "<>\"'`".includes(character),
+  );
+  if (!value || value.length > 2_000 || unsafe) return false;
   if (attribute === "src" && value.startsWith("data:image/")) {
     return /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/u.test(value);
   }

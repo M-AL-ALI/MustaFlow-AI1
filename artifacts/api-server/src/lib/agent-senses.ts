@@ -475,7 +475,7 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
     await page.waitForTimeout(300);
     if (input.captureOverlay) {
       await page.evaluate((overlay) => {
-        const doc = (globalThis as unknown as { document: any }).document;
+        const doc = (globalThis as unknown as { document: Document }).document;
         const root = doc.createElement("div");
         root.setAttribute("data-mfm-capture-overlay", "true");
         root.style.cssText =

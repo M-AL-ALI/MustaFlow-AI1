@@ -644,7 +644,7 @@ router.get("/assets/:assetId/content", async (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader(
     "Content-Disposition",
-    `${asset.mimeType.startsWith("image/") || asset.mimeType.startsWith("video/") ? "inline" : "attachment"}; filename="${asset.filename.replace(/\"/g, "")}"`,
+    `${asset.mimeType.startsWith("image/") || asset.mimeType.startsWith("video/") ? "inline" : "attachment"}; filename="${asset.filename.replace(/"/g, "")}"`,
   );
   object.body.pipe(res);
 });

@@ -57,4 +57,10 @@ describe("source-backed visual editing session", () => {
     expect(source).toContain('| "object-fit"');
     expect(source).toContain('property === "object-fit"');
   });
+
+  it("rejects control characters and markup delimiters before writing link or image attributes", () => {
+    expect(source).toContain("character.charCodeAt(0) <= 31");
+    expect(source).toContain(".includes(character)");
+    expect(source).toContain("if (!value || value.length > 2_000 || unsafe) return false");
+  });
 });

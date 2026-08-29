@@ -45,7 +45,7 @@ export async function generateAssetDerivatives(
   return Promise.all(
     unique.map(async (preset) => {
       const spec = ASSET_DERIVATIVE_PRESETS[preset];
-      let pipeline = sharp(source, { failOn: "error" })
+      const pipeline = sharp(source, { failOn: "error" })
         .rotate()
         .resize(spec.width, spec.height, {
           fit: "contain",
