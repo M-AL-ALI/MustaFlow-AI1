@@ -27,6 +27,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { uploadAccountAsset } from "@/lib/asset-upload";
 import {
   getReferenceSavedMemories,
   setReferenceSavedMemories,
@@ -162,6 +163,8 @@ type BrandProfile = {
   accentColor: string;
   fontPairing: string;
   tone: string;
+  logoAssetId: number | null;
+  logoContentUrl?: string | null;
 };
 
 const EMPTY_BRAND: BrandProfile = {
@@ -169,6 +172,7 @@ const EMPTY_BRAND: BrandProfile = {
   accentColor: "",
   fontPairing: "",
   tone: "",
+  logoAssetId: null,
 };
 
 const TONE_OPTIONS: { value: string; label: string }[] = [
@@ -185,6 +189,7 @@ function BrandProfileSection() {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasSaved, setHasSaved] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,6 +208,8 @@ function BrandProfileSection() {
             accentColor: data.profile.accentColor ?? "",
             fontPairing: data.profile.fontPairing ?? "",
             tone: data.profile.tone ?? "",
+            logoAssetId: data.profile.logoAssetId ?? null,
+            logoContentUrl: data.profile.logoContentUrl ?? null,
           });
           setHasSaved(true);
         }
@@ -218,7 +225,46 @@ function BrandProfileSection() {
   }, []);
 
   const isEmpty =
-    !profile.primaryColor && !profile.accentColor && !profile.fontPairing && !profile.tone;
+    !profile.primaryColor &&
+    !profile.accentColor &&
+    !profile.fontPairing &&
+    !profile.tone &&
+    profile.logoAssetId === null;
+
+  const handleLogo = async (file: File | undefined) => {
+    if (!file) return;
+    setUploadingLogo(true);
+    try {
+      const uploaded = await uploadAccountAsset({ file, source: "picker" });
+      if (!uploaded.mimeType.startsWith("image/")) {
+        throw new Error("Choose an image for your logo.");
+      }
+      const metadata = await authFetch(`/api/assets/${uploaded.assetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ brandRole: "logo", altText: "Brand logo" }),
+      });
+      if (!metadata.ok) throw new Error("The logo could not be added to your brand kit.");
+      setProfile((current) => ({
+        ...current,
+        logoAssetId: uploaded.assetId,
+        logoContentUrl: uploaded.contentUrl,
+      }));
+      toast({
+        title: "Logo ready",
+        description: uploaded.resized
+          ? "The image was resized for reliable use without losing visual fidelity."
+          : "Save the brand kit to reuse this logo in every build.",
+      });
+    } catch (error) {
+      toast({
+        title: error instanceof Error ? error.message : "The logo could not be uploaded.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
 
   const handleSave = async () => {
     if (isEmpty) {
@@ -278,6 +324,50 @@ function BrandProfileSection() {
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2 flex items-center gap-4 rounded-lg border border-border/70 p-3">
+            {profile.logoContentUrl ? (
+              <img
+                src={profile.logoContentUrl}
+                alt="Current brand logo"
+                className="h-14 w-14 rounded-md border border-border object-contain bg-white"
+              />
+            ) : (
+              <div className="h-14 w-14 rounded-md border border-dashed border-border grid place-items-center text-[10px] text-muted-foreground">
+                Logo
+              </div>
+            )}
+            <div className="flex-1">
+              <label className="block text-[11px] font-medium text-foreground mb-1.5">
+                Brand logo
+              </label>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                disabled={!loaded || uploadingLogo}
+                onChange={(event) => {
+                  void handleLogo(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+                className="block w-full text-xs text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-xs file:text-foreground"
+              />
+            </div>
+            {profile.logoAssetId !== null && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setProfile((current) => ({
+                    ...current,
+                    logoAssetId: null,
+                    logoContentUrl: null,
+                  }))
+                }
+              >
+                Remove
+              </Button>
+            )}
+          </div>
           <div>
             <label className="block text-[11px] font-medium text-foreground mb-1.5">
               Primary colour

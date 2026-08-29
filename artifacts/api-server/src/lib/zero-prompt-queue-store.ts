@@ -62,6 +62,7 @@ type QueueRow = {
   project_id: number;
   position: number | null;
   current_text: string;
+  asset_ids: unknown;
   state: "queued" | "promoted" | "deleted";
   promoted_turn_id: string | null;
   deleted_by: string | null;
@@ -137,6 +138,9 @@ function itemFromRow(row: QueueRow): ZeroPromptQueueItem {
     id: row.id,
     projectId: String(row.project_id),
     currentText: row.current_text,
+    assetIds: Array.isArray(row.asset_ids)
+      ? row.asset_ids.filter((value): value is number => Number.isSafeInteger(value) && value > 0)
+      : [],
     references: referencesFrom(metadata),
   } as const;
   const position = positionFromRow(row);
@@ -194,6 +198,7 @@ async function readProjectRows(
            q.project_id,
            q.position,
            q.current_text,
+           q.asset_ids,
            q.state,
            q.promoted_turn_id,
            q.deleted_by,
@@ -230,6 +235,7 @@ async function readItemRow(
            q.project_id,
            q.position,
            q.current_text,
+           q.asset_ids,
            q.state,
            q.promoted_turn_id,
            q.deleted_by,
@@ -298,12 +304,13 @@ async function persistSnapshot(
       `WITH desired AS (
          SELECT *
            FROM unnest(
-             $2::text[], $3::integer[], $4::text[], $5::text[], $6::text[], $7::text[]
-           ) AS value(id, position, current_text, state, promoted_turn_id, deleted_by)
+             $2::text[], $3::integer[], $4::text[], $5::jsonb[], $6::text[], $7::text[], $8::text[]
+           ) AS value(id, position, current_text, asset_ids, state, promoted_turn_id, deleted_by)
        )
        UPDATE zero_prompt_queue_items q
           SET position = desired.position,
               current_text = desired.current_text,
+              asset_ids = desired.asset_ids,
               state = desired.state,
               promoted_turn_id = desired.promoted_turn_id,
               deleted_by = desired.deleted_by,
@@ -316,6 +323,7 @@ async function persistSnapshot(
         existing.map((item) => item.id),
         existing.map(v1WritePosition),
         existing.map((item) => item.currentText),
+        existing.map((item) => JSON.stringify(item.assetIds ?? [])),
         existing.map((item) => item.state),
         existing.map((item) => terminalColumns(item).promotedTurnId),
         existing.map((item) => terminalColumns(item).deletedBy),
@@ -330,12 +338,49 @@ async function persistSnapshot(
       throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
     }
     await client.query(
-      `INSERT INTO zero_prompt_queue_items
-        (id, project_id, position, current_text, state, promoted_turn_id, deleted_by,
+      `WITH inserted_queue AS (
+       INSERT INTO zero_prompt_queue_items
+        (id, project_id, position, current_text, asset_ids, state, promoted_turn_id, deleted_by,
          created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [item.id, projectId, v1WritePosition(item), item.currentText, item.state],
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       RETURNING id
+       )
+       INSERT INTO asset_usage (asset_id, project_id, consumer, created_at)
+       SELECT asset_id, $2, 'queue:' || $1, CURRENT_TIMESTAMP
+         FROM inserted_queue, unnest($7::integer[]) AS asset_id`,
+      [
+        item.id,
+        projectId,
+        v1WritePosition(item),
+        item.currentText,
+        JSON.stringify(item.assetIds ?? []),
+        item.state,
+        item.assetIds ?? [],
+      ],
     );
+    statements += 1;
+  }
+  if (mutation.kind === "delete" || mutation.kind === "promote-next") {
+    const item = result.snapshot.items.find((candidate) => candidate.id === result.event.itemId);
+    if (!item) throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
+    if (mutation.kind === "delete") {
+      await client.query(
+        `DELETE FROM asset_usage
+          WHERE project_id=$1 AND consumer=$2 AND asset_id=ANY($3::integer[])`,
+        [projectId, `queue:${item.id}`, item.assetIds ?? []],
+      );
+    } else {
+      await client.query(
+        `UPDATE asset_usage SET consumer=$4
+          WHERE project_id=$1 AND consumer=$2 AND asset_id=ANY($3::integer[])`,
+        [
+          projectId,
+          `queue:${item.id}`,
+          item.assetIds ?? [],
+          `agent-turn:${mutation.activeTurn.id}`,
+        ],
+      );
+    }
     statements += 1;
   }
   return statements;

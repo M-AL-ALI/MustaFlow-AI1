@@ -300,6 +300,65 @@ router.get("/admin/stats", async (_req, res): Promise<void> => {
   });
 });
 
+// ── GET /api/admin/asset-health ───────────────────────────────────────────────
+// Capability 9: image analysis is a separately visible cost centre and heavy
+// published-app assets are an operational health signal, not hidden gallery data.
+router.get("/admin/asset-health", async (_req, res): Promise<void> => {
+  const [analysis, assets] = await Promise.all([
+    db.execute<{
+      calls: string;
+      estimated_cost_micros: string;
+      failed: string;
+    }>(sql`
+      SELECT
+        COUNT(*)::int AS calls,
+        COALESCE(SUM(estimated_provider_cost_micros), 0)::bigint AS estimated_cost_micros,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
+      FROM asset_analysis_events
+      WHERE created_at > now() - interval '30 days'
+    `),
+    db.execute<{
+      total: string;
+      missing_alt_text: string;
+      overweight_images: string;
+      overweight_bytes: string;
+    }>(sql`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (
+          WHERE mime_type LIKE 'image/%'
+            AND COALESCE(NULLIF(context->>'altText', ''), '') = ''
+        )::int AS missing_alt_text,
+        COUNT(*) FILTER (
+          WHERE mime_type LIKE 'image/%' AND size_bytes > 2097152
+        )::int AS overweight_images,
+        COALESCE(SUM(size_bytes) FILTER (
+          WHERE mime_type LIKE 'image/%' AND size_bytes > 2097152
+        ), 0)::bigint AS overweight_bytes
+      FROM assets
+      WHERE state = 'ready'
+    `),
+  ]);
+  const vision = analysis.rows[0];
+  const library = assets.rows[0];
+  res.json({
+    windowDays: 30,
+    vision: {
+      calls: Number(vision?.calls ?? 0),
+      failed: Number(vision?.failed ?? 0),
+      estimatedProviderCostMicros: Number(vision?.estimated_cost_micros ?? 0),
+      pricing: "meter-only",
+    },
+    library: {
+      total: Number(library?.total ?? 0),
+      missingAltText: Number(library?.missing_alt_text ?? 0),
+      overweightImages: Number(library?.overweight_images ?? 0),
+      overweightBytes: Number(library?.overweight_bytes ?? 0),
+      overweightThresholdBytes: 2_097_152,
+    },
+  });
+});
+
 // ── GET /api/admin/telemetry/calibration ─────────────────────────────────────
 // NabuFlow R2 Phase D calibration report.
 //

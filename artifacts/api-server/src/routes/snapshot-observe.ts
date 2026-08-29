@@ -1,12 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Router, type IRouter, type Request, type RequestHandler, type Response } from "express";
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   agentTasksTable,
+  assetAnalysisEventsTable,
   chatMessagesTable,
   db,
   projectFilesTable,
+  projectVersionsTable,
   projectsTable,
 } from "@workspace/db";
 import type { AgentMode } from "../lib/ai";
@@ -14,7 +16,6 @@ import { takeScreenshot, type ScreenshotInput, type ScreenshotResult } from "../
 import { runConversePipeline } from "../lib/builder";
 import type { ConversationTurn } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
-import { deductCreditsAtomic } from "../lib/credits";
 import { shouldRouteToLivePreview } from "../lib/livePreviewProxy";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
@@ -25,12 +26,24 @@ import {
   responseSucceededTerminal,
 } from "@workspace/ora-contracts";
 import { persistZeroTerminal, zeroTerminalRef } from "../lib/zero-terminal-persistence";
+import { completeAsset, rejectReservedAsset, reserveAsset } from "../lib/asset-registry";
+import { deleteAssetObject, putAssetBuffer } from "../lib/asset-r2";
+import { nabuflowGateHttpError } from "../lib/nabuflow-billing";
 
 export const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 const SNAPSHOT_UNAVAILABLE_MESSAGE =
   "I couldn't capture this preview safely. Please make sure the server preview is available and try again.";
 const SNAPSHOT_OBSERVE_PROMPT =
   "Observe the captured preview. Describe what is visible, identify any clear problems, and suggest the most useful next step without changing the project.";
+
+const CaptureRect = z
+  .object({
+    x: z.number().int().min(0).max(1919),
+    y: z.number().int().min(0).max(1199),
+    width: z.number().int().min(16).max(1920),
+    height: z.number().int().min(16).max(1200),
+  })
+  .strict();
 
 const SnapshotBody = z
   .object({
@@ -54,8 +67,27 @@ const SnapshotBody = z
         height: z.number().int().min(240).max(1200),
       })
       .strict(),
+    region: CaptureRect.optional(),
+    domPath: z.string().max(512).optional(),
+    annotation: z.string().trim().max(200).optional(),
+    redactions: z.array(CaptureRect).max(12).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const rects = [...(value.region ? [value.region] : []), ...(value.redactions ?? [])];
+    for (const rect of rects) {
+      if (
+        rect.x + rect.width > value.viewport.width ||
+        rect.y + rect.height > value.viewport.height
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "capture rectangles must stay inside the viewport",
+        });
+        return;
+      }
+    }
+  });
 
 export type SnapshotPreviewClass = "db-static" | "runtime-proxy" | "cloudflare-grant";
 export type SnapshotObserveBody = z.infer<typeof SnapshotBody>;
@@ -69,6 +101,7 @@ export type SnapshotProject = {
   builderMode: string;
   containerId: string | null;
   containerStatus: string;
+  versionId?: number | null;
 };
 
 export type SnapshotCompletionInput = {
@@ -76,10 +109,19 @@ export type SnapshotCompletionInput = {
   previewClass: SnapshotPreviewClass;
   dataUri: string;
   actorUserId: string;
+  path: string;
+  viewport: { width: number; height: number; deviceMode: string };
+  region?: { x: number; y: number; width: number; height: number };
+  domPath?: string;
+  annotation?: string;
+  consoleErrors: string[];
 };
 
 export type SnapshotObserveDependencies = {
   loadProject(projectId: number): Promise<SnapshotProject | null>;
+  authorizeVision?(
+    project: SnapshotProject,
+  ): Promise<{ status: number; body: Record<string, unknown> } | null>;
   capture(input: ScreenshotInput): Promise<ScreenshotResult>;
   complete(input: SnapshotCompletionInput): Promise<Record<string, unknown>>;
 };
@@ -195,6 +237,11 @@ export function createSnapshotObserveRouter(
       snapshotUnavailable(res);
       return;
     }
+    const billingBlock = await dependencies.authorizeVision?.(project);
+    if (billingBlock) {
+      res.status(billingBlock.status).json(billingBlock.body);
+      return;
+    }
 
     const captureUrl = new URL(
       `/api/projects/${projectId}/preview${parsed.data.path}`,
@@ -210,6 +257,19 @@ export function createSnapshotObserveRouter(
         signal: AbortSignal.timeout(25_000),
         exactOriginCookies: cookies,
         exactCookieOrigin: origin,
+        clip: parsed.data.region,
+        captureOverlay: {
+          redactions: parsed.data.redactions,
+          annotations: parsed.data.region
+            ? [
+                {
+                  kind: "circle",
+                  ...parsed.data.region,
+                  text: parsed.data.annotation,
+                },
+              ]
+            : undefined,
+        },
       });
       const base64 = capture.base64;
       let finalOrigin: string | null = null;
@@ -233,6 +293,20 @@ export function createSnapshotObserveRouter(
         previewClass: snapshotPreviewClass(project),
         dataUri,
         actorUserId,
+        path: parsed.data.path,
+        viewport: {
+          ...parsed.data.viewport,
+          deviceMode:
+            parsed.data.viewport.width <= 480
+              ? "phone"
+              : parsed.data.viewport.width <= 900
+                ? "tablet"
+                : "desktop",
+        },
+        region: parsed.data.region,
+        domPath: parsed.data.domPath,
+        annotation: parsed.data.annotation,
+        consoleErrors: capture.consoleErrors ?? [],
       });
       res.status(200).json(result);
     } catch (error) {
@@ -250,31 +324,98 @@ export function createSnapshotObserveRouter(
 }
 
 async function loadSnapshotProject(projectId: number): Promise<SnapshotProject | null> {
-  const [project] = await db
-    .select({
-      id: projectsTable.id,
-      name: projectsTable.name,
-      ownerId: projectsTable.ownerId,
-      status: projectsTable.status,
-      agentMode: projectsTable.agentMode,
-      builderMode: projectsTable.builderMode,
-      containerId: projectsTable.containerId,
-      containerStatus: projectsTable.containerStatus,
-    })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
-  return project ?? null;
+  const [[project], [version]] = await Promise.all([
+    db
+      .select({
+        id: projectsTable.id,
+        name: projectsTable.name,
+        ownerId: projectsTable.ownerId,
+        status: projectsTable.status,
+        agentMode: projectsTable.agentMode,
+        builderMode: projectsTable.builderMode,
+        containerId: projectsTable.containerId,
+        containerStatus: projectsTable.containerStatus,
+      })
+      .from(projectsTable)
+      .where(eq(projectsTable.id, projectId)),
+    db
+      .select({ id: projectVersionsTable.id })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.projectId, projectId))
+      .orderBy(desc(projectVersionsTable.id))
+      .limit(1),
+  ]);
+  return project ? { ...project, versionId: version?.id ?? null } : null;
 }
 
 async function completeSnapshotObservation(
   input: SnapshotCompletionInput,
 ): Promise<Record<string, unknown>> {
-  const deduction = await deductCreditsAtomic(input.actorUserId, 1, {
-    type: "converse",
-    description: `Project observation — project ${input.project.id}`,
+  const png = Buffer.from(input.dataUri.slice(input.dataUri.indexOf(",") + 1), "base64");
+  const asset = await reserveAsset({
+    ownerUserId: input.project.ownerId,
+    actorUserId: input.actorUserId,
     projectId: input.project.id,
+    threadKey: `project:${input.project.id}`,
+    scope: "project",
+    kind: "snapshot",
+    source: "observe",
+    filename: `preview-${randomUUID()}.png`,
+    mimeType: "image/png",
+    sizeBytes: png.length,
+    versionId: input.project.versionId,
+    context: {
+      route: input.path,
+      viewport: input.viewport,
+      region: input.region,
+      domPath: input.domPath,
+      annotation: input.annotation,
+      consoleErrors: input.consoleErrors,
+    },
   });
-  if ("insufficient" in deduction) throw new Error("snapshot observation credit unavailable");
+  try {
+    await putAssetBuffer({ key: asset.storageKey, body: png, contentType: "image/png" });
+    await completeAsset({
+      assetId: asset.id,
+      ownerUserId: input.project.ownerId,
+      actorUserId: input.actorUserId,
+      sha256: createHash("sha256").update(png).digest("hex"),
+      scanState: "not-required",
+    });
+  } catch (error) {
+    try {
+      await deleteAssetObject(asset.storageKey);
+    } catch {
+      // The rejected registry row is the durable truth when provider cleanup is unavailable.
+    }
+    await rejectReservedAsset({
+      assetId: asset.id,
+      ownerUserId: input.project.ownerId,
+      actorUserId: input.actorUserId,
+      code: "asset_storage_unavailable",
+    });
+    throw error;
+  }
+  const persistedAttachment = {
+    kind: "image",
+    url: `/api/assets/${asset.id}/content`,
+    alt: `${input.previewClass} ${input.region ? "preview region" : "preview"} at ${input.path}`,
+    assetId: asset.id,
+    versionId: input.project.versionId,
+  };
+  const [analysisEvent] = await db
+    .insert(assetAnalysisEventsTable)
+    .values({
+      userId: input.actorUserId,
+      projectId: input.project.id,
+      assetId: asset.id,
+      provider: "pending",
+      model: "pending",
+      customerCreditPrice: null,
+      status: "started",
+    })
+    .returning({ id: assetAnalysisEventsTable.id });
+  if (!analysisEvent) throw new Error("snapshot analysis receipt unavailable");
 
   const [currentFiles, recentMessages] = await Promise.all([
     db
@@ -298,6 +439,17 @@ async function completeSnapshotObservation(
       content: message.content,
     }))
     .slice(-8);
+  const observationPrompt = [
+    SNAPSHOT_OBSERVE_PROMPT,
+    input.region ? `The user pointed to region ${JSON.stringify(input.region)}.` : null,
+    input.domPath ? `DOM path under the selection: ${input.domPath}.` : null,
+    input.annotation ? `Their annotation: ${input.annotation}` : null,
+    input.consoleErrors.length
+      ? `Sanitized console errors captured at the same moment:\n${input.consoleErrors.map((value) => `- ${value}`).join("\n")}`
+      : "No console errors were captured at that moment.",
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n");
   const requestId = randomUUID();
   const receipt = await intentReceiptStore.persist(input.project.id, requestId, {
     intent: "observe",
@@ -310,11 +462,12 @@ async function completeSnapshotObservation(
     .values({
       projectId: input.project.id,
       role: "user",
-      content: SNAPSHOT_OBSERVE_PROMPT,
+      content: observationPrompt,
       agentMode: input.project.agentMode,
       planMode: false,
       origin: "snapshot_control",
       intentReceiptId: receipt.receiptId,
+      attachments: [persistedAttachment],
     })
     .returning();
   if (!userMessage) throw new Error("snapshot observation message unavailable");
@@ -324,10 +477,10 @@ async function completeSnapshotObservation(
     .insert(agentTasksTable)
     .values({
       projectId: input.project.id,
-      title: `Observe ${input.previewClass} preview`,
+      title: `Observe ${input.previewClass} ${input.region ? "preview region" : "preview"}`,
       kind: "converse",
       status: "answering",
-      prompt: SNAPSHOT_OBSERVE_PROMPT,
+      prompt: observationPrompt,
       agentIdentity: "main",
       origin: "snapshot_control",
       intentReceiptId: receipt.receiptId,
@@ -347,13 +500,22 @@ async function completeSnapshotObservation(
   try {
     converse = await runConversePipeline({
       projectName: input.project.name,
-      userPrompt: SNAPSHOT_OBSERVE_PROMPT,
+      userPrompt: observationPrompt,
       conversationHistory,
       currentFiles,
       agentMode: input.project.agentMode as AgentMode,
-      imageAttachments: [{ dataUri: input.dataUri, alt: `${input.previewClass} preview` }],
+      imageAttachments: [
+        {
+          dataUri: input.dataUri,
+          alt: `${input.previewClass} ${input.region ? "preview region" : "preview"}`,
+        },
+      ],
     });
   } catch {
+    await db
+      .update(assetAnalysisEventsTable)
+      .set({ status: "failed" })
+      .where(eq(assetAnalysisEventsTable.id, analysisEvent.id));
     const failure = "I captured the preview, but couldn't finish observing it. Please try again.";
     const terminal = failedTerminal({
       schema: "zero-terminal-v1",
@@ -393,6 +555,20 @@ async function completeSnapshotObservation(
     if (!persisted) throw new Error("snapshot observation failure outcome unavailable");
     throw new Error("snapshot observation model unavailable");
   }
+  await db
+    .update(assetAnalysisEventsTable)
+    .set({
+      provider: converse.usage?.provider ?? "unreported",
+      model: converse.usage?.model ?? "unreported",
+      inputTokens: converse.usage?.inputTokens ?? 0,
+      outputTokens: converse.usage?.outputTokens ?? 0,
+      estimatedProviderCostMicros: Math.max(
+        0,
+        Math.round((converse.usage?.estimatedProviderCostUsd ?? 0) * 1_000_000),
+      ),
+      status: "completed",
+    })
+    .where(eq(assetAnalysisEventsTable.id, analysisEvent.id));
   const assistantContent = `I captured the ${input.previewClass} preview.\n\n${converse.markdown}`;
   const [assistantMessage] = await db
     .insert(chatMessagesTable)
@@ -448,11 +624,26 @@ async function completeSnapshotObservation(
     assistantMessageId: assistantMessage.id,
     taskId: task.id,
     terminalRef: zeroTerminalRef(terminal),
+    asset: persistedAttachment,
+    context: {
+      route: input.path,
+      viewport: input.viewport,
+      region: input.region,
+      domPath: input.domPath,
+      consoleErrors: input.consoleErrors,
+    },
   };
 }
 
 const router = createSnapshotObserveRouter({
   loadProject: loadSnapshotProject,
+  authorizeVision: (project) =>
+    nabuflowGateHttpError(project.ownerId, {
+      engineMode: "eco",
+      deepReasoning: false,
+      projectedCredits: 1,
+      source: "pipeline",
+    }),
   capture: takeScreenshot,
   complete: completeSnapshotObservation,
 });

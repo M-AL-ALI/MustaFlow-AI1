@@ -21,6 +21,7 @@ export const generatedImagesTable = pgTable("generated_images", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull(),
   projectId: integer("project_id"),
+  assetId: integer("asset_id"),
   prompt: text("prompt").notNull(),
   negativePrompt: text("negative_prompt"),
   revisedPrompt: text("revised_prompt"),

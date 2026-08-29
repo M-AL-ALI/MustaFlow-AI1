@@ -296,6 +296,24 @@ export interface ScreenshotInput {
    */
   exactOriginCookies?: Array<{ name: string; value: string }>;
   exactCookieOrigin?: string;
+  /** Optional viewport-relative crop. Coordinates are clamped by the caller. */
+  clip?: { x: number; y: number; width: number; height: number };
+  /**
+   * Privacy and annotation overlays applied inside the capture page before any
+   * screenshot bytes are produced. The raw pixels therefore never enter the
+   * returned buffer, logs, storage, or a model request.
+   */
+  captureOverlay?: {
+    redactions?: Array<{ x: number; y: number; width: number; height: number }>;
+    annotations?: Array<{
+      kind: "circle" | "arrow";
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      text?: string;
+    }>;
+  };
 }
 
 export interface ScreenshotResult {
@@ -308,7 +326,19 @@ export interface ScreenshotResult {
   height?: number;
   status?: number;
   finalUrl?: string;
+  /** Sanitized console errors observed while the captured page loaded. */
+  consoleErrors?: string[];
   error?: string;
+}
+
+export function sanitizeCaptureConsoleError(value: string): string {
+  return value
+    .replace(/\b(?:bearer\s+)?[A-Za-z0-9_-]{24,}\b/giu, "[private value]")
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, "[private email]")
+    .replace(/([?&](?:token|key|secret|password|code)=)[^&\s]+/giu, "$1[private value]")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 240);
 }
 
 export function screenshotRequestHeaders(
@@ -402,6 +432,12 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
     // and URL-based captures so neither path can pivot through the browser
     // process to a metadata/loopback target.
     const page = await ctx.newPage();
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() !== "error" || consoleErrors.length >= 10) return;
+      const sanitized = sanitizeCaptureConsoleError(message.text());
+      if (sanitized) consoleErrors.push(sanitized);
+    });
     await page.route("**/*", async (route) => {
       const reqUrl = route.request().url();
       if (reqUrl.startsWith("data:") || reqUrl.startsWith("about:")) {
@@ -437,16 +473,50 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
     }
     // Settle a moment for CSS/fonts
     await page.waitForTimeout(300);
-    const buf = await page.screenshot({ type: "png", fullPage: !!input.fullPage });
+    if (input.captureOverlay) {
+      await page.evaluate((overlay) => {
+        const doc = (globalThis as unknown as { document: Document }).document;
+        const root = doc.createElement("div");
+        root.setAttribute("data-mfm-capture-overlay", "true");
+        root.style.cssText =
+          "position:fixed;inset:0;z-index:2147483647;pointer-events:none;overflow:hidden";
+        for (const item of overlay.redactions ?? []) {
+          const mask = doc.createElement("div");
+          mask.style.cssText = `position:absolute;left:${item.x}px;top:${item.y}px;width:${item.width}px;height:${item.height}px;background:#000`;
+          root.appendChild(mask);
+        }
+        for (const item of overlay.annotations ?? []) {
+          const mark = doc.createElement("div");
+          mark.style.cssText =
+            item.kind === "circle"
+              ? `position:absolute;left:${item.x}px;top:${item.y}px;width:${item.width}px;height:${item.height}px;border:4px solid #ef4444;border-radius:9999px;box-sizing:border-box`
+              : `position:absolute;left:${item.x}px;top:${item.y}px;width:${item.width}px;height:${item.height}px;border-bottom:4px solid #ef4444;transform:rotate(-35deg);transform-origin:left bottom;box-sizing:border-box`;
+          root.appendChild(mark);
+          if (item.text) {
+            const label = doc.createElement("div");
+            label.textContent = item.text;
+            label.style.cssText = `position:absolute;left:${item.x}px;top:${Math.max(0, item.y - 30)}px;max-width:360px;padding:5px 8px;background:#ef4444;color:#fff;font:600 14px/1.3 system-ui,sans-serif;border-radius:5px;white-space:pre-wrap`;
+            root.appendChild(label);
+          }
+        }
+        doc.documentElement.appendChild(root);
+      }, input.captureOverlay);
+    }
+    const buf = await page.screenshot({
+      type: "png",
+      fullPage: input.clip ? false : !!input.fullPage,
+      clip: input.clip,
+    });
     const base64 = Buffer.from(buf).toString("base64");
     return {
       ok: true,
       base64,
       bytes: buf.length,
-      width: w,
-      height: h,
+      width: input.clip?.width ?? w,
+      height: input.clip?.height ?? h,
       status,
       finalUrl: page.url(),
+      consoleErrors,
     };
   } catch (err) {
     return { ok: false, error: String((err as Error).message ?? err) };

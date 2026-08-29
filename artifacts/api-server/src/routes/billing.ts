@@ -654,6 +654,24 @@ export async function handleStripeWebhook(
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
   ) {
+    if (event.data?.object?.metadata?.surface === "asset_storage") {
+      try {
+        const { removeAssetStorageSubscription, syncAssetStorageSubscription } =
+          await import("../lib/asset-storage-billing");
+        if (event.type === "customer.subscription.deleted") {
+          await removeAssetStorageSubscription(String(event.data.object.id ?? ""));
+        } else {
+          await syncAssetStorageSubscription(event.data.object as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        }
+        await markEventSucceeded();
+        res.json({ ok: true, type: event.type, surface: "asset_storage", processed: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unexpected error";
+        await markEventFailed(msg);
+        res.status(500).json({ error: "Storage subscription sync failed", willRetry: true });
+      }
+      return;
+    }
     // NabuFlow subscriptions are namespaced via metadata.surface === 'nabuflow'
     // and share the account's Stripe Customer with Ora/workspace plans — they
     // must be routed EARLY so Ora's customer-id fallback can never misattribute
@@ -692,6 +710,20 @@ export async function handleStripeWebhook(
   // ── checkout.session.completed — workspace metadata attachment + domain purchase + credit grant
   if (event.type === "checkout.session.completed") {
     const session = event.data?.object;
+
+    if (session?.metadata?.surface === "asset_storage") {
+      try {
+        const { handleAssetStorageCheckout } = await import("../lib/asset-storage-billing");
+        await handleAssetStorageCheckout(stripe, session as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+        await markEventSucceeded();
+        res.json({ ok: true, type: event.type, surface: "asset_storage", processed: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unexpected error";
+        await markEventFailed(msg);
+        res.status(500).json({ error: "Storage checkout sync failed", willRetry: true });
+      }
+      return;
+    }
 
     // Workspace subscription mode: attach workspaceId metadata so the follow-up
     // customer.subscription.created event can resolve which workspace to upgrade.

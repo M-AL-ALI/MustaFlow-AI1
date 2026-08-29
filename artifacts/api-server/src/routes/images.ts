@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable } from "@workspace/db";
+import { assetsTable, db, projectsTable, projectFilesTable } from "@workspace/db";
 import { generateImageBuffer } from "@workspace/integrations-openai-ai-server";
 import { requireProjectOwnership } from "../lib/auth";
 import { objectStorageClient, ObjectStorageService } from "../lib/objectStorage";
 import { GenerateImageBody, GenerateImageResponse } from "@workspace/api-zod";
+import { openAsset } from "../lib/asset-r2";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -116,8 +117,38 @@ router.post(
   },
 );
 
-export async function fetchAttachmentAsDataUri(objectPath: string): Promise<string | null> {
+export async function fetchAttachmentAsDataUri(
+  objectPath: string,
+  expectedProjectId?: number,
+): Promise<string | null> {
   try {
+    const assetMatch = /^\/api\/assets\/(\d+)\/content$/.exec(objectPath);
+    if (assetMatch) {
+      const assetId = Number(assetMatch[1]);
+      const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, assetId));
+      if (
+        !asset ||
+        asset.state !== "ready" ||
+        asset.storageBackend !== "r2" ||
+        expectedProjectId === undefined ||
+        asset.projectId !== expectedProjectId ||
+        !asset.mimeType.startsWith("image/") ||
+        asset.sizeBytes > 20 * 1024 * 1024
+      ) {
+        return null;
+      }
+      const object = await openAsset(asset.storageKey);
+      if (!object) return null;
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      for await (const chunk of object.body) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+        bytes += buffer.length;
+        if (bytes > 20 * 1024 * 1024) return null;
+        chunks.push(buffer);
+      }
+      return `data:${asset.mimeType};base64,${Buffer.concat(chunks).toString("base64")}`;
+    }
     const file = await objectStorageService.getObjectEntityFile(objectPath);
     const [metadata] = await file.getMetadata();
     const [bytes] = await file.download();

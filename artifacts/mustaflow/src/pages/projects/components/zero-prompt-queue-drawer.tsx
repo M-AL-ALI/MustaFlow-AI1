@@ -1,4 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
+import { formatAssetBytes, uploadProjectAsset, type AssetUploadResult } from "@/lib/asset-upload";
 import {
   QUEUE_LOAD_FALLBACK_ERROR,
   QUEUE_MUTATION_FALLBACK_ERROR,
@@ -12,13 +13,14 @@ import {
   type ZeroPromptQueueObservedPhase,
   type ZeroPromptQueueRunPhase,
 } from "@workspace/ora-contracts";
-import { ArrowDown, ArrowUp, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Paperclip, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type PromptQueueItemView = {
   id: string;
   position: number;
   currentText: string;
+  assetIds: readonly number[];
 };
 
 export const ZERO_PROMPT_QUEUE_HISTORY_LIMIT = 10;
@@ -107,6 +109,9 @@ export function normalizePromptQueuePayload(value: unknown): PromptQueueView {
       id: item.id as string,
       position: Number(item.position),
       currentText: item.currentText as string,
+      assetIds: Array.isArray(item.assetIds)
+        ? item.assetIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0)
+        : [],
     }))
     .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id));
 
@@ -217,6 +222,8 @@ export function ZeroPromptQueueDrawer({
   const [newText, setNewText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [newAssets, setNewAssets] = useState<AssetUploadResult[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const previousPhaseRef = useRef<ZeroPromptQueueObservedPhase | null>(phase);
 
   const loadQueue = useCallback(async () => {
@@ -281,9 +288,41 @@ export function ZeroPromptQueueDrawer({
     const accepted = await mutateQueue(`/api/projects/${projectId}/prompt-queue`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ position: items.length + 1, text: newText, references: [] }),
+      body: JSON.stringify({
+        position: items.length + 1,
+        text: newText,
+        references: [],
+        assetIds: newAssets.map((asset) => asset.assetId),
+      }),
     });
-    if (accepted) setNewText("");
+    if (accepted) {
+      setNewText("");
+      setNewAssets([]);
+    }
+  };
+
+  const uploadFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const remaining = Math.max(0, 10 - newAssets.length);
+      const selected = Array.from(files).slice(0, remaining);
+      const uploaded: AssetUploadResult[] = [];
+      for (const file of selected) {
+        uploaded.push(await uploadProjectAsset({ projectId, file, source: "picker" }));
+      }
+      setNewAssets((current) => [...current, ...uploaded].slice(0, 10));
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "The attachment could not be uploaded.",
+      );
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setBusy(false);
+    }
   };
 
   const reorder = (item: PromptQueueItemView, position: number) =>
@@ -362,6 +401,12 @@ export function ZeroPromptQueueDrawer({
                     ) : (
                       <p className="whitespace-pre-wrap break-words text-xs text-foreground">
                         {item.currentText}
+                      </p>
+                    )}
+                    {item.assetIds.length > 0 && (
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        {item.assetIds.length}{" "}
+                        {item.assetIds.length === 1 ? "attachment" : "attachments"}
                       </p>
                     )}
                   </div>
@@ -499,6 +544,49 @@ export function ZeroPromptQueueDrawer({
           placeholder="What should Zero do next?"
           className="mt-1 w-full min-h-16 resize-y rounded-md border border-border bg-muted/20 px-2.5 py-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-primary"
         />
+        {newAssets.length > 0 && (
+          <ul aria-label="Queued prompt attachments" className="mt-2 space-y-1">
+            {newAssets.map((asset) => (
+              <li
+                key={asset.assetId}
+                className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-[10px]"
+              >
+                <span className="min-w-0 truncate">
+                  {asset.name} · {formatAssetBytes(asset.sizeBytes)}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${asset.name}`}
+                  onClick={() =>
+                    setNewAssets((current) =>
+                      current.filter((candidate) => candidate.assetId !== asset.assetId),
+                    )
+                  }
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="sr-only"
+          aria-label="Attach files to queued prompt"
+          onChange={(event) => void uploadFiles(event.target.files)}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={busy || newAssets.length >= 10}
+          className="mt-2 flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[10px] text-muted-foreground hover:bg-muted disabled:opacity-40"
+        >
+          <Paperclip className="h-3.5 w-3.5" />
+          Attach files
+        </button>
         <button
           type="button"
           onClick={() => void addPrompt()}

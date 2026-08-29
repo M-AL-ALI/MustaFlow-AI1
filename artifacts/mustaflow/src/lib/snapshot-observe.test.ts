@@ -46,6 +46,34 @@ describe("snapshot observation client", () => {
     expect(JSON.stringify(result)).not.toContain("internal_capture_timeout");
   });
 
+  it("forwards the selected region and privacy masks without changing the observe route", async () => {
+    const pointed: SnapshotObserveRequest = {
+      ...snapshot,
+      region: { x: 40, y: 50, width: 300, height: 180 },
+      domPath: "body>main:nth-child(1)>button:nth-child(2)",
+      annotation: "this button does nothing",
+      redactions: [{ x: 70, y: 80, width: 60, height: 24 }],
+    };
+    const transport = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        previewClass: "runtime-proxy",
+        asset: { assetId: "asset-1", url: "/api/assets/asset-1/content" },
+      }),
+    }));
+
+    await expect(requestSnapshotObservation(51, pointed, transport)).resolves.toEqual({
+      ok: true,
+      previewClass: "runtime-proxy",
+      asset: { assetId: "asset-1", url: "/api/assets/asset-1/content" },
+    });
+    expect(transport).toHaveBeenCalledWith(
+      "/api/projects/51/observe/snapshot",
+      expect.objectContaining({ body: JSON.stringify(pointed) }),
+    );
+  });
+
   it("keeps the preview control on the dedicated observe callback with no mutation fallback", () => {
     const previewSource = readFileSync(
       join(process.cwd(), "src/pages/projects/components/preview-tab.tsx"),
@@ -58,6 +86,8 @@ describe("snapshot observation client", () => {
     );
 
     expect(handler).toContain("await onSnapshotObserve");
+    expect(handler).toContain("sendRegionToAi");
+    expect(handler).toContain("captureRedactions");
     expect(handler).toContain('previewSource: webContainerLive ? "webcontainer" : "server"');
     expect(handler).not.toContain("onFixPrompt");
     expect(handler).not.toContain("onAutoSendPrompt");

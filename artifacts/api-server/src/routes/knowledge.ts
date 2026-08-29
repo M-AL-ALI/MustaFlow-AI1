@@ -7,6 +7,7 @@ import {
   projectsTable,
   creditTransactionsTable,
   userCreditsTable,
+  assetsTable,
 } from "@workspace/db";
 import { presentZeroMemoryProvenance, presentZeroMemoryVersion } from "@workspace/ora-contracts";
 import { isAdminUser } from "../lib/adminAuth";
@@ -179,6 +180,7 @@ const brandProfileSchema = z.object({
   accentColor: z.string().max(32).optional(),
   fontPairing: z.string().max(120).optional(),
   tone: z.string().max(60).optional(),
+  logoAssetId: z.number().int().positive().nullable().optional(),
 });
 
 const router: IRouter = Router();
@@ -815,6 +817,7 @@ router.get("/knowledge/brand-profile", async (req, res): Promise<void> => {
     accentColor?: string;
     fontPairing?: string;
     tone?: string;
+    logoAssetId?: number | null;
   } = {};
   try {
     if (row.annotation) parsed = JSON.parse(row.annotation) as typeof parsed;
@@ -829,6 +832,9 @@ router.get("/knowledge/brand-profile", async (req, res): Promise<void> => {
       accentColor: parsed.accentColor ?? "",
       fontPairing: parsed.fontPairing ?? "",
       tone: parsed.tone ?? "",
+      logoAssetId: parsed.logoAssetId ?? null,
+      logoContentUrl:
+        typeof parsed.logoAssetId === "number" ? `/api/assets/${parsed.logoAssetId}/content` : null,
       content: row.content,
       updatedAt: row.createdAt,
     },
@@ -858,18 +864,52 @@ router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
     accentColor: (body.accentColor ?? "").trim(),
     fontPairing: (body.fontPairing ?? "").trim(),
     tone: (body.tone ?? "").trim(),
+    logoAssetId: body.logoAssetId ?? null,
   };
 
-  if (!clean.primaryColor && !clean.accentColor && !clean.fontPairing && !clean.tone) {
+  if (
+    !clean.primaryColor &&
+    !clean.accentColor &&
+    !clean.fontPairing &&
+    !clean.tone &&
+    clean.logoAssetId === null
+  ) {
     res.status(400).json({ error: "At least one brand field must be provided" });
     return;
   }
 
-  const lines: string[] = ["User-declared brand profile (apply this to every new build):"];
+  if (clean.logoAssetId !== null) {
+    const [logo] = await db
+      .select({ id: assetsTable.id, mimeType: assetsTable.mimeType })
+      .from(assetsTable)
+      .where(
+        and(
+          eq(assetsTable.id, clean.logoAssetId),
+          eq(assetsTable.ownerUserId, userId),
+          eq(assetsTable.state, "ready"),
+        ),
+      );
+    if (!logo || !logo.mimeType.startsWith("image/")) {
+      res
+        .status(400)
+        .json({ error: "Choose an image from your asset library for the brand logo." });
+      return;
+    }
+  }
+
+  const lines: string[] = [
+    "User-declared brand profile (apply this to every new build):",
+    "- Keep brand colours and fonts in shared theme tokens (brand/brand.css where the stack supports it), never scattered local overrides.",
+  ];
   if (clean.primaryColor) lines.push(`- Primary colour: ${clean.primaryColor}`);
   if (clean.accentColor) lines.push(`- Accent colour: ${clean.accentColor}`);
   if (clean.fontPairing) lines.push(`- Font pairing: ${clean.fontPairing}`);
   if (clean.tone) lines.push(`- Writing tone: ${clean.tone}`);
+  if (clean.logoAssetId !== null) {
+    lines.push(
+      `- Brand logo: account upload #${clean.logoAssetId}. Use list_uploads, then place_upload before referencing it in app source.`,
+    );
+  }
   const content = lines.join("\n");
   const annotation = JSON.stringify(clean);
 

@@ -16,8 +16,10 @@
  *  - User preferences (including erasure job metadata)
  *  - Personal access tokens
  *
- * External storage (best-effort — logged on failure, never blocks completion):
- *  - Object-storage upload files
+ * External storage:
+ *  - Unified private R2 assets are blocking and idempotent; erasure cannot
+ *    complete while those durable bytes or paid storage subscriptions remain.
+ *  - Legacy object-storage upload files remain best-effort for compatibility.
  *  - Fly.io containers for agentic projects
  */
 
@@ -33,6 +35,9 @@ import {
   userSubscriptionsTable,
   personalAccessTokensTable,
   oraTranscriptsTable,
+  assetsTable,
+  accountAssetQuotaTable,
+  storageAddonSubscriptionsTable,
 } from "@workspace/db";
 import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
@@ -40,6 +45,8 @@ import { evictTierCache } from "./public-ai/authed-user";
 import { destroyContainer, tenantRuntimeProvider } from "./tenant-runtime";
 import { releaseProductionDatabasesForHardDelete } from "./production-database-lifecycle";
 import { objectStorageClient } from "./objectStorage";
+import { deleteAssetObject } from "./asset-r2";
+import { getUncachableStripeClient } from "./stripeClient";
 
 /**
  * Best-effort: delete a file from Replit object storage by its objectPath.
@@ -85,6 +92,51 @@ export async function runGdprErasure(userId: string): Promise<void> {
     uploadObjectPaths = uploadRows.map((r) => r.objectPath).filter(Boolean);
   }
 
+  // Unified Capability-9 assets live in private R2 rather than the legacy
+  // upload store. Collect them before project-row cascades remove their
+  // ownership evidence. R2 deletion is blocking and idempotent: hard erasure
+  // never claims completion while durable bytes still exist.
+  const unifiedAssetRows = await db
+    .select({ storageKey: assetsTable.storageKey })
+    .from(assetsTable)
+    .where(eq(assetsTable.ownerUserId, userId));
+  const unifiedStorageKeys = [...new Set(unifiedAssetRows.map((row) => row.storageKey))];
+
+  // Paid storage is a recurring provider obligation. Cancel it before rows
+  // disappear; deleting only the local receipt could leave money burning.
+  const storageSubscriptions = await db
+    .select({
+      stripeSubscriptionId: storageAddonSubscriptionsTable.stripeSubscriptionId,
+      status: storageAddonSubscriptionsTable.status,
+    })
+    .from(storageAddonSubscriptionsTable)
+    .where(eq(storageAddonSubscriptionsTable.userId, userId));
+  const liveStorageSubscriptions = storageSubscriptions.filter(
+    (subscription) => !["canceled", "incomplete_expired"].includes(subscription.status),
+  );
+  if (liveStorageSubscriptions.length > 0) {
+    const stripe = await getUncachableStripeClient();
+    if (!stripe) throw new Error("gdpr_asset_storage_billing_unavailable");
+    for (const subscription of liveStorageSubscriptions) {
+      try {
+        await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
+      } catch (error) {
+        const code = (error as { code?: string }).code;
+        if (code !== "resource_missing") throw error;
+      }
+    }
+  }
+
+  for (const storageKey of unifiedStorageKeys) {
+    await deleteAssetObject(storageKey);
+  }
+  if (unifiedStorageKeys.length > 0) {
+    logger.info(
+      { userId, count: unifiedStorageKeys.length },
+      "gdpr-erasure: unified R2 asset objects deleted",
+    );
+  }
+
   // ── 2. Destroy Fly.io containers (best-effort) ─────────────────────────────
   // Durable production databases are project-owned and outlive releases and blue/green flips.
   // Hard erasure is their only release boundary. Provider deletion and verify-gone deliberately
@@ -120,6 +172,14 @@ export async function runGdprErasure(userId: string): Promise<void> {
       "gdpr-erasure: upload objects deleted",
     );
   }
+
+  // Project-scoped rows were cascade-deleted above. This also removes any
+  // account/thread-scoped asset rows, subscription receipts, and quota state.
+  await db.delete(assetsTable).where(eq(assetsTable.ownerUserId, userId));
+  await db
+    .delete(storageAddonSubscriptionsTable)
+    .where(eq(storageAddonSubscriptionsTable.userId, userId));
+  await db.delete(accountAssetQuotaTable).where(eq(accountAssetQuotaTable.userId, userId));
 
   // ── 5. Hard-delete knowledge vault entries ─────────────────────────────────
   await db.delete(knowledgeEntriesTable).where(eq(knowledgeEntriesTable.userId, userId));

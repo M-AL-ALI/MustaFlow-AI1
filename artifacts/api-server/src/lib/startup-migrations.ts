@@ -24,6 +24,251 @@ type MigrationStep = {
 
 type MigrationClient = Pick<import("pg").PoolClient, "query">;
 
+export async function applyUnifiedAssetRegistryMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS account_asset_quota (
+        user_id TEXT PRIMARY KEY,
+        base_allowance_bytes BIGINT NOT NULL DEFAULT 524288000,
+        purchased_allowance_bytes BIGINT NOT NULL DEFAULT 0,
+        used_bytes BIGINT NOT NULL DEFAULT 0,
+        reserved_bytes BIGINT NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT account_asset_quota_nonnegative CHECK (
+          base_allowance_bytes >= 0 AND purchased_allowance_bytes >= 0
+          AND used_bytes >= 0 AND reserved_bytes >= 0
+        )
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS assets (
+        id SERIAL PRIMARY KEY,
+        owner_user_id TEXT NOT NULL,
+        actor_user_id TEXT NOT NULL,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        thread_key TEXT,
+        scope TEXT NOT NULL CHECK (scope IN ('account', 'project', 'thread')),
+        kind TEXT NOT NULL CHECK (kind IN ('image', 'file', 'snapshot', 'recording', 'generated')),
+        source TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
+        sha256 TEXT,
+        storage_backend TEXT NOT NULL DEFAULT 'r2',
+        storage_key TEXT NOT NULL UNIQUE,
+        state TEXT NOT NULL DEFAULT 'reserved'
+          CHECK (state IN ('reserved', 'ready', 'rejected', 'deleted')),
+        scan_state TEXT NOT NULL DEFAULT 'not-scanned'
+          CHECK (scan_state IN ('not-required', 'not-scanned', 'clean', 'threat', 'failed')),
+        rejection_code TEXT,
+        text_preview TEXT,
+        version_id INTEGER,
+        task_id INTEGER,
+        message_id INTEGER,
+        context JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        ready_at TIMESTAMPTZ,
+        deleted_at TIMESTAMPTZ
+      )
+    `);
+    await client.query(`ALTER TABLE assets ADD COLUMN IF NOT EXISTS actor_user_id TEXT`);
+    await client.query(`UPDATE assets SET actor_user_id=owner_user_id WHERE actor_user_id IS NULL`);
+    await client.query(`ALTER TABLE assets ALTER COLUMN actor_user_id SET NOT NULL`);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS assets_owner_state_idx ON assets(owner_user_id, state)`,
+    );
+    await client.query(`ALTER TABLE assets ADD COLUMN IF NOT EXISTS text_preview TEXT`);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS assets_project_created_idx ON assets(project_id, created_at DESC)`,
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS assets_thread_created_idx ON assets(thread_key, created_at DESC)`,
+    );
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS asset_usage (
+        id SERIAL PRIMARY KEY,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        version_id INTEGER,
+        file_path TEXT,
+        consumer TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS asset_usage_asset_idx ON asset_usage(asset_id)`);
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS asset_usage_project_idx ON asset_usage(project_id)`,
+    );
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS asset_usage_identity_uq
+        ON asset_usage(
+          asset_id,
+          COALESCE(project_id, -1),
+          COALESCE(version_id, -1),
+          COALESCE(file_path, ''),
+          consumer
+        )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS storage_addon_subscriptions (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        sku TEXT NOT NULL,
+        allowance_bytes BIGINT NOT NULL CHECK (allowance_bytes > 0),
+        stripe_subscription_id TEXT NOT NULL UNIQUE,
+        stripe_item_id TEXT,
+        status TEXT NOT NULL,
+        current_period_end TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS storage_addons_user_status_idx
+        ON storage_addon_subscriptions(user_id, status)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS asset_analysis_events (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        estimated_provider_cost_micros BIGINT NOT NULL DEFAULT 0,
+        customer_credit_price INTEGER,
+        status TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS asset_analysis_user_created_idx
+        ON asset_analysis_events(user_id, created_at DESC)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS asset_analysis_asset_idx
+        ON asset_analysis_events(asset_id)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS visual_edit_sessions (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        actor_user_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('open', 'closed', 'cancelled')),
+        summary TEXT,
+        version_id INTEGER REFERENCES project_versions(id) ON DELETE SET NULL,
+        opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        closed_at TIMESTAMPTZ
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS visual_edit_sessions_project_status_idx
+        ON visual_edit_sessions(project_id, status)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS visual_edit_changes (
+        id SERIAL PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES visual_edit_sessions(id) ON DELETE CASCADE,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        actor_user_id TEXT NOT NULL,
+        file_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        intent_receipt_id INTEGER NOT NULL REFERENCES zero_intent_receipts(id) ON DELETE RESTRICT,
+        intent JSONB NOT NULL,
+        before_content TEXT NOT NULL,
+        after_content TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'applied' CHECK (status IN ('applied', 'undone')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        undone_at TIMESTAMPTZ
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS visual_edit_changes_session_idx
+        ON visual_edit_changes(session_id, id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS visual_edit_changes_project_idx
+        ON visual_edit_changes(project_id, created_at)
+    `);
+
+    // Preserve existing metadata before new callers adopt the shared registry.
+    // Generated image byte sizes are unknown in the legacy table and stay zero
+    // until a governed provider-HEAD migration measures them.
+    await client.query(`
+      INSERT INTO assets (
+        owner_user_id, actor_user_id, project_id, scope, kind, source, filename, mime_type,
+        size_bytes, storage_backend, storage_key, state, scan_state,
+        created_at, ready_at, deleted_at
+      )
+      SELECT
+        user_id,
+        user_id,
+        project_id,
+        CASE WHEN project_id IS NULL THEN 'account' ELSE 'project' END,
+        CASE WHEN source_type = 'uploaded' THEN 'image' ELSE 'generated' END,
+        source_type,
+        'image-' || id || '.webp',
+        'image/webp',
+        0,
+        CASE WHEN storage_key IS NULL THEN 'legacy-url' ELSE 'r2' END,
+        COALESCE(storage_key, 'legacy-generated/' || id),
+        CASE WHEN deleted_at IS NULL THEN 'ready' ELSE 'deleted' END,
+        'not-scanned',
+        created_at,
+        CASE WHEN status = 'completed' THEN updated_at ELSE NULL END,
+        deleted_at
+      FROM generated_images
+      WHERE status = 'completed'
+      ON CONFLICT (storage_key) DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO assets (
+        owner_user_id, actor_user_id, project_id, scope, kind, source, filename, mime_type,
+        size_bytes, storage_backend, storage_key, state, scan_state, text_preview, created_at, ready_at
+      )
+      SELECT
+        p.owner_id,
+        COALESCE(u.uploader_id, p.owner_id),
+        u.project_id,
+        'project',
+        CASE WHEN u.mime_type LIKE 'image/%' THEN 'image' ELSE 'file' END,
+        'legacy-project-upload',
+        u.filename,
+        u.mime_type,
+        u.size_bytes,
+        'legacy-object',
+        u.object_path,
+        'ready',
+        'not-scanned',
+        u.text_preview,
+        u.created_at,
+        u.created_at
+      FROM project_uploads u
+      JOIN projects p ON p.id = u.project_id
+      ON CONFLICT (storage_key) DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO account_asset_quota (user_id, used_bytes, reserved_bytes)
+      SELECT owner_user_id,
+             COALESCE(SUM(size_bytes) FILTER (WHERE state = 'ready'), 0),
+             COALESCE(SUM(size_bytes) FILTER (WHERE state = 'reserved'), 0)
+        FROM assets
+       GROUP BY owner_user_id
+      ON CONFLICT (user_id) DO UPDATE
+        SET used_bytes = EXCLUDED.used_bytes,
+            reserved_bytes = EXCLUDED.reserved_bytes,
+            updated_at = NOW()
+    `);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function applyProjectCollaborationMigration(client: MigrationClient): Promise<void> {
   await client.query("BEGIN");
   try {
@@ -1287,6 +1532,7 @@ export async function applyZeroPromptQueuePersistenceMigration(
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       position INTEGER NOT NULL,
       current_text TEXT NOT NULL,
+      asset_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
       state TEXT NOT NULL,
       promoted_turn_id TEXT,
       deleted_by TEXT,
@@ -1309,6 +1555,10 @@ export async function applyZeroPromptQueuePersistenceMigration(
   await client.query(`
     CREATE INDEX IF NOT EXISTS zero_prompt_queue_items_project_state_idx
       ON zero_prompt_queue_items(project_id, state, position)
+  `);
+  await client.query(`
+    ALTER TABLE zero_prompt_queue_items
+      ADD COLUMN IF NOT EXISTS asset_ids JSONB NOT NULL DEFAULT '[]'::jsonb
   `);
   await client.query(`
     CREATE INDEX IF NOT EXISTS project_activity_queue_item_idx
@@ -4580,6 +4830,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
           id                     SERIAL PRIMARY KEY,
           user_id                TEXT NOT NULL,
           project_id             INTEGER,
+          asset_id               INTEGER,
           prompt                 TEXT NOT NULL,
           revised_prompt         TEXT,
           style                  TEXT,
@@ -4622,7 +4873,8 @@ const MIGRATION_STEPS: MigrationStep[] = [
           ADD COLUMN IF NOT EXISTS purpose         TEXT,
           ADD COLUMN IF NOT EXISTS provider_name   TEXT NOT NULL DEFAULT 'openai',
           ADD COLUMN IF NOT EXISTS model_name      TEXT,
-          ADD COLUMN IF NOT EXISTS thumbnail_url   TEXT
+          ADD COLUMN IF NOT EXISTS thumbnail_url   TEXT,
+          ADD COLUMN IF NOT EXISTS asset_id        INTEGER
       `);
       await client.query("COMMIT");
     },
@@ -6727,6 +6979,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-project-collaboration",
     async run(client) {
       await applyProjectCollaborationMigration(client);
+    },
+  },
+  {
+    name: "migrate-unified-asset-registry",
+    async run(client) {
+      await applyUnifiedAssetRegistryMigration(client);
     },
   },
 ];
