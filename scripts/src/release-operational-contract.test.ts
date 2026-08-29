@@ -8,6 +8,10 @@ const scriptsPackage = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 ) as { scripts: Record<string, string> };
 const gateSource = readFileSync(new URL("./ora-stability-gate.ts", import.meta.url), "utf8");
+const drizzleConfigSource = readFileSync(
+  new URL("../../lib/db/drizzle.config.ts", import.meta.url),
+  "utf8",
+);
 
 assert.equal(
   rootPackage.scripts["test:api:serial"],
@@ -26,6 +30,10 @@ assert.equal(
   "tsx ./src/verify-production-release.ts",
 );
 assert.equal(gateSource.includes("--minWorkers"), false);
+assert.ok(
+  drizzleConfigSource.includes('.replaceAll("\\\\", "/")'),
+  "Drizzle schema paths must use portable separators so a Windows lab can bootstrap its test database",
+);
 assert.equal(
   gateSource.includes("/^artifacts\\/mustaflow\\/src\\/pages\\/.*ora/i"),
   false,
