@@ -6,6 +6,8 @@ const source = readFileSync(resolve(process.cwd(), "src/pages/image-studio.tsx")
 
 describe("Image Studio unified asset contract", () => {
   it("places generated and uploaded assets into a chosen project", () => {
+    expect(source).toContain("const addAssetToProject = async () =>");
+    expect(source).not.toContain("useAssetInProject");
     expect(source).toContain('title={image.assetId ? "Use in Project"');
     expect(source).toContain("setUsingAsset({ assetId: asset.id");
     expect(source).toContain("setUsingAsset({ assetId: image.assetId");

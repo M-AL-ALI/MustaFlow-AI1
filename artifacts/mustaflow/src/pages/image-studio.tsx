@@ -415,7 +415,7 @@ export default function ImageStudioPage() {
       .catch(() => setProjects([]));
   }, [fetchAssets, fetchImages]);
 
-  const useAssetInProject = async () => {
+  const addAssetToProject = async () => {
     if (!usingAsset || useProjectId === null) return;
     setUseBusy(true);
     setUploadError(null);
@@ -1307,7 +1307,7 @@ export default function ImageStudioPage() {
               </button>
               <button
                 type="button"
-                onClick={() => void useAssetInProject()}
+                onClick={() => void addAssetToProject()}
                 disabled={useBusy || useProjectId === null}
                 className="rounded bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
               >
