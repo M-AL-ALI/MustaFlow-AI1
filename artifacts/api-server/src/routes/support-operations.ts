@@ -78,7 +78,48 @@ export function safeInternalRedirectPath(currentPath: string, location: string):
   }
 }
 
-async function proveCurrentNabuFlowRoute(
+export function trustedSupportProofOrigin(req: Request): string | null {
+  const rawHost = req.get("host")?.trim().toLowerCase();
+  if (!rawHost) return null;
+  try {
+    const host = new URL(`http://${rawHost}`).host.toLowerCase();
+    const configuredHosts = new Set(
+      (process.env.REPLIT_DOMAINS ?? "")
+        .split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean),
+    );
+    for (const candidate of [
+      process.env.MUSTAFLOW_WEB_URL,
+      process.env.WEB_BASE_URL,
+      process.env.PLATFORM_DOMAIN,
+    ]) {
+      if (!candidate?.trim()) continue;
+      try {
+        configuredHosts.add(
+          candidate.includes("://")
+            ? new URL(candidate).host.toLowerCase()
+            : new URL(`https://${candidate}`).host.toLowerCase(),
+        );
+      } catch {
+        // Invalid configuration cannot authorize an outbound proof target.
+      }
+    }
+    if (process.env.NODE_ENV === "production" && !configuredHosts.has(host)) return null;
+    const forwardedProtocol = req.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const protocol =
+      process.env.NODE_ENV === "production"
+        ? "https"
+        : forwardedProtocol === "https" || forwardedProtocol === "http"
+          ? forwardedProtocol
+          : req.protocol;
+    return new URL(`${protocol}://${host}`).origin;
+  } catch {
+    return null;
+  }
+}
+
+export async function proveCurrentNabuFlowRoute(
   req: Request,
   route: string,
 ): Promise<{
@@ -87,9 +128,9 @@ async function proveCurrentNabuFlowRoute(
   observedAt: string;
   durationMs: number;
 } | null> {
-  const port = Number(process.env.PORT);
   const path = safeInternalProbePath(route);
-  if (!path || !Number.isSafeInteger(port) || port < 1 || port > 65_535) return null;
+  const origin = trustedSupportProofOrigin(req);
+  if (!path || !origin) return null;
   const headers: Record<string, string> = {};
   const cookie = req.get("cookie");
   const authorization = req.get("authorization");
@@ -98,7 +139,7 @@ async function proveCurrentNabuFlowRoute(
   const startedAt = Date.now();
   try {
     const request = (probePath: string) =>
-      fetch(`http://127.0.0.1:${port}${probePath}`, {
+      fetch(new URL(probePath, `${origin}/`), {
         method: "GET",
         headers,
         redirect: "manual",

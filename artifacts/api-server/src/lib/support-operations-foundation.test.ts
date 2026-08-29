@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? Buffer.alloc(32, 11).toString("base64");
 process.env.DATABASE_URL = process.env.DATABASE_URL ?? "postgres://test:test@127.0.0.1:1/test";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function source(relative: string): string {
   return readFileSync(new URL(relative, import.meta.url), "utf8");
@@ -167,9 +171,13 @@ describe("consented support operations", () => {
     ).toBeGreaterThanOrEqual(2);
   });
 
-  it("allows only same-process route paths for automatic defect proof", async () => {
-    const { safeInternalProbePath, safeInternalRedirectPath } =
-      await import("../routes/support-operations");
+  it("allows only trusted same-origin route paths for automatic defect proof", async () => {
+    const {
+      proveCurrentNabuFlowRoute,
+      safeInternalProbePath,
+      safeInternalRedirectPath,
+      trustedSupportProofOrigin,
+    } = await import("../routes/support-operations");
     expect(safeInternalProbePath("/api/healthz?full=1")).toBe("/api/healthz?full=1");
     expect(safeInternalProbePath("https://example.com/healthz")).toBeNull();
     expect(safeInternalProbePath("//example.com/healthz")).toBeNull();
@@ -177,6 +185,47 @@ describe("consented support operations", () => {
     expect(safeInternalRedirectPath("/help", "/help/")).toBe("/help/");
     expect(safeInternalRedirectPath("/help", "https://example.com/help")).toBeNull();
     expect(safeInternalRedirectPath("/help", "//example.com/help")).toBeNull();
+
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousDomains = process.env.REPLIT_DOMAINS;
+    process.env.NODE_ENV = "production";
+    process.env.REPLIT_DOMAINS = "www.mustaflow.com";
+    const request = {
+      protocol: "http",
+      get: (name: string) => {
+        if (name.toLowerCase() === "host") return "www.mustaflow.com";
+        if (name.toLowerCase() === "x-forwarded-proto") return "https";
+        return undefined;
+      },
+    } as never;
+    try {
+      expect(trustedSupportProofOrigin(request)).toBe("https://www.mustaflow.com");
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: unknown) => {
+          calls.push(String(input));
+          return calls.length === 1
+            ? new Response(null, { status: 301, headers: { location: "/help/" } })
+            : new Response("ok", { status: 200 });
+        }),
+      );
+      await expect(proveCurrentNabuFlowRoute(request, "/help")).resolves.toMatchObject({
+        route: "/help/",
+        status: 200,
+      });
+      expect(calls).toEqual(["https://www.mustaflow.com/help", "https://www.mustaflow.com/help/"]);
+      const untrustedRequest = {
+        protocol: "http",
+        get: (name: string) => (name.toLowerCase() === "host" ? "example.com" : undefined),
+      } as never;
+      expect(trustedSupportProofOrigin(untrustedRequest)).toBeNull();
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousDomains === undefined) delete process.env.REPLIT_DOMAINS;
+      else process.env.REPLIT_DOMAINS = previousDomains;
+    }
   });
 
   it("uses one real-identity presence mechanism and removes ghosts", () => {
