@@ -103,7 +103,7 @@ function SignedOut() {
 }
 
 function TicketDetail({ ticketId }: { ticketId: number }) {
-  const { data, isLoading, isError, error } = useGetSupportTicket(ticketId);
+  const { data, isLoading, isError, error, refetch } = useGetSupportTicket(ticketId);
 
   if (isLoading) {
     return (
@@ -148,7 +148,7 @@ function TicketDetail({ ticketId }: { ticketId: number }) {
         </div>
       </div>
 
-      <SupportOwnerActions ticketId={ticketId} />
+      <SupportOwnerActions ticketId={ticketId} onMutated={() => refetch()} />
 
       {data.attachments.length > 0 && (
         <section className="space-y-2">
