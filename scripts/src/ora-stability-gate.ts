@@ -496,6 +496,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /brand-kit-file-builder/i,
       /brand-kit-api/i,
       /brand-kit-route/i,
+      /brand-kit-unified-assets/i,
       /startup-migrations/i,
     ],
     manualWebsite:
