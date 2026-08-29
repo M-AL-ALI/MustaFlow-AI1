@@ -34,6 +34,7 @@ export const adminAccessReceiptsTable = pgTable(
     targetWorkspaceId: integer("target_workspace_id"),
     previousRole: text("previous_role"),
     nextRole: text("next_role"),
+    reason: text("reason"),
     outcome: text("outcome").notNull(),
     requestMethod: text("request_method"),
     requestPath: text("request_path"),

@@ -147,7 +147,13 @@ describe("Admin Page access foundation", () => {
 
   it("keeps the four roles least-privileged by a closed central policy", () => {
     expect(staffRoleAllowsRequest("owner", "POST", "/api/admin/roles")).toBe(true);
+    expect(staffRoleAllowsRequest("owner", "POST", "/api/admin/accounts/user_2/suspend")).toBe(
+      true,
+    );
     expect(staffRoleAllowsRequest("operator", "POST", "/api/admin/roles")).toBe(false);
+    expect(staffRoleAllowsRequest("operator", "POST", "/api/admin/accounts/user_2/suspend")).toBe(
+      false,
+    );
     expect(staffRoleAllowsRequest("operator", "POST", "/api/admin/domains/7/suspend")).toBe(true);
     expect(staffRoleAllowsRequest("support", "POST", "/api/admin/support-tickets/7/reply")).toBe(
       true,

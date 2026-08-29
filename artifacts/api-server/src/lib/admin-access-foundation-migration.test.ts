@@ -26,6 +26,9 @@ describe("Admin Page access migration", () => {
     expect(
       firstRun.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS admin_access_receipts")),
     ).toBe(true);
+    expect(firstRun).toContain(
+      "ALTER TABLE admin_access_receipts ADD COLUMN IF NOT EXISTS reason TEXT",
+    );
     expect(firstRun.some((sql) => sql.includes("user_roles_role_check"))).toBe(true);
     expect(firstRun.at(-1)).toBe("COMMIT");
   });

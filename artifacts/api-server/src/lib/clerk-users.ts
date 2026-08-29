@@ -18,6 +18,11 @@ export interface ClerkUserSummary {
   imageUrl: string | null;
 }
 
+export interface ClerkAccountAccessSummary extends ClerkUserSummary {
+  banned: boolean;
+  locked: boolean;
+}
+
 export const SHARED_ACCOUNT_PROFILE_SEMANTICS = "shared-account-profile-v1" as const;
 
 export interface SharedAccountProfile extends ClerkUserSummary {
@@ -97,6 +102,16 @@ function summarise(user: {
     email,
     displayName,
     imageUrl: user.imageUrl ?? null,
+  };
+}
+
+function summariseAccountAccess(
+  user: Parameters<typeof summarise>[0] & { banned?: boolean; locked?: boolean },
+): ClerkAccountAccessSummary {
+  return {
+    ...summarise(user),
+    banned: user.banned === true,
+    locked: user.locked === true,
   };
 }
 
@@ -198,6 +213,54 @@ export async function findClerkUserByEmail(email: string): Promise<ClerkUserSumm
   } catch (err) {
     logger.warn({ err, email: trimmed }, "Clerk user lookup by email failed");
     return null;
+  }
+}
+
+/** Owner-console lookup for one account's reversible Clerk access state. */
+export async function findClerkAccountAccessByEmail(
+  email: string,
+): Promise<ClerkAccountAccessSummary | null> {
+  const trimmed = email.trim().toLowerCase();
+  if (!trimmed || !clerkConfigured()) return null;
+  try {
+    const result = await clerkClient.users.getUserList({ emailAddress: [trimmed], limit: 1 });
+    const user = result.data?.[0];
+    return user ? summariseAccountAccess(user) : null;
+  } catch (err) {
+    logger.warn({ err }, "Clerk account-access lookup by email failed");
+    throw new Error("account_access_store_unavailable", { cause: err });
+  }
+}
+
+export async function getClerkAccountAccessById(
+  userId: string,
+): Promise<ClerkAccountAccessSummary | null> {
+  if (!userId || !clerkConfigured()) return null;
+  try {
+    const user = await clerkClient.users.getUser(userId);
+    return user ? summariseAccountAccess(user) : null;
+  } catch (err) {
+    const status = (err as { status?: number } | null)?.status;
+    if (status === 404) return null;
+    logger.warn({ err, userId }, "Clerk account-access lookup by ID failed");
+    throw new Error("account_access_store_unavailable", { cause: err });
+  }
+}
+
+/** Clerk is the single account-access control plane; no local ban shadow is stored. */
+export async function setClerkAccountBanned(
+  userId: string,
+  banned: boolean,
+): Promise<ClerkAccountAccessSummary> {
+  if (!userId || !clerkConfigured()) throw new Error("account_access_store_unavailable");
+  try {
+    const user = banned
+      ? await clerkClient.users.banUser(userId)
+      : await clerkClient.users.unbanUser(userId);
+    return summariseAccountAccess(user);
+  } catch (err) {
+    logger.warn({ err, userId, banned }, "Clerk account-access mutation failed");
+    throw new Error("account_access_store_unavailable", { cause: err });
   }
 }
 

@@ -7123,6 +7123,92 @@ export const RevokeAdminRoleResponse = zod.object({
 
 
 /**
+ * @summary Look up one account for an Owner access decision
+ */
+export const lookupAdminAccountQueryEmailMax = 320;
+
+
+
+export const LookupAdminAccountQueryParams = zod.object({
+  "email": zod.coerce.string().email().max(lookupAdminAccountQueryEmailMax)
+})
+
+export const LookupAdminAccountResponse = zod.object({
+  "account": zod.object({
+  "userId": zod.string(),
+  "email": zod.string().email().nullable(),
+  "displayName": zod.string().nullable(),
+  "imageUrl": zod.string().url().nullable(),
+  "banned": zod.boolean(),
+  "locked": zod.boolean(),
+  "staffRole": zod.union([zod.literal('owner'),zod.literal('operator'),zod.literal('support'),zod.literal('analyst'),zod.literal(null)]).nullable()
+})
+})
+
+
+/**
+ * @summary Reversibly suspend one account from signing in
+ */
+export const SuspendAdminAccountParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const suspendAdminAccountBodyReasonMin = 8;
+export const suspendAdminAccountBodyReasonMax = 500;
+
+
+
+export const SuspendAdminAccountBody = zod.object({
+  "reason": zod.string().min(suspendAdminAccountBodyReasonMin).max(suspendAdminAccountBodyReasonMax)
+})
+
+export const SuspendAdminAccountResponse = zod.object({
+  "ok": zod.boolean(),
+  "changed": zod.boolean(),
+  "account": zod.object({
+  "userId": zod.string(),
+  "email": zod.string().email().nullable(),
+  "displayName": zod.string().nullable(),
+  "imageUrl": zod.string().url().nullable(),
+  "banned": zod.boolean(),
+  "locked": zod.boolean(),
+  "staffRole": zod.union([zod.literal('owner'),zod.literal('operator'),zod.literal('support'),zod.literal('analyst'),zod.literal(null)]).nullable()
+})
+})
+
+
+/**
+ * @summary Restore a reversibly suspended account
+ */
+export const RestoreAdminAccountParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const restoreAdminAccountBodyReasonMin = 8;
+export const restoreAdminAccountBodyReasonMax = 500;
+
+
+
+export const RestoreAdminAccountBody = zod.object({
+  "reason": zod.string().min(restoreAdminAccountBodyReasonMin).max(restoreAdminAccountBodyReasonMax)
+})
+
+export const RestoreAdminAccountResponse = zod.object({
+  "ok": zod.boolean(),
+  "changed": zod.boolean(),
+  "account": zod.object({
+  "userId": zod.string(),
+  "email": zod.string().email().nullable(),
+  "displayName": zod.string().nullable(),
+  "imageUrl": zod.string().url().nullable(),
+  "banned": zod.boolean(),
+  "locked": zod.boolean(),
+  "staffRole": zod.union([zod.literal('owner'),zod.literal('operator'),zod.literal('support'),zod.literal('analyst'),zod.literal(null)]).nullable()
+})
+})
+
+
+/**
  * @summary List secret audit log entries with pagination
  */
 export const getAdminAuditLogQueryLimitDefault = 50;

@@ -140,12 +140,14 @@ export async function applyAdminAccessFoundationMigration(client: MigrationClien
         target_workspace_id INTEGER,
         previous_role       TEXT,
         next_role           TEXT,
+        reason              TEXT,
         outcome             TEXT NOT NULL,
         request_method      TEXT,
         request_path        TEXT,
         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await client.query(`ALTER TABLE admin_access_receipts ADD COLUMN IF NOT EXISTS reason TEXT`);
     await client.query(`
       CREATE INDEX IF NOT EXISTS admin_access_receipts_actor_created_idx
         ON admin_access_receipts(actor_user_id, created_at)

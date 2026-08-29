@@ -6268,6 +6268,78 @@ paths:
                   userId: { type: string }
                   note: { type: string }
 
+  /admin/accounts/lookup:
+    get:
+      operationId: lookupAdminAccount
+      tags: [admin]
+      summary: Look up one account for an Owner access decision
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string, format: email, maxLength: 320 }
+      responses:
+        "200":
+          description: Current account access state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccountAccessResponse"
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/accounts/{userId}/suspend:
+    post:
+      operationId: suspendAdminAccount
+      tags: [admin]
+      summary: Reversibly suspend one account from signing in
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccountAccessChangeInput"
+      responses:
+        "200":
+          description: Account access suspended or already suspended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccountAccessChangeResponse"
+        "409":
+          description: Self or Owner lockout refused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /admin/accounts/{userId}/restore:
+    post:
+      operationId: restoreAdminAccount
+      tags: [admin]
+      summary: Restore a reversibly suspended account
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAccountAccessChangeInput"
+      responses:
+        "200":
+          description: Account access restored or already active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAccountAccessChangeResponse"
+
   /admin/audit-log:
     get:
       operationId: getAdminAuditLog
@@ -10449,6 +10521,42 @@ components:
         nextRole: { type: ["string", "null"] }
         action: { type: string }
         createdAt: { type: string, format: date-time }
+
+    AdminAccountAccess:
+      type: object
+      required: [userId, email, displayName, imageUrl, banned, locked, staffRole]
+      properties:
+        userId: { type: string }
+        email: { type: ["string", "null"], format: email }
+        displayName: { type: ["string", "null"] }
+        imageUrl: { type: ["string", "null"], format: uri }
+        banned: { type: boolean }
+        locked: { type: boolean }
+        staffRole:
+          type: ["string", "null"]
+          enum: [owner, operator, support, analyst, null]
+
+    AdminAccountAccessResponse:
+      type: object
+      required: [account]
+      properties:
+        account:
+          $ref: "#/components/schemas/AdminAccountAccess"
+
+    AdminAccountAccessChangeInput:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 8, maxLength: 500 }
+
+    AdminAccountAccessChangeResponse:
+      type: object
+      required: [ok, changed, account]
+      properties:
+        ok: { type: boolean }
+        changed: { type: boolean }
+        account:
+          $ref: "#/components/schemas/AdminAccountAccess"
 
     AnalyticsPingInput:
       type: object
