@@ -2,7 +2,6 @@ import { Readable } from "node:stream";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
-  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -68,25 +67,6 @@ export async function putAssetBuffer(input: {
     contentLength: input.body.length,
     contentType: input.contentType,
   });
-}
-
-export async function headAsset(key: string): Promise<{
-  sizeBytes: number;
-  contentType: string;
-} | null> {
-  const { client, bucket } = requireConfig();
-  try {
-    const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-    return {
-      sizeBytes: Number(response.ContentLength ?? 0),
-      contentType: response.ContentType ?? "application/octet-stream",
-    };
-  } catch (error) {
-    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
-      return null;
-    }
-    throw error;
-  }
 }
 
 export async function openAsset(key: string): Promise<{
