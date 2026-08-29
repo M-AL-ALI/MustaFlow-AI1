@@ -226,7 +226,7 @@ describe("Zero prompt queue drawer", () => {
       "/api/projects/7/prompt-queue",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ position: 3, text: "Third", references: [] }),
+        body: JSON.stringify({ position: 3, text: "Third", references: [], assetIds: [] }),
       }),
     ]);
 

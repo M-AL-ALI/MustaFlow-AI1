@@ -24,4 +24,27 @@ describe("visual edit session UI contract", () => {
     expect(source).toContain("json.suggestedPrompt");
     expect(source).toContain("setEditMode(false)");
   });
+
+  it("makes breakpoint, reorder, and reference comparison explicit in the preview", () => {
+    expect(source).toContain("breakpoint: device");
+    expect(source).toContain('kind: "reorder"');
+    expect(source).toContain("direction: payload.direction");
+    expect(source).toContain('applyVisualEdit({ kind: "reorder", direction: "up" })');
+    expect(source).toContain('applyVisualEdit({ kind: "reorder", direction: "down" })');
+    expect(source).toContain("Add reference overlay");
+    expect(source).toContain('aria-label="Reference overlay opacity"');
+    expect(source.match(/\{renderReferenceOverlay\(\)\}/gu)).toHaveLength(3);
+    expect(source).toContain('aria-label="Drag selected element to resize"');
+    expect(source).toContain('aria-label="Drag selected element to reorder"');
+    expect(source).toContain("Release to save this size");
+    expect(source).toContain("veSelections.length > 1");
+    expect(source).toContain(
+      "elements selected · changes to style, spacing, visibility, and delete apply to all",
+    );
+    expect(source).toContain("for (const selection of veSelections)");
+    expect(source).toContain("Crop to frame");
+    expect(source).toContain("Remove background");
+    expect(source).toContain("Generate a replacement for the selected image");
+    expect(source).toContain('property: "object-fit"');
+  });
 });

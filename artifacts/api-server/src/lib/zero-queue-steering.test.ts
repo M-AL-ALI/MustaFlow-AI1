@@ -145,6 +145,7 @@ describe("queue-backed steering at the declared boundary", () => {
       kind: "promoted",
       itemId: "queue-1",
       text: "Queue update",
+      assetIds: [],
       activeTurnId: "42",
     });
   });

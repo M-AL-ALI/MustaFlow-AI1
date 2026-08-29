@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  check,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { projectsTable } from "./projects";
 
 export const ZERO_PROMPT_QUEUE_STORED_STATES = ["queued", "promoted", "deleted"] as const;
@@ -14,6 +23,7 @@ export const zeroPromptQueueItemsTable = pgTable(
       .references(() => projectsTable.id, { onDelete: "cascade" }),
     position: integer("position").notNull(),
     currentText: text("current_text").notNull(),
+    assetIds: jsonb("asset_ids").$type<number[]>().notNull().default([]),
     state: text("state").$type<ZeroPromptQueueStoredState>().notNull(),
     promotedTurnId: text("promoted_turn_id"),
     deletedBy: text("deleted_by"),

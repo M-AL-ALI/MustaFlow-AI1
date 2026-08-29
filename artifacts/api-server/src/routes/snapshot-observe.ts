@@ -4,6 +4,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
   agentTasksTable,
+  assetAnalysisEventsTable,
   chatMessagesTable,
   db,
   projectFilesTable,
@@ -15,7 +16,6 @@ import { takeScreenshot, type ScreenshotInput, type ScreenshotResult } from "../
 import { runConversePipeline } from "../lib/builder";
 import type { ConversationTurn } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
-import { deductCreditsAtomic } from "../lib/credits";
 import { shouldRouteToLivePreview } from "../lib/livePreviewProxy";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
@@ -28,6 +28,7 @@ import {
 import { persistZeroTerminal, zeroTerminalRef } from "../lib/zero-terminal-persistence";
 import { completeAsset, rejectReservedAsset, reserveAsset } from "../lib/asset-registry";
 import { deleteAssetObject, putAssetBuffer } from "../lib/asset-r2";
+import { nabuflowGateHttpError } from "../lib/nabuflow-billing";
 
 export const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 const SNAPSHOT_UNAVAILABLE_MESSAGE =
@@ -118,6 +119,9 @@ export type SnapshotCompletionInput = {
 
 export type SnapshotObserveDependencies = {
   loadProject(projectId: number): Promise<SnapshotProject | null>;
+  authorizeVision?(
+    project: SnapshotProject,
+  ): Promise<{ status: number; body: Record<string, unknown> } | null>;
   capture(input: ScreenshotInput): Promise<ScreenshotResult>;
   complete(input: SnapshotCompletionInput): Promise<Record<string, unknown>>;
 };
@@ -231,6 +235,11 @@ export function createSnapshotObserveRouter(
     const cookies = nabuflowSessionCookies(req.headers.cookie);
     if (!project || !actorUserId || !origin || cookies.length === 0) {
       snapshotUnavailable(res);
+      return;
+    }
+    const billingBlock = await dependencies.authorizeVision?.(project);
+    if (billingBlock) {
+      res.status(billingBlock.status).json(billingBlock.body);
       return;
     }
 
@@ -394,12 +403,19 @@ async function completeSnapshotObservation(
     assetId: asset.id,
     versionId: input.project.versionId,
   };
-  const deduction = await deductCreditsAtomic(input.actorUserId, 1, {
-    type: "converse",
-    description: `Project observation — project ${input.project.id}`,
-    projectId: input.project.id,
-  });
-  if ("insufficient" in deduction) throw new Error("snapshot observation credit unavailable");
+  const [analysisEvent] = await db
+    .insert(assetAnalysisEventsTable)
+    .values({
+      userId: input.actorUserId,
+      projectId: input.project.id,
+      assetId: asset.id,
+      provider: "pending",
+      model: "pending",
+      customerCreditPrice: null,
+      status: "started",
+    })
+    .returning({ id: assetAnalysisEventsTable.id });
+  if (!analysisEvent) throw new Error("snapshot analysis receipt unavailable");
 
   const [currentFiles, recentMessages] = await Promise.all([
     db
@@ -496,6 +512,10 @@ async function completeSnapshotObservation(
       ],
     });
   } catch {
+    await db
+      .update(assetAnalysisEventsTable)
+      .set({ status: "failed" })
+      .where(eq(assetAnalysisEventsTable.id, analysisEvent.id));
     const failure = "I captured the preview, but couldn't finish observing it. Please try again.";
     const terminal = failedTerminal({
       schema: "zero-terminal-v1",
@@ -535,6 +555,20 @@ async function completeSnapshotObservation(
     if (!persisted) throw new Error("snapshot observation failure outcome unavailable");
     throw new Error("snapshot observation model unavailable");
   }
+  await db
+    .update(assetAnalysisEventsTable)
+    .set({
+      provider: converse.usage?.provider ?? "unreported",
+      model: converse.usage?.model ?? "unreported",
+      inputTokens: converse.usage?.inputTokens ?? 0,
+      outputTokens: converse.usage?.outputTokens ?? 0,
+      estimatedProviderCostMicros: Math.max(
+        0,
+        Math.round((converse.usage?.estimatedProviderCostUsd ?? 0) * 1_000_000),
+      ),
+      status: "completed",
+    })
+    .where(eq(assetAnalysisEventsTable.id, analysisEvent.id));
   const assistantContent = `I captured the ${input.previewClass} preview.\n\n${converse.markdown}`;
   const [assistantMessage] = await db
     .insert(chatMessagesTable)
@@ -603,6 +637,13 @@ async function completeSnapshotObservation(
 
 const router = createSnapshotObserveRouter({
   loadProject: loadSnapshotProject,
+  authorizeVision: (project) =>
+    nabuflowGateHttpError(project.ownerId, {
+      engineMode: "eco",
+      deepReasoning: false,
+      projectedCredits: 1,
+      source: "pipeline",
+    }),
   capture: takeScreenshot,
   complete: completeSnapshotObservation,
 });

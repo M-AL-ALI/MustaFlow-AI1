@@ -38,6 +38,10 @@ export type AssetContext = {
   annotation?: { kind: "arrow" | "circle"; label: string };
   redactions?: Array<{ x: number; y: number; width: number; height: number }>;
   resized?: boolean;
+  altText?: string;
+  brandRole?: "none" | "logo" | "icon" | "palette" | "font" | "reference";
+  derivativeOfAssetId?: number;
+  derivativePreset?: string;
 };
 
 export const assetsTable = pgTable(
@@ -133,6 +137,32 @@ export const storageAddonSubscriptionsTable = pgTable(
   (table) => [
     uniqueIndex("storage_addons_stripe_sub_uq").on(table.stripeSubscriptionId),
     index("storage_addons_user_status_idx").on(table.userId, table.status),
+  ],
+);
+
+export const assetAnalysisEventsTable = pgTable(
+  "asset_analysis_events",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    projectId: integer("project_id").references(() => projectsTable.id, { onDelete: "cascade" }),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => assetsTable.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    estimatedProviderCostMicros: bigint("estimated_provider_cost_micros", { mode: "number" })
+      .notNull()
+      .default(0),
+    customerCreditPrice: integer("customer_credit_price"),
+    status: text("status").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("asset_analysis_user_created_idx").on(table.userId, table.createdAt),
+    index("asset_analysis_asset_idx").on(table.assetId),
   ],
 );
 

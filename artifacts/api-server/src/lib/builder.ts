@@ -3,9 +3,15 @@ import { parse as acornParse } from "acorn";
 import { checkSyntax } from "./checks/syntax-checker";
 import { runTsCheck, formatTsErrors } from "./checks/ts-checker";
 import { logger } from "./logger";
+import { referenceAwarePrompt } from "./reference-image-policy";
 import { isValidTenantServicePort } from "./runtime-manifest";
 import type { AgentMode } from "./ai";
-import { creditCostFor, EmptyCompletionError, resolveStageProvider } from "./ai-providers";
+import {
+  computeModelUsdCost,
+  creditCostFor,
+  EmptyCompletionError,
+  resolveStageProvider,
+} from "./ai-providers";
 import type { StreamCompletionSummary } from "./ai-providers";
 import {
   completionSummaryFromResponse,
@@ -1748,7 +1754,7 @@ function pushUserMessageWithImages(
     {
       type: "text",
       text:
-        userPrompt +
+        referenceAwarePrompt(userPrompt) +
         "\n\n[The user has attached " +
         imageAttachments.length +
         " image(s) above. Carefully look at each image, identify the visible UI elements, layout, colours, text, and any errors or issues shown, and use that to inform what you build or fix.]",
@@ -8230,6 +8236,13 @@ export type ConverseResult = {
     question: string;
     options: string[];
   };
+  usage?: {
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedProviderCostUsd: number;
+  };
 };
 
 function createMustaflowPlatformPrimer(): string {
@@ -8555,7 +8568,9 @@ export async function runConversePipeline(args: {
   }
 
   if (imageAttachments && imageAttachments.length > 0) {
-    const parts: Array<TextPart | ImagePart> = [{ type: "text", text: userPrompt }];
+    const parts: Array<TextPart | ImagePart> = [
+      { type: "text", text: referenceAwarePrompt(userPrompt) },
+    ];
     for (const att of imageAttachments) {
       parts.push({ type: "image_url", image_url: { url: att.dataUri } });
     }
@@ -8601,7 +8616,19 @@ export async function runConversePipeline(args: {
       });
     }
     const stopEvidence = requireCleanConverseCompletion(completionSummary, markdown);
-    return { markdown, stopEvidence };
+    const inputTokens = response.usage?.prompt_tokens ?? 0;
+    const outputTokens = response.usage?.completion_tokens ?? 0;
+    return {
+      markdown,
+      stopEvidence,
+      usage: {
+        provider: cProvider,
+        model: cModel,
+        inputTokens,
+        outputTokens,
+        estimatedProviderCostUsd: computeModelUsdCost(cModel, inputTokens, outputTokens),
+      },
+    };
   } catch (err) {
     logger.error({ err }, "Converse pipeline failed");
     throw err instanceof Error ? err : new Error(String(err));
@@ -8780,7 +8807,9 @@ export async function runConverseStreamPipeline(
   }
 
   if (imageAttachments && imageAttachments.length > 0) {
-    const parts: Array<TextPart | ImagePart> = [{ type: "text", text: userPrompt }];
+    const parts: Array<TextPart | ImagePart> = [
+      { type: "text", text: referenceAwarePrompt(userPrompt) },
+    ];
     for (const att of imageAttachments) {
       parts.push({ type: "image_url", image_url: { url: att.dataUri } });
     }

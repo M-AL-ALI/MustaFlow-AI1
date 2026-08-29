@@ -74,13 +74,20 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
     while (el && el !== document.body && !el.hasAttribute("data-mfm-id")) el = el.parentNode;
     if (!el || el === document.body) return;
     e.preventDefault(); e.stopPropagation();
-    var prev = document.querySelector(".__mfm_sel"); if (prev) prev.classList.remove("__mfm_sel");
-    el.classList.add("__mfm_sel");
+    var additive = !!e.shiftKey;
+    if (!additive) {
+      var previous = document.querySelectorAll(".__mfm_sel");
+      for (var p=0;p<previous.length;p++) previous[p].classList.remove("__mfm_sel");
+    }
+    if (additive && el.classList.contains("__mfm_sel")) el.classList.remove("__mfm_sel");
+    else el.classList.add("__mfm_sel");
     var rect = el.getBoundingClientRect();
     var cs = getComputedStyle(el);
     var payload = {
       __mustaflow_edit: true,
       type: "click",
+      additive: additive,
+      selected: el.classList.contains("__mfm_sel"),
       mfmId: el.getAttribute("data-mfm-id"),
       tag: el.nodeName.toLowerCase(),
       text: (el.textContent || "").trim().slice(0, 500),
@@ -105,7 +112,8 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
     if (MODE) { document.documentElement.classList.add("__mfm_ve"); }
     else {
       document.documentElement.classList.remove("__mfm_ve");
-      var prev = document.querySelector(".__mfm_sel"); if (prev) prev.classList.remove("__mfm_sel");
+      var previous = document.querySelectorAll(".__mfm_sel");
+      for (var p=0;p<previous.length;p++) previous[p].classList.remove("__mfm_sel");
     }
   }
   function applyOptimistic(msg){

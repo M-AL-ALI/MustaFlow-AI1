@@ -27,6 +27,23 @@ export type AssetReservation = {
   filename: string;
 };
 
+export async function assertReadyProjectAssets(input: {
+  ownerUserId: string;
+  projectId: number;
+  assetIds: readonly number[];
+}): Promise<void> {
+  const assetIds = [...new Set(input.assetIds)];
+  if (assetIds.length === 0) return;
+  const result = await pool.query<{ id: number }>(
+    `SELECT id FROM assets
+      WHERE owner_user_id=$1 AND project_id=$2 AND state='ready' AND id = ANY($3::integer[])`,
+    [input.ownerUserId, input.projectId, assetIds],
+  );
+  if (result.rows.length !== assetIds.length) {
+    throw new AssetAdmissionError("asset_not_found", 404);
+  }
+}
+
 function safeName(value: string): string {
   const cleaned = basename(value)
     .replace(/[^a-zA-Z0-9._-]+/g, "-")

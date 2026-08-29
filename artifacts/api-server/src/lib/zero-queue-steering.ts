@@ -25,6 +25,7 @@ export type ZeroQueuePromotionOutcome =
       kind: "promoted";
       itemId: string;
       text: string;
+      assetIds: readonly number[];
       activeTurnId: string;
     }
   | { kind: "empty" }
@@ -77,7 +78,13 @@ export async function promoteQueuedSteeringAtBoundary(input: {
           candidate.terminalEvidence.activeTurnId === activeTurnId,
       );
       if (!item) return { kind: "delayed" };
-      return { kind: "promoted", itemId: item.id, text: item.currentText, activeTurnId };
+      return {
+        kind: "promoted",
+        itemId: item.id,
+        text: item.currentText,
+        assetIds: item.assetIds ?? [],
+        activeTurnId,
+      };
     })
     .catch<ZeroQueuePromotionOutcome>((error: unknown) =>
       error instanceof ZeroPromptQueueError && error.code === "queue_item_not_found"
@@ -105,13 +112,13 @@ export async function applyZeroSteeringAtBoundary(input: {
   projectId: number;
   taskId: number;
   actorId: string;
-  inject: (text: string) => Promise<void>;
+  inject: (text: string, assetIds: readonly number[]) => Promise<void>;
   promoteNext?: ZeroQueuePromoteNext;
   timeoutMs?: number;
   createEventId?: () => string;
   occurredAt?: () => string;
 }): Promise<ZeroQueuePromotionOutcome> {
   const queue = await promoteQueuedSteeringAtBoundary(input);
-  if (queue.kind === "promoted") await input.inject(queue.text);
+  if (queue.kind === "promoted") await input.inject(queue.text, queue.assetIds);
   return queue;
 }

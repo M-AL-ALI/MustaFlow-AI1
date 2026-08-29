@@ -16,10 +16,11 @@ export async function normalizeUploadedImage(input: {
     })
     .webp({ quality: 84, effort: 4, smartSubsample: true })
     .toBuffer();
-  // Normalisation is for privacy and performance, not expansion. A pathological
-  // source that encodes smaller remains byte-for-byte intact.
-  if (normalized.length >= input.buffer.length) {
-    return { buffer: input.buffer, mimeType: input.mimeType, changed: false };
-  }
-  return { buffer: normalized, mimeType: "image/webp", changed: true };
+  // Always use the decoded/re-encoded bytes. Returning a smaller original would
+  // preserve EXIF/GPS metadata and make privacy depend on compression ratio.
+  return {
+    buffer: normalized,
+    mimeType: "image/webp",
+    changed: !normalized.equals(input.buffer) || input.mimeType !== "image/webp",
+  };
 }

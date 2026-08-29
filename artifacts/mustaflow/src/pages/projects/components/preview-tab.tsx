@@ -587,6 +587,7 @@ export function PreviewTab({
   const [veSessionId, setVeSessionId] = useState<string | null>(null);
   const [veCanUndo, setVeCanUndo] = useState(false);
   const [veSelection, setVeSelection] = useState<VeSelection | null>(null);
+  const [veSelections, setVeSelections] = useState<VeSelection[]>([]);
   const [vePanel, setVePanel] = useState<
     null | "text" | "color" | "background" | "padding" | "layout" | "font" | "link"
   >(null);
@@ -595,6 +596,18 @@ export function PreviewTab({
   const [veDraftPadding, setVeDraftPadding] = useState("");
   const [veDraftValue, setVeDraftValue] = useState("");
   const [veToast, setVeToast] = useState<string | null>(null);
+  const [veDirectDrag, setVeDirectDrag] = useState<{
+    kind: "resize" | "reorder";
+    startX: number;
+    startY: number;
+    width: number;
+    height: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
+  const referenceOverlayInputRef = useRef<HTMLInputElement>(null);
+  const [referenceOverlay, setReferenceOverlay] = useState<string | null>(null);
+  const [referenceOpacity, setReferenceOpacity] = useState(50);
   // Tracks whether the in-iframe bridge has signalled "ready" for the current
   // iframe load (reset whenever iframeKey changes so reloads re-handshake).
   const veReadyRef = useRef(false);
@@ -615,6 +628,7 @@ export function PreviewTab({
     }
     if (!editMode) {
       setVeSelection(null);
+      setVeSelections([]);
       setVePanel(null);
     }
   }, [editMode, iframeKey]);
@@ -673,6 +687,7 @@ export function PreviewTab({
   }, [editMode, project.id, veSessionId]);
   const closeVe = useCallback(() => {
     setVeSelection(null);
+    setVeSelections([]);
     setVePanel(null);
   }, []);
   // Apply edit — direct-patch fast path, with refine fallback
@@ -690,15 +705,74 @@ export function PreviewTab({
               | "margin"
               | "text-align"
               | "display"
+              | "object-fit"
               | "font-family"
               | "font-weight";
             value: string;
           }
         | { kind: "attribute"; attribute: "href" | "src"; value: string }
+        | { kind: "reorder"; direction: "up" | "down" }
         | { kind: "delete" },
     ) => {
       if (!veSelection || !veSessionId) {
         setVeToast("Visual editing is still starting. Please try that change again.");
+        return;
+      }
+      const bulkEligible =
+        payload.kind === "color" ||
+        payload.kind === "padding" ||
+        payload.kind === "style" ||
+        payload.kind === "delete";
+      if (veSelections.length > 1 && bulkEligible) {
+        try {
+          for (const selection of veSelections) {
+            const body: Record<string, unknown> = {
+              mfmId: selection.mfmId,
+              sessionId: veSessionId,
+              breakpoint: device,
+              text: selection.text,
+            };
+            if (payload.kind === "color") {
+              body.kind = "color";
+              body.target = payload.target;
+              body.oldColor =
+                payload.target === "background" ? selection.backgroundColor : selection.color;
+              body.newColor = payload.newColor;
+            } else if (payload.kind === "padding") {
+              body.kind = "padding";
+              body.oldPadding = selection.padding;
+              body.newPadding = payload.newPadding;
+            } else if (payload.kind === "style") {
+              body.kind = "style";
+              body.property = payload.property;
+              body.value = payload.value;
+            } else {
+              body.kind = "delete";
+            }
+            const response = await authFetch(`/api/projects/${project.id}/visual-edit`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+              credentials: "include",
+            });
+            const result = (await response.json().catch(() => null)) as {
+              patched?: boolean;
+              suggestedPrompt?: string;
+            } | null;
+            if (!response.ok || !result?.patched) {
+              throw new Error(result?.suggestedPrompt ?? "bulk visual edit unavailable");
+            }
+          }
+          setVeCanUndo(true);
+          setVeToast(`Saved the change to ${veSelections.length} selected elements`);
+          setIframeKey((key) => key + 1);
+        } catch {
+          setVeToast(
+            "The group change stopped before every element was updated. Review it or undo the session.",
+          );
+        }
+        setTimeout(() => setVeToast(null), 3000);
+        closeVe();
         return;
       }
       const win = iframeRef.current?.contentWindow;
@@ -764,6 +838,17 @@ export function PreviewTab({
             },
             "*",
           );
+        } else if (payload.kind === "reorder") {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "move",
+              mfmId: veSelection.mfmId,
+              direction: payload.direction,
+            },
+            "*",
+          );
         } else if (payload.kind === "delete") {
           win?.postMessage(
             {
@@ -783,6 +868,7 @@ export function PreviewTab({
         const body: Record<string, unknown> = {
           mfmId: veSelection.mfmId,
           sessionId: veSessionId,
+          breakpoint: device,
         };
         if (payload.kind === "text") {
           body.kind = "text";
@@ -810,6 +896,10 @@ export function PreviewTab({
           body.attribute = payload.attribute;
           body.value = payload.value;
           body.oldValue = payload.attribute === "href" ? veSelection.href : veSelection.src;
+          body.text = veSelection.text;
+        } else if (payload.kind === "reorder") {
+          body.kind = "reorder";
+          body.direction = payload.direction;
           body.text = veSelection.text;
         } else {
           body.kind = "delete";
@@ -877,8 +967,80 @@ export function PreviewTab({
       }
       closeVe();
     },
-    [veSelection, veSessionId, project.id, onAutoSendPrompt, onFixPrompt, closeVe, wc],
+    [
+      veSelection,
+      veSelections,
+      veSessionId,
+      project.id,
+      device,
+      onAutoSendPrompt,
+      onFixPrompt,
+      closeVe,
+      wc,
+    ],
   );
+
+  useEffect(() => {
+    if (!veDirectDrag || !veSelection) return;
+    const onMove = (event: PointerEvent) => {
+      setVeDirectDrag((current) =>
+        current ? { ...current, currentX: event.clientX, currentY: event.clientY } : null,
+      );
+      if (veDirectDrag.kind !== "resize") return;
+      const width = Math.max(
+        16,
+        Math.round(veDirectDrag.width + event.clientX - veDirectDrag.startX),
+      );
+      const height = Math.max(
+        16,
+        Math.round(veDirectDrag.height + event.clientY - veDirectDrag.startY),
+      );
+      try {
+        const win = iframeRef.current?.contentWindow;
+        for (const [property, value] of [
+          ["width", `${width}px`],
+          ["height", `${height}px`],
+        ] as const) {
+          win?.postMessage(
+            {
+              __mustaflow_edit: true,
+              type: "apply",
+              action: "setStyle",
+              mfmId: veSelection.mfmId,
+              property,
+              value,
+            },
+            "*",
+          );
+        }
+      } catch {
+        // The persisted edit remains authoritative if an optimistic frame update is unavailable.
+      }
+    };
+    const onUp = (event: PointerEvent) => {
+      const drag = veDirectDrag;
+      setVeDirectDrag(null);
+      if (drag.kind === "reorder") {
+        const delta = event.clientY - drag.startY;
+        if (Math.abs(delta) >= 20) {
+          void applyVisualEdit({ kind: "reorder", direction: delta < 0 ? "up" : "down" });
+        }
+        return;
+      }
+      const width = Math.max(16, Math.round(drag.width + event.clientX - drag.startX));
+      const height = Math.max(16, Math.round(drag.height + event.clientY - drag.startY));
+      void (async () => {
+        await applyVisualEdit({ kind: "style", property: "width", value: `${width}px` });
+        await applyVisualEdit({ kind: "style", property: "height", value: `${height}px` });
+      })();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [applyVisualEdit, veDirectDrag, veSelection]);
 
   const undoVisualEdit = useCallback(async () => {
     if (!veSessionId || !veCanUndo) return;
@@ -1229,7 +1391,15 @@ export function PreviewTab({
             src: String(data.src ?? ""),
             rect: data.rect ?? { top: 0, left: 0, width: 0, height: 0 },
           };
-          setVeSelection(sel);
+          setVeSelections((current) => {
+            const next = !data.additive
+              ? [sel]
+              : !data.selected
+                ? current.filter((item) => item.mfmId !== sel.mfmId)
+                : [...current.filter((item) => item.mfmId !== sel.mfmId), sel].slice(-20);
+            setVeSelection(next.at(-1) ?? null);
+            return next;
+          });
           setVeDraftText(sel.text);
           setVeDraftColor(rgbToHex(sel.color) || "#ffffff");
           setVeDraftPadding(sel.padding || "");
@@ -1505,6 +1675,17 @@ export function PreviewTab({
     );
   };
 
+  const renderReferenceOverlay = () =>
+    referenceOverlay ? (
+      <img
+        src={referenceOverlay}
+        alt="Visual reference overlay"
+        className="pointer-events-none absolute inset-0 z-20 h-full w-full object-fill"
+        style={{ opacity: referenceOpacity / 100 }}
+        data-testid="preview-reference-overlay"
+      />
+    ) : null;
+
   // Boot progress overlay — shown in the preview area while WC is initialising.
   const renderWcBootOverlay = () => (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0d0f17]/80 backdrop-blur-sm gap-4 z-10">
@@ -1761,6 +1942,17 @@ export function PreviewTab({
           )}
         </>
       )}
+      {editMode && veDirectDrag && (
+        <div className="pointer-events-none fixed inset-0 z-[69]" aria-hidden="true">
+          <div className="absolute left-1/2 top-0 h-full border-l border-cyan-400/70" />
+          <div className="absolute left-0 top-1/2 w-full border-t border-cyan-400/70" />
+          <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded bg-cyan-950/90 px-2 py-1 text-[10px] text-cyan-100">
+            {veDirectDrag.kind === "resize"
+              ? "Release to save this size"
+              : "Release above or below to reorder"}
+          </div>
+        </div>
+      )}
       {/* Visual Edit inline toolbar — anchored under the selected iframe element */}
       {editMode && veSelection && veOverlayStyle && (
         <div
@@ -1774,8 +1966,66 @@ export function PreviewTab({
               {veSelection.tag}
             </span>
             <span className="text-[10px] text-zinc-500 truncate flex-1">
-              {veSelection.text.slice(0, 40) || "(no text)"}
+              {veSelections.length > 1
+                ? `${veSelections.length} elements selected · changes to style, spacing, visibility, and delete apply to all`
+                : veSelection.text.slice(0, 40) || "(no text)"}
             </span>
+            <button
+              type="button"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                setVeDirectDrag({
+                  kind: "reorder",
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  width: veSelection.rect.width,
+                  height: veSelection.rect.height,
+                  currentX: event.clientX,
+                  currentY: event.clientY,
+                });
+              }}
+              className="inline-flex cursor-ns-resize items-center justify-center rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+              title="Drag up or down to reorder"
+              aria-label="Drag selected element to reorder"
+            >
+              <ListTree className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                setVeDirectDrag({
+                  kind: "resize",
+                  startX: event.clientX,
+                  startY: event.clientY,
+                  width: veSelection.rect.width,
+                  height: veSelection.rect.height,
+                  currentX: event.clientX,
+                  currentY: event.clientY,
+                });
+              }}
+              className="inline-flex cursor-nwse-resize items-center justify-center rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+              title="Drag to resize"
+              aria-label="Drag selected element to resize"
+            >
+              <Maximize2 className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void applyVisualEdit({ kind: "reorder", direction: "up" })}
+              className="inline-flex items-center justify-center text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+              title="Move before the previous sibling"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => void applyVisualEdit({ kind: "reorder", direction: "down" })}
+              className="inline-flex items-center justify-center text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100"
+              title="Move after the next sibling"
+            >
+              ↓
+            </button>
             {veCanUndo && (
               <button
                 type="button"
@@ -2164,12 +2414,77 @@ export function PreviewTab({
                   Apply
                 </button>
               </div>
+              {veSelection.tag === "img" && (
+                <div className="grid grid-cols-3 gap-1 border-t border-zinc-800 pt-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void applyVisualEdit({
+                        kind: "style",
+                        property: "object-fit",
+                        value: "cover",
+                      })
+                    }
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+                  >
+                    Crop to frame
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = onAutoSendPrompt ?? onFixPrompt;
+                      target?.(
+                        `Remove the background from the selected image at ${veSelection.mfmId}. Use the shared Assets & Image Studio pipeline, replace the project reference, and keep the rest of the page unchanged.`,
+                      );
+                      setVeToast("Sent the selected image to Zero for background removal");
+                      setEditMode(false);
+                    }}
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+                  >
+                    Remove background
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = onAutoSendPrompt ?? onFixPrompt;
+                      target?.(
+                        `Generate a replacement for the selected image at ${veSelection.mfmId}. Use the shared Assets & Image Studio pipeline, ask one focused question only if the desired image is ambiguous, and keep the rest of the page unchanged.`,
+                      );
+                      setVeToast("Sent the selected image to Zero for replacement");
+                      setEditMode(false);
+                    }}
+                    className="rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-100 hover:bg-zinc-700"
+                  >
+                    Generate
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
       {/* Preview toolbar */}
       <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 border-b border-border bg-card">
+        <input
+          ref={referenceOverlayInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            if (file.size > 25 * 1024 * 1024) {
+              setVeToast("Choose a reference image smaller than 25 MB.");
+              return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+              if (typeof reader.result === "string") setReferenceOverlay(reader.result);
+            };
+            reader.readAsDataURL(file);
+          }}
+        />
         {/* Device size switcher */}
         <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0">
           {(["desktop", "tablet", "mobile"] as DeviceFrame[]).map((d) => {
@@ -2192,6 +2507,36 @@ export function PreviewTab({
             );
           })}
         </div>
+
+        {referenceOverlay ? (
+          <div className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1">
+            <span className="text-[10px] font-medium text-violet-300">Reference</span>
+            <input
+              type="range"
+              min={5}
+              max={95}
+              value={referenceOpacity}
+              onChange={(event) => setReferenceOpacity(Number(event.target.value))}
+              aria-label="Reference overlay opacity"
+              className="w-20 accent-violet-500"
+            />
+            <button
+              type="button"
+              onClick={() => setReferenceOverlay(null)}
+              className="text-[10px] text-violet-200 hover:text-white"
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => referenceOverlayInputRef.current?.click()}
+            className="rounded-lg border border-border bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            Add reference overlay
+          </button>
+        )}
 
         {/* iOS / Android platform toggle — mobile projects only */}
         {isMobile && (
@@ -3464,6 +3809,7 @@ export function PreviewTab({
                   ["booting", "installing", "starting"].includes(wc.status) &&
                   renderWcBootOverlay()}
                 {renderIframe("h-full")}
+                {renderReferenceOverlay()}
               </div>
             </div>
           ) : device === "mobile" ? (
@@ -3512,6 +3858,7 @@ export function PreviewTab({
                     ["booting", "installing", "starting"].includes(wc.status) &&
                     renderWcBootOverlay()}
                   {renderIframe(undefined, { height: 780 })}
+                  {renderReferenceOverlay()}
                 </div>
                 {/* Home bar (iOS) / Nav bar (Android) */}
                 {platform === "android" ? (
@@ -3544,6 +3891,7 @@ export function PreviewTab({
                     ["booting", "installing", "starting"].includes(wc.status) &&
                     renderWcBootOverlay()}
                   {renderIframe(undefined, { height: 970 })}
+                  {renderReferenceOverlay()}
                 </div>
                 {/* Home bar */}
                 <div className="shrink-0 bg-zinc-900 flex justify-center py-2">

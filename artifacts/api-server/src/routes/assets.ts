@@ -1,11 +1,25 @@
 import { createHash } from "node:crypto";
 import { Transform } from "node:stream";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq } from "drizzle-orm";
-import { assetsTable, assetUsageTable, db, projectsTable } from "@workspace/db";
+import { and, desc, eq, sql } from "drizzle-orm";
+import {
+  assetsTable,
+  assetAnalysisEventsTable,
+  assetUsageTable,
+  db,
+  projectFilesTable,
+  projectsTable,
+  type AssetContext,
+} from "@workspace/db";
 import { checkProjectAccess, requireProjectAccess } from "../lib/auth";
+import { findLiveSupportGrant } from "../lib/support-access";
 import { analyzeAssetBuffer, MAX_INLINE_ASSET_ANALYSIS_BYTES } from "../lib/asset-analysis";
 import { normalizeUploadedImage } from "../lib/asset-image-normalization";
+import {
+  ASSET_DERIVATIVE_PRESETS,
+  generateAssetDerivatives,
+  type AssetDerivativePreset,
+} from "../lib/asset-derivatives";
 import { acceptsDeclaredAsset, ASSET_ERROR_MESSAGES, sniffAsset } from "../lib/asset-contract";
 import {
   AssetAdmissionError,
@@ -33,8 +47,137 @@ import {
 } from "../lib/asset-storage-billing";
 import { requireStripe } from "../lib/nabuflow-stripe";
 import { ensureStripeCustomer } from "./billing";
+import { resolveArtifactId } from "../lib/artifacts";
 
 const router: IRouter = Router();
+const MAX_MATERIALIZED_ASSET_BYTES = 25 * 1024 * 1024;
+
+async function mayReadProjectAssets(userId: string, projectId: number): Promise<boolean> {
+  if ((await checkProjectAccess(userId, projectId, "viewer")) === "granted") return true;
+  return (await findLiveSupportGrant({ projectId, staffUserId: userId })) !== null;
+}
+
+type MaterializableAsset = {
+  id: number;
+  filename: string;
+  mimeType: string;
+  bytes: Buffer;
+};
+
+function safeAssetPath(assetId: number, filename: string): string {
+  const name = filename
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^[-.]+/, "")
+    .slice(0, 100);
+  return `public/assets/${assetId}-${name || "asset"}`;
+}
+
+function requestedAssetPath(value: unknown, assetId: number, filename: string): string | null {
+  if (value === undefined || value === null || value === "")
+    return safeAssetPath(assetId, filename);
+  if (typeof value !== "string") return null;
+  const path = value.replace(/\\/g, "/").replace(/^\/+/, "").trim();
+  if (
+    path.length < 1 ||
+    path.length > 240 ||
+    path.split("/").some((part) => part === ".." || part === "." || part.length === 0)
+  ) {
+    return null;
+  }
+  return path;
+}
+
+async function loadMaterializableAsset(input: {
+  userId: string;
+  projectId: number;
+  assetId: number;
+}): Promise<MaterializableAsset> {
+  const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, input.assetId));
+  if (
+    !asset ||
+    asset.state !== "ready" ||
+    asset.storageBackend !== "r2" ||
+    (asset.ownerUserId !== input.userId && asset.projectId !== input.projectId)
+  ) {
+    throw new AssetAdmissionError("asset_not_found", 404);
+  }
+  if (asset.sizeBytes > MAX_MATERIALIZED_ASSET_BYTES) {
+    throw new AssetAdmissionError(
+      "asset_content_mismatch",
+      413,
+      "This file is too large to place directly in a project. Zero can still read it from the private library.",
+    );
+  }
+  const bytes = await readAssetBuffer(asset.storageKey, MAX_MATERIALIZED_ASSET_BYTES);
+  if (!bytes) throw new AssetAdmissionError("asset_storage_unavailable", 503);
+  return { id: asset.id, filename: asset.filename, mimeType: asset.mimeType, bytes };
+}
+
+async function materializeProjectAsset(input: {
+  userId: string;
+  projectId: number;
+  assetId: number;
+  path?: unknown;
+}): Promise<{ path: string; src: string; assetId: number }> {
+  const asset = await loadMaterializableAsset(input);
+  const path = requestedAssetPath(input.path, asset.id, asset.filename);
+  if (!path) {
+    throw new AssetAdmissionError(
+      "asset_content_mismatch",
+      400,
+      "Choose a safe project file path.",
+    );
+  }
+  const artifactId = await resolveArtifactId(input.projectId, null);
+  if (artifactId === null) {
+    throw new AssetAdmissionError(
+      "asset_content_mismatch",
+      409,
+      "This project needs a primary app before an asset can be placed in it.",
+    );
+  }
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: projectFilesTable.id })
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, input.projectId),
+          eq(projectFilesTable.artifactId, artifactId),
+          eq(projectFilesTable.path, path),
+        ),
+      );
+    if (existing) {
+      await tx
+        .update(projectFilesTable)
+        .set({
+          content: asset.bytes.toString("base64"),
+          mimeType: asset.mimeType,
+          updatedAt: new Date(),
+        })
+        .where(eq(projectFilesTable.id, existing.id));
+    } else {
+      await tx.insert(projectFilesTable).values({
+        projectId: input.projectId,
+        artifactId,
+        path,
+        content: asset.bytes.toString("base64"),
+        mimeType: asset.mimeType,
+      });
+    }
+    await tx
+      .insert(assetUsageTable)
+      .values({
+        assetId: asset.id,
+        projectId: input.projectId,
+        filePath: path,
+        consumer: "project-file",
+      })
+      .onConflictDoNothing();
+  });
+  const src = path.startsWith("public/") ? `/${path.slice("public/".length)}` : path;
+  return { path, src, assetId: asset.id };
+}
 
 function respondError(res: Response, error: unknown): void {
   if (error instanceof AssetAdmissionError) {
@@ -141,6 +284,36 @@ router.get("/assets/quota", async (req, res) => {
     return;
   }
   res.json(await getQuota(req.userId));
+});
+
+router.get("/assets/analysis-usage", async (req, res) => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const rows = await db
+    .select()
+    .from(assetAnalysisEventsTable)
+    .where(eq(assetAnalysisEventsTable.userId, req.userId))
+    .orderBy(desc(assetAnalysisEventsTable.createdAt))
+    .limit(50);
+  const [total] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      costMicros: sql<number>`coalesce(sum(${assetAnalysisEventsTable.estimatedProviderCostMicros}), 0)::bigint`,
+    })
+    .from(assetAnalysisEventsTable)
+    .where(eq(assetAnalysisEventsTable.userId, req.userId));
+  res.json({
+    pricing: "meter-only",
+    customerCreditPrice: null,
+    message: "Image analysis is metered separately. No customer credit price is active yet.",
+    total: {
+      count: total?.count ?? 0,
+      estimatedProviderCostMicros: Number(total?.costMicros ?? 0),
+    },
+    events: rows,
+  });
 });
 
 router.get("/projects/:id/assets/quota", requireProjectAccess("viewer"), async (req, res) => {
@@ -332,7 +505,9 @@ router.put("/assets/:assetId/content", async (req, res) => {
       ownerUserId: asset.ownerUserId,
       actorUserId: req.userId,
       sha256: finalSha256,
-      scanState: detected.startsWith("image/") ? "not-scanned" : "not-scanned",
+      // Accepted formats are kept private and are structurally parsed before use. They are not
+      // executable payloads, so the honest state is that malware scanning is not required.
+      scanState: "not-required",
       textPreview,
       finalMimeType,
       finalSizeBytes,
@@ -399,10 +574,7 @@ router.get("/assets", async (req, res) => {
   const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50)));
   const projectId = req.query.projectId === undefined ? null : Number(req.query.projectId);
   if (projectId !== null) {
-    if (
-      !Number.isSafeInteger(projectId) ||
-      (await checkProjectAccess(req.userId, projectId)) !== "granted"
-    ) {
+    if (!Number.isSafeInteger(projectId) || !(await mayReadProjectAssets(req.userId, projectId))) {
       res.status(404).json({ error: "Project not found" });
       return;
     }
@@ -452,8 +624,7 @@ router.get("/assets/:assetId/content", async (req, res) => {
   }
   const mayRead =
     asset.ownerUserId === req.userId ||
-    (asset.projectId !== null &&
-      (await checkProjectAccess(req.userId, asset.projectId, "viewer")) === "granted");
+    (asset.projectId !== null && (await mayReadProjectAssets(req.userId, asset.projectId)));
   if (!mayRead) {
     res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
     return;
@@ -477,6 +648,299 @@ router.get("/assets/:assetId/content", async (req, res) => {
   );
   object.body.pipe(res);
 });
+
+router.patch("/assets/:assetId", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const body = req.body as { altText?: unknown; brandRole?: unknown } | null;
+  const altText = typeof body?.altText === "string" ? body.altText.trim() : "";
+  const allowedRoles = ["none", "logo", "icon", "palette", "font", "reference"] as const;
+  const requestedRole = typeof body?.brandRole === "string" ? body.brandRole : "none";
+  const brandRole = allowedRoles.find((role) => role === requestedRole);
+  if (altText.length > 500 || !brandRole) {
+    res.status(400).json({ error: "Choose a short description and a valid brand role." });
+    return;
+  }
+  const [asset] = await db
+    .select({ context: assetsTable.context })
+    .from(assetsTable)
+    .where(
+      and(
+        eq(assetsTable.id, Number(req.params.assetId)),
+        eq(assetsTable.ownerUserId, req.userId),
+        eq(assetsTable.state, "ready"),
+      ),
+    );
+  if (!asset) {
+    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+    return;
+  }
+  const context: AssetContext = {
+    ...((asset.context as AssetContext | null) ?? {}),
+    altText: altText || undefined,
+    brandRole,
+  };
+  await db
+    .update(assetsTable)
+    .set({ context })
+    .where(
+      and(
+        eq(assetsTable.id, Number(req.params.assetId)),
+        eq(assetsTable.ownerUserId, req.userId),
+        eq(assetsTable.state, "ready"),
+      ),
+    );
+  res.json({ updated: true, assetId: Number(req.params.assetId), context });
+});
+
+router.post("/assets/:assetId/derivatives", async (req, res): Promise<void> => {
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const [source] = await db
+    .select()
+    .from(assetsTable)
+    .where(
+      and(
+        eq(assetsTable.id, Number(req.params.assetId)),
+        eq(assetsTable.ownerUserId, req.userId),
+        eq(assetsTable.state, "ready"),
+      ),
+    );
+  if (!source || source.storageBackend !== "r2" || !source.mimeType.startsWith("image/")) {
+    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+    return;
+  }
+  const requested = (req.body as { presets?: unknown } | null)?.presets;
+  const values = Array.isArray(requested) ? requested : Object.keys(ASSET_DERIVATIVE_PRESETS);
+  const presets = values.filter(
+    (value): value is AssetDerivativePreset =>
+      typeof value === "string" && Object.hasOwn(ASSET_DERIVATIVE_PRESETS, value),
+  );
+  if (presets.length !== values.length || presets.length < 1 || presets.length > 20) {
+    res.status(400).json({ error: "Choose between 1 and 20 supported asset sizes." });
+    return;
+  }
+  const bytes = await readAssetBuffer(source.storageKey, MAX_MATERIALIZED_ASSET_BYTES);
+  if (!bytes) {
+    res.status(503).json({ error: ASSET_ERROR_MESSAGES.asset_storage_unavailable });
+    return;
+  }
+  const created: Array<{
+    id: number;
+    storageKey: string;
+    sizeBytes: number;
+    state: "reserved" | "ready";
+    preset: AssetDerivativePreset;
+  }> = [];
+  try {
+    const derivatives = await generateAssetDerivatives(bytes, presets);
+    for (const derivative of derivatives) {
+      const reserved = await reserveAsset({
+        ownerUserId: req.userId,
+        actorUserId: req.userId,
+        projectId: source.projectId,
+        threadKey: source.threadKey,
+        scope: source.scope as "account" | "project" | "thread",
+        kind: "image",
+        source: "derivative",
+        filename: `${source.filename.replace(/\.[^.]+$/u, "")}-${derivative.filename}`,
+        mimeType: derivative.mimeType,
+        sizeBytes: derivative.buffer.length,
+        versionId: source.versionId,
+        taskId: source.taskId,
+        context: {
+          derivativeOfAssetId: source.id,
+          derivativePreset: derivative.preset,
+          altText: (source.context as { altText?: string } | null)?.altText,
+          brandRole: (source.context as { brandRole?: string } | null)?.brandRole,
+        },
+      });
+      const tracked: (typeof created)[number] = {
+        id: reserved.id,
+        storageKey: reserved.storageKey,
+        sizeBytes: derivative.buffer.length,
+        state: "reserved",
+        preset: derivative.preset,
+      };
+      created.push(tracked);
+      await putAssetBuffer({
+        key: reserved.storageKey,
+        body: derivative.buffer,
+        contentType: derivative.mimeType,
+      });
+      await completeAsset({
+        assetId: reserved.id,
+        ownerUserId: req.userId,
+        actorUserId: req.userId,
+        sha256: createHash("sha256").update(derivative.buffer).digest("hex"),
+        scanState: "not-required",
+      });
+      tracked.state = "ready";
+    }
+    res.status(201).json({
+      sourceAssetId: source.id,
+      derivatives: created.map((item) => ({
+        assetId: item.id,
+        preset: item.preset,
+        contentUrl: `/api/assets/${item.id}/content`,
+      })),
+    });
+  } catch (error) {
+    for (const item of [...created].reverse()) {
+      try {
+        if (item.state === "ready") {
+          const pending = await deleteReadyAsset({ assetId: item.id, userId: req.userId });
+          await deleteAssetObject(item.storageKey);
+          await recordAssetDeleted({
+            assetId: item.id,
+            userId: req.userId,
+            sizeBytes: pending.sizeBytes,
+          });
+        } else {
+          await deleteAssetObject(item.storageKey);
+          await cancelReservedAsset({ assetId: item.id, actorUserId: req.userId });
+        }
+      } catch {
+        // Every attempted cleanup remains represented by its durable registry row.
+      }
+    }
+    if (error instanceof AssetAdmissionError) {
+      respondError(res, error);
+    } else {
+      res.status(422).json({ error: "This image could not be turned into app-ready sizes." });
+    }
+  }
+});
+
+router.post(
+  "/projects/:id/assets/:assetId/materialize",
+  requireProjectAccess("member"),
+  async (req, res): Promise<void> => {
+    if (!req.userId) {
+      res.status(401).json({ error: "Unauthenticated" });
+      return;
+    }
+    try {
+      const receipt = await materializeProjectAsset({
+        userId: req.userId,
+        projectId: Number(req.params.id),
+        assetId: Number(req.params.assetId),
+        path: (req.body as { path?: unknown } | null)?.path,
+      });
+      res.status(201).json({
+        ...receipt,
+        message: "The asset is now available in this project and can be restored with its history.",
+      });
+    } catch (error) {
+      respondError(res, error);
+    }
+  },
+);
+
+router.post(
+  "/projects/:id/assets/:assetId/replace",
+  requireProjectAccess("member"),
+  async (req, res): Promise<void> => {
+    if (!req.userId) {
+      res.status(401).json({ error: "Unauthenticated" });
+      return;
+    }
+    const projectId = Number(req.params.id);
+    const assetId = Number(req.params.assetId);
+    const replacementAssetId = Number(
+      (req.body as { replacementAssetId?: unknown } | null)?.replacementAssetId,
+    );
+    if (!Number.isSafeInteger(replacementAssetId) || replacementAssetId < 1) {
+      res.status(400).json({ error: "Choose a valid replacement asset." });
+      return;
+    }
+    const usages = await db
+      .select()
+      .from(assetUsageTable)
+      .where(and(eq(assetUsageTable.assetId, assetId), eq(assetUsageTable.projectId, projectId)))
+      .limit(101);
+    if (usages.length > 100 || usages.some((usage) => !usage.filePath)) {
+      res.status(409).json({
+        error:
+          "This asset has references that need Zero's review before they can be replaced safely.",
+      });
+      return;
+    }
+    try {
+      const replacement = await loadMaterializableAsset({
+        userId: req.userId,
+        projectId,
+        assetId: replacementAssetId,
+      });
+      const artifactId = await resolveArtifactId(projectId, null);
+      if (artifactId === null) {
+        throw new AssetAdmissionError(
+          "asset_content_mismatch",
+          409,
+          "This project needs a primary app before its assets can be replaced.",
+        );
+      }
+      const receipts = usages.map((usage) => {
+        const path = usage.filePath as string;
+        return {
+          path,
+          src: path.startsWith("public/") ? `/${path.slice("public/".length)}` : path,
+          assetId: replacement.id,
+        };
+      });
+      const encoded = replacement.bytes.toString("base64");
+      await db.transaction(async (tx) => {
+        for (const receipt of receipts) {
+          const [existing] = await tx
+            .select({ id: projectFilesTable.id })
+            .from(projectFilesTable)
+            .where(
+              and(
+                eq(projectFilesTable.projectId, projectId),
+                eq(projectFilesTable.artifactId, artifactId),
+                eq(projectFilesTable.path, receipt.path),
+              ),
+            );
+          if (existing) {
+            await tx
+              .update(projectFilesTable)
+              .set({ content: encoded, mimeType: replacement.mimeType, updatedAt: new Date() })
+              .where(eq(projectFilesTable.id, existing.id));
+          } else {
+            await tx.insert(projectFilesTable).values({
+              projectId,
+              artifactId,
+              path: receipt.path,
+              content: encoded,
+              mimeType: replacement.mimeType,
+            });
+          }
+          await tx
+            .insert(assetUsageTable)
+            .values({
+              assetId: replacement.id,
+              projectId,
+              filePath: receipt.path,
+              consumer: "project-file",
+            })
+            .onConflictDoNothing();
+        }
+        await tx
+          .delete(assetUsageTable)
+          .where(
+            and(eq(assetUsageTable.assetId, assetId), eq(assetUsageTable.projectId, projectId)),
+          );
+      });
+      res.json({ replaced: true, replacements: receipts });
+    } catch (error) {
+      respondError(res, error);
+    }
+  },
+);
 
 router.delete("/assets/:assetId", async (req, res) => {
   if (!req.userId) {

@@ -129,6 +129,30 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         ON storage_addon_subscriptions(user_id, status)
     `);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS asset_analysis_events (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        estimated_provider_cost_micros BIGINT NOT NULL DEFAULT 0,
+        customer_credit_price INTEGER,
+        status TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS asset_analysis_user_created_idx
+        ON asset_analysis_events(user_id, created_at DESC)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS asset_analysis_asset_idx
+        ON asset_analysis_events(asset_id)
+    `);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS visual_edit_sessions (
         id TEXT PRIMARY KEY,
         project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -1508,6 +1532,7 @@ export async function applyZeroPromptQueuePersistenceMigration(
       project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       position INTEGER NOT NULL,
       current_text TEXT NOT NULL,
+      asset_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
       state TEXT NOT NULL,
       promoted_turn_id TEXT,
       deleted_by TEXT,
@@ -1530,6 +1555,10 @@ export async function applyZeroPromptQueuePersistenceMigration(
   await client.query(`
     CREATE INDEX IF NOT EXISTS zero_prompt_queue_items_project_state_idx
       ON zero_prompt_queue_items(project_id, state, position)
+  `);
+  await client.query(`
+    ALTER TABLE zero_prompt_queue_items
+      ADD COLUMN IF NOT EXISTS asset_ids JSONB NOT NULL DEFAULT '[]'::jsonb
   `);
   await client.query(`
     CREATE INDEX IF NOT EXISTS project_activity_queue_item_idx
@@ -4801,6 +4830,7 @@ const MIGRATION_STEPS: MigrationStep[] = [
           id                     SERIAL PRIMARY KEY,
           user_id                TEXT NOT NULL,
           project_id             INTEGER,
+          asset_id               INTEGER,
           prompt                 TEXT NOT NULL,
           revised_prompt         TEXT,
           style                  TEXT,
@@ -4843,7 +4873,8 @@ const MIGRATION_STEPS: MigrationStep[] = [
           ADD COLUMN IF NOT EXISTS purpose         TEXT,
           ADD COLUMN IF NOT EXISTS provider_name   TEXT NOT NULL DEFAULT 'openai',
           ADD COLUMN IF NOT EXISTS model_name      TEXT,
-          ADD COLUMN IF NOT EXISTS thumbnail_url   TEXT
+          ADD COLUMN IF NOT EXISTS thumbnail_url   TEXT,
+          ADD COLUMN IF NOT EXISTS asset_id        INTEGER
       `);
       await client.query("COMMIT");
     },

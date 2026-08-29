@@ -20,4 +20,9 @@ describe("generated images share the unified asset registry", () => {
     expect(source).toContain("finalSizeBytes: completedBuffer.length");
     expect(source).toContain("rejectReservedAsset({");
   });
+
+  it("links the Image Studio row to the unified asset before provider work begins", () => {
+    expect(source).toContain(".set({ assetId: reservedAsset.id");
+    expect(source).toContain("assetId: reservedAsset.id");
+  });
 });

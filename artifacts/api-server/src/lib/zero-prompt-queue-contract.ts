@@ -63,6 +63,7 @@ type ZeroPromptQueueItemBase = {
   id: string;
   projectId: string;
   currentText: string;
+  assetIds?: readonly number[];
   references: readonly ZeroPromptQueueReference[];
 };
 
@@ -117,6 +118,7 @@ export type ZeroPromptQueueMutation =
       projectId: string;
       position: number;
       text: string;
+      assetIds?: readonly number[];
       references: readonly ZeroPromptQueueReference[];
     })
   | (OrderedMutation & {
@@ -153,6 +155,7 @@ export type ZeroPromptQueueEvent =
       type: "queue.item.enqueued";
       position: number;
       currentText: string;
+      assetIds?: readonly number[];
     })
   | (EventBase & {
       type: "queue.item.reordered";

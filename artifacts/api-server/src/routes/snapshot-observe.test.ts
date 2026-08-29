@@ -60,6 +60,7 @@ function body(overrides: Record<string, unknown> = {}) {
 function harness(options: {
   project?: SnapshotProject | null;
   capture?: SnapshotObserveDependencies["capture"];
+  authorizeVision?: SnapshotObserveDependencies["authorizeVision"];
 }) {
   const writes = {
     receipts: 0,
@@ -85,6 +86,7 @@ function harness(options: {
   });
   const dependencies: SnapshotObserveDependencies = {
     loadProject: vi.fn(async () => (options.project === undefined ? project() : options.project)),
+    authorizeVision: options.authorizeVision,
     capture,
     complete,
   };
@@ -134,6 +136,29 @@ describe("snapshot observe route", () => {
     expect(writes.versions).toBe(0);
     expect(writes.storage).toBe(0);
     expect(writes.provenance).toBe(0);
+  });
+
+  it("hard-stops at the account ceiling before capture, storage, or provider work", async () => {
+    const { app, capture, complete, writes } = harness({
+      authorizeVision: async () => ({
+        status: 402,
+        body: {
+          code: "nabuflow_billing",
+          error: "Your account spend limit currently blocks image analysis.",
+        },
+      }),
+    });
+
+    const response = await post(app);
+
+    expect(response.status).toBe(402);
+    expect(response.body).toEqual({
+      code: "nabuflow_billing",
+      error: "Your account spend limit currently blocks image analysis.",
+    });
+    expect(capture).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(Object.values(writes)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
   });
 
   it("carries an exact region, DOM context, redactions, and sanitized console evidence", async () => {

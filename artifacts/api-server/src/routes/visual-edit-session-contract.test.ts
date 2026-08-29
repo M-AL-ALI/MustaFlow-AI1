@@ -46,4 +46,15 @@ describe("source-backed visual editing session", () => {
     expect(undoRoute).toContain("eq(projectFilesTable.content, change.afterContent)");
     expect(undoRoute).toContain("source changed after that edit");
   });
+
+  it("keeps breakpoint and sibling-order changes inside the typed visual-edit contract", () => {
+    expect(source).toContain('breakpoint?: "desktop" | "tablet" | "mobile"');
+    expect(source).toContain('kind: "reorder"');
+    expect(source).toContain('direction: "up" | "down"');
+    expect(source).toContain('(body.breakpoint ?? "desktop") === "desktop"');
+    expect(source).toContain("At the ${body.breakpoint} breakpoint only");
+    expect(source).toContain("move the selected element${ctx} one place ${body.direction}");
+    expect(source).toContain('| "object-fit"');
+    expect(source).toContain('property === "object-fit"');
+  });
 });

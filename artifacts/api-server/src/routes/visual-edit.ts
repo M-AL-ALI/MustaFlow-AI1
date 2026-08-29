@@ -37,7 +37,7 @@ import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
 
 const router: IRouter = Router();
 
-type EditBody =
+type EditBody = (
   | { sessionId: string; kind: "text"; mfmId: string; oldText: string; newText: string }
   | {
       sessionId: string;
@@ -58,6 +58,7 @@ type EditBody =
         | "margin"
         | "text-align"
         | "display"
+        | "object-fit"
         | "font-family"
         | "font-weight";
       value: string;
@@ -80,7 +81,9 @@ type EditBody =
       newPadding: string;
       text?: string;
     }
-  | { sessionId: string; kind: "delete"; mfmId: string; text?: string };
+  | { sessionId: string; kind: "reorder"; mfmId: string; direction: "up" | "down"; text?: string }
+  | { sessionId: string; kind: "delete"; mfmId: string; text?: string }
+) & { breakpoint?: "desktop" | "tablet" | "mobile" };
 
 router.post(
   "/projects/:id/visual-edit/sessions",
@@ -180,7 +183,7 @@ router.post(
             ? (body.oldValue ?? "")
             : "";
 
-    if (isStaticHtml) {
+    if (isStaticHtml && (body.breakpoint ?? "desktop") === "desktop") {
       // Text edit: literal string replace, HTML-escaped.
       if (body.kind === "text") {
         const oldText = (body.oldText ?? "").trim();
@@ -672,6 +675,7 @@ function isSafeCssPropertyValue(property: string, value: string): boolean {
   }
   if (property === "text-align") return /^(?:left|center|right|justify)$/u.test(value);
   if (property === "display") return /^(?:none|block|inline|inline-block|flex|grid)$/u.test(value);
+  if (property === "object-fit") return /^(?:contain|cover|fill|none|scale-down)$/u.test(value);
   if (property === "font-weight") return /^(?:normal|bold|[1-9]00)$/u.test(value);
   if (property === "font-family") {
     return value.length <= 100 && /^[A-Za-z0-9 ,"'-]+$/u.test(value);
@@ -879,29 +883,37 @@ function removeEnclosingElement(source: string, anchorText: string): string | nu
 }
 
 function buildPrompt(body: EditBody): string {
+  const breakpoint =
+    body.breakpoint && body.breakpoint !== "desktop"
+      ? `At the ${body.breakpoint} breakpoint only, `
+      : "";
   switch (body.kind) {
     case "text":
-      return `Visual edit: change the text "${truncate(body.oldText)}" to "${truncate(body.newText)}". Update the file that contains it; leave everything else unchanged.`;
+      return `Visual edit: ${breakpoint}change the text "${truncate(body.oldText)}" to "${truncate(body.newText)}". Update the file that contains it; leave everything else unchanged.`;
     case "color": {
       const target = body.target === "background" ? "background color" : "text color";
       const ctx = body.text ? ` (on the element containing "${truncate(body.text)}")` : "";
-      return `Visual edit: change the ${target}${ctx} to ${body.newColor}. Keep all other styling unchanged.`;
+      return `Visual edit: ${breakpoint}change the ${target}${ctx} to ${body.newColor}. Keep all other styling unchanged.`;
     }
     case "padding": {
       const ctx = body.text ? ` (on the element containing "${truncate(body.text)}")` : "";
-      return `Visual edit: change the padding${ctx} to ${body.newPadding}. Keep all other styling unchanged.`;
+      return `Visual edit: ${breakpoint}change the padding${ctx} to ${body.newPadding}. Keep all other styling unchanged.`;
     }
     case "style": {
       const ctx = body.text ? ` on the element containing "${truncate(body.text)}"` : "";
-      return `Visual edit: change ${body.property}${ctx} to ${body.value}. Keep every other property unchanged.`;
+      return `Visual edit: ${breakpoint}change ${body.property}${ctx} to ${body.value}. Keep every other property unchanged.`;
     }
     case "attribute": {
       const label = body.attribute === "href" ? "link destination" : "image";
-      return `Visual edit: replace the ${label} on the selected element. Keep the rest of the page unchanged.`;
+      return `Visual edit: ${breakpoint}replace the ${label} on the selected element. Keep the rest of the page unchanged.`;
+    }
+    case "reorder": {
+      const ctx = body.text ? ` containing "${truncate(body.text)}"` : "";
+      return `Visual edit: ${breakpoint}move the selected element${ctx} one place ${body.direction}. Keep its styling and content unchanged.`;
     }
     case "delete": {
       const ctx = body.text ? ` containing "${truncate(body.text)}"` : "";
-      return `Visual edit: delete the element${ctx}. Remove any orphaned wrappers but leave the rest of the layout intact.`;
+      return `Visual edit: ${breakpoint}delete the element${ctx}. Remove any orphaned wrappers but leave the rest of the layout intact.`;
     }
     default:
       return "Visual edit requested from the preview.";

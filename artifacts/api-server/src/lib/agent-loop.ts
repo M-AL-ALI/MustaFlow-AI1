@@ -721,7 +721,7 @@ export const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "list_uploads",
       description:
-        "List user-uploaded files attached to this project (drag-drop uploads, NOT project source files). Returns { uploads: [{ id, filename, mimeType, sizeBytes, hasTextPreview }] }. Use this to discover what reference material (CSVs, PDFs, docs) the user has provided. Use `read_upload` to fetch the textual preview of an upload.",
+        "List up to 50 recent user-uploaded assets attached to this project (drag-drop uploads, screenshots, recordings, and generated images; NOT project source files). The result says when older assets are outside the working window. Use `read_upload` for a bounded textual preview. Never claim to remember image pixels that are not in the current turn.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -748,7 +748,7 @@ export const TOOLS: ChatCompletionTool[] = [
     function: {
       name: "read_upload",
       description:
-        "Read the text preview of a user-uploaded file by id (returned by list_uploads). Returns the first ~8 KB of UTF-8 text for textlike files (CSV, JSON, plain text, markdown). For binary uploads (PDF, images, video) returns a short metadata-only summary. Use this to ground generated code in user-supplied data.",
+        "Read the bounded extracted text preview of a user-uploaded file by id (returned by list_uploads). Images and recordings return metadata only unless their pixels were attached to the current turn; say that honestly and ask the user to attach the visual again when necessary.",
       parameters: {
         type: "object",
         properties: {
@@ -2422,10 +2422,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     // Promote at most one durable queued prompt at the declared safe boundary.
     if (input.taskId && input.queuePromotionActorId) {
-      const inject = async (hint: string) => {
+      const inject = async (hint: string, assetIds: readonly number[]) => {
+        const attachmentContext =
+          assetIds.length === 0
+            ? ""
+            : `\nAttached project asset IDs: ${assetIds.join(", ")}. Read them with the project asset tools before acting.`;
         messages.push({
           role: "system",
-          content: `[User steering hint — apply immediately]: ${hint}`,
+          content: `[User steering hint — apply immediately]: ${hint}${attachmentContext}`,
         });
         await safeEvent(
           input.onEvent,
@@ -5322,15 +5326,23 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           .select()
           .from(assetsTable)
           .where(and(eq(assetsTable.projectId, input.projectId), eq(assetsTable.state, "ready")))
-          .orderBy(desc(assetsTable.createdAt));
+          .orderBy(desc(assetsTable.createdAt))
+          .limit(51);
         if (rows.length === 0) return { ok: true, observation: "(no uploads)" };
+        const truncated = rows.length > 50;
         const summary = rows
+          .slice(0, 50)
           .map(
             (r) =>
               `#${r.id}  ${r.filename}  (${r.mimeType}, ${r.sizeBytes} bytes${r.textPreview ? ", readable text" : ""}; source ${r.source}; version ${r.versionId ?? "unbound"})`,
           )
           .join("\n");
-        return { ok: true, observation: summary };
+        return {
+          ok: true,
+          observation: truncated
+            ? `${summary}\n\nOlder uploads are outside this working window. I must not claim to see their pixels; ask the user to attach the visual again if it is needed.`
+            : summary,
+        };
       } catch (err) {
         return {
           ok: false,
@@ -5407,7 +5419,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         }
         return {
           ok: true,
-          observation: `[upload #${row.id} — ${row.filename}] Binary content (${row.mimeType}, ${row.sizeBytes} bytes). No text preview available. PDF/image parsing is not enabled in this build.`,
+          observation: `[upload #${row.id} — ${row.filename}] Binary content (${row.mimeType}, ${row.sizeBytes} bytes). No text preview is available. If this is an older image or recording, I cannot honestly claim to see its pixels; attach it to the current turn again.`,
         };
       } catch (err) {
         return {

@@ -16,6 +16,7 @@ import {
   Paperclip,
   ImagePlus,
   ListOrdered,
+  Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBuilderCreditCosts } from "@/lib/builder-followup-submit";
@@ -419,6 +420,7 @@ export function ZeroAgentPanel({
   const appliedScrollTaskIdRef = useRef<number | null>(null);
   const appliedSupportSessionRef = useRef<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
+  const [recordingPreview, setRecordingPreview] = useState(false);
   const [assetQuota, setAssetQuota] = useState<{
     usedBytes: number;
     reservedBytes: number;
@@ -539,7 +541,10 @@ export function ZeroAgentPanel({
 
   // ── File upload ──────────────────────────────────────────────────────────
   const handleFiles = useCallback(
-    async (files: FileList | File[], source: "picker" | "paste" | "drop" = "picker") => {
+    async (
+      files: FileList | File[],
+      source: "picker" | "paste" | "drop" | "recording" = "picker",
+    ) => {
       const list = Array.from(files);
       for (const file of list) {
         const abortController = new AbortController();
@@ -604,6 +609,67 @@ export function ZeroAgentPanel({
     },
     [loadAssetQuota, projectId],
   );
+
+  const recordPreview = useCallback(async () => {
+    if (recordingPreview || isBusy) return;
+    setRecordingPreview(true);
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.muted = true;
+      await video.play();
+      const frame = async (name: string) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext("2d")?.drawImage(video, 0, 0);
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, "image/png"),
+        );
+        if (!blob) throw new Error("The preview frame could not be captured.");
+        return new File([blob], name, { type: "image/png" });
+      };
+      const startFrame = await frame("preview-start.png");
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      const stopped = new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+      });
+      recorder.start();
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      const endFrame = await frame("preview-end.png");
+      recorder.stop();
+      await stopped;
+      const recording = new File(chunks, "preview-8-seconds.webm", { type: "video/webm" });
+      await handleFiles([startFrame, endFrame, recording], "recording");
+      setPrompt((current) =>
+        current.trim()
+          ? current
+          : "Compare the attached start and end frames, explain what changed during the eight-second preview recording, and suggest the next step without changing the project.",
+      );
+    } catch (recordError) {
+      setAttachments((current) => [
+        ...current,
+        {
+          kind: "file",
+          name: "Preview recording",
+          uploading: false,
+          error:
+            recordError instanceof Error
+              ? recordError.message
+              : "The preview recording could not be captured.",
+        },
+      ]);
+    } finally {
+      stream?.getTracks().forEach((track) => track.stop());
+      setRecordingPreview(false);
+    }
+  }, [handleFiles, isBusy, recordingPreview]);
 
   // ── Auto-scroll ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1431,6 +1497,20 @@ export function ZeroAgentPanel({
               title="Attach image (right-click for file)"
             >
               <Paperclip className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void recordPreview()}
+              disabled={isBusy || recordingPreview}
+              className="shrink-0 flex items-center justify-center h-9 w-9 rounded-xl border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Record eight seconds of the preview"
+              aria-label="Record preview for eight seconds"
+            >
+              {recordingPreview ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Video className="h-3.5 w-3.5" />
+              )}
             </button>
             {assetQuota && (
               <span

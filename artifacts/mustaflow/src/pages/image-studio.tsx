@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 
 interface GeneratedImage {
   id: number;
+  assetId?: number | null;
   prompt: string;
   negativePrompt?: string | null;
   revisedPrompt?: string | null;
@@ -70,6 +71,12 @@ interface UnifiedAsset {
   sizeBytes: number;
   scanState: string;
   contentUrl: string;
+  context?: {
+    altText?: string;
+    brandRole?: "none" | "logo" | "icon" | "palette" | "font" | "reference";
+    derivativeOfAssetId?: number;
+    derivativePreset?: string;
+  } | null;
   createdAt: string;
 }
 
@@ -78,6 +85,14 @@ interface StoragePlan {
   label: string;
   allowanceBytes: number;
   monthlyCents: number;
+}
+
+interface AssetUsage {
+  id: number;
+  projectId: number | null;
+  versionId: number | null;
+  filePath: string | null;
+  consumer: string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -132,10 +147,12 @@ function ImageCard({
   image,
   onDelete,
   onEditClick,
+  onUseClick,
 }: {
   image: GeneratedImage;
   onDelete: (id: number) => void;
   onEditClick: (image: GeneratedImage) => void;
+  onUseClick: (image: GeneratedImage) => void;
 }) {
   const [deleting, setDeleting] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
@@ -248,9 +265,10 @@ function ImageCard({
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
-            disabled
-            title="Use in Project — Coming soon"
-            className="p-1.5 rounded-lg bg-white/10 text-white/40 cursor-not-allowed"
+            onClick={() => onUseClick(image)}
+            disabled={!image.assetId}
+            title={image.assetId ? "Use in Project" : "This image is still being prepared"}
+            className="p-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors disabled:text-white/40 disabled:cursor-not-allowed"
           >
             <Image className="h-3.5 w-3.5" />
           </button>
@@ -278,6 +296,10 @@ export default function ImageStudioPage() {
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [loadingImages, setLoadingImages] = useState(true);
   const [assets, setAssets] = useState<UnifiedAsset[]>([]);
+  const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
+  const [usingAsset, setUsingAsset] = useState<{ assetId: number; label: string } | null>(null);
+  const [useProjectId, setUseProjectId] = useState<number | null>(null);
+  const [useBusy, setUseBusy] = useState(false);
   const [quota, setQuota] = useState<{
     usedBytes: number;
     reservedBytes: number;
@@ -285,7 +307,19 @@ export default function ImageStudioPage() {
   }>();
   const [storagePlans, setStoragePlans] = useState<StoragePlan[]>([]);
   const [storageBusy, setStorageBusy] = useState<string | null>(null);
+  const [analysisUsage, setAnalysisUsage] = useState<{
+    count: number;
+    estimatedProviderCostMicros: number;
+  }>();
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
+  const [assetBusy, setAssetBusy] = useState<number | null>(null);
+  const [usageAsset, setUsageAsset] = useState<UnifiedAsset | null>(null);
+  const [assetUsages, setAssetUsages] = useState<AssetUsage[]>([]);
+  const [usageBusy, setUsageBusy] = useState(false);
+  const [replacementAssetId, setReplacementAssetId] = useState<number | null>(null);
+  const [assetDrafts, setAssetDrafts] = useState<
+    Record<number, { altText: string; brandRole: string }>
+  >({});
 
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingJobsRef = useRef<Set<string>>(new Set());
@@ -318,13 +352,30 @@ export default function ImageStudioPage() {
   }, []);
 
   const fetchAssets = useCallback(async () => {
-    const [assetResponse, storageResponse] = await Promise.all([
+    const [assetResponse, storageResponse, analysisResponse] = await Promise.all([
       authFetch("/api/assets?limit=100"),
       authFetch("/api/assets/storage-plans"),
+      authFetch("/api/assets/analysis-usage"),
     ]);
     if (assetResponse.ok) {
       const body = (await assetResponse.json()) as { assets?: UnifiedAsset[] };
-      setAssets(body.assets ?? []);
+      const nextAssets = body.assets ?? [];
+      setAssets(nextAssets);
+      setAssetDrafts((current) =>
+        Object.fromEntries(
+          nextAssets.map((asset) => [
+            asset.id,
+            current[asset.id] ?? {
+              altText:
+                asset.context?.altText ??
+                (asset.mimeType.startsWith("image/")
+                  ? asset.filename.replace(/[-_]+/g, " ").replace(/\.[^.]+$/u, "")
+                  : ""),
+              brandRole: asset.context?.brandRole ?? "none",
+            },
+          ]),
+        ),
+      );
     }
     if (storageResponse.ok) {
       const body = (await storageResponse.json()) as {
@@ -334,12 +385,173 @@ export default function ImageStudioPage() {
       setQuota(body.quota);
       setStoragePlans(body.plans ?? []);
     }
+    if (analysisResponse.ok) {
+      const body = (await analysisResponse.json()) as {
+        total?: { count: number; estimatedProviderCostMicros: number };
+      };
+      setAnalysisUsage(body.total);
+    }
   }, []);
 
   useEffect(() => {
     void fetchImages();
     void fetchAssets();
+    void authFetch("/api/projects")
+      .then(async (response) => (response.ok ? ((await response.json()) as unknown) : []))
+      .then((value) => {
+        const rows = Array.isArray(value) ? value : [];
+        const available = rows
+          .filter(
+            (row): row is { id: number; name: string } =>
+              Boolean(row) &&
+              typeof row === "object" &&
+              Number.isSafeInteger((row as { id?: unknown }).id) &&
+              typeof (row as { name?: unknown }).name === "string",
+          )
+          .map((row) => ({ id: row.id, name: row.name }));
+        setProjects(available);
+        setUseProjectId((current) => current ?? available[0]?.id ?? null);
+      })
+      .catch(() => setProjects([]));
   }, [fetchAssets, fetchImages]);
+
+  const useAssetInProject = async () => {
+    if (!usingAsset || useProjectId === null) return;
+    setUseBusy(true);
+    setUploadError(null);
+    try {
+      const response = await authFetch(
+        `/api/projects/${useProjectId}/assets/${usingAsset.assetId}/materialize`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      );
+      const body = (await response.json().catch(() => ({}))) as {
+        src?: string;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "The asset could not be added.");
+      setAssetNotice(`${usingAsset.label} is ready in the selected project at ${body.src}.`);
+      setUsingAsset(null);
+      await fetchAssets();
+    } catch (useError) {
+      setUploadError(
+        useError instanceof Error ? useError.message : "The asset could not be added.",
+      );
+    } finally {
+      setUseBusy(false);
+    }
+  };
+
+  const saveAssetDetails = async (assetId: number) => {
+    const draft = assetDrafts[assetId];
+    if (!draft) return;
+    setAssetBusy(assetId);
+    setUploadError(null);
+    try {
+      const response = await authFetch(`/api/assets/${assetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Asset details could not be saved.");
+      setAssetNotice("Asset details saved for Zero and published-app accessibility checks.");
+      await fetchAssets();
+    } catch (detailsError) {
+      setUploadError(
+        detailsError instanceof Error ? detailsError.message : "Asset details could not be saved.",
+      );
+    } finally {
+      setAssetBusy(null);
+    }
+  };
+
+  const createAppSizes = async (assetId: number) => {
+    setAssetBusy(assetId);
+    setUploadError(null);
+    try {
+      const response = await authFetch(`/api/assets/${assetId}/derivatives`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        derivatives?: unknown[];
+      };
+      if (!response.ok) throw new Error(body.error ?? "App-ready sizes could not be created.");
+      setAssetNotice(`${body.derivatives?.length ?? 0} app-ready sizes were added to the library.`);
+      await fetchAssets();
+    } catch (derivativeError) {
+      setUploadError(
+        derivativeError instanceof Error
+          ? derivativeError.message
+          : "App-ready sizes could not be created.",
+      );
+    } finally {
+      setAssetBusy(null);
+    }
+  };
+
+  const openAssetUsage = async (asset: UnifiedAsset) => {
+    setUsageAsset(asset);
+    setAssetUsages([]);
+    setReplacementAssetId(
+      assets.find((candidate) => candidate.id !== asset.id && candidate.scanState !== "threat")
+        ?.id ?? null,
+    );
+    setUsageBusy(true);
+    setUploadError(null);
+    try {
+      const response = await authFetch(`/api/assets/${asset.id}/usage`);
+      const body = (await response.json().catch(() => ({}))) as {
+        usages?: AssetUsage[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Asset use could not be loaded.");
+      setAssetUsages(body.usages ?? []);
+    } catch (usageError) {
+      setUploadError(
+        usageError instanceof Error ? usageError.message : "Asset use could not be loaded.",
+      );
+      setUsageAsset(null);
+    } finally {
+      setUsageBusy(false);
+    }
+  };
+
+  const replaceAssetInProject = async (projectId: number) => {
+    if (!usageAsset || replacementAssetId === null) return;
+    setUsageBusy(true);
+    setUploadError(null);
+    try {
+      const response = await authFetch(
+        `/api/projects/${projectId}/assets/${usageAsset.id}/replace`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ replacementAssetId }),
+        },
+      );
+      const body = (await response.json().catch(() => ({}))) as {
+        replacements?: unknown[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "The asset could not be replaced safely.");
+      setAssetNotice(
+        `${body.replacements?.length ?? 0} uses were replaced together in ${projects.find((project) => project.id === projectId)?.name ?? "the project"}.`,
+      );
+      await openAssetUsage(usageAsset);
+      await fetchAssets();
+    } catch (replaceError) {
+      setUploadError(
+        replaceError instanceof Error
+          ? replaceError.message
+          : "The asset could not be replaced safely.",
+      );
+    } finally {
+      setUsageBusy(false);
+    }
+  };
 
   // Polling for pending jobs
   useEffect(() => {
@@ -867,6 +1079,15 @@ export default function ImageStudioPage() {
                 </button>
               ))}
             </div>
+            <div className="rounded-lg border border-border bg-muted px-2.5 py-2 text-[10px] text-muted-foreground">
+              <p className="font-medium text-foreground">Image analysis · separate meter</p>
+              <p>
+                {analysisUsage
+                  ? `${analysisUsage.count} analyses · $${(analysisUsage.estimatedProviderCostMicros / 1_000_000).toFixed(4)} estimated provider cost`
+                  : "No image analysis usage yet."}
+              </p>
+              <p>No customer credit price is active while real usage is being measured.</p>
+            </div>
           </div>
         </div>
 
@@ -897,7 +1118,7 @@ export default function ImageStudioPage() {
                     {asset.mimeType.startsWith("image/") ? (
                       <img
                         src={asset.contentUrl}
-                        alt={asset.filename}
+                        alt={asset.context?.altText ?? asset.filename}
                         className="aspect-square w-full object-cover"
                         loading="lazy"
                       />
@@ -913,6 +1134,48 @@ export default function ImageStudioPage() {
                       <p className="text-[9px] text-muted-foreground">
                         {formatAssetBytes(asset.sizeBytes)} · {asset.source}
                       </p>
+                      {asset.context?.derivativePreset && (
+                        <p className="truncate text-[9px] text-emerald-500">
+                          {asset.context.derivativePreset}
+                        </p>
+                      )}
+                      <input
+                        value={assetDrafts[asset.id]?.altText ?? ""}
+                        onChange={(event) =>
+                          setAssetDrafts((current) => ({
+                            ...current,
+                            [asset.id]: {
+                              altText: event.target.value,
+                              brandRole: current[asset.id]?.brandRole ?? "none",
+                            },
+                          }))
+                        }
+                        maxLength={500}
+                        placeholder="Describe this image"
+                        aria-label={`Alt text for ${asset.filename}`}
+                        className="w-full rounded border border-border bg-background px-1.5 py-1 text-[9px]"
+                      />
+                      <select
+                        value={assetDrafts[asset.id]?.brandRole ?? "none"}
+                        onChange={(event) =>
+                          setAssetDrafts((current) => ({
+                            ...current,
+                            [asset.id]: {
+                              altText: current[asset.id]?.altText ?? "",
+                              brandRole: event.target.value,
+                            },
+                          }))
+                        }
+                        aria-label={`Brand role for ${asset.filename}`}
+                        className="w-full rounded border border-border bg-background px-1 py-1 text-[9px]"
+                      >
+                        <option value="none">No brand role</option>
+                        <option value="logo">Logo</option>
+                        <option value="icon">Icon</option>
+                        <option value="palette">Colour reference</option>
+                        <option value="font">Font reference</option>
+                        <option value="reference">Visual reference</option>
+                      </select>
                       <div className="flex gap-1">
                         <a
                           href={asset.contentUrl}
@@ -922,12 +1185,51 @@ export default function ImageStudioPage() {
                         </a>
                         <button
                           type="button"
+                          onClick={() =>
+                            setUsingAsset({ assetId: asset.id, label: asset.filename })
+                          }
+                          className="rounded bg-muted p-1 text-muted-foreground hover:text-foreground"
+                          aria-label={`Use ${asset.filename} in a project`}
+                        >
+                          <Image className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void openAssetUsage(asset)}
+                          className="rounded bg-muted p-1 text-muted-foreground hover:text-foreground"
+                          aria-label={`Show where ${asset.filename} is used`}
+                        >
+                          <Layers className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => void handleAssetDelete(asset)}
                           className="rounded bg-muted p-1 text-muted-foreground hover:text-destructive"
                           aria-label={`Delete ${asset.filename}`}
                         >
                           <Trash2 className="h-3 w-3" />
                         </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => void saveAssetDetails(asset.id)}
+                          disabled={assetBusy === asset.id}
+                          className="rounded bg-muted px-1 py-1 text-[9px] hover:text-foreground disabled:opacity-50"
+                        >
+                          Save details
+                        </button>
+                        {asset.mimeType.startsWith("image/") &&
+                          !asset.context?.derivativeOfAssetId && (
+                            <button
+                              type="button"
+                              onClick={() => void createAppSizes(asset.id)}
+                              disabled={assetBusy === asset.id}
+                              className="rounded bg-muted px-1 py-1 text-[9px] hover:text-foreground disabled:opacity-50"
+                            >
+                              App sizes
+                            </button>
+                          )}
                       </div>
                     </div>
                   </article>
@@ -963,12 +1265,150 @@ export default function ImageStudioPage() {
                   image={img}
                   onDelete={handleDelete}
                   onEditClick={setEditingImage}
+                  onUseClick={(image) =>
+                    image.assetId &&
+                    setUsingAsset({ assetId: image.assetId, label: `Generated image ${image.id}` })
+                  }
                 />
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {usingAsset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-background p-4 shadow-xl">
+            <div>
+              <h2 className="text-sm font-semibold">Use in a project</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                A restorable project file and a where-used receipt will be created.
+              </p>
+            </div>
+            <select
+              aria-label="Project for asset"
+              value={useProjectId ?? ""}
+              onChange={(event) => setUseProjectId(Number(event.target.value))}
+              className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs"
+            >
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUsingAsset(null)}
+                className="rounded px-3 py-2 text-xs text-muted-foreground hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void useAssetInProject()}
+                disabled={useBusy || useProjectId === null}
+                className="rounded bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
+              >
+                {useBusy ? "Adding…" : "Add to project"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {usageAsset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[80vh] w-full max-w-lg space-y-4 overflow-y-auto rounded-xl border border-border bg-background p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Where this asset is used</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{usageAsset.filename}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUsageAsset(null)}
+                aria-label="Close asset use"
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {usageBusy && assetUsages.length === 0 ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading uses…
+              </div>
+            ) : assetUsages.length === 0 ? (
+              <p className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                Nothing currently references this asset. It can be deleted without breaking a
+                project.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  {assetUsages.length} {assetUsages.length === 1 ? "use" : "uses"} found. Deletion
+                  stays blocked until every reference is removed or replaced.
+                </p>
+                {Array.from(
+                  new Map(
+                    assetUsages
+                      .filter((usage) => usage.projectId !== null)
+                      .map((usage) => [usage.projectId as number, true]),
+                  ).keys(),
+                ).map((projectId) => {
+                  const projectUses = assetUsages.filter((usage) => usage.projectId === projectId);
+                  const project = projects.find((entry) => entry.id === projectId);
+                  return (
+                    <div key={projectId} className="rounded-lg border border-border p-3">
+                      <p className="text-xs font-medium">
+                        {project?.name ?? `Project ${projectId}`}
+                      </p>
+                      <ul className="mt-1 space-y-1 text-[10px] text-muted-foreground">
+                        {projectUses.map((usage) => (
+                          <li key={usage.id}>{usage.filePath ?? usage.consumer}</li>
+                        ))}
+                      </ul>
+                      <button
+                        type="button"
+                        onClick={() => void replaceAssetInProject(projectId)}
+                        disabled={usageBusy || replacementAssetId === null}
+                        className="mt-2 rounded bg-primary px-2 py-1 text-[10px] text-primary-foreground disabled:opacity-50"
+                      >
+                        Replace every use in this project
+                      </button>
+                    </div>
+                  );
+                })}
+                {assetUsages.some((usage) => usage.projectId === null) && (
+                  <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-700 dark:text-amber-300">
+                    A non-project reference needs Zero's review before this asset can be replaced.
+                  </p>
+                )}
+              </div>
+            )}
+            {assetUsages.some((usage) => usage.projectId !== null) && (
+              <div>
+                <label className="mb-1 block text-[10px] font-medium">Replacement asset</label>
+                <select
+                  aria-label="Replacement asset"
+                  value={replacementAssetId ?? ""}
+                  onChange={(event) => setReplacementAssetId(Number(event.target.value))}
+                  className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs"
+                >
+                  {assets
+                    .filter((asset) => asset.id !== usageAsset.id)
+                    .map((asset) => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.filename}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Edit modal */}
       {editingImage && (

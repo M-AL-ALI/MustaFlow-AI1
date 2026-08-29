@@ -367,6 +367,11 @@ export async function enqueueImageJob(
     throw error;
   }
 
+  await db
+    .update(generatedImagesTable)
+    .set({ assetId: reservedAsset.id, updatedAt: sql`now()` })
+    .where(eq(generatedImagesTable.id, imageId));
+
   // Step 5: Deduct credits atomically
   const deduction = await deductCreditsAtomic(userId, creditCost, {
     type: "creative",
@@ -530,6 +535,11 @@ export async function enqueueImageEditJob(
       .where(eq(generatedImagesTable.id, imageId));
     throw error;
   }
+
+  await db
+    .update(generatedImagesTable)
+    .set({ assetId: reservedAsset.id, updatedAt: sql`now()` })
+    .where(eq(generatedImagesTable.id, imageId));
 
   let creditsWereDeducted = false;
   if (billingMode === "credits") {

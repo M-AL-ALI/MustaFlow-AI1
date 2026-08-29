@@ -41,6 +41,10 @@ function canonicalReferences(item: ZeroPromptQueueItem): ZeroPromptQueueItem["re
   });
 }
 
+function canonicalAssetIds(item: ZeroPromptQueueItem): readonly number[] {
+  return [...new Set(item.assetIds ?? [])].sort((left, right) => left - right);
+}
+
 function compareItems(left: ZeroPromptQueueItem, right: ZeroPromptQueueItem): number {
   if (left.state === "queued" && right.state !== "queued") return -1;
   if (left.state !== "queued" && right.state === "queued") return 1;
@@ -98,7 +102,11 @@ function validateAndCanonicalize(snapshot: ZeroPromptQueueSnapshot): ZeroPromptQ
   return {
     semantics: ZERO_PROMPT_QUEUE_SEMANTICS,
     projectId: snapshot.projectId,
-    items: items.map((item) => ({ ...item, references: canonicalReferences(item) })),
+    items: items.map((item) => ({
+      ...item,
+      references: canonicalReferences(item),
+      assetIds: canonicalAssetIds(item),
+    })),
   };
 }
 
@@ -182,6 +190,7 @@ export function applyZeroPromptQueueMutation(
       projectId: snapshot.projectId,
       position: operation.position,
       currentText: operation.text,
+      assetIds: [...(operation.assetIds ?? [])],
       state: "queued",
       references: [...operation.references],
       terminalEvidence: null,
@@ -196,6 +205,7 @@ export function applyZeroPromptQueueMutation(
       type: "queue.item.enqueued",
       position: operation.position,
       currentText: operation.text,
+      assetIds: [...(operation.assetIds ?? [])],
     };
   } else if (operation.kind === "reorder") {
     const item = resolveQueuedItem(snapshot, operation.target);

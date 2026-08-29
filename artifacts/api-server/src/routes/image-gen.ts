@@ -364,6 +364,7 @@ router.get("/images", async (req, res): Promise<void> => {
   const rows = await db
     .select({
       id: generatedImagesTable.id,
+      assetId: generatedImagesTable.assetId,
       prompt: generatedImagesTable.prompt,
       negativePrompt: generatedImagesTable.negativePrompt,
       revisedPrompt: generatedImagesTable.revisedPrompt,

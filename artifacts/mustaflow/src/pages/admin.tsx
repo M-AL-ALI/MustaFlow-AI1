@@ -62,6 +62,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { OraRoutingDiagnosticsPanel } from "@/components/admin/ora-routing-diagnostics-panel";
 import { AdminBreadcrumbs } from "@/components/admin/admin-breadcrumbs";
 import { AdminAccountAccessPanel } from "@/components/admin/account-access-panel";
+import { authFetch } from "@/lib/api-fetch";
 
 function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
   return (
@@ -113,6 +114,22 @@ export default function AdminPage() {
   );
   const [roleError, setRoleError] = useState<string | null>(null);
   const [roleSuccess, setRoleSuccess] = useState<string | null>(null);
+  const [assetHealth, setAssetHealth] = useState<{
+    windowDays: number;
+    vision: {
+      calls: number;
+      failed: number;
+      estimatedProviderCostMicros: number;
+      pricing: "meter-only";
+    };
+    library: {
+      total: number;
+      missingAltText: number;
+      overweightImages: number;
+      overweightBytes: number;
+      overweightThresholdBytes: number;
+    };
+  } | null>(null);
 
   const stats = statsQuery.data;
   const readiness = readinessQuery.data;
@@ -122,6 +139,24 @@ export default function AdminPage() {
   const rolesLoading = rolesQuery.isPending || rolesQuery.isFetching;
   const auditLoading = auditQuery.isPending || auditQuery.isFetching;
   const auditPage = auditQuery.data;
+
+  useEffect(() => {
+    if (!canViewAnalytics) return;
+    let cancelled = false;
+    void authFetch("/api/admin/asset-health")
+      .then(async (response) =>
+        response.ok ? ((await response.json()) as NonNullable<typeof assetHealth>) : null,
+      )
+      .then((value) => {
+        if (!cancelled) setAssetHealth(value);
+      })
+      .catch(() => {
+        if (!cancelled) setAssetHealth(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canViewAnalytics]);
 
   function refreshAll() {
     void queryClient.invalidateQueries({ queryKey: getGetAdminMeQueryKey() });
@@ -210,6 +245,50 @@ export default function AdminPage() {
           Refresh
         </button>
       </div>
+
+      {canViewAnalytics && (
+        <section
+          className="rounded-xl border border-border bg-card p-4"
+          data-testid="admin-asset-health"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold">Asset and image-analysis health</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Vision provider cost is metered separately; images over 2 MB are flagged before they
+                slow published apps.
+              </p>
+            </div>
+            <span className="text-[10px] text-muted-foreground">Last 30 days</span>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-4">
+            <AdminItem
+              label="Vision calls"
+              value={assetHealth ? String(assetHealth.vision.calls) : "Unknown"}
+              status={assetHealth && assetHealth.vision.failed === 0 ? "ok" : "warn"}
+            />
+            <AdminItem
+              label="Vision provider cost"
+              value={
+                assetHealth
+                  ? `$${(assetHealth.vision.estimatedProviderCostMicros / 1_000_000).toFixed(4)}`
+                  : "Unknown"
+              }
+              status="ok"
+            />
+            <AdminItem
+              label="Images over 2 MB"
+              value={assetHealth ? String(assetHealth.library.overweightImages) : "Unknown"}
+              status={assetHealth?.library.overweightImages === 0 ? "ok" : "warn"}
+            />
+            <AdminItem
+              label="Images missing alt text"
+              value={assetHealth ? String(assetHealth.library.missingAltText) : "Unknown"}
+              status={assetHealth?.library.missingAltText === 0 ? "ok" : "warn"}
+            />
+          </div>
+        </section>
+      )}
 
       {canViewAnalytics && (
         <div

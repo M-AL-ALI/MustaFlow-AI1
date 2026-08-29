@@ -31,6 +31,7 @@ function queueItem(id: string, position: number): ZeroPromptQueueItem {
     projectId: "project-52",
     position,
     currentText: `Prompt ${id}`,
+    assetIds: [],
     state: "queued",
     references: [],
     terminalEvidence: null,
