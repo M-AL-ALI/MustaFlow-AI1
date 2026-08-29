@@ -248,7 +248,7 @@ export function SupportOwnerActions({ ticketId }: { ticketId: number }) {
       })}
 
       {operations.ticket.resolutionClass === "external" &&
-        operations.ticket.status === "blocked" && (
+        operations.ticket.status === "blocked_on_third_party" && (
           <button
             type="button"
             disabled={busy !== null}

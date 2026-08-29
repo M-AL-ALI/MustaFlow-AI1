@@ -60,5 +60,7 @@ describe("support resolution and presence surfaces", () => {
     expect(owner).toContain("receiptDetailLines(event)");
     expect(owner).not.toContain("JSON.stringify(event.detail)");
     expect(owner).toContain("I fixed it with the third party");
+    expect(owner).toContain('operations.ticket.status === "blocked_on_third_party"');
+    expect(owner).not.toContain('operations.ticket.status === "blocked"');
   });
 });

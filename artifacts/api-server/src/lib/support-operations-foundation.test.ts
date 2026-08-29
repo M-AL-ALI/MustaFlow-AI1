@@ -168,11 +168,15 @@ describe("consented support operations", () => {
   });
 
   it("allows only same-process route paths for automatic defect proof", async () => {
-    const { safeInternalProbePath } = await import("../routes/support-operations");
+    const { safeInternalProbePath, safeInternalRedirectPath } =
+      await import("../routes/support-operations");
     expect(safeInternalProbePath("/api/healthz?full=1")).toBe("/api/healthz?full=1");
     expect(safeInternalProbePath("https://example.com/healthz")).toBeNull();
     expect(safeInternalProbePath("//example.com/healthz")).toBeNull();
     expect(safeInternalProbePath("/api/healthz#unobserved")).toBeNull();
+    expect(safeInternalRedirectPath("/help", "/help/")).toBe("/help/");
+    expect(safeInternalRedirectPath("/help", "https://example.com/help")).toBeNull();
+    expect(safeInternalRedirectPath("/help", "//example.com/help")).toBeNull();
   });
 
   it("uses one real-identity presence mechanism and removes ghosts", () => {

@@ -66,6 +66,18 @@ export function safeInternalProbePath(value: string): string | null {
   }
 }
 
+export function safeInternalRedirectPath(currentPath: string, location: string): string | null {
+  const current = safeInternalProbePath(currentPath);
+  if (!current || !location.trim()) return null;
+  try {
+    const redirected = new URL(location, new URL(current, "http://nabuflow.internal"));
+    if (redirected.origin !== "http://nabuflow.internal" || redirected.hash) return null;
+    return safeInternalProbePath(`${redirected.pathname}${redirected.search}`);
+  } catch {
+    return null;
+  }
+}
+
 async function proveCurrentNabuFlowRoute(
   req: Request,
   route: string,
@@ -85,16 +97,29 @@ async function proveCurrentNabuFlowRoute(
   if (authorization) headers.authorization = authorization;
   const startedAt = Date.now();
   try {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method: "GET",
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(5_000),
-    });
+    const request = (probePath: string) =>
+      fetch(`http://127.0.0.1:${port}${probePath}`, {
+        method: "GET",
+        headers,
+        redirect: "manual",
+        signal: AbortSignal.timeout(5_000),
+      });
+    let observedPath = path;
+    let response = await request(observedPath);
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const redirectedPath = safeInternalRedirectPath(
+        observedPath,
+        response.headers.get("location") ?? "",
+      );
+      await response.body?.cancel();
+      if (!redirectedPath || redirectedPath === observedPath) return null;
+      observedPath = redirectedPath;
+      response = await request(observedPath);
+    }
     await response.body?.cancel();
     if (response.status < 200 || response.status > 299) return null;
     return {
-      route: path,
+      route: observedPath,
       status: response.status,
       observedAt: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
