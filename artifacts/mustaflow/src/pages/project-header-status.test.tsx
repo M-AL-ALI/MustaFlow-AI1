@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(new URL("./projects/[id].tsx", import.meta.url), "utf8");
+const source = readFileSync(path.join(process.cwd(), "src/pages/projects/[id].tsx"), "utf8");
 
 describe("project header status truth", () => {
   it("distinguishes the last build result from the live runtime state", () => {
