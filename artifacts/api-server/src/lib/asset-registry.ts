@@ -159,15 +159,52 @@ export async function completeAsset(input: {
   sha256: string;
   scanState: "not-required" | "not-scanned" | "clean";
   textPreview?: string | null;
+  finalSizeBytes?: number;
+  finalMimeType?: string;
+  finalStorageKey?: string;
 }): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const row = await client.query<{ size_bytes: string }>(
-      `UPDATE assets
-          SET state='ready', sha256=$4, scan_state=$5, text_preview=$6, ready_at=NOW()
+    const reserved = await client.query<{ size_bytes: string }>(
+      `SELECT size_bytes FROM assets
         WHERE id=$1 AND owner_user_id=$2 AND actor_user_id=$3 AND state='reserved'
-      RETURNING size_bytes`,
+        FOR UPDATE`,
+      [input.assetId, input.ownerUserId, input.actorUserId],
+    );
+    if (!reserved.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
+    const finalSizeBytes = input.finalSizeBytes ?? Number(reserved.rows[0]!.size_bytes);
+    if (!Number.isSafeInteger(finalSizeBytes) || finalSizeBytes < 0) {
+      throw new AssetAdmissionError("asset_size_mismatch", 409);
+    }
+    const quota = await client.query<{
+      used_bytes: string;
+      reserved_bytes: string;
+      limit_bytes: string;
+    }>(
+      `SELECT used_bytes, reserved_bytes,
+              base_allowance_bytes + purchased_allowance_bytes AS limit_bytes
+         FROM account_asset_quota WHERE user_id=$1 FOR UPDATE`,
+      [input.ownerUserId],
+    );
+    const quotaRow = quota.rows[0];
+    if (
+      !quotaRow ||
+      Number(quotaRow.used_bytes) +
+        Number(quotaRow.reserved_bytes) -
+        Number(reserved.rows[0]!.size_bytes) +
+        finalSizeBytes >
+        Number(quotaRow.limit_bytes)
+    ) {
+      throw new AssetAdmissionError("asset_quota_exceeded", 413);
+    }
+    const row = await client.query(
+      `UPDATE assets
+          SET state='ready', sha256=$4, scan_state=$5, text_preview=$6,
+              size_bytes=COALESCE($7, size_bytes), mime_type=COALESCE($8, mime_type),
+              storage_key=COALESCE($9, storage_key), ready_at=NOW()
+        WHERE id=$1 AND owner_user_id=$2 AND actor_user_id=$3 AND state='reserved'
+      RETURNING id`,
       [
         input.assetId,
         input.ownerUserId,
@@ -175,16 +212,19 @@ export async function completeAsset(input: {
         input.sha256,
         input.scanState,
         input.textPreview ?? null,
+        finalSizeBytes,
+        input.finalMimeType ?? null,
+        input.finalStorageKey ?? null,
       ],
     );
     if (!row.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
     await client.query(
       `UPDATE account_asset_quota
           SET reserved_bytes=GREATEST(0, reserved_bytes-$2),
-              used_bytes=used_bytes+$2,
+              used_bytes=used_bytes+$3,
               updated_at=NOW()
         WHERE user_id=$1`,
-      [input.ownerUserId, Number(row.rows[0]!.size_bytes)],
+      [input.ownerUserId, Number(reserved.rows[0]!.size_bytes), finalSizeBytes],
     );
     await client.query("COMMIT");
   } catch (error) {

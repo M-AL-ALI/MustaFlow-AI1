@@ -13,7 +13,7 @@
  *
  * ISOLATION: this file MUST NOT import from builder.ts or any pipeline module.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
 import {
   db,
@@ -48,12 +48,16 @@ import {
 } from "./public-ai/model-router";
 import { buildOraImageEditProfile } from "./public-ai/image-quality";
 import { logger } from "./logger";
+import { completeAsset, rejectReservedAsset, reserveAsset } from "./asset-registry";
+
+const GENERATED_ASSET_RESERVATION_BYTES = 8 * 1024 * 1024;
 
 export type JobStatus = "pending" | "generating" | "completed" | "failed";
 
 export interface ImageJob {
   jobId: string;
   imageId: number;
+  assetId: number;
   userId: string;
   status: JobStatus;
   fileUrl?: string;
@@ -335,6 +339,34 @@ export async function enqueueImageJob(
 
   const imageId = imageRow.id;
 
+  let reservedAsset: Awaited<ReturnType<typeof reserveAsset>>;
+  try {
+    reservedAsset = await reserveAsset({
+      ownerUserId: userId,
+      actorUserId: userId,
+      projectId: projectId ?? null,
+      threadKey: projectId ? `project:${projectId}` : null,
+      scope: projectId ? "project" : "account",
+      kind: "generated",
+      source: "image-generation",
+      filename: `generated-${imageId}.webp`,
+      mimeType: "image/webp",
+      sizeBytes: GENERATED_ASSET_RESERVATION_BYTES,
+      context: { generatedImageId: imageId, purpose: purpose ?? null },
+    });
+  } catch (error) {
+    await db
+      .update(generatedImagesTable)
+      .set({
+        status: "failed",
+        errorMessage: "Storage allowance unavailable",
+        errorCategory: "storage",
+        updatedAt: sql`now()`,
+      })
+      .where(eq(generatedImagesTable.id, imageId));
+    throw error;
+  }
+
   // Step 5: Deduct credits atomically
   const deduction = await deductCreditsAtomic(userId, creditCost, {
     type: "creative",
@@ -351,6 +383,12 @@ export async function enqueueImageJob(
         updatedAt: sql`now()`,
       })
       .where(eq(generatedImagesTable.id, imageId));
+    await rejectReservedAsset({
+      assetId: reservedAsset.id,
+      ownerUserId: userId,
+      actorUserId: userId,
+      code: "asset_cancelled",
+    });
     throw Object.assign(new Error("Insufficient credits for image generation"), {
       code: "INSUFFICIENT_CREDITS",
       balance: deduction.balance,
@@ -361,6 +399,7 @@ export async function enqueueImageJob(
   const job: ImageJob = {
     jobId,
     imageId,
+    assetId: reservedAsset.id,
     userId,
     status: "pending",
     createdAt: new Date(),
@@ -464,6 +503,34 @@ export async function enqueueImageEditJob(
   if (!imageRow) throw new Error("Failed to create edit image record");
   const imageId = imageRow.id;
 
+  let reservedAsset: Awaited<ReturnType<typeof reserveAsset>>;
+  try {
+    reservedAsset = await reserveAsset({
+      ownerUserId: userId,
+      actorUserId: userId,
+      projectId: projectId ?? null,
+      threadKey: projectId ? `project:${projectId}` : null,
+      scope: projectId ? "project" : "account",
+      kind: "generated",
+      source: "image-edit",
+      filename: `edited-${imageId}.webp`,
+      mimeType: "image/webp",
+      sizeBytes: GENERATED_ASSET_RESERVATION_BYTES,
+      context: { generatedImageId: imageId, parentImageId },
+    });
+  } catch (error) {
+    await db
+      .update(generatedImagesTable)
+      .set({
+        status: "failed",
+        errorMessage: "Storage allowance unavailable",
+        errorCategory: "storage",
+        updatedAt: sql`now()`,
+      })
+      .where(eq(generatedImagesTable.id, imageId));
+    throw error;
+  }
+
   let creditsWereDeducted = false;
   if (billingMode === "credits") {
     // Deduct credits atomically
@@ -482,6 +549,12 @@ export async function enqueueImageEditJob(
           updatedAt: sql`now()`,
         })
         .where(eq(generatedImagesTable.id, imageId));
+      await rejectReservedAsset({
+        assetId: reservedAsset.id,
+        ownerUserId: userId,
+        actorUserId: userId,
+        code: "asset_cancelled",
+      });
       throw Object.assign(new Error("Insufficient credits for image editing"), {
         code: "INSUFFICIENT_CREDITS",
         balance: deduction.balance,
@@ -494,6 +567,7 @@ export async function enqueueImageEditJob(
   const job: ImageJob = {
     jobId,
     imageId,
+    assetId: reservedAsset.id,
     userId,
     status: "pending",
     createdAt: new Date(),
@@ -516,7 +590,7 @@ async function runImageEditJob(
   creditCost: number,
   creditsWereDeducted: boolean,
 ): Promise<void> {
-  const { jobId, imageId, userId } = job;
+  const { jobId, imageId, assetId, userId } = job;
   const {
     parentStorageKey,
     parentFileUrl,
@@ -551,6 +625,19 @@ async function runImageEditJob(
     logger.info({ jobId, imageId }, "image-jobs: storing edit result");
 
     const { fileUrl, thumbnailUrl, storageKey } = await storeEditedImage(result.openaiUrl, imageId);
+
+    if (!storageKey) throw new Error("Generated asset storage was not durable");
+    const completedBuffer = await getImageBuffer(storageKey, fileUrl);
+    await completeAsset({
+      assetId,
+      ownerUserId: userId,
+      actorUserId: userId,
+      sha256: createHash("sha256").update(completedBuffer).digest("hex"),
+      scanState: "not-required",
+      finalSizeBytes: completedBuffer.length,
+      finalMimeType: "image/webp",
+      finalStorageKey: storageKey,
+    });
 
     await db
       .update(generatedImagesTable)
@@ -618,6 +705,13 @@ async function runImageEditJob(
       })
       .where(eq(generatedImagesTable.id, imageId));
 
+    await rejectReservedAsset({
+      assetId,
+      ownerUserId: userId,
+      actorUserId: userId,
+      code: "asset_storage_unavailable",
+    });
+
     if (creditsWereDeducted) {
       await refundCredits(userId, creditCost, {
         description: `Image edit failed — image #${imageId}: ${message.slice(0, 100)}`,
@@ -643,7 +737,7 @@ async function runImageJob(
   creditCost: number,
   creditsWereDeducted: boolean,
 ): Promise<void> {
-  const { jobId, imageId, userId } = job;
+  const { jobId, imageId, assetId, userId } = job;
   const {
     prompt,
     negativePrompt,
@@ -684,6 +778,19 @@ async function runImageJob(
       result.openaiUrl,
       imageId,
     );
+
+    if (!storageKey) throw new Error("Generated asset storage was not durable");
+    const completedBuffer = await getImageBuffer(storageKey, fileUrl);
+    await completeAsset({
+      assetId,
+      ownerUserId: userId,
+      actorUserId: userId,
+      sha256: createHash("sha256").update(completedBuffer).digest("hex"),
+      scanState: "not-required",
+      finalSizeBytes: completedBuffer.length,
+      finalMimeType: "image/webp",
+      finalStorageKey: storageKey,
+    });
 
     // Update DB — completed
     await db
@@ -748,6 +855,13 @@ async function runImageJob(
         updatedAt: sql`now()`,
       })
       .where(eq(generatedImagesTable.id, imageId));
+
+    await rejectReservedAsset({
+      assetId,
+      ownerUserId: userId,
+      actorUserId: userId,
+      code: "asset_storage_unavailable",
+    });
 
     if (creditsWereDeducted) {
       await refundCredits(userId, creditCost, {

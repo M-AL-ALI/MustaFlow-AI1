@@ -128,6 +128,47 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       CREATE INDEX IF NOT EXISTS storage_addons_user_status_idx
         ON storage_addon_subscriptions(user_id, status)
     `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS visual_edit_sessions (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        actor_user_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('open', 'closed', 'cancelled')),
+        summary TEXT,
+        version_id INTEGER REFERENCES project_versions(id) ON DELETE SET NULL,
+        opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        closed_at TIMESTAMPTZ
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS visual_edit_sessions_project_status_idx
+        ON visual_edit_sessions(project_id, status)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS visual_edit_changes (
+        id SERIAL PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES visual_edit_sessions(id) ON DELETE CASCADE,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        actor_user_id TEXT NOT NULL,
+        file_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        intent_receipt_id INTEGER NOT NULL REFERENCES zero_intent_receipts(id) ON DELETE RESTRICT,
+        intent JSONB NOT NULL,
+        before_content TEXT NOT NULL,
+        after_content TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'applied' CHECK (status IN ('applied', 'undone')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        undone_at TIMESTAMPTZ
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS visual_edit_changes_session_idx
+        ON visual_edit_changes(session_id, id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS visual_edit_changes_project_idx
+        ON visual_edit_changes(project_id, created_at)
+    `);
 
     // Preserve existing metadata before new callers adopt the shared registry.
     // Generated image byte sizes are unknown in the legacy table and stay zero

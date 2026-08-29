@@ -136,6 +136,52 @@ describe("snapshot observe route", () => {
     expect(writes.provenance).toBe(0);
   });
 
+  it("carries an exact region, DOM context, redactions, and sanitized console evidence", async () => {
+    const { app, completions, capture } = harness({
+      capture: async () => ({
+        ok: true,
+        base64: png(),
+        bytes: 64,
+        status: 200,
+        consoleErrors: ["Button handler failed"],
+      }),
+    });
+    const region = { x: 100, y: 120, width: 420, height: 260 };
+    const redaction = { x: 160, y: 160, width: 80, height: 32 };
+    const response = await post(
+      app,
+      body({
+        region,
+        domPath: "body>main:nth-child(1)>button:nth-child(2)",
+        annotation: "this button does nothing",
+        redactions: [redaction],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(capture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clip: region,
+        captureOverlay: {
+          redactions: [redaction],
+          annotations: [
+            expect.objectContaining({
+              kind: "circle",
+              ...region,
+              text: "this button does nothing",
+            }),
+          ],
+        },
+      }),
+    );
+    expect(completions[0]).toMatchObject({
+      region,
+      domPath: "body>main:nth-child(1)>button:nth-child(2)",
+      annotation: "this button does nothing",
+      consoleErrors: ["Button handler failed"],
+    });
+  });
+
   it("denies another user before capture or vision", async () => {
     const { app, capture, complete } = harness({});
     const response = await post(app, body(), "other-user");
@@ -174,6 +220,8 @@ describe("snapshot observe route", () => {
     ["bad source", body({ previewSource: "browser" })],
     ["bad width", body({ viewport: { width: 319, height: 800 } })],
     ["bad height", body({ viewport: { width: 1280, height: 1201 } })],
+    ["out-of-bounds region", body({ region: { x: 1200, y: 700, width: 400, height: 200 } })],
+    ["out-of-bounds redaction", body({ redactions: [{ x: 1270, y: 790, width: 40, height: 40 }] })],
   ])("rejects %s before capture with zero writes", async (_name, payload) => {
     const { app, capture, complete, writes } = harness({});
     const response = await post(app, payload);

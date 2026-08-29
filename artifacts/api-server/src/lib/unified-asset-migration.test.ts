@@ -16,6 +16,8 @@ describe("unified asset registry migration", () => {
     const sql = query.mock.calls.map(([statement]) => String(statement)).join("\n");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS assets");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS account_asset_quota");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS visual_edit_sessions");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS visual_edit_changes");
     expect(sql).toContain("ON CONFLICT (storage_key) DO NOTHING");
     expect(sql).not.toMatch(/DROP\s+(?:TABLE|COLUMN)/i);
     expect(query.mock.calls.filter(([statement]) => statement === "BEGIN")).toHaveLength(2);

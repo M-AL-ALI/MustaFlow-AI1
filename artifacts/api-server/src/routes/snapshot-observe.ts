@@ -35,6 +35,15 @@ const SNAPSHOT_UNAVAILABLE_MESSAGE =
 const SNAPSHOT_OBSERVE_PROMPT =
   "Observe the captured preview. Describe what is visible, identify any clear problems, and suggest the most useful next step without changing the project.";
 
+const CaptureRect = z
+  .object({
+    x: z.number().int().min(0).max(1919),
+    y: z.number().int().min(0).max(1199),
+    width: z.number().int().min(16).max(1920),
+    height: z.number().int().min(16).max(1200),
+  })
+  .strict();
+
 const SnapshotBody = z
   .object({
     path: z
@@ -57,8 +66,27 @@ const SnapshotBody = z
         height: z.number().int().min(240).max(1200),
       })
       .strict(),
+    region: CaptureRect.optional(),
+    domPath: z.string().max(512).optional(),
+    annotation: z.string().trim().max(200).optional(),
+    redactions: z.array(CaptureRect).max(12).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const rects = [...(value.region ? [value.region] : []), ...(value.redactions ?? [])];
+    for (const rect of rects) {
+      if (
+        rect.x + rect.width > value.viewport.width ||
+        rect.y + rect.height > value.viewport.height
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "capture rectangles must stay inside the viewport",
+        });
+        return;
+      }
+    }
+  });
 
 export type SnapshotPreviewClass = "db-static" | "runtime-proxy" | "cloudflare-grant";
 export type SnapshotObserveBody = z.infer<typeof SnapshotBody>;
@@ -82,6 +110,10 @@ export type SnapshotCompletionInput = {
   actorUserId: string;
   path: string;
   viewport: { width: number; height: number; deviceMode: string };
+  region?: { x: number; y: number; width: number; height: number };
+  domPath?: string;
+  annotation?: string;
+  consoleErrors: string[];
 };
 
 export type SnapshotObserveDependencies = {
@@ -216,6 +248,19 @@ export function createSnapshotObserveRouter(
         signal: AbortSignal.timeout(25_000),
         exactOriginCookies: cookies,
         exactCookieOrigin: origin,
+        clip: parsed.data.region,
+        captureOverlay: {
+          redactions: parsed.data.redactions,
+          annotations: parsed.data.region
+            ? [
+                {
+                  kind: "circle",
+                  ...parsed.data.region,
+                  text: parsed.data.annotation,
+                },
+              ]
+            : undefined,
+        },
       });
       const base64 = capture.base64;
       let finalOrigin: string | null = null;
@@ -249,6 +294,10 @@ export function createSnapshotObserveRouter(
                 ? "tablet"
                 : "desktop",
         },
+        region: parsed.data.region,
+        domPath: parsed.data.domPath,
+        annotation: parsed.data.annotation,
+        consoleErrors: capture.consoleErrors ?? [],
       });
       res.status(200).json(result);
     } catch (error) {
@@ -306,7 +355,14 @@ async function completeSnapshotObservation(
     mimeType: "image/png",
     sizeBytes: png.length,
     versionId: input.project.versionId,
-    context: { route: input.path, viewport: input.viewport },
+    context: {
+      route: input.path,
+      viewport: input.viewport,
+      region: input.region,
+      domPath: input.domPath,
+      annotation: input.annotation,
+      consoleErrors: input.consoleErrors,
+    },
   });
   try {
     await putAssetBuffer({ key: asset.storageKey, body: png, contentType: "image/png" });
@@ -334,7 +390,7 @@ async function completeSnapshotObservation(
   const persistedAttachment = {
     kind: "image",
     url: `/api/assets/${asset.id}/content`,
-    alt: `${input.previewClass} preview at ${input.path}`,
+    alt: `${input.previewClass} ${input.region ? "preview region" : "preview"} at ${input.path}`,
     assetId: asset.id,
     versionId: input.project.versionId,
   };
@@ -367,6 +423,17 @@ async function completeSnapshotObservation(
       content: message.content,
     }))
     .slice(-8);
+  const observationPrompt = [
+    SNAPSHOT_OBSERVE_PROMPT,
+    input.region ? `The user pointed to region ${JSON.stringify(input.region)}.` : null,
+    input.domPath ? `DOM path under the selection: ${input.domPath}.` : null,
+    input.annotation ? `Their annotation: ${input.annotation}` : null,
+    input.consoleErrors.length
+      ? `Sanitized console errors captured at the same moment:\n${input.consoleErrors.map((value) => `- ${value}`).join("\n")}`
+      : "No console errors were captured at that moment.",
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n");
   const requestId = randomUUID();
   const receipt = await intentReceiptStore.persist(input.project.id, requestId, {
     intent: "observe",
@@ -379,7 +446,7 @@ async function completeSnapshotObservation(
     .values({
       projectId: input.project.id,
       role: "user",
-      content: SNAPSHOT_OBSERVE_PROMPT,
+      content: observationPrompt,
       agentMode: input.project.agentMode,
       planMode: false,
       origin: "snapshot_control",
@@ -394,10 +461,10 @@ async function completeSnapshotObservation(
     .insert(agentTasksTable)
     .values({
       projectId: input.project.id,
-      title: `Observe ${input.previewClass} preview`,
+      title: `Observe ${input.previewClass} ${input.region ? "preview region" : "preview"}`,
       kind: "converse",
       status: "answering",
-      prompt: SNAPSHOT_OBSERVE_PROMPT,
+      prompt: observationPrompt,
       agentIdentity: "main",
       origin: "snapshot_control",
       intentReceiptId: receipt.receiptId,
@@ -417,11 +484,16 @@ async function completeSnapshotObservation(
   try {
     converse = await runConversePipeline({
       projectName: input.project.name,
-      userPrompt: SNAPSHOT_OBSERVE_PROMPT,
+      userPrompt: observationPrompt,
       conversationHistory,
       currentFiles,
       agentMode: input.project.agentMode as AgentMode,
-      imageAttachments: [{ dataUri: input.dataUri, alt: `${input.previewClass} preview` }],
+      imageAttachments: [
+        {
+          dataUri: input.dataUri,
+          alt: `${input.previewClass} ${input.region ? "preview region" : "preview"}`,
+        },
+      ],
     });
   } catch {
     const failure = "I captured the preview, but couldn't finish observing it. Please try again.";
@@ -519,6 +591,13 @@ async function completeSnapshotObservation(
     taskId: task.id,
     terminalRef: zeroTerminalRef(terminal),
     asset: persistedAttachment,
+    context: {
+      route: input.path,
+      viewport: input.viewport,
+      region: input.region,
+      domPath: input.domPath,
+      consoleErrors: input.consoleErrors,
+    },
   };
 }
 

@@ -5,6 +5,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { assetsTable, assetUsageTable, db, projectsTable } from "@workspace/db";
 import { checkProjectAccess, requireProjectAccess } from "../lib/auth";
 import { analyzeAssetBuffer, MAX_INLINE_ASSET_ANALYSIS_BYTES } from "../lib/asset-analysis";
+import { normalizeUploadedImage } from "../lib/asset-image-normalization";
 import { acceptsDeclaredAsset, ASSET_ERROR_MESSAGES, sniffAsset } from "../lib/asset-contract";
 import {
   AssetAdmissionError,
@@ -20,6 +21,7 @@ import {
   assetR2Configured,
   deleteAssetObject,
   openAsset,
+  putAssetBuffer,
   putAssetStream,
   readAssetBuffer,
 } from "../lib/asset-r2";
@@ -280,6 +282,9 @@ router.put("/assets/:assetId/content", async (req, res) => {
       return;
     }
     let textPreview: string | null = null;
+    let finalMimeType = detected;
+    let finalSizeBytes = asset.sizeBytes;
+    let finalSha256 = digest.digest("hex");
     const completeBuffer =
       asset.sizeBytes <= MAX_INLINE_ASSET_ANALYSIS_BYTES
         ? await readAssetBuffer(asset.storageKey, MAX_INLINE_ASSET_ANALYSIS_BYTES)
@@ -305,21 +310,39 @@ router.put("/assets/:assetId/content", async (req, res) => {
         return;
       }
       textPreview = analysis.textPreview;
+      if (detected.startsWith("image/")) {
+        const normalized = await normalizeUploadedImage({
+          buffer: completeBuffer,
+          mimeType: detected,
+        });
+        if (normalized.changed) {
+          await putAssetBuffer({
+            key: asset.storageKey,
+            body: normalized.buffer,
+            contentType: normalized.mimeType,
+          });
+          finalMimeType = normalized.mimeType;
+          finalSizeBytes = normalized.buffer.length;
+          finalSha256 = createHash("sha256").update(normalized.buffer).digest("hex");
+        }
+      }
     }
     await completeAsset({
       assetId,
       ownerUserId: asset.ownerUserId,
       actorUserId: req.userId,
-      sha256: digest.digest("hex"),
+      sha256: finalSha256,
       scanState: detected.startsWith("image/") ? "not-scanned" : "not-scanned",
       textPreview,
+      finalMimeType,
+      finalSizeBytes,
     });
     res.status(201).json({
       assetId,
       contentUrl: `/api/assets/${assetId}/content`,
       filename: asset.filename,
-      mimeType: detected,
-      sizeBytes: asset.sizeBytes,
+      mimeType: finalMimeType,
+      sizeBytes: finalSizeBytes,
     });
   } catch (error) {
     try {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screenshotRequestHeaders } from "./agent-senses";
+import { sanitizeCaptureConsoleError, screenshotRequestHeaders } from "./agent-senses";
 
 describe("snapshot cookie cage", () => {
   it("keeps the session cookie on the exact platform origin", () => {
@@ -20,5 +20,15 @@ describe("snapshot cookie cage", () => {
         "https://www.mustaflow.com",
       ),
     ).toEqual({ accept: "image/png" });
+  });
+
+  it("removes private values before console evidence crosses the capture boundary", () => {
+    const sanitized = sanitizeCaptureConsoleError(
+      "Request failed for founder@example.com?token=abcdefghijklmnopqrstuvwxyz012345",
+    );
+    expect(sanitized).toContain("[private email]");
+    expect(sanitized).toContain("token=[private value]");
+    expect(sanitized).not.toContain("founder@example.com");
+    expect(sanitized).not.toContain("abcdefghijklmnopqrstuvwxyz012345");
   });
 });

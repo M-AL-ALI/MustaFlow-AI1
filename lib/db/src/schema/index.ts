@@ -92,3 +92,4 @@ export * from "./zero-prompt-queue";
 export * from "./zero-intent-receipts";
 export * from "./zero-model-control";
 export * from "./assets";
+export * from "./visual-edit";

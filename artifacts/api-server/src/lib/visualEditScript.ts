@@ -56,8 +56,8 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
     if (skip.indexOf(el.nodeName) !== -1) return false;
     // Must have either direct text or be a leaf-ish container with a colour.
     var txt = (el.textContent || "").trim();
-    if (txt.length === 0) return false;
-    return true;
+    if (txt.length > 0) return true;
+    return ["IMG","SVG","VIDEO","CANVAS","INPUT","BUTTON","A"].indexOf(el.nodeName) !== -1;
   }
   function annotateAll(){
     var all = document.body ? document.body.querySelectorAll("*") : [];
@@ -87,6 +87,15 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
       color: cs.color,
       backgroundColor: cs.backgroundColor,
       padding: cs.padding,
+      margin: cs.margin,
+      width: cs.width,
+      height: cs.height,
+      display: cs.display,
+      textAlign: cs.textAlign,
+      fontFamily: cs.fontFamily,
+      fontWeight: cs.fontWeight,
+      href: typeof el.href === "string" ? el.getAttribute("href") || "" : "",
+      src: typeof el.src === "string" ? el.getAttribute("src") || "" : "",
       rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
     };
     try { window.parent.postMessage(payload, "*"); } catch(_){}
@@ -107,12 +116,38 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
     else if (msg.action === "setColor" && typeof msg.color === "string") el.style.color = msg.color;
     else if (msg.action === "setBackgroundColor" && typeof msg.color === "string") el.style.backgroundColor = msg.color;
     else if (msg.action === "setPadding" && typeof msg.padding === "string") el.style.padding = msg.padding;
+    else if (msg.action === "setStyle" && typeof msg.property === "string" && typeof msg.value === "string") el.style[msg.property] = msg.value;
+    else if (msg.action === "setAttribute" && typeof msg.attribute === "string" && typeof msg.value === "string") el.setAttribute(msg.attribute, msg.value);
+    else if (msg.action === "move" && (msg.direction === "up" || msg.direction === "down")) {
+      var sibling = msg.direction === "up" ? el.previousElementSibling : el.nextElementSibling;
+      if (sibling && el.parentNode) {
+        if (msg.direction === "up") el.parentNode.insertBefore(el, sibling);
+        else el.parentNode.insertBefore(sibling, el);
+      }
+    }
     else if (msg.action === "delete") { if (el.parentNode) el.parentNode.removeChild(el); }
+  }
+  function describePoint(msg){
+    if (!msg || typeof msg.x !== "number" || typeof msg.y !== "number") return;
+    var el = document.elementFromPoint(msg.x, msg.y);
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
+    try {
+      window.parent.postMessage({
+        __mustaflow_edit: true,
+        type: "pointContext",
+        requestId: msg.requestId,
+        mfmId: el.getAttribute("data-mfm-id") || pathOf(el),
+        tag: el.nodeName.toLowerCase(),
+        rect: { top: rect.top, left: rect.left, width: rect.width, height: rect.height }
+      }, "*");
+    } catch(_) {}
   }
   window.addEventListener("message", function(ev){
     var d = ev.data; if (!d || typeof d !== "object" || !d.__mustaflow_edit) return;
     if (d.type === "setMode") setMode(d.on);
     else if (d.type === "apply") applyOptimistic(d);
+    else if (d.type === "describePoint") describePoint(d);
   });
   function init(){
     ensureStyle(); annotateAll();

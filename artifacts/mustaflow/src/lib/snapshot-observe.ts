@@ -4,10 +4,18 @@ export type SnapshotObserveRequest = {
   path: string;
   previewSource: "server" | "webcontainer";
   viewport: { width: number; height: number };
+  region?: { x: number; y: number; width: number; height: number };
+  domPath?: string;
+  annotation?: string;
+  redactions?: Array<{ x: number; y: number; width: number; height: number }>;
 };
 
 export type SnapshotObserveResult =
-  | { ok: true; previewClass: "db-static" | "runtime-proxy" | "cloudflare-grant" }
+  | {
+      ok: true;
+      previewClass: "db-static" | "runtime-proxy" | "cloudflare-grant";
+      asset?: { assetId?: string; url?: string };
+    }
   | { ok: false; message: string };
 
 type SnapshotTransport = (
@@ -37,9 +45,14 @@ export async function requestSnapshotObservation(
     if (!response.ok || body?.ok !== true || !PREVIEW_CLASSES.has(String(body.previewClass))) {
       return { ok: false, message: SNAPSHOT_UNAVAILABLE_MESSAGE };
     }
+    const asset =
+      body && typeof body === "object" && "asset" in body
+        ? (body.asset as { assetId?: string; url?: string })
+        : undefined;
     return {
       ok: true,
       previewClass: body.previewClass as "db-static" | "runtime-proxy" | "cloudflare-grant",
+      ...(asset ? { asset } : {}),
     };
   } catch {
     return { ok: false, message: SNAPSHOT_UNAVAILABLE_MESSAGE };
