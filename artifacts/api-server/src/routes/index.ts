@@ -268,6 +268,7 @@ const KNOWN_PREFIXES = [
   "/ora",
   "/builder",
   "/images",
+  "/assets",
   "/help",
   "/orax",
 ];
