@@ -47,6 +47,18 @@ describe("Admin navigation and operational hierarchy", () => {
     expect(adminSource).toContain('statsQuery.isError ? "Unavailable"');
   });
 
+  it("distinguishes launch-blocking failures from advisory failures", () => {
+    expect(adminSource).toContain("readiness.blockingFailCount} blocking fail");
+    expect(adminSource).toContain(
+      "readiness.failed - readiness.blockingFailCount} non-blocking fail",
+    );
+    expect(adminSource).toContain('!check.blocking && check.status === "fail"');
+    expect(adminSource).toContain("non-blocking");
+    expect(adminSource).not.toContain(
+      '<span className="text-destructive">{readiness.failed} fail</span>',
+    );
+  });
+
   it("gives a selected ticket contextual exits without browser history", () => {
     expect(supportSource).toContain("Back to Admin Page");
     expect(supportSource).toContain('href="/admin"');
