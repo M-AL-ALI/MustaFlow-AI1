@@ -13,9 +13,11 @@ type Feedback = { kind: "ok" | "error"; text: string } | null;
 export function SupportOperationConsole({
   ticketId,
   ticketNumber,
+  onMutated,
 }: {
   ticketId: number;
   ticketNumber: string;
+  onMutated: () => void;
 }) {
   const [operations, setOperations] = useState<SupportOperationsView | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +65,7 @@ export function SupportOperationConsole({
             : success,
         });
         await load();
+        onMutated();
       } catch (error) {
         setFeedback({
           kind: "error",
@@ -72,7 +75,7 @@ export function SupportOperationConsole({
         setBusy(null);
       }
     },
-    [load],
+    [load, onMutated],
   );
 
   const startApprovedSession = useCallback(
@@ -100,6 +103,7 @@ export function SupportOperationConsole({
           text: "Zero started the exact change the project owner approved.",
         });
         await load();
+        onMutated();
       } catch (error) {
         setFeedback({
           kind: "error",
@@ -110,7 +114,7 @@ export function SupportOperationConsole({
         setBusy(null);
       }
     },
-    [load],
+    [load, onMutated],
   );
 
   const prepareZeroProposal = useCallback(async () => {
@@ -139,6 +143,7 @@ export function SupportOperationConsole({
         text: "Zero prepared a specific read-only proposal for the project owner to review.",
       });
       await load();
+      onMutated();
     } catch (error) {
       setFeedback({
         kind: "error",
@@ -148,7 +153,7 @@ export function SupportOperationConsole({
     } finally {
       setBusy(null);
     }
-  }, [load, ticketId]);
+  }, [load, onMutated, ticketId]);
 
   if (loading && !operations) {
     return (

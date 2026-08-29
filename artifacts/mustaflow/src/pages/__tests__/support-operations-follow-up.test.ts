@@ -31,9 +31,12 @@ describe("support resolution and presence surfaces", () => {
 
   it("renders named defect impact and refuses a typed-only shipped claim", () => {
     const operator = source("../support-operation-console.tsx");
+    const inbox = source("../support-inbox.tsx");
     expect(operator).toContain("affectedAccountCount");
     expect(operator).toContain("affectedAccounts.join");
     expect(operator).toContain("Verify shipped fix");
+    expect(operator).toContain("onMutated();");
+    expect(inbox).toMatch(/<SupportOperationConsole[\s\S]{0,200}onMutated=\{onMutated\}/u);
     expect(operator).toContain("/api/admin/support-defects/${defect.id}/verify");
     expect(operator).not.toContain("status: 200");
     expect(operator).not.toContain("observedAt: new Date().toISOString()");

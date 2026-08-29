@@ -783,7 +783,11 @@ function TicketDetail({
         )}
       </div>
 
-      <SupportOperationConsole ticketId={ticketId} ticketNumber={ticket.ticketNumber} />
+      <SupportOperationConsole
+        ticketId={ticketId}
+        ticketNumber={ticket.ticketNumber}
+        onMutated={onMutated}
+      />
 
       {/* Attachments */}
       {ticket.attachments.length > 0 && (
