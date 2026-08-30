@@ -65,7 +65,11 @@ describe("snapshot observe under partial runtime configuration", () => {
             builderMode: "agentic",
             containerId: "runtime-1",
             containerStatus: "running",
+            runtimePort: 8080,
+            stack: "node",
           }),
+          resolveCloudflarePreview: async () =>
+            "https://runtime.mustaflow.com/_nabuflow/preview/v1/runtime-1/?__nfg=signed",
           capture,
           complete,
         },

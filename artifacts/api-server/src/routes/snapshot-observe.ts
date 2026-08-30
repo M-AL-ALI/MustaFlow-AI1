@@ -16,7 +16,10 @@ import { takeScreenshot, type ScreenshotInput, type ScreenshotResult } from "../
 import { runConversePipeline } from "../lib/builder";
 import type { ConversationTurn } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
-import { shouldRouteToLivePreview } from "../lib/livePreviewProxy";
+import {
+  resolveCloudflareLivePreviewLaunchUrl,
+  shouldRouteToLivePreview,
+} from "../lib/livePreviewProxy";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
 import { logger } from "../lib/logger";
@@ -99,6 +102,7 @@ export type SnapshotFailureCause =
   | "actor-unavailable"
   | "origin-unavailable"
   | "session-cookie-unavailable"
+  | "preview-grant-unavailable"
   | "capture-unavailable"
   | "capture-origin-mismatch"
   | "capture-bytes-invalid"
@@ -114,6 +118,8 @@ export type SnapshotProject = {
   builderMode: string;
   containerId: string | null;
   containerStatus: string;
+  runtimePort: number | null;
+  stack: string | null;
   versionId?: number | null;
 };
 
@@ -135,6 +141,7 @@ export type SnapshotObserveDependencies = {
   authorizeVision?(
     project: SnapshotProject,
   ): Promise<{ status: number; body: Record<string, unknown> } | null>;
+  resolveCloudflarePreview(project: SnapshotProject, requestPath: string): Promise<string | null>;
   capture(input: ScreenshotInput): Promise<ScreenshotResult>;
   complete(input: SnapshotCompletionInput): Promise<Record<string, unknown>>;
 };
@@ -290,32 +297,70 @@ export function createSnapshotObserveRouter(
       snapshotUnavailable(res, { projectId, stage: "capture", cause: "origin-unavailable" });
       return;
     }
-    if (!loopbackOrigin) {
-      snapshotUnavailable(res, {
-        projectId,
-        stage: "capture",
-        cause: "origin-unavailable",
-      });
-      return;
-    }
-    if (cookies.length === 0) {
-      snapshotUnavailable(res, {
-        projectId,
-        stage: "capture",
-        cause: "session-cookie-unavailable",
-      });
-      return;
-    }
     const billingBlock = await dependencies.authorizeVision?.(project);
     if (billingBlock) {
       res.status(billingBlock.status).json(billingBlock.body);
       return;
     }
 
-    const captureUrl = new URL(
-      `/api/projects/${projectId}/preview${parsed.data.path}`,
-      loopbackOrigin,
-    ).toString();
+    const previewClass = snapshotPreviewClass(project);
+    let captureUrl: string;
+    let approvedFinalOrigin: string;
+    let captureCookies: Array<{ name: string; value: string }> | undefined;
+    let captureCookieOrigin: string | undefined;
+    let trustedLoopbackOrigin: string | undefined;
+    if (previewClass === "cloudflare-grant") {
+      let grantUrl: string | null;
+      try {
+        grantUrl = await dependencies.resolveCloudflarePreview(
+          project,
+          `/api/projects/${projectId}/preview${parsed.data.path}`,
+        );
+      } catch (error) {
+        snapshotUnavailable(res, {
+          projectId,
+          stage: "capture",
+          cause: "preview-grant-unavailable",
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        });
+        return;
+      }
+      if (!grantUrl) {
+        snapshotUnavailable(res, {
+          projectId,
+          stage: "capture",
+          cause: "preview-grant-unavailable",
+        });
+        return;
+      }
+      captureUrl = grantUrl;
+      approvedFinalOrigin = new URL(grantUrl).origin;
+    } else {
+      if (!loopbackOrigin) {
+        snapshotUnavailable(res, {
+          projectId,
+          stage: "capture",
+          cause: "origin-unavailable",
+        });
+        return;
+      }
+      if (cookies.length === 0) {
+        snapshotUnavailable(res, {
+          projectId,
+          stage: "capture",
+          cause: "session-cookie-unavailable",
+        });
+        return;
+      }
+      captureUrl = new URL(
+        `/api/projects/${projectId}/preview${parsed.data.path}`,
+        loopbackOrigin,
+      ).toString();
+      approvedFinalOrigin = loopbackOrigin;
+      captureCookies = cookies;
+      captureCookieOrigin = loopbackOrigin;
+      trustedLoopbackOrigin = loopbackOrigin;
+    }
     let capture: ScreenshotResult | undefined;
     let activeStage: "capture" | "completion" = "capture";
     try {
@@ -325,9 +370,9 @@ export function createSnapshotObserveRouter(
         height: parsed.data.viewport.height,
         fullPage: false,
         signal: AbortSignal.timeout(25_000),
-        exactOriginCookies: cookies,
-        exactCookieOrigin: loopbackOrigin,
-        trustedLoopbackOrigin: loopbackOrigin,
+        exactOriginCookies: captureCookies,
+        exactCookieOrigin: captureCookieOrigin,
+        trustedLoopbackOrigin,
         clip: parsed.data.region,
         captureOverlay: {
           redactions: parsed.data.redactions,
@@ -358,7 +403,7 @@ export function createSnapshotObserveRouter(
         });
         return;
       }
-      if (finalOrigin !== null && finalOrigin !== loopbackOrigin) {
+      if (finalOrigin !== null && finalOrigin !== approvedFinalOrigin) {
         snapshotUnavailable(res, {
           projectId,
           stage: "capture",
@@ -379,7 +424,7 @@ export function createSnapshotObserveRouter(
       activeStage = "completion";
       const result = await dependencies.complete({
         project,
-        previewClass: snapshotPreviewClass(project),
+        previewClass,
         dataUri,
         actorUserId,
         path: parsed.data.path,
@@ -425,6 +470,8 @@ async function loadSnapshotProject(projectId: number): Promise<SnapshotProject |
         builderMode: projectsTable.builderMode,
         containerId: projectsTable.containerId,
         containerStatus: projectsTable.containerStatus,
+        runtimePort: projectsTable.runtimePort,
+        stack: projectsTable.stack,
       })
       .from(projectsTable)
       .where(eq(projectsTable.id, projectId)),
@@ -734,6 +781,7 @@ const router = createSnapshotObserveRouter({
       projectedCredits: 1,
       source: "pipeline",
     }),
+  resolveCloudflarePreview: resolveCloudflareLivePreviewLaunchUrl,
   capture: takeScreenshot,
   complete: completeSnapshotObservation,
 });
