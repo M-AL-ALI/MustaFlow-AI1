@@ -35,6 +35,8 @@ function project(overrides: Partial<SnapshotProject> = {}): SnapshotProject {
     builderMode: "static-legacy",
     containerId: null,
     containerStatus: "stopped",
+    runtimePort: null,
+    stack: null,
     ...overrides,
   };
 }
@@ -61,6 +63,7 @@ function harness(options: {
   project?: SnapshotProject | null;
   capture?: SnapshotObserveDependencies["capture"];
   authorizeVision?: SnapshotObserveDependencies["authorizeVision"];
+  resolveCloudflarePreview?: SnapshotObserveDependencies["resolveCloudflarePreview"];
 }) {
   const writes = {
     receipts: 0,
@@ -87,6 +90,7 @@ function harness(options: {
   const dependencies: SnapshotObserveDependencies = {
     loadProject: vi.fn(async () => (options.project === undefined ? project() : options.project)),
     authorizeVision: options.authorizeVision,
+    resolveCloudflarePreview: options.resolveCloudflarePreview ?? vi.fn(async () => null),
     capture,
     complete,
   };
@@ -357,18 +361,90 @@ describe("snapshot observe route", () => {
 
   it("accepts a real PNG through the Cloudflare-grant preview class", async () => {
     process.env.TENANT_RUNTIME_PROVIDER = "cloudflare";
-    const { app, completions } = harness({
+    const resolveCloudflarePreview = vi.fn(
+      async () =>
+        "https://runtime.mustaflow.com/_nabuflow/preview/v1/project-51-preview-primary/?__nfg=signed",
+    );
+    const { app, completions, capture } = harness({
       project: project({
         builderMode: "agentic",
         containerId: "runtime-1",
         containerStatus: "running",
       }),
-      capture: async () => ({ ok: true, base64: png(128), bytes: 128, status: 200 }),
+      resolveCloudflarePreview,
+      capture: async () => ({
+        ok: true,
+        base64: png(128),
+        bytes: 128,
+        status: 200,
+        finalUrl: "https://runtime.mustaflow.com/_nabuflow/preview/v1/project-51-preview-primary/",
+      }),
     });
     const response = await post(app);
     expect(response.status).toBe(200);
     expect(response.body.previewClass).toBe("cloudflare-grant");
+    expect(resolveCloudflarePreview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 51, containerId: "runtime-1" }),
+      "/api/projects/51/preview/",
+    );
+    expect(capture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: expect.stringMatching(/^https:\/\/runtime\.mustaflow\.com\//u),
+        exactOriginCookies: undefined,
+        exactCookieOrigin: undefined,
+        trustedLoopbackOrigin: undefined,
+      }),
+    );
     expect(completions[0]?.dataUri).toMatch(/^data:image\/png;base64,/u);
+  });
+
+  it("keeps a missing Cloudflare preview grant typed and write-free", async () => {
+    process.env.TENANT_RUNTIME_PROVIDER = "cloudflare";
+    const { app, capture, complete, writes } = harness({
+      project: project({
+        builderMode: "agentic",
+        containerId: "runtime-1",
+        containerStatus: "running",
+      }),
+      resolveCloudflarePreview: async () => null,
+    });
+
+    const response = await post(app);
+
+    expect(response.status).toBe(503);
+    expect(response.body.evidence).toEqual({
+      stage: "capture",
+      cause: "preview-grant-unavailable",
+    });
+    expect(capture).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(Object.values(writes).every((count) => count === 0)).toBe(true);
+  });
+
+  it("keeps a failed Cloudflare grant mint typed and write-free", async () => {
+    process.env.TENANT_RUNTIME_PROVIDER = "cloudflare";
+    const { app, capture, complete, writes } = harness({
+      project: project({
+        builderMode: "agentic",
+        containerId: "runtime-1",
+        containerStatus: "running",
+      }),
+      resolveCloudflarePreview: async () => {
+        throw new Error("private configuration detail");
+      },
+    });
+
+    const response = await post(app);
+
+    expect(response.status).toBe(503);
+    expect(response.body.evidence).toEqual({
+      stage: "capture",
+      cause: "preview-grant-unavailable",
+    });
+    expect(JSON.stringify(response.body)).not.toContain("private configuration detail");
+    expect(capture).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+    expect(Object.values(writes).every((count) => count === 0)).toBe(true);
   });
 
   it("does not invisibly retry when a consumed Cloudflare grant capture fails", async () => {
@@ -379,6 +455,8 @@ describe("snapshot observe route", () => {
         containerId: "runtime-1",
         containerStatus: "running",
       }),
+      resolveCloudflarePreview: async () =>
+        "https://runtime.mustaflow.com/_nabuflow/preview/v1/runtime-1/?__nfg=signed",
       capture,
     });
     process.env.TENANT_RUNTIME_PROVIDER = "cloudflare";
