@@ -83,7 +83,7 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
-import { QueueComposer } from "./components/queue-composer";
+import { QueueComposer, type ComposerAttachment } from "./components/queue-composer";
 import { useProjectIssues } from "@/hooks/use-project-issues";
 import { parseTaskStreamReceipt } from "@/hooks/use-task-event-stream";
 import { QueueProgressStrip } from "./components/queue-progress-strip";
@@ -1791,7 +1791,7 @@ export default function ProjectWorkspacePage() {
       background?: boolean;
       agentMode?: AgentMode;
       agentIntent?: BuilderComposerIntent;
-      attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
+      attachments?: ComposerAttachment[];
     };
   } | null>(null);
 
@@ -2487,7 +2487,7 @@ export default function ProjectWorkspacePage() {
         background?: boolean;
         agentMode?: AgentMode;
         agentIntent?: BuilderComposerIntent;
-        attachments?: Array<{ kind: "image"; url: string; alt?: string; generated?: boolean }>;
+        attachments?: ComposerAttachment[];
         agentIdentity?: "planning" | "main";
         idempotencyKey?: string;
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
@@ -2588,19 +2588,14 @@ export default function ProjectWorkspacePage() {
         agentIntent?: BuilderComposerIntent;
         /** Override visible executor for explicit plan/main handoffs. */
         agentIdentity?: "planning" | "main";
-        attachments?: Array<{
-          kind: "image";
-          url: string;
-          alt?: string;
-          generated?: boolean;
-        }>;
+        attachments?: ComposerAttachment[];
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
         onProceed?: () => void;
       },
     ) => {
-      // Allow image-only sends — when no text prompt is given the server injects a default.
-      const hasImageAttachments = (opts?.attachments ?? []).length > 0;
-      if (!content.trim() && !hasImageAttachments) return;
+      // Any governed attachment can carry an attachment-only request.
+      const hasAttachments = (opts?.attachments ?? []).length > 0;
+      if (!content.trim() && !hasAttachments) return;
       // A fresh attempt clears any previous billing block; the server re-gates.
       setBillingBlock(null);
 
@@ -4871,22 +4866,13 @@ export default function ProjectWorkspacePage() {
                             chatLastScrollTopRef.current = scrollRef.current.scrollTop;
                           }
                         }
-                        const imageOnly = attachments?.filter(
-                          (
-                            a,
-                          ): a is {
-                            kind: "image";
-                            url: string;
-                            alt?: string;
-                            generated?: boolean;
-                          } => a.kind === "image",
-                        );
-                        const hasImages = (imageOnly?.length ?? 0) > 0;
+                        const hasImages =
+                          attachments?.some((attachment) => attachment.kind === "image") ?? false;
                         // Auto-activate plan mode when the client detected a plan intent
                         // so the user never has to manually toggle it.
                         if (intent === "plan") setPlanMode(true);
                         send(content, {
-                          ...(imageOnly && imageOnly.length > 0 ? { attachments: imageOnly } : {}),
+                          ...(attachments && attachments.length > 0 ? { attachments } : {}),
                           // Images and explicit build/plan intents use the regular task-creating
                           // mutation. Conversational intents keep their existing streamed path.
                           ...mapIntentToSendOptions({ intent, hasImages }),

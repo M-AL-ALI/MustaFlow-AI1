@@ -664,11 +664,20 @@ export const GenerateImageBody = zod.object({
   "savePath": zod.string().optional().describe('Optional project file path to also save the image (e.g. assets\/hero.png). Auto-generated if omitted.')
 })
 
+
+export const generateImageResponseAttachmentSizeMin = 0;
+
+
+
 export const GenerateImageResponse = zod.object({
   "attachment": zod.object({
-  "kind": zod.enum(['image']),
-  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "kind": zod.enum(['image', 'file']),
+  "assetId": zod.number().min(1).optional().describe('Unified project asset identity. Required for files and for URLs under \/api\/assets\/.'),
+  "url": zod.string().describe('Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages.'),
   "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "name": zod.string().optional().describe('Original file name for a non-image attachment.'),
+  "mime": zod.string().optional().describe('Media type for a non-image attachment.'),
+  "size": zod.number().min(generateImageResponseAttachmentSizeMin).optional().describe('Stored byte size for a non-image attachment.'),
   "width": zod.number().optional(),
   "height": zod.number().optional(),
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
@@ -1374,6 +1383,11 @@ export const ListMessagesParams = zod.object({
   "id": zod.coerce.number()
 })
 
+
+export const listMessagesResponseAttachmentsItemSizeMin = 0;
+
+
+
 export const ListMessagesResponseItem = zod.object({
   "id": zod.number(),
   "projectId": zod.number(),
@@ -1383,9 +1397,13 @@ export const ListMessagesResponseItem = zod.object({
   "planMode": zod.boolean(),
   "plan": zod.record(zod.string(), zod.unknown()).nullish(),
   "attachments": zod.array(zod.object({
-  "kind": zod.enum(['image']),
-  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "kind": zod.enum(['image', 'file']),
+  "assetId": zod.number().min(1).optional().describe('Unified project asset identity. Required for files and for URLs under \/api\/assets\/.'),
+  "url": zod.string().describe('Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages.'),
   "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "name": zod.string().optional().describe('Original file name for a non-image attachment.'),
+  "mime": zod.string().optional().describe('Media type for a non-image attachment.'),
+  "size": zod.number().min(listMessagesResponseAttachmentsItemSizeMin).optional().describe('Stored byte size for a non-image attachment.'),
   "width": zod.number().optional(),
   "height": zod.number().optional(),
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
@@ -1407,6 +1425,9 @@ export const SendMessageParams = zod.object({
 
 
 export const sendMessageBodyDeepReasoningDefault = false;
+export const sendMessageBodyAttachmentsItemSizeMin = 0;
+
+
 
 
 export const SendMessageBody = zod.object({
@@ -1418,14 +1439,18 @@ export const SendMessageBody = zod.object({
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional visible executor override. New work should use planning or main; task is legacy compatibility only.'),
   "agentIntent": zod.enum(['answer', 'clarify', 'mutate', 'observe', 'converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests', 'fix_types', 'fix_lint']).optional().describe('Optional explicit intent override. New callers use the closed answer\/clarify\/plan\/mutate\/observe contract. Legacy controls remain accepted and map into that contract.'),
   "attachments": zod.array(zod.object({
-  "kind": zod.enum(['image']),
-  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "kind": zod.enum(['image', 'file']),
+  "assetId": zod.number().min(1).optional().describe('Unified project asset identity. Required for files and for URLs under \/api\/assets\/.'),
+  "url": zod.string().describe('Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages.'),
   "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "name": zod.string().optional().describe('Original file name for a non-image attachment.'),
+  "mime": zod.string().optional().describe('Media type for a non-image attachment.'),
+  "size": zod.number().min(sendMessageBodyAttachmentsItemSizeMin).optional().describe('Stored byte size for a non-image attachment.'),
   "width": zod.number().optional(),
   "height": zod.number().optional(),
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
-})).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
+})).optional().describe('Optional project assets from the governed account-quota registry. Images are sent to vision; files are available to Zero through project asset tools.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
   "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
   "supportSessionId": zod.number().min(1).optional().describe('User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.'),
@@ -1434,6 +1459,14 @@ export const SendMessageBody = zod.object({
   "content": zod.string()
 })).optional().describe('Optional brainstorm conversation history from the brainstorm panel. When provided, the AI builder uses these turns to understand the nuances, tone, and priorities the user expressed during brainstorming — context that may not have fully made it into the resolved prompt.')
 })
+
+
+export const sendMessageResponseUserMessageAttachmentsItemSizeMin = 0;
+
+
+export const sendMessageResponseAssistantMessageAttachmentsItemSizeMin = 0;
+
+
 
 export const SendMessageResponse = zod.object({
   "userMessage": zod.object({
@@ -1445,9 +1478,13 @@ export const SendMessageResponse = zod.object({
   "planMode": zod.boolean(),
   "plan": zod.record(zod.string(), zod.unknown()).nullish(),
   "attachments": zod.array(zod.object({
-  "kind": zod.enum(['image']),
-  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "kind": zod.enum(['image', 'file']),
+  "assetId": zod.number().min(1).optional().describe('Unified project asset identity. Required for files and for URLs under \/api\/assets\/.'),
+  "url": zod.string().describe('Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages.'),
   "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "name": zod.string().optional().describe('Original file name for a non-image attachment.'),
+  "mime": zod.string().optional().describe('Media type for a non-image attachment.'),
+  "size": zod.number().min(sendMessageResponseUserMessageAttachmentsItemSizeMin).optional().describe('Stored byte size for a non-image attachment.'),
   "width": zod.number().optional(),
   "height": zod.number().optional(),
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
@@ -1466,9 +1503,13 @@ export const SendMessageResponse = zod.object({
   "planMode": zod.boolean(),
   "plan": zod.record(zod.string(), zod.unknown()).nullish(),
   "attachments": zod.array(zod.object({
-  "kind": zod.enum(['image']),
-  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "kind": zod.enum(['image', 'file']),
+  "assetId": zod.number().min(1).optional().describe('Unified project asset identity. Required for files and for URLs under \/api\/assets\/.'),
+  "url": zod.string().describe('Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages.'),
   "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "name": zod.string().optional().describe('Original file name for a non-image attachment.'),
+  "mime": zod.string().optional().describe('Media type for a non-image attachment.'),
+  "size": zod.number().min(sendMessageResponseAssistantMessageAttachmentsItemSizeMin).optional().describe('Stored byte size for a non-image attachment.'),
   "width": zod.number().optional(),
   "height": zod.number().optional(),
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
@@ -1534,6 +1575,9 @@ export const StreamMessageParams = zod.object({
 
 
 export const streamMessageBodyDeepReasoningDefault = false;
+export const streamMessageBodyAttachmentsItemSizeMin = 0;
+
+
 
 
 export const StreamMessageBody = zod.object({
@@ -1545,14 +1589,18 @@ export const StreamMessageBody = zod.object({
   "agentIdentity": zod.enum(['planning', 'task', 'main']).optional().describe('Optional visible executor override. New work should use planning or main; task is legacy compatibility only.'),
   "agentIntent": zod.enum(['answer', 'clarify', 'mutate', 'observe', 'converse', 'plan', 'build', 'debug', 'refactor', 'review', 'explain', 'fix_tests', 'fix_types', 'fix_lint']).optional().describe('Optional explicit intent override. New callers use the closed answer\/clarify\/plan\/mutate\/observe contract. Legacy controls remain accepted and map into that contract.'),
   "attachments": zod.array(zod.object({
-  "kind": zod.enum(['image']),
-  "url": zod.string().describe('Object path served via \/api\/storage{objectPath} (e.g. \/objects\/uploads\/uuid).'),
+  "kind": zod.enum(['image', 'file']),
+  "assetId": zod.number().min(1).optional().describe('Unified project asset identity. Required for files and for URLs under \/api\/assets\/.'),
+  "url": zod.string().describe('Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages.'),
   "alt": zod.string().optional().describe('Alt text or, for AI-generated images, the source prompt.'),
+  "name": zod.string().optional().describe('Original file name for a non-image attachment.'),
+  "mime": zod.string().optional().describe('Media type for a non-image attachment.'),
+  "size": zod.number().min(streamMessageBodyAttachmentsItemSizeMin).optional().describe('Stored byte size for a non-image attachment.'),
   "width": zod.number().optional(),
   "height": zod.number().optional(),
   "generated": zod.boolean().optional().describe('True when this image was produced by the AI image-generation pipeline.'),
   "savedPath": zod.string().optional().describe('Project file path the generated image was also saved to (e.g. assets\/generated\/img-123.png).')
-})).optional().describe('Optional image attachments uploaded via \/storage\/uploads\/request-url. Sent to the vision-capable model.'),
+})).optional().describe('Optional project assets from the governed account-quota registry. Images are sent to vision; files are available to Zero through project asset tools.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
   "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
   "supportSessionId": zod.number().min(1).optional().describe('User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.'),

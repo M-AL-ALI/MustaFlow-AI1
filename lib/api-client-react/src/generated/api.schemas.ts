@@ -1215,14 +1215,29 @@ export type ChatAttachmentKind = typeof ChatAttachmentKind[keyof typeof ChatAtta
 
 export const ChatAttachmentKind = {
   image: 'image',
+  file: 'file',
 } as const;
 
 export interface ChatAttachment {
   kind: ChatAttachmentKind;
-  /** Object path served via /api/storage{objectPath} (e.g. /objects/uploads/uuid). */
+  /**
+     * Unified project asset identity. Required for files and for URLs under /api/assets/.
+     * @minimum 1
+     */
+  assetId?: number;
+  /** Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages. */
   url: string;
   /** Alt text or, for AI-generated images, the source prompt. */
   alt?: string;
+  /** Original file name for a non-image attachment. */
+  name?: string;
+  /** Media type for a non-image attachment. */
+  mime?: string;
+  /**
+     * Stored byte size for a non-image attachment.
+     * @minimum 0
+     */
+  size?: number;
   width?: number;
   height?: number;
   /** True when this image was produced by the AI image-generation pipeline. */
@@ -1605,7 +1620,7 @@ export interface ChatMessageInput {
   agentIdentity?: ChatMessageInputAgentIdentity;
   /** Optional explicit intent override. New callers use the closed answer/clarify/plan/mutate/observe contract. Legacy controls remain accepted and map into that contract. */
   agentIntent?: ChatMessageInputAgentIntent;
-  /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
+  /** Optional project assets from the governed account-quota registry. Images are sent to vision; files are available to Zero through project asset tools. */
   attachments?: ChatAttachment[];
   /** Surface sending this message. Pass 'zero' when sending from the Zero agent panel so the message is tagged for its filtered thread view. */
   origin?: string;

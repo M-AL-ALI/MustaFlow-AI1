@@ -1,4 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
+import { uploadProjectAsset } from "@/lib/asset-upload";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Rocket,
@@ -87,77 +88,21 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB hard limit per file
-const MAX_IMAGE_SIDE = 1500; // px — downscale if either dimension exceeds this
-const MAX_IMAGE_BYTES_BEFORE_RESIZE = 1 * 1024 * 1024; // 1 MB — also resize even if dimensions ok
 const MAX_IMAGES_PER_MESSAGE = 4; // max simultaneous image attachments
-
-/**
- * Downscale an image File using a hidden canvas element if it exceeds the
- * MAX_IMAGE_SIDE or MAX_IMAGE_BYTES_BEFORE_RESIZE thresholds.  Returns the
- * original File unchanged when no resizing is needed.
- */
-async function resizeImageForVision(file: File): Promise<Blob> {
-  // Fast path: small image that fits within both limits — no canvas needed.
-  if (file.size <= MAX_IMAGE_BYTES_BEFORE_RESIZE) {
-    try {
-      const bitmap = await createImageBitmap(file);
-      const fits = bitmap.width <= MAX_IMAGE_SIDE && bitmap.height <= MAX_IMAGE_SIDE;
-      bitmap.close();
-      if (fits) return file;
-    } catch {
-      // createImageBitmap unsupported — fall through to canvas path
-    }
-  }
-
-  return new Promise<Blob>((resolve, reject) => {
-    const img = new Image();
-    const objectUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      const scale = Math.min(MAX_IMAGE_SIDE / img.width, MAX_IMAGE_SIDE / img.height, 1);
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error("Canvas 2D context unavailable"));
-        return;
-      }
-      ctx.drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(objectUrl);
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
-            reject(new Error("Canvas toBlob returned null"));
-            return;
-          }
-          resolve(blob);
-        },
-        "image/jpeg",
-        0.85,
-      );
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Failed to load image for resizing"));
-    };
-    img.src = objectUrl;
-  });
-}
 
 export type ComposerAttachment =
   | {
       kind: "image";
+      assetId?: number;
       url: string;
       alt?: string;
       generated?: boolean;
+      resized?: boolean;
     }
   | {
       kind: "file";
-      uploadId: number;
+      assetId: number;
+      url: string;
       name: string;
       mime: string;
       size: number;
@@ -355,6 +300,7 @@ export function QueueComposer({
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploadingCount, setUploadingCount] = useState(0);
   const [attachErrors, setAttachErrors] = useState<string[]>([]);
+  const [attachNotices, setAttachNotices] = useState<string[]>([]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [imagePanelOpen, setImagePanelOpen] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
@@ -364,132 +310,54 @@ export function QueueComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const uploadFile = useCallback(
-    async (file: File): Promise<{ attachment: ComposerAttachment | null; error?: string }> => {
-      // Image path — screenshot-to-code flow with client-side resizing.
+    async (
+      file: File,
+      source: "picker" | "paste" | "drop",
+    ): Promise<{ attachment: ComposerAttachment | null; error?: string }> => {
       if (file.type.startsWith("image/")) {
-        // Validate MIME type (PNG / JPG / WebP only)
         if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
           return {
             attachment: null,
             error: `"${file.name}": only PNG, JPG, and WebP images are supported.`,
           };
         }
-        // Validate raw size before resizing (5 MB cap on original)
-        if (file.size > MAX_IMAGE_BYTES) {
-          return {
-            attachment: null,
-            error: `"${file.name}" is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 5 MB per image.`,
-          };
-        }
-        setUploadingCount((c) => c + 1);
-        try {
-          // Downscale to ≤ 1500 px on either side if needed.
-          const blob = await resizeImageForVision(file);
-          const contentType = blob.type || file.type;
-
-          // Get a signed PUT URL from the project-scoped endpoint.
-          const meta = await authFetch(`/api/projects/${projectId}/attachments/upload-url`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ contentType, sizeBytes: blob.size }),
-          });
-          if (!meta.ok) {
-            const err = (await meta.json().catch(() => ({}))) as { error?: string };
-            throw new Error(err.error ?? "Failed to request upload URL");
-          }
-          const { uploadUrl, objectPath } = (await meta.json()) as {
-            uploadUrl: string;
-            objectPath: string;
-          };
-
-          // PUT the (possibly resized) blob directly to the signed URL.
-          const put = await fetch(uploadUrl, {
-            method: "PUT",
-            headers: { "Content-Type": contentType },
-            body: blob,
-          });
-          if (!put.ok) throw new Error("Image upload failed");
-
-          return { attachment: { kind: "image", url: objectPath, alt: file.name } };
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.error("Image upload failed:", err);
-          return {
-            attachment: null,
-            error: err instanceof Error ? err.message : "Image upload failed",
-          };
-        } finally {
-          setUploadingCount((c) => Math.max(0, c - 1));
-        }
       }
 
       setUploadingCount((c) => c + 1);
       try {
-        // ── Non-image files handled below (original flow kept intact) ──────
-
-        // Non-image files (CSV / PDF / TXT / JSON / etc.) → project-scoped
-        // uploads (Task #540). Two-step: request presigned URL, PUT, then
-        // register with the project so `list_uploads`/`read_upload` agent
-        // tools can see it.
-        const reqRes = await authFetch(`/api/projects/${projectId}/uploads/request-url`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            name: file.name,
-            size: file.size,
-            contentType: file.type || "application/octet-stream",
-          }),
+        const uploaded = await uploadProjectAsset({
+          projectId,
+          file,
+          source,
         });
-        if (!reqRes.ok) {
-          const err = (await reqRes.json().catch(() => ({}))) as { error?: string };
-          throw new Error(err.error ?? "Failed to request upload URL");
+        if (uploaded.mimeType.startsWith("image/")) {
+          return {
+            attachment: {
+              kind: "image",
+              assetId: uploaded.assetId,
+              url: uploaded.contentUrl,
+              alt: uploaded.name,
+              resized: uploaded.resized,
+            },
+          };
         }
-        const { uploadURL, objectPath } = (await reqRes.json()) as {
-          uploadURL: string;
-          objectPath: string;
-        };
-        const put = await fetch(uploadURL, {
-          method: "PUT",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file,
-        });
-        if (!put.ok) throw new Error("Upload failed");
-        const regRes = await authFetch(`/api/projects/${projectId}/uploads`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            objectPath,
-            name: file.name,
-            sizeBytes: file.size,
-            contentType: file.type || "application/octet-stream",
-          }),
-        });
-        if (!regRes.ok) {
-          const err = (await regRes.json().catch(() => ({}))) as { error?: string };
-          throw new Error(err.error ?? "Failed to register upload");
-        }
-        const row = (await regRes.json()) as {
-          id: number;
-          filename: string;
-          mimeType: string;
-          sizeBytes: number;
-        };
         return {
           attachment: {
             kind: "file",
-            uploadId: row.id,
-            name: row.filename,
-            mime: row.mimeType,
-            size: row.sizeBytes,
+            assetId: uploaded.assetId,
+            url: uploaded.contentUrl,
+            name: uploaded.name,
+            mime: uploaded.mimeType,
+            size: uploaded.sizeBytes,
           },
         };
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error("Upload failed:", err);
-        return { attachment: null };
+        return {
+          attachment: null,
+          error: err instanceof Error ? err.message : "The upload could not be completed.",
+        };
       } finally {
         setUploadingCount((c) => Math.max(0, c - 1));
       }
@@ -498,7 +366,7 @@ export function QueueComposer({
   );
 
   const handleFiles = useCallback(
-    async (files: FileList | File[]) => {
+    async (files: FileList | File[], source: "picker" | "paste" | "drop") => {
       const arr = Array.from(files);
       if (arr.length === 0) return;
 
@@ -529,7 +397,7 @@ export function QueueComposer({
         return;
       }
 
-      const results = await Promise.all(filesToProcess.map((f) => uploadFile(f)));
+      const results = await Promise.all(filesToProcess.map((file) => uploadFile(file, source)));
       const ok: ComposerAttachment[] = [];
       for (const r of results) {
         if (r.attachment) ok.push(r.attachment);
@@ -537,6 +405,11 @@ export function QueueComposer({
       }
 
       if (ok.length > 0) setAttachments((prev) => [...prev, ...ok]);
+      setAttachNotices(
+        ok.some((attachment) => attachment.kind === "image" && attachment.resized)
+          ? ["The image was resized for a faster app while keeping full visual detail."]
+          : [],
+      );
       // Always update errors (even if empty) so stale errors from a previous
       // attempt are cleared when a subsequent attach succeeds.
       setAttachErrors(newErrors);
@@ -556,7 +429,7 @@ export function QueueComposer({
       }
       if (files.length > 0) {
         e.preventDefault();
-        await handleFiles(files);
+        await handleFiles(files, "paste");
       }
     },
     [handleFiles],
@@ -590,7 +463,13 @@ export function QueueComposer({
         throw new Error(err.error ?? "Image generation failed");
       }
       const data = (await res.json()) as {
-        attachment: { kind: "image"; url: string; alt?: string; generated?: boolean };
+        attachment: {
+          kind: "image";
+          assetId: number;
+          url: string;
+          alt?: string;
+          generated?: boolean;
+        };
       };
       setAttachments((prev) => [...prev, data.attachment]);
       setAttachErrors([]);
@@ -923,6 +802,7 @@ export function QueueComposer({
     const newId = crypto.randomUUID();
     setRows([{ id: newId, text: "" }]);
     setAttachErrors([]);
+    setAttachNotices([]);
     if (onPromptValueChange) onPromptValueChange("");
   }, [onPromptValueChange, stopAudioAnalysis]);
 
@@ -1173,9 +1053,9 @@ export function QueueComposer({
 
   const handleSend = useCallback(async () => {
     const messages = rows.map((r) => r.text.trim()).filter(Boolean);
-    // Allow image-only sends (no text required when a screenshot is attached).
-    const hasImageAttachment = attachments.some((a) => a.kind === "image");
-    if (messages.length === 0 && !hasImageAttachment) return;
+    // Any governed attachment is sufficient evidence for an attachment-only send.
+    const hasAttachment = attachments.length > 0;
+    if (messages.length === 0 && !hasAttachment) return;
     // Stop voice dictation before sending so late callbacks can't mutate the cleared composer.
     if (isListening || recognitionRef.current) {
       stopVoiceDictation();
@@ -1216,16 +1096,10 @@ export function QueueComposer({
       return;
     }
 
-    if (messages.length <= 1 && (messages.length === 1 || hasImageAttachment)) {
-      // Image-only send: the attachment is evidence; it never chooses the request's intent.
-      const text = messages[0] ?? "";
+    if (messages.length <= 1 && (messages.length === 1 || hasAttachment)) {
+      // Attachment-only send: the evidence never chooses the request's intent.
+      const text = messages[0] ?? "Please review the attached evidence.";
       const pending = attachments;
-      // Only inline image attachments go on the message payload. File uploads
-      // (CSV/PDF/etc.) live in the project_uploads table and the agent reads
-      // them via list_uploads / read_upload tools.
-      const inlineImages = pending.filter(
-        (a): a is Extract<ComposerAttachment, { kind: "image" }> => a.kind === "image",
-      );
       // Pass the active developer intent (persisted badge) first; fall back to
       // client-detected intent so the server skips the classifier when possible.
       const detectedIntent: Parameters<typeof onSingleSend>[1] = resolveBuilderComposerIntent({
@@ -1239,12 +1113,13 @@ export function QueueComposer({
         setRows([{ id: crypto.randomUUID(), text: "" }]);
         setAttachments([]);
         setAttachErrors([]);
+        setAttachNotices([]);
         if (onPromptValueChange) onPromptValueChange("");
       };
       onSingleSend(
         text,
         detectedIntent,
-        inlineImages.length > 0 ? inlineImages : undefined,
+        pending.length > 0 ? pending : undefined,
         undefined,
         clearComposer,
       );
@@ -1378,7 +1253,7 @@ export function QueueComposer({
         setFileDragActive(false);
         if (files && files.length > 0) {
           e.preventDefault();
-          void handleFiles(files);
+          void handleFiles(files, "drop");
         }
       }}
     >
@@ -1532,6 +1407,14 @@ export function QueueComposer({
             </div>
           )}
 
+          {attachNotices.length > 0 && (
+            <div className="mx-3 mt-1 mb-0.5 rounded-md px-2 py-1 text-[10px] bg-primary/10 text-foreground border border-primary/20">
+              {attachNotices.map((notice) => (
+                <p key={notice}>{notice}</p>
+              ))}
+            </div>
+          )}
+
           {(isListening || voiceError) && (
             <div
               className={cn(
@@ -1621,7 +1504,7 @@ export function QueueComposer({
                 }
                 return (
                   <div
-                    key={`file-${a.uploadId}-${i}`}
+                    key={`file-${a.assetId}-${i}`}
                     className="relative group rounded-md border border-border bg-background/60 px-2 py-1.5 max-w-[180px]"
                     title={`${a.name} (${a.mime})`}
                   >
@@ -1751,7 +1634,7 @@ export function QueueComposer({
                   multiple
                   hidden
                   onChange={(e) => {
-                    if (e.target.files) void handleFiles(e.target.files);
+                    if (e.target.files) void handleFiles(e.target.files, "picker");
                     e.currentTarget.value = "";
                   }}
                 />

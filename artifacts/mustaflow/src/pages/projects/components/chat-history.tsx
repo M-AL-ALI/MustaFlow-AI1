@@ -33,6 +33,7 @@ import {
   Bug,
   KeySquare,
   Eye,
+  Paperclip,
 } from "lucide-react";
 import { format, isToday, isYesterday } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -303,9 +304,13 @@ type ChatPlanPayload =
   | Record<string, unknown>;
 
 type ChatAttachment = {
-  kind: "image";
+  kind: "image" | "file";
+  assetId?: number;
   url: string;
   alt?: string;
+  name?: string;
+  mime?: string;
+  size?: number;
   width?: number;
   height?: number;
   generated?: boolean;
@@ -330,7 +335,20 @@ function AttachmentGallery({ attachments }: { attachments: ChatAttachment[] }) {
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
       {attachments.map((att, i) => {
-        if (att.kind !== "image" || !att.url) return null;
+        if (att.kind === "file") {
+          return (
+            <a
+              key={`file-${att.assetId ?? i}`}
+              href={att.url}
+              className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md border border-border bg-background/60 px-2 py-1.5 text-[10px] text-foreground hover:bg-muted"
+              title={att.mime ?? att.name ?? "Attached file"}
+            >
+              <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+              <span className="truncate">{att.name ?? "Attached file"}</span>
+            </a>
+          );
+        }
+        if (!att.url) return null;
         const src = att.url.startsWith("/objects/")
           ? `/api/storage${att.url}`
           : att.url.startsWith("http")
