@@ -20,11 +20,24 @@ export type ZeroIntentExplicitControl =
 
 export interface ZeroIntentJudgeInput {
   explicitControl?: ZeroIntentExplicitControl;
+  mutationForbidden: boolean;
   planMode: boolean;
   approvedPlanStep: boolean;
   imageGenerationRequested: boolean;
   attachments: readonly unknown[];
   classify(): Promise<IntentResult>;
+}
+
+const EXPLICIT_NO_PROJECT_MUTATION =
+  /^\s*(?:please\s+)?(?:do\s+not|don't|dont|never)\s+(?:change|modify|edit|update|build|mutate)\s+(?:this|the|my)\s+(?:project|app|codebase)\b/iu;
+
+/**
+ * A whole-project no-change instruction is a user control, not classifier advice.
+ * Keep the match deliberately anchored and narrow so quoted or object-specific
+ * phrases such as "do not change the heading" do not suppress a real build.
+ */
+export function isExplicitNoProjectMutationRequest(content: string): boolean {
+  return EXPLICIT_NO_PROJECT_MUTATION.test(content);
 }
 
 function explicitDecision(control: ZeroIntentExplicitControl): IntentReceiptDecision {
@@ -89,6 +102,14 @@ export async function judgeZeroIntent(input: ZeroIntentJudgeInput): Promise<Inte
     };
   }
   if (input.explicitControl) return explicitDecision(input.explicitControl);
+  if (input.mutationForbidden) {
+    return {
+      intent: "answer",
+      decidingSource: "user_explicit",
+      confidence: null,
+      reasonCode: "explicit_control",
+    };
+  }
   if (input.planMode) {
     return {
       intent: "plan",

@@ -27,4 +27,10 @@ describe("authoritative message intent wiring", () => {
     expect(source.match(/isZeroProjectChoiceCaptureOnlyMessage\(content\)/g)).toHaveLength(2);
     expect(source.match(/explicitControl: authoritativeExplicitAgentIntent/g)).toHaveLength(2);
   });
+
+  it("binds whole-project no-change controls before both route dispatches", () => {
+    expect(
+      source.match(/mutationForbidden: isExplicitNoProjectMutationRequest\(content\)/g),
+    ).toHaveLength(2);
+  });
 });
