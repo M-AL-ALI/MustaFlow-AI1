@@ -201,6 +201,13 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(livePreviewProxySource).not.toContain(
       "Deploy to production to test agentic app previews",
     );
+    const proxyErrorStart = livePreviewProxySource.indexOf("error: (err, req, target)");
+    const proxyErrorEnd = livePreviewProxySource.indexOf("\n    },\n  },\n});", proxyErrorStart);
+    expect(proxyErrorStart).toBeGreaterThan(-1);
+    expect(proxyErrorEnd).toBeGreaterThan(proxyErrorStart);
+    expect(livePreviewProxySource.slice(proxyErrorStart, proxyErrorEnd)).not.toContain(
+      "serveProjectFilesPreview",
+    );
   });
 
   it("falls back to project_files without clearing runtime identity during a read", () => {
@@ -220,11 +227,32 @@ describe("Preview Architecture Fix regression coverage", () => {
 
   it("prefers WebContainer for React/Vite unless the server reports preview access", () => {
     expect(previewTabSource).toContain("isReactVite && !serverPreviewLive");
-    expect(previewTabSource).toContain("hasServerPreviewAccess(previewAccess)");
+    expect(previewTabSource).toContain(
+      "const serverPreviewLive = hasServerPreviewAccess(previewAccess)",
+    );
+    expect(previewTabSource).not.toContain(
+      "const serverPreviewLive = isAgentic && hasServerPreviewAccess(previewAccess)",
+    );
     expect(previewTabSource).not.toContain("Boolean(containerUrl)");
     expect(previewTabSource).toContain(
       "const src = webContainerLive ? wc.previewUrl! : previewSrc",
     );
+  });
+
+  it("does not let a stale capability sample turn visible runtime recovery into a no-op", () => {
+    for (const callbackName of [
+      "const refreshContainerStatus = useCallback",
+      "const handleStartContainer = useCallback",
+      "const handleStopContainer = useCallback",
+    ]) {
+      const start = projectPageSource.indexOf(callbackName);
+      const end = projectPageSource.indexOf("\n  },", start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      expect(projectPageSource.slice(start, end)).not.toContain(
+        "if (!containerLayerConfigured) return",
+      );
+    }
   });
 
   it("does not render a raw agentic preview response before provider liveness is proven", () => {

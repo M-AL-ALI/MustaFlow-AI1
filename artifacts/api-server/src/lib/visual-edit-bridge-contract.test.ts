@@ -30,12 +30,19 @@ describe("visual edit bridge selection contract", () => {
     expect(filesRoute).toContain("visualEditEnabled: true");
   });
 
-  it("keeps the bridge out of public preview fallback responses", () => {
+  it("keeps the bridge out of public static fallback and runtime error responses", () => {
     expect(
       livePreviewProxy.match(/visualEditEnabled: options\?\.publicRequestUrl === undefined/gu),
-    ).toHaveLength(2);
-    expect(livePreviewProxy).toContain(
+    ).toHaveLength(1);
+    expect(livePreviewProxy).not.toContain(
       "visualEditEnabled: expressReq.mustaFlowPublicPreview === undefined",
+    );
+    const proxyErrorStart = livePreviewProxy.indexOf("error: (err, req, target)");
+    const proxyErrorEnd = livePreviewProxy.indexOf("\n    },\n  },\n});", proxyErrorStart);
+    expect(proxyErrorStart).toBeGreaterThan(-1);
+    expect(proxyErrorEnd).toBeGreaterThan(proxyErrorStart);
+    expect(livePreviewProxy.slice(proxyErrorStart, proxyErrorEnd)).not.toContain(
+      "serveProjectFilesPreview",
     );
   });
 });
