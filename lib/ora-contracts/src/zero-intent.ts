@@ -51,6 +51,14 @@ export type IntentReceiptDecision = Pick<
   "intent" | "decidingSource" | "confidence" | "reasonCode"
 >;
 
+const EXPLICIT_NO_PROJECT_MUTATION =
+  /^\s*(?:please\s+)?(?:do\s+not|don't|dont|never)\s+(?:change|modify|edit|update|build|mutate)\s+(?:this|the|my)\s+(?:project|app|codebase)\b/iu;
+
+/** A whole-project no-change instruction is authoritative user control. */
+export function isExplicitNoProjectMutationRequest(content: string): boolean {
+  return EXPLICIT_NO_PROJECT_MUTATION.test(content);
+}
+
 export const ZERO_INTENT_RECEIPT_ERROR_CODES = [
   "intent_receipt_illegal_pair",
   "intent_receipt_confidence_invalid",
