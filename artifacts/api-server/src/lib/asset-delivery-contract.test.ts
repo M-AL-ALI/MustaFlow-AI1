@@ -16,11 +16,11 @@ describe("unified asset delivery contract", () => {
     );
   });
 
-  it("marks structurally accepted private formats as scan-not-required", () => {
-    expect(routeSource).toContain('scanState: "not-required"');
-    expect(routeSource).not.toContain(
-      'scanState: detected.startsWith("image/") ? "not-scanned" : "not-scanned"',
-    );
+  it("does not describe private storage or structural parsing as a malware scan", () => {
+    expect(routeSource).toContain('let scanState: "not-required" | "not-scanned" = "not-scanned"');
+    expect(routeSource).toContain('scanState = "not-required"');
+    expect(routeSource).toContain('Structurally parsed documents remain honestly "not-scanned"');
+    expect(routeSource).not.toContain("private and are structurally parsed before use");
   });
 
   it("materializes a project file and its usage receipt in one transaction", () => {

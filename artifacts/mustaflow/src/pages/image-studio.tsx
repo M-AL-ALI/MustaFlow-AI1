@@ -73,6 +73,7 @@ interface UnifiedAsset {
   contentUrl: string;
   context?: {
     altText?: string;
+    suggestedAltText?: string;
     brandRole?: "none" | "logo" | "icon" | "palette" | "font" | "reference";
     derivativeOfAssetId?: number;
     derivativePreset?: string;
@@ -368,6 +369,7 @@ export default function ImageStudioPage() {
             current[asset.id] ?? {
               altText:
                 asset.context?.altText ??
+                asset.context?.suggestedAltText ??
                 (asset.mimeType.startsWith("image/")
                   ? asset.filename.replace(/[-_]+/g, " ").replace(/\.[^.]+$/u, "")
                   : ""),
@@ -460,6 +462,36 @@ export default function ImageStudioPage() {
       setUploadError(
         detailsError instanceof Error ? detailsError.message : "Asset details could not be saved.",
       );
+    } finally {
+      setAssetBusy(null);
+    }
+  };
+
+  const proposeAssetAltText = async (assetId: number) => {
+    setAssetBusy(assetId);
+    setAssetNotice(null);
+    try {
+      const response = await authFetch(`/api/assets/${assetId}/alt-text-proposal`, {
+        method: "POST",
+      });
+      const body = (await response.json().catch(() => null)) as {
+        error?: string;
+        proposedAltText?: string;
+      } | null;
+      if (!response.ok || !body?.proposedAltText) {
+        throw new Error(body?.error ?? "Zero could not suggest alt text right now.");
+      }
+      setAssetDrafts((current) => ({
+        ...current,
+        [assetId]: {
+          altText: body.proposedAltText!,
+          brandRole: current[assetId]?.brandRole ?? "none",
+        },
+      }));
+      setAssetNotice("Zero proposed editable alt text. Review it, then save when it is right.");
+      await fetchAssets();
+    } catch (error) {
+      setAssetNotice(error instanceof Error ? error.message : "Zero could not suggest alt text.");
     } finally {
       setAssetBusy(null);
     }
@@ -1134,6 +1166,26 @@ export default function ImageStudioPage() {
                       <p className="text-[9px] text-muted-foreground">
                         {formatAssetBytes(asset.sizeBytes)} · {asset.source}
                       </p>
+                      <p
+                        className={cn(
+                          "text-[9px]",
+                          asset.scanState === "not-scanned"
+                            ? "text-amber-500"
+                            : asset.scanState === "threat" || asset.scanState === "failed"
+                              ? "text-destructive"
+                              : "text-muted-foreground",
+                        )}
+                      >
+                        {asset.scanState === "not-scanned"
+                          ? "Private · not malware-scanned"
+                          : asset.scanState === "not-required"
+                            ? "Decoded safely before use"
+                            : asset.scanState === "clean"
+                              ? "Malware scan passed"
+                              : asset.scanState === "threat"
+                                ? "Blocked as unsafe"
+                                : "Safety check unavailable"}
+                      </p>
                       {asset.context?.derivativePreset && (
                         <p className="truncate text-[9px] text-emerald-500">
                           {asset.context.derivativePreset}
@@ -1155,6 +1207,11 @@ export default function ImageStudioPage() {
                         aria-label={`Alt text for ${asset.filename}`}
                         className="w-full rounded border border-border bg-background px-1.5 py-1 text-[9px]"
                       />
+                      {asset.context?.suggestedAltText && !asset.context?.altText && (
+                        <p className="text-[9px] text-emerald-600">
+                          Zero proposed this description automatically. Review it before saving.
+                        </p>
+                      )}
                       <select
                         value={assetDrafts[asset.id]?.brandRole ?? "none"}
                         onChange={(event) =>
@@ -1230,6 +1287,16 @@ export default function ImageStudioPage() {
                               App sizes
                             </button>
                           )}
+                        {asset.mimeType.startsWith("image/") && (
+                          <button
+                            type="button"
+                            onClick={() => void proposeAssetAltText(asset.id)}
+                            disabled={assetBusy === asset.id}
+                            className="col-span-2 rounded bg-muted px-1 py-1 text-[9px] hover:text-foreground disabled:opacity-50"
+                          >
+                            Ask Zero for alt text
+                          </button>
+                        )}
                       </div>
                     </div>
                   </article>

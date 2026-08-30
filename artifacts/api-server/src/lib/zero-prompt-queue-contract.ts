@@ -130,6 +130,8 @@ export type ZeroPromptQueueMutation =
       kind: "edit";
       target: ZeroPromptQueueItemAddress;
       text: string;
+      /** When supplied, replaces the queued prompt's complete attachment set. */
+      assetIds?: readonly number[];
     })
   | (OrderedMutation & {
       kind: "delete";
@@ -167,6 +169,8 @@ export type ZeroPromptQueueEvent =
       position: number;
       originalText: string;
       currentText: string;
+      originalAssetIds: readonly number[];
+      assetIds: readonly number[];
     })
   | (EventBase & {
       type: "queue.item.deleted";

@@ -222,8 +222,11 @@ export function ZeroPromptQueueDrawer({
   const [newText, setNewText] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [editAssetIds, setEditAssetIds] = useState<readonly number[]>([]);
+  const [editNewAssets, setEditNewAssets] = useState<AssetUploadResult[]>([]);
   const [newAssets, setNewAssets] = useState<AssetUploadResult[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   const previousPhaseRef = useRef<ZeroPromptQueueObservedPhase | null>(phase);
 
   const loadQueue = useCallback(async () => {
@@ -338,10 +341,41 @@ export function ZeroPromptQueueDrawer({
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: editText }),
+        body: JSON.stringify({
+          text: editText,
+          assetIds: [...editAssetIds, ...editNewAssets.map((asset) => asset.assetId)],
+        }),
       },
     );
-    if (accepted) setEditingId(null);
+    if (accepted) {
+      setEditingId(null);
+      setEditAssetIds([]);
+      setEditNewAssets([]);
+    }
+  };
+
+  const uploadEditFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const remaining = Math.max(0, 10 - editAssetIds.length - editNewAssets.length);
+      const selected = Array.from(files).slice(0, remaining);
+      const uploaded: AssetUploadResult[] = [];
+      for (const file of selected) {
+        uploaded.push(await uploadProjectAsset({ projectId, file, source: "picker" }));
+      }
+      setEditNewAssets((current) => [...current, ...uploaded].slice(0, 10 - editAssetIds.length));
+    } catch (uploadError) {
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "The attachment could not be uploaded.",
+      );
+    } finally {
+      if (editFileInputRef.current) editFileInputRef.current.value = "";
+      setBusy(false);
+    }
   };
 
   return (
@@ -409,6 +443,76 @@ export function ZeroPromptQueueDrawer({
                         {item.assetIds.length === 1 ? "attachment" : "attachments"}
                       </p>
                     )}
+                    {editingId === item.id && (
+                      <div className="mt-2 space-y-1.5">
+                        <ul
+                          aria-label={`Attachments for queued prompt ${index + 1}`}
+                          className="space-y-1"
+                        >
+                          {editAssetIds.map((assetId) => (
+                            <li
+                              key={assetId}
+                              className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-[10px]"
+                            >
+                              <span>Attachment {assetId}</span>
+                              <button
+                                type="button"
+                                aria-label={`Remove attachment ${assetId}`}
+                                onClick={() =>
+                                  setEditAssetIds((current) =>
+                                    current.filter((candidate) => candidate !== assetId),
+                                  )
+                                }
+                                className="text-muted-foreground hover:text-foreground"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </li>
+                          ))}
+                          {editNewAssets.map((asset) => (
+                            <li
+                              key={asset.assetId}
+                              className="flex items-center justify-between gap-2 rounded border border-border px-2 py-1 text-[10px]"
+                            >
+                              <span className="min-w-0 truncate">
+                                {asset.name} · {formatAssetBytes(asset.sizeBytes)}
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={`Remove ${asset.name}`}
+                                onClick={() =>
+                                  setEditNewAssets((current) =>
+                                    current.filter(
+                                      (candidate) => candidate.assetId !== asset.assetId,
+                                    ),
+                                  )
+                                }
+                                className="text-muted-foreground hover:text-foreground"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                        <input
+                          ref={editFileInputRef}
+                          type="file"
+                          multiple
+                          className="sr-only"
+                          aria-label={`Attach files to queued prompt ${index + 1}`}
+                          onChange={(event) => void uploadEditFiles(event.target.files)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => editFileInputRef.current?.click()}
+                          disabled={busy || editAssetIds.length + editNewAssets.length >= 10}
+                          className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-muted disabled:opacity-40"
+                        >
+                          <Paperclip className="h-3 w-3" />
+                          Edit attachments
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -458,6 +562,8 @@ export function ZeroPromptQueueDrawer({
                         onClick={() => {
                           setEditingId(item.id);
                           setEditText(item.currentText);
+                          setEditAssetIds(item.assetIds);
+                          setEditNewAssets([]);
                         }}
                         disabled={busy}
                         className="rounded p-1 text-muted-foreground hover:bg-muted disabled:opacity-30"

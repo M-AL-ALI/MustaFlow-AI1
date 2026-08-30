@@ -232,8 +232,14 @@ export function applyZeroPromptQueueMutation(
   } else if (operation.kind === "edit") {
     const item = resolveQueuedItem(snapshot, operation.target);
     assertText(operation.text, "edit");
+    const nextAssetIds =
+      operation.assetIds === undefined
+        ? canonicalAssetIds(item)
+        : [...new Set(operation.assetIds)].sort((left, right) => left - right);
     nextItems = snapshot.items.map((candidate) =>
-      candidate.id === item.id ? { ...candidate, currentText: operation.text } : candidate,
+      candidate.id === item.id
+        ? { ...candidate, currentText: operation.text, assetIds: nextAssetIds }
+        : candidate,
     );
     event = {
       ...eventBase(snapshot, operation, item.id),
@@ -241,6 +247,8 @@ export function applyZeroPromptQueueMutation(
       position: item.position,
       originalText: item.currentText,
       currentText: operation.text,
+      originalAssetIds: canonicalAssetIds(item),
+      assetIds: nextAssetIds,
     };
   } else if (operation.kind === "delete") {
     const item = resolveQueuedItem(snapshot, operation.target);

@@ -39,6 +39,7 @@ export type AssetContext = {
   redactions?: Array<{ x: number; y: number; width: number; height: number }>;
   resized?: boolean;
   altText?: string;
+  suggestedAltText?: string;
   brandRole?: "none" | "logo" | "icon" | "palette" | "font" | "reference";
   derivativeOfAssetId?: number;
   derivativePreset?: string;

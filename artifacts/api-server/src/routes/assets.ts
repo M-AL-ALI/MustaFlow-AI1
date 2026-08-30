@@ -16,6 +16,11 @@ import { findLiveSupportGrant } from "../lib/support-access";
 import { analyzeAssetBuffer, MAX_INLINE_ASSET_ANALYSIS_BYTES } from "../lib/asset-analysis";
 import { normalizeUploadedImage } from "../lib/asset-image-normalization";
 import {
+  createAssetAltTextEvent,
+  enqueueAutomaticAssetAltText,
+  runAssetAltTextAnalysis,
+} from "../lib/asset-alt-text-analysis";
+import {
   ASSET_DERIVATIVE_PRESETS,
   generateAssetDerivatives,
   type AssetDerivativePreset,
@@ -48,6 +53,7 @@ import {
 import { requireStripe } from "../lib/nabuflow-stripe";
 import { ensureStripeCustomer } from "./billing";
 import { resolveArtifactId } from "../lib/artifacts";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const MAX_MATERIALIZED_ASSET_BYTES = 25 * 1024 * 1024;
@@ -316,6 +322,42 @@ router.get("/assets/analysis-usage", async (req, res) => {
   });
 });
 
+router.post("/assets/:assetId/alt-text-proposal", async (req, res): Promise<void> => {
+  const assetId = Number(req.params.assetId);
+  if (!req.userId || !Number.isSafeInteger(assetId) || assetId < 1) {
+    res.status(400).json({ error: "Choose a valid image." });
+    return;
+  }
+  const [asset] = await db
+    .select()
+    .from(assetsTable)
+    .where(and(eq(assetsTable.id, assetId), eq(assetsTable.ownerUserId, req.userId)))
+    .limit(1);
+  if (!asset || asset.state !== "ready" || !asset.mimeType.startsWith("image/")) {
+    res.status(404).json({ error: "That image is not available." });
+    return;
+  }
+  const eventId = await createAssetAltTextEvent({
+    userId: req.userId,
+    projectId: asset.projectId,
+    assetId,
+  });
+  const result = await runAssetAltTextAnalysis({ eventId, userId: req.userId, assetId });
+  if (result.status === "completed") {
+    res.json({
+      assetId,
+      proposedAltText: result.proposedAltText,
+      metering: { customerCreditPrice: null, status: "recorded" },
+    });
+    return;
+  }
+  if (result.status === "blocked") {
+    res.status(402).json({ error: "Image analysis is paused by the account spending limit." });
+    return;
+  }
+  res.status(503).json({ error: "Zero could not suggest alt text right now. Try again." });
+});
+
 router.get("/projects/:id/assets/quota", requireProjectAccess("viewer"), async (req, res) => {
   const [project] = await db
     .select({ ownerUserId: projectsTable.ownerId })
@@ -458,6 +500,10 @@ router.put("/assets/:assetId/content", async (req, res) => {
     let finalMimeType = detected;
     let finalSizeBytes = asset.sizeBytes;
     let finalSha256 = digest.digest("hex");
+    // "not-required" is reserved for bytes we decode/re-encode or for bounded
+    // plain text. Structurally parsed documents remain honestly "not-scanned"
+    // until a malware service is commissioned; private storage is not a scan.
+    let scanState: "not-required" | "not-scanned" = "not-scanned";
     const completeBuffer =
       asset.sizeBytes <= MAX_INLINE_ASSET_ANALYSIS_BYTES
         ? await readAssetBuffer(asset.storageKey, MAX_INLINE_ASSET_ANALYSIS_BYTES)
@@ -498,6 +544,9 @@ router.put("/assets/:assetId/content", async (req, res) => {
           finalSizeBytes = normalized.buffer.length;
           finalSha256 = createHash("sha256").update(normalized.buffer).digest("hex");
         }
+        scanState = "not-required";
+      } else if (/\.(?:txt|md|json|csv)$/iu.test(asset.filename)) {
+        scanState = "not-required";
       }
     }
     await completeAsset({
@@ -505,19 +554,33 @@ router.put("/assets/:assetId/content", async (req, res) => {
       ownerUserId: asset.ownerUserId,
       actorUserId: req.userId,
       sha256: finalSha256,
-      // Accepted formats are kept private and are structurally parsed before use. They are not
-      // executable payloads, so the honest state is that malware scanning is not required.
-      scanState: "not-required",
+      scanState,
       textPreview,
       finalMimeType,
       finalSizeBytes,
     });
+    let analysisEventId: number | null = null;
+    if (finalMimeType.startsWith("image/")) {
+      try {
+        analysisEventId = await enqueueAutomaticAssetAltText({
+          userId: asset.ownerUserId,
+          projectId: asset.projectId,
+          assetId,
+        });
+      } catch (error) {
+        logger.warn(
+          { assetId, errorClass: error instanceof Error ? error.name : "unknown" },
+          "automatic alt-text queue unavailable; upload remains ready",
+        );
+      }
+    }
     res.status(201).json({
       assetId,
       contentUrl: `/api/assets/${assetId}/content`,
       filename: asset.filename,
       mimeType: finalMimeType,
       sizeBytes: finalSizeBytes,
+      analysis: analysisEventId === null ? null : { eventId: analysisEventId, status: "queued" },
     });
   } catch (error) {
     try {

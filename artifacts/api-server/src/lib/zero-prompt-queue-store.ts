@@ -383,6 +383,25 @@ async function persistSnapshot(
     }
     statements += 1;
   }
+  if (mutation.kind === "edit" && mutation.assetIds !== undefined) {
+    const item = result.snapshot.items.find((candidate) => candidate.id === result.event.itemId);
+    if (!item) throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
+    await client.query(
+      `DELETE FROM asset_usage
+        WHERE project_id=$1 AND consumer=$2`,
+      [projectId, `queue:${item.id}`],
+    );
+    statements += 1;
+    if ((item.assetIds ?? []).length > 0) {
+      await client.query(
+        `INSERT INTO asset_usage (asset_id, project_id, consumer, created_at)
+         SELECT asset_id, $1, $2, CURRENT_TIMESTAMP
+           FROM unnest($3::integer[]) AS asset_id`,
+        [projectId, `queue:${item.id}`, item.assetIds ?? []],
+      );
+      statements += 1;
+    }
+  }
   return statements;
 }
 

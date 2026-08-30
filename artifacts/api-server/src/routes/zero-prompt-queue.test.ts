@@ -252,6 +252,24 @@ describe("Zero prompt queue governed API", () => {
     expect(enqueue.mock.calls[0]?.[1]).toMatchObject({ assetIds: [42, 7] });
   });
 
+  it("revalidates and replaces attachments when a queued prompt is edited", async () => {
+    const { app, store, assertAssets } = buildApp();
+    const edit = vi.spyOn(store, "edit");
+
+    const response = await request(app)
+      .patch("/projects/1/prompt-queue/item-1")
+      .set("x-test-user", OWNER_ONE)
+      .send({ text: "Use the revised evidence", assetIds: [17, 17, 4] });
+
+    expect(response.status).toBe(200);
+    expect(assertAssets).toHaveBeenCalledWith({
+      ownerUserId: OWNER_ONE,
+      projectId: 1,
+      assetIds: [17, 4],
+    });
+    expect(edit.mock.calls[0]?.[1]).toMatchObject({ assetIds: [17, 4] });
+  });
+
   it("bounds list responses and rejects an oversized requested page", async () => {
     const { app, store } = buildApp();
     const manyItems = Array.from({ length: 55 }, (_, index) =>
