@@ -8867,13 +8867,27 @@ components:
       properties:
         kind:
           type: string
-          enum: [image]
+          enum: [image, file]
+        assetId:
+          type: integer
+          minimum: 1
+          description: "Unified project asset identity. Required for files and for URLs under /api/assets/."
         url:
           type: string
-          description: "Object path served via /api/storage{objectPath} (e.g. /objects/uploads/uuid)."
+          description: "Authenticated unified asset URL. Legacy image object paths remain readable in stored history but are refused on new messages."
         alt:
           type: string
           description: "Alt text or, for AI-generated images, the source prompt."
+        name:
+          type: string
+          description: "Original file name for a non-image attachment."
+        mime:
+          type: string
+          description: "Media type for a non-image attachment."
+        size:
+          type: integer
+          minimum: 0
+          description: "Stored byte size for a non-image attachment."
         width: { type: integer }
         height: { type: integer }
         generated:
@@ -9176,7 +9190,7 @@ components:
         attachments:
           type: array
           items: { $ref: "#/components/schemas/ChatAttachment" }
-          description: "Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model."
+          description: "Optional project assets from the governed account-quota registry. Images are sent to vision; files are available to Zero through project asset tools."
         origin:
           type: string
           description: "Surface sending this message. Pass 'zero' when sending from the Zero agent panel so the message is tagged for its filtered thread view."

@@ -11,4 +11,5 @@ export type ChatAttachmentKind = typeof ChatAttachmentKind[keyof typeof ChatAtta
 
 export const ChatAttachmentKind = {
   image: 'image',
+  file: 'file',
 } as const;

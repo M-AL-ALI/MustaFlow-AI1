@@ -27,21 +27,62 @@ export type AssetReservation = {
   filename: string;
 };
 
-export async function assertReadyProjectAssets(input: {
+export type ReadyProjectAsset = {
+  id: number;
+  kind: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  scanState: string;
+  textPreview: string | null;
+};
+
+export async function readReadyProjectAssets(input: {
   ownerUserId: string;
   projectId: number;
   assetIds: readonly number[];
-}): Promise<void> {
+}): Promise<ReadyProjectAsset[]> {
   const assetIds = [...new Set(input.assetIds)];
-  if (assetIds.length === 0) return;
-  const result = await pool.query<{ id: number }>(
-    `SELECT id FROM assets
+  if (assetIds.length === 0) return [];
+  const result = await pool.query<{
+    id: number;
+    kind: string;
+    filename: string;
+    mime_type: string;
+    size_bytes: string;
+    scan_state: string;
+    text_preview: string | null;
+  }>(
+    `SELECT id, kind, filename, mime_type, size_bytes, scan_state, text_preview FROM assets
       WHERE owner_user_id=$1 AND project_id=$2 AND state='ready' AND id = ANY($3::integer[])`,
     [input.ownerUserId, input.projectId, assetIds],
   );
   if (result.rows.length !== assetIds.length) {
     throw new AssetAdmissionError("asset_not_found", 404);
   }
+  const byId = new Map(
+    result.rows.map((row) => [
+      row.id,
+      {
+        id: row.id,
+        kind: row.kind,
+        filename: row.filename,
+        mimeType: row.mime_type,
+        sizeBytes: Number(row.size_bytes),
+        scanState: row.scan_state,
+        textPreview: row.text_preview,
+      },
+    ]),
+  );
+  return assetIds.map((assetId) => byId.get(assetId)!);
+}
+
+export async function assertReadyProjectAssets(input: {
+  ownerUserId: string;
+  projectId: number;
+  assetIds: readonly number[];
+}): Promise<void> {
+  await readReadyProjectAssets(input);
 }
 
 function safeName(value: string): string {

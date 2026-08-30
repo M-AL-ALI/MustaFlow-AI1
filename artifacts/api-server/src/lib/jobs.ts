@@ -1661,7 +1661,10 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
     .from(agentTasksTable)
     .where(eq(agentTasksTable.queueBatchId, completedTask.queueBatchId));
 
-  const drainedImageAttachments = await hydrateTaskAttachments(nextTask.attachments);
+  const drainedImageAttachments = await hydrateTaskAttachments(
+    nextTask.attachments,
+    nextTask.projectId,
+  );
 
   enqueueJob({
     taskId: nextTask.id,
@@ -1699,15 +1702,17 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
  */
 async function hydrateTaskAttachments(
   raw: unknown,
+  projectId: number,
 ): Promise<Array<{ dataUri: string; alt?: string }> | undefined> {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
   const hydrated: Array<{ dataUri: string; alt?: string }> = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
+    if ((entry as { kind?: unknown }).kind !== "image") continue;
     const url = (entry as { url?: unknown }).url;
     if (typeof url !== "string" || url.length === 0) continue;
     const alt = (entry as { alt?: unknown }).alt;
-    const dataUri = await fetchAttachmentAsDataUri(url);
+    const dataUri = await fetchAttachmentAsDataUri(url, projectId);
     if (dataUri) hydrated.push({ dataUri, alt: typeof alt === "string" ? alt : undefined });
   }
   return hydrated.length > 0 ? hydrated : undefined;
@@ -1785,7 +1790,10 @@ export async function drainNextProjectTask(
     .from(sql`(select 1 from project_files where project_id = ${projectId} limit 1) as f`);
   const hasFiles = (fileRow?.c ?? 0) > 0;
 
-  const drainedImageAttachments = await hydrateTaskAttachments(nextTask.attachments);
+  const drainedImageAttachments = await hydrateTaskAttachments(
+    nextTask.attachments,
+    nextTask.projectId,
+  );
 
   // Forward persisted execution context so the drained task runs identically
   // to its original enqueue (Task #509): runMode, wallClockCapMs, agentIdentity.

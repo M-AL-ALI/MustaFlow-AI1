@@ -23,7 +23,7 @@ export interface ChatMessageInput {
   agentIdentity?: ChatMessageInputAgentIdentity;
   /** Optional explicit intent override. New callers use the closed answer/clarify/plan/mutate/observe contract. Legacy controls remain accepted and map into that contract. */
   agentIntent?: ChatMessageInputAgentIntent;
-  /** Optional image attachments uploaded via /storage/uploads/request-url. Sent to the vision-capable model. */
+  /** Optional project assets from the governed account-quota registry. Images are sent to vision; files are available to Zero through project asset tools. */
   attachments?: ChatAttachment[];
   /** Surface sending this message. Pass 'zero' when sending from the Zero agent panel so the message is tagged for its filtered thread view. */
   origin?: string;

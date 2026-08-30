@@ -1,42 +1,22 @@
 import { Router, type IRouter } from "express";
-import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
-import { assetsTable, db, projectsTable, projectFilesTable } from "@workspace/db";
+import { createHash } from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import { assetsTable, assetUsageTable, db, projectsTable, projectFilesTable } from "@workspace/db";
 import { generateImageBuffer } from "@workspace/integrations-openai-ai-server";
 import { requireProjectOwnership } from "../lib/auth";
-import { objectStorageClient, ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService } from "../lib/objectStorage";
 import { GenerateImageBody, GenerateImageResponse } from "@workspace/api-zod";
-import { openAsset } from "../lib/asset-r2";
+import { deleteAssetObject, openAsset, putAssetBuffer } from "../lib/asset-r2";
+import {
+  AssetAdmissionError,
+  completeAsset,
+  rejectReservedAsset,
+  reserveAsset,
+} from "../lib/asset-registry";
+import { resolveArtifactId } from "../lib/artifacts";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
-
-function parsePrivateDir(): { bucketName: string; prefix: string } {
-  let dir = process.env.PRIVATE_OBJECT_DIR ?? "";
-  if (!dir) {
-    throw new Error("PRIVATE_OBJECT_DIR not set");
-  }
-  if (!dir.startsWith("/")) dir = `/${dir}`;
-  const parts = dir.split("/").filter(Boolean);
-  if (parts.length < 1) throw new Error("PRIVATE_OBJECT_DIR malformed");
-  const bucketName = parts[0]!;
-  const prefix = parts.slice(1).join("/");
-  return { bucketName, prefix };
-}
-
-async function uploadBufferToPrivate(
-  buffer: Buffer,
-  subdir: string,
-  contentType: string,
-): Promise<{ objectPath: string }> {
-  const { bucketName, prefix } = parsePrivateDir();
-  const id = randomUUID();
-  const objectName = [prefix, subdir, `${id}.png`].filter(Boolean).join("/");
-  const file = objectStorageClient.bucket(bucketName).file(objectName);
-  await file.save(buffer, { contentType, resumable: false });
-  const entityId = [subdir, `${id}.png`].filter(Boolean).join("/");
-  return { objectPath: `/objects/${entityId}` };
-}
 
 router.post(
   "/projects/:id/generate-image",
@@ -70,7 +50,49 @@ router.post(
       },
     );
 
-    const { objectPath } = await uploadBufferToPrivate(buffer, "generated", "image/png");
+    let reservation: Awaited<ReturnType<typeof reserveAsset>> | null = null;
+    try {
+      reservation = await reserveAsset({
+        ownerUserId: project.ownerId,
+        actorUserId: req.userId!,
+        projectId: project.id,
+        threadKey: null,
+        scope: "project",
+        kind: "generated",
+        source: "zero-composer",
+        filename: "generated.png",
+        mimeType: "image/png",
+        sizeBytes: buffer.length,
+        context: { altText: prompt, brandRole: "none" },
+      });
+      await putAssetBuffer({
+        key: reservation.storageKey,
+        body: buffer,
+        contentType: "image/png",
+      });
+      await completeAsset({
+        assetId: reservation.id,
+        ownerUserId: project.ownerId,
+        actorUserId: req.userId!,
+        sha256: createHash("sha256").update(buffer).digest("hex"),
+        scanState: "not-required",
+      });
+    } catch (error) {
+      if (reservation) {
+        await deleteAssetObject(reservation.storageKey).catch(() => undefined);
+        await rejectReservedAsset({
+          assetId: reservation.id,
+          ownerUserId: project.ownerId,
+          actorUserId: req.userId!,
+          code: "asset_storage_unavailable",
+        }).catch(() => undefined);
+      }
+      if (error instanceof AssetAdmissionError) {
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
+    }
 
     // Also save into project files so generated apps can reference the asset.
     const safeSavePath = (() => {
@@ -81,21 +103,53 @@ router.post(
       return candidate;
     })();
 
+    let savedPath: string | undefined;
     try {
-      const existing = await db
-        .select({ id: projectFilesTable.id })
-        .from(projectFilesTable)
-        .where(eq(projectFilesTable.projectId, project.id));
-      const dup = existing.find(() => false); // placeholder — unused
-      if (dup) {
-        // no-op
+      const artifactId = await resolveArtifactId(project.id, null);
+      if (artifactId === null) {
+        req.log.warn({ projectId: project.id }, "Generated image has no primary app to save into");
+      } else {
+        await db.transaction(async (tx) => {
+          const [existing] = await tx
+            .select({ id: projectFilesTable.id })
+            .from(projectFilesTable)
+            .where(
+              and(
+                eq(projectFilesTable.projectId, project.id),
+                eq(projectFilesTable.artifactId, artifactId),
+                eq(projectFilesTable.path, safeSavePath),
+              ),
+            );
+          if (existing) {
+            await tx
+              .update(projectFilesTable)
+              .set({
+                content: buffer.toString("base64"),
+                mimeType: "image/png",
+                updatedAt: new Date(),
+              })
+              .where(eq(projectFilesTable.id, existing.id));
+          } else {
+            await tx.insert(projectFilesTable).values({
+              projectId: project.id,
+              artifactId,
+              path: safeSavePath,
+              content: buffer.toString("base64"),
+              mimeType: "image/png",
+            });
+          }
+          await tx
+            .insert(assetUsageTable)
+            .values({
+              assetId: reservation.id,
+              projectId: project.id,
+              filePath: safeSavePath,
+              consumer: `project-file:${safeSavePath}`,
+            })
+            .onConflictDoNothing();
+        });
+        savedPath = safeSavePath;
       }
-      await db.insert(projectFilesTable).values({
-        projectId: project.id,
-        path: safeSavePath,
-        content: buffer.toString("base64"),
-        mimeType: "image/png",
-      });
     } catch (err) {
       req.log.warn({ err }, "Failed to persist generated image as project file (non-fatal)");
     }
@@ -105,12 +159,13 @@ router.post(
       GenerateImageResponse.parse({
         attachment: {
           kind: "image",
-          url: objectPath,
+          assetId: reservation.id,
+          url: `/api/assets/${reservation.id}/content`,
           alt: prompt,
           width: w,
           height: h,
           generated: true,
-          savedPath: safeSavePath,
+          ...(savedPath ? { savedPath } : {}),
         },
       }),
     );

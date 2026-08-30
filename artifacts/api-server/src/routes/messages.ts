@@ -9,6 +9,7 @@ import {
   taskEventsTable,
   knowledgeEntriesTable,
   supportZeroSessionsTable,
+  assetUsageTable,
 } from "@workspace/db";
 import {
   ListMessagesParams,
@@ -46,6 +47,17 @@ import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { zeroProjectMemoryContext } from "../lib/zero-project-memory";
 import { loadZeroProjectChoices } from "../lib/zero-project-choice-store";
 import { readProjectMemoryReconciliationSummary } from "../lib/memory-reconciliation-reader";
+import {
+  AssetAdmissionError,
+  readReadyProjectAssets,
+  type ReadyProjectAsset,
+} from "../lib/asset-registry";
+import {
+  appendGovernedAssetContext,
+  ChatAssetIdentityError,
+  governedChatAssetIds,
+  type ChatAttachmentInput,
+} from "../lib/chat-assets";
 import { fetchAttachmentAsDataUri } from "./images";
 import { getOraAssetBytes } from "../lib/ora-assets";
 import { createStreamSession, getStreamSession } from "../lib/stream-sessions";
@@ -430,14 +442,32 @@ router.post(
       return;
     }
     const deepReasoning = Boolean(requestedDeepReasoning);
-    const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
+    const attachments = (
+      Array.isArray(rawAttachments) ? rawAttachments : []
+    ) as ChatAttachmentInput[];
+    let attachedAssets: ReadyProjectAsset[];
+    let attachedAssetIds: number[];
+    try {
+      attachedAssetIds = governedChatAssetIds(attachments);
+      attachedAssets = await readReadyProjectAssets({
+        ownerUserId: project.ownerId,
+        projectId: project.id,
+        assetIds: attachedAssetIds,
+      });
+    } catch (error) {
+      if (error instanceof AssetAdmissionError || error instanceof ChatAssetIdentityError) {
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
+    }
     const supportEvidenceImages = supportRun
       ? await readSupportEvidenceImages(supportRun)
       : { model: [], receipt: [] };
     const imageAttachments = supportRun
       ? supportEvidenceImages.model
       : attachments.filter((a) => a.kind === "image" && typeof a.url === "string");
-    const persistedImageAttachments = supportRun ? supportEvidenceImages.receipt : imageAttachments;
+    const persistedAttachments = supportRun ? supportEvidenceImages.receipt : attachments;
 
     // Brainstorm context — if the user resolved a brainstorm session before sending
     // this message, attach the conversation thread as supplementary context so the
@@ -453,6 +483,7 @@ router.post(
         `[BRAINSTORM CONTEXT — conversation that shaped this request; use it to understand ` +
         `the user's intent, priorities, and edge cases]\n${turns}\n[END BRAINSTORM CONTEXT]`;
     }
+    userPromptWithContext = appendGovernedAssetContext(userPromptWithContext, attachedAssets);
 
     // Foreground requests that were queued by aiBuilderLimiter physically wait
     // in-line (HTTP connection held open) until a slot frees, then run here
@@ -645,21 +676,33 @@ router.post(
       : typeof origin === "string" && origin.length > 0
         ? origin
         : null;
-    const [userMessage] = await db
-      .insert(chatMessagesTable)
-      .values({
-        projectId: project.id,
-        role: "user",
-        content,
-        agentMode: mode,
-        planMode: effectivePlanMode,
-        attachments: persistedImageAttachments.length > 0 ? persistedImageAttachments : undefined,
-        origin: messageOrigin,
-        intentReceiptId: intentReceipt.receiptId,
-        supportSessionId: supportRun?.sessionId ?? null,
-        provenanceActorUserId: supportRun?.staffUserId ?? null,
-      })
-      .returning();
+    const userMessage = await db.transaction(async (tx) => {
+      const [message] = await tx
+        .insert(chatMessagesTable)
+        .values({
+          projectId: project.id,
+          role: "user",
+          content,
+          agentMode: mode,
+          planMode: effectivePlanMode,
+          attachments: persistedAttachments.length > 0 ? persistedAttachments : undefined,
+          origin: messageOrigin,
+          intentReceiptId: intentReceipt.receiptId,
+          supportSessionId: supportRun?.sessionId ?? null,
+          provenanceActorUserId: supportRun?.staffUserId ?? null,
+        })
+        .returning();
+      if (message && attachedAssetIds.length > 0) {
+        await tx.insert(assetUsageTable).values(
+          attachedAssetIds.map((assetId) => ({
+            assetId,
+            projectId: project.id,
+            consumer: `chat-message:${message.id}`,
+          })),
+        );
+      }
+      return message;
+    });
     if (!userMessage) {
       res.status(500).json({ error: "Failed to save message" });
       return;
@@ -985,7 +1028,12 @@ router.post(
           .returning({ id: supportZeroSessionsTable.id });
         if (!claimed) {
           await db.delete(agentTasksTable).where(eq(agentTasksTable.id, planTask.id));
-          await db.delete(chatMessagesTable).where(eq(chatMessagesTable.id, userMessage.id));
+          await db.transaction(async (tx) => {
+            await tx
+              .delete(assetUsageTable)
+              .where(eq(assetUsageTable.consumer, `chat-message:${userMessage.id}`));
+            await tx.delete(chatMessagesTable).where(eq(chatMessagesTable.id, userMessage.id));
+          });
           res.status(409).json({
             error: "This support proposal has already started.",
             code: "support_proposal_already_started",
@@ -1243,7 +1291,7 @@ router.post(
           kind: runInBackground ? "background" : "main",
           status: hasActiveTask ? "queued" : "planning",
           prompt: content,
-          attachments: persistedImageAttachments.length > 0 ? persistedImageAttachments : null,
+          attachments: persistedAttachments.length > 0 ? persistedAttachments : null,
           agentIdentity: resolvedAgentIdentity,
           origin: messageOrigin,
           runMode: runInBackground ? "background" : "foreground",
@@ -1923,7 +1971,9 @@ router.post(
     const streamHasBrainstormContext =
       Array.isArray(streamBrainstormContext) && streamBrainstormContext.length > 0;
     const mode = agentMode as AgentMode;
-    const attachments = Array.isArray(rawAttachments) ? rawAttachments : [];
+    const attachments = (
+      Array.isArray(rawAttachments) ? rawAttachments : []
+    ) as ChatAttachmentInput[];
     const imageAttachments = attachments.filter(
       (a) => a.kind === "image" && typeof a.url === "string",
     );
@@ -1966,6 +2016,36 @@ router.post(
       // Mark as in-flight before starting any async work
       idempotencyStore.set(streamIdempotencyKey, { status: "in-flight", timestamp: Date.now() });
     }
+
+    let attachedAssets: ReadyProjectAsset[];
+    let attachedAssetIds: number[];
+    try {
+      attachedAssetIds = governedChatAssetIds(attachments);
+      attachedAssets = await readReadyProjectAssets({
+        ownerUserId: project.ownerId,
+        projectId: project.id,
+        assetIds: attachedAssetIds,
+      });
+    } catch (error) {
+      if (streamIdempotencyKey) idempotencyStore.delete(streamIdempotencyKey);
+      if (error instanceof AssetAdmissionError || error instanceof ChatAssetIdentityError) {
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
+    }
+
+    let streamUserPromptWithContext = content;
+    if (streamHasBrainstormContext) {
+      const turns = (streamBrainstormContext as Array<{ role: string; content: string }>)
+        .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
+        .join("\n");
+      streamUserPromptWithContext += `\n\n[BRAINSTORM CONTEXT]\n${turns}\n[END BRAINSTORM CONTEXT]`;
+    }
+    streamUserPromptWithContext = appendGovernedAssetContext(
+      streamUserPromptWithContext,
+      attachedAssets,
+    );
 
     // Keep streaming/converse requests on the same primary-artifact boundary as
     // planning, support proposals, and trusted builds.
@@ -2112,19 +2192,31 @@ router.post(
       typeof streamOrigin === "string" && streamOrigin.length > 0 ? streamOrigin : null;
     let userMessageId: number;
     try {
-      const [userMessage] = await db
-        .insert(chatMessagesTable)
-        .values({
-          projectId: project.id,
-          role: "user",
-          content,
-          agentMode: mode,
-          planMode: effectivePlanMode,
-          attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
-          origin: streamMessageOrigin,
-          intentReceiptId: intentReceipt.receiptId,
-        })
-        .returning();
+      const userMessage = await db.transaction(async (tx) => {
+        const [message] = await tx
+          .insert(chatMessagesTable)
+          .values({
+            projectId: project.id,
+            role: "user",
+            content,
+            agentMode: mode,
+            planMode: effectivePlanMode,
+            attachments: attachments.length > 0 ? attachments : undefined,
+            origin: streamMessageOrigin,
+            intentReceiptId: intentReceipt.receiptId,
+          })
+          .returning();
+        if (message && attachedAssetIds.length > 0) {
+          await tx.insert(assetUsageTable).values(
+            attachedAssetIds.map((assetId) => ({
+              assetId,
+              projectId: project.id,
+              consumer: `chat-message:${message.id}`,
+            })),
+          );
+        }
+        return message;
+      });
       if (!userMessage) throw new Error("Failed to save user message");
       userMessageId = userMessage.id;
       try {
@@ -2154,6 +2246,7 @@ router.post(
         kind: "converse",
         status: "answering",
         prompt: content,
+        attachments: attachments.length > 0 ? attachments : null,
         agentIdentity: "main",
         origin: streamMessageOrigin,
         intentReceiptId: terminalIntentReceiptId,
@@ -2226,7 +2319,7 @@ router.post(
       const converseResult = await runConverseStreamPipeline(
         {
           projectName: project.name,
-          userPrompt: content,
+          userPrompt: streamUserPromptWithContext,
           conversationHistory,
           currentFiles: currentProjectFiles,
           agentMode: mode,
