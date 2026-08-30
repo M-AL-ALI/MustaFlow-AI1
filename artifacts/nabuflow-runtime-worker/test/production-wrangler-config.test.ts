@@ -14,7 +14,12 @@ type WranglerConfig = Record<string, unknown> & {
 const root = resolve(import.meta.dirname, "..");
 
 function readConfig(name: string): WranglerConfig {
-  return JSON.parse(readFileSync(resolve(root, name), "utf8")) as WranglerConfig;
+  const jsonc = readFileSync(resolve(root, name), "utf8");
+  // These committed production configs use JSONC's trailing-comma allowance.
+  // Normalize that single declared extension so the guard reaches the resource
+  // identity assertions instead of failing before the first test executes.
+  const strictJson = jsonc.replace(/,\s*([}\]])/gu, "$1");
+  return JSON.parse(strictJson) as WranglerConfig;
 }
 
 const runtime = readConfig("wrangler.runtime.production.jsonc");

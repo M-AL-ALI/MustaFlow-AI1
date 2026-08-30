@@ -15,6 +15,10 @@ describe("visual edit session UI contract", () => {
       'win.postMessage({ __mustaflow_edit: true, type: "setMode", on: editMode }, "*")',
     );
     expect(source).toContain('if (data.type === "ready")');
+    expect(source).toContain('if (data.type === "modeApplied")');
+    expect(source).toContain(
+      "This preview cannot be edited directly. Ask Zero to make the change instead.",
+    );
   });
 
   it("opens one server session and binds every source change to it", () => {

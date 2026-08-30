@@ -195,6 +195,29 @@ describe("authenticated preview data plane", () => {
     expect(sandbox.httpRequests[0]?.url).toBe("https://tenant.preview.invalid/hello?value=1");
   });
 
+  it("injects the shared visual-edit bridge into authenticated HTML preview responses", async () => {
+    sandbox.responseFactory = () =>
+      new Response("<!doctype html><html><body><a href='/next'>Get Started</a></body></html>", {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    const redeemed = await redeem(await grant());
+    const response = await handlePreviewDataPlaneRequest(
+      new Request(`${origin}${PREVIEW_DATA_PREFIX}/${identity}/`, {
+        headers: { cookie: cookieFrom(redeemed!) },
+      }),
+      env,
+      { coordinator, sandbox, nowMs: TEST_NOW_MS },
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("x-nabuflow-preview-bridge")).toBe("visual-edit-v1");
+    expect(response?.headers.get("content-length")).toBeNull();
+    const html = await response!.text();
+    expect(html).toContain("window.__MFM_VISUAL__");
+    expect(html.indexOf("window.__MFM_VISUAL__")).toBeLessThan(html.indexOf("</body>"));
+    expect(html).toContain("Get Started");
+  });
+
   it.each([
     ["expired", async () => grant({ issuedAt: nowSeconds - 400, expiresAt: nowSeconds - 100 })],
     [
