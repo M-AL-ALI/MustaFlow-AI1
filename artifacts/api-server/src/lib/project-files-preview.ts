@@ -32,7 +32,7 @@ export async function serveProjectFilesPreview(
   projectId: number,
   filePath: string,
   options: {
-    projectStatus: string;
+    visualEditEnabled: boolean;
     showStaticBanner?: boolean;
     previewState?: string;
   },
@@ -82,7 +82,6 @@ export async function serveProjectFilesPreview(
 
   const mime = selectedRow.mimeType || guessMime(selectedRow.path);
   const isHtml = mime === "text/html" || selectedRow.path.endsWith(".html");
-  const isOwnerPreview = options.projectStatus !== "published";
   if (options.previewState) {
     res.setHeader("X-MustaFlow-Preview-State", options.previewState);
   }
@@ -99,7 +98,7 @@ export async function serveProjectFilesPreview(
 
   const html = injectBridge(
     selectedRow.content,
-    isOwnerPreview ? `${MOCK_FLAG_SCRIPT}${VISUAL_EDIT_SCRIPT}` : "",
+    options.visualEditEnabled ? `${MOCK_FLAG_SCRIPT}${VISUAL_EDIT_SCRIPT}` : "",
   );
   res.send(options.showStaticBanner ? injectStaticPreviewBanner(html) : html);
 }

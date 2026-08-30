@@ -667,7 +667,7 @@ router.get("/projects/:id/preview/{*splat}", async (req, res, next): Promise<voi
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
   await serveProjectFilesPreview(res, projectId, filePath, {
-    projectStatus: previewProject.status,
+    visualEditEnabled: true,
     showStaticBanner: previewProject.builderMode === "agentic",
   });
 });
