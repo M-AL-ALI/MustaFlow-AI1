@@ -234,6 +234,12 @@ function requestOrigin(req: Request): string | null {
   }
 }
 
+function requestLoopbackOrigin(req: Request): string | null {
+  const port = req.socket.localPort;
+  if (!Number.isInteger(port) || !port || port < 1 || port > 65_535) return null;
+  return `http://127.0.0.1:${port}`;
+}
+
 function isPng(buffer: Buffer): boolean {
   return (
     buffer.length >= 8 &&
@@ -270,6 +276,7 @@ export function createSnapshotObserveRouter(
     const project = await dependencies.loadProject(projectId);
     const actorUserId = req.userId;
     const origin = requestOrigin(req);
+    const loopbackOrigin = requestLoopbackOrigin(req);
     const cookies = nabuflowSessionCookies(req.headers.cookie);
     if (!project) {
       snapshotUnavailable(res, { projectId, stage: "subject", cause: "project-unavailable" });
@@ -281,6 +288,14 @@ export function createSnapshotObserveRouter(
     }
     if (!origin) {
       snapshotUnavailable(res, { projectId, stage: "capture", cause: "origin-unavailable" });
+      return;
+    }
+    if (!loopbackOrigin) {
+      snapshotUnavailable(res, {
+        projectId,
+        stage: "capture",
+        cause: "origin-unavailable",
+      });
       return;
     }
     if (cookies.length === 0) {
@@ -299,7 +314,7 @@ export function createSnapshotObserveRouter(
 
     const captureUrl = new URL(
       `/api/projects/${projectId}/preview${parsed.data.path}`,
-      origin,
+      loopbackOrigin,
     ).toString();
     let capture: ScreenshotResult | undefined;
     let activeStage: "capture" | "completion" = "capture";
@@ -311,7 +326,8 @@ export function createSnapshotObserveRouter(
         fullPage: false,
         signal: AbortSignal.timeout(25_000),
         exactOriginCookies: cookies,
-        exactCookieOrigin: origin,
+        exactCookieOrigin: loopbackOrigin,
+        trustedLoopbackOrigin: loopbackOrigin,
         clip: parsed.data.region,
         captureOverlay: {
           redactions: parsed.data.redactions,
@@ -342,7 +358,7 @@ export function createSnapshotObserveRouter(
         });
         return;
       }
-      if (finalOrigin !== null && finalOrigin !== origin) {
+      if (finalOrigin !== null && finalOrigin !== loopbackOrigin) {
         snapshotUnavailable(res, {
           projectId,
           stage: "capture",

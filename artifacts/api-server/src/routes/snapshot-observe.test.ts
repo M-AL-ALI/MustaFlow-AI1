@@ -123,12 +123,16 @@ describe("snapshot observe route", () => {
     expect(capture).toHaveBeenCalledTimes(1);
     expect(capture).toHaveBeenCalledWith(
       expect.objectContaining({
-        url: expect.stringContaining("/api/projects/51/preview/"),
+        url: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/api\/projects\/51\/preview\/$/u),
         fullPage: false,
-        exactCookieOrigin: expect.any(String),
+        exactCookieOrigin: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
+        trustedLoopbackOrigin: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
         exactOriginCookies: [{ name: "__session", value: "session-token" }],
       }),
     );
+    const captureInput = capture.mock.calls[0]?.[0];
+    expect(captureInput?.url.startsWith(`${captureInput.exactCookieOrigin}/`)).toBe(true);
+    expect(captureInput?.trustedLoopbackOrigin).toBe(captureInput?.exactCookieOrigin);
     expect(completions).toHaveLength(1);
     expect(completions[0]?.dataUri).toMatch(/^data:image\/png;base64,/u);
     expect(completions[0]?.previewClass).toBe("db-static");
