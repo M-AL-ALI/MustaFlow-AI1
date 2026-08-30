@@ -45,6 +45,23 @@ describe("mapIntentToSendOptions", () => {
 });
 
 describe("resolveBuilderComposerIntent", () => {
+  it("lets an explicit whole-project no-change instruction override inferred and persisted build controls", () => {
+    const messageText =
+      "Do not change this project. Read both attached items as reference data and answer briefly.";
+    expect(
+      resolveBuilderComposerIntent({
+        messageText,
+        activeIntent: "mutate",
+        localIntent: "build",
+        hasCompletedTask: true,
+        routingAgentIdentity: "main",
+      }),
+    ).toBe("answer");
+    expect(mapIntentToSendOptions({ intent: "answer", hasImages: true })).toEqual({
+      agentIntent: "answer",
+    });
+  });
+
   it("does not let a completed task override a new undecided request", () => {
     expect(
       resolveBuilderComposerIntent({

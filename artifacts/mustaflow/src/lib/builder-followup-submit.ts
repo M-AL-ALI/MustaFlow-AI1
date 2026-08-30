@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/api-fetch";
-import { isZeroProjectChoiceCaptureOnlyMessage } from "@workspace/ora-contracts";
+import {
+  isExplicitNoProjectMutationRequest,
+  isZeroProjectChoiceCaptureOnlyMessage,
+} from "@workspace/ora-contracts";
 
 export type BuilderComposerIntent =
   | "answer"
@@ -221,6 +224,7 @@ export function resolveBuilderComposerIntent({
   hasCompletedTask: boolean;
   routingAgentIdentity?: string | null;
 }): BuilderReceiptIntent | undefined {
+  if (isExplicitNoProjectMutationRequest(messageText)) return "answer";
   if (isZeroProjectChoiceCaptureOnlyMessage(messageText)) return "answer";
   if (activeIntent) return toBuilderReceiptIntent(activeIntent);
   if (localIntent === "converse" || localIntent === "plan" || localIntent === "build") {
