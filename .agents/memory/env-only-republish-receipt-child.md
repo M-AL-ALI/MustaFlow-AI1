@@ -15,3 +15,5 @@ The ceremony wave spec calls this a "tree-identical receipt child" — `/api/ver
 **How to apply:** when verifying post-env-flip Republish, TREE match is sufficient for closure; do not require the commit to equal TIP5 verbatim.
 
 Also: `setEnvVars({ environment: "shared", values: { KEY: "value" } })` works for the enforcement flip even when the same key exists in available_secrets — the shared env var takes effect at the next deployment boot.
+
+If a generated receipt child is currently at local `main`, a later source branch whose sole parent is the receipt's parent cannot fast-forward from that local ref. Preserve the receipt; do not reset or rebase just to force a fast-forward.
