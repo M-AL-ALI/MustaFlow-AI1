@@ -92,6 +92,19 @@ const SnapshotBody = z
 export type SnapshotPreviewClass = "db-static" | "runtime-proxy" | "cloudflare-grant";
 export type SnapshotObserveBody = z.infer<typeof SnapshotBody>;
 
+export type SnapshotFailureStage = "subject" | "capture" | "image" | "completion";
+export type SnapshotFailureCause =
+  | "preview-source-unavailable"
+  | "project-unavailable"
+  | "actor-unavailable"
+  | "origin-unavailable"
+  | "session-cookie-unavailable"
+  | "capture-unavailable"
+  | "capture-origin-mismatch"
+  | "capture-bytes-invalid"
+  | "capture-errored"
+  | "completion-errored";
+
 export type SnapshotProject = {
   id: number;
   name: string;
@@ -157,8 +170,29 @@ export function nabuflowSessionCookies(
   return cookies;
 }
 
-function snapshotUnavailable(res: Response): void {
-  res.status(503).json({ code: "snapshot_unavailable", error: SNAPSHOT_UNAVAILABLE_MESSAGE });
+function snapshotUnavailable(
+  res: Response,
+  input: {
+    projectId: number;
+    stage: SnapshotFailureStage;
+    cause: SnapshotFailureCause;
+    errorType?: string;
+  },
+): void {
+  logger.warn(
+    {
+      projectId: input.projectId,
+      snapshotStage: input.stage,
+      snapshotCause: input.cause,
+      ...(input.errorType ? { errorType: input.errorType } : {}),
+    },
+    "snapshot observation unavailable",
+  );
+  res.status(503).json({
+    code: "snapshot_unavailable",
+    error: SNAPSHOT_UNAVAILABLE_MESSAGE,
+    evidence: { stage: input.stage, cause: input.cause },
+  });
 }
 
 function requestOrigin(req: Request): string | null {
@@ -225,7 +259,11 @@ export function createSnapshotObserveRouter(
       return;
     }
     if (parsed.data.previewSource === "webcontainer") {
-      snapshotUnavailable(res);
+      snapshotUnavailable(res, {
+        projectId,
+        stage: "capture",
+        cause: "preview-source-unavailable",
+      });
       return;
     }
 
@@ -233,8 +271,24 @@ export function createSnapshotObserveRouter(
     const actorUserId = req.userId;
     const origin = requestOrigin(req);
     const cookies = nabuflowSessionCookies(req.headers.cookie);
-    if (!project || !actorUserId || !origin || cookies.length === 0) {
-      snapshotUnavailable(res);
+    if (!project) {
+      snapshotUnavailable(res, { projectId, stage: "subject", cause: "project-unavailable" });
+      return;
+    }
+    if (!actorUserId) {
+      snapshotUnavailable(res, { projectId, stage: "subject", cause: "actor-unavailable" });
+      return;
+    }
+    if (!origin) {
+      snapshotUnavailable(res, { projectId, stage: "capture", cause: "origin-unavailable" });
+      return;
+    }
+    if (cookies.length === 0) {
+      snapshotUnavailable(res, {
+        projectId,
+        stage: "capture",
+        cause: "session-cookie-unavailable",
+      });
       return;
     }
     const billingBlock = await dependencies.authorizeVision?.(project);
@@ -248,6 +302,7 @@ export function createSnapshotObserveRouter(
       origin,
     ).toString();
     let capture: ScreenshotResult | undefined;
+    let activeStage: "capture" | "completion" = "capture";
     try {
       capture = await dependencies.capture({
         url: captureUrl,
@@ -278,16 +333,34 @@ export function createSnapshotObserveRouter(
       } catch {
         finalOrigin = null;
       }
-      if (!capture.ok || !base64 || (finalOrigin !== null && finalOrigin !== origin)) {
-        snapshotUnavailable(res);
+      if (!capture.ok || !base64) {
+        snapshotUnavailable(res, {
+          projectId,
+          stage: "capture",
+          cause: "capture-unavailable",
+          errorType: capture.error ? "CaptureUnavailable" : undefined,
+        });
+        return;
+      }
+      if (finalOrigin !== null && finalOrigin !== origin) {
+        snapshotUnavailable(res, {
+          projectId,
+          stage: "capture",
+          cause: "capture-origin-mismatch",
+        });
         return;
       }
       const png = Buffer.from(base64, "base64");
       if (png.length === 0 || png.length > MAX_SNAPSHOT_BYTES || !isPng(png)) {
-        snapshotUnavailable(res);
+        snapshotUnavailable(res, {
+          projectId,
+          stage: "image",
+          cause: "capture-bytes-invalid",
+        });
         return;
       }
       const dataUri = `data:image/png;base64,${base64}`;
+      activeStage = "completion";
       const result = await dependencies.complete({
         project,
         previewClass: snapshotPreviewClass(project),
@@ -310,11 +383,12 @@ export function createSnapshotObserveRouter(
       });
       res.status(200).json(result);
     } catch (error) {
-      logger.warn(
-        { projectId, errorType: error instanceof Error ? error.name : "UnknownError" },
-        "snapshot observation unavailable",
-      );
-      snapshotUnavailable(res);
+      snapshotUnavailable(res, {
+        projectId,
+        stage: activeStage,
+        cause: activeStage === "capture" ? "capture-errored" : "completion-errored",
+        errorType: error instanceof Error ? error.name : "UnknownError",
+      });
     } finally {
       if (capture) delete capture.base64;
     }

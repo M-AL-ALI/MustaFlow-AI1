@@ -229,6 +229,10 @@ describe("snapshot observe route", () => {
         .set("Cookie", "__session=opaque")
         .send(body());
       expect(response.status).toBe(503);
+      expect(response.body.evidence).toEqual({
+        stage: "capture",
+        cause: "origin-unavailable",
+      });
       expect(capture).not.toHaveBeenCalled();
       expect(complete).not.toHaveBeenCalled();
     } finally {
@@ -261,6 +265,10 @@ describe("snapshot observe route", () => {
     const response = await post(app, body({ previewSource: "webcontainer" }));
     expect(response.status).toBe(503);
     expect(response.body.code).toBe("snapshot_unavailable");
+    expect(response.body.evidence).toEqual({
+      stage: "capture",
+      cause: "preview-source-unavailable",
+    });
     expect(capture).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
     expect(Object.values(writes).every((count) => count === 0)).toBe(true);
@@ -292,6 +300,17 @@ describe("snapshot observe route", () => {
       name === "missing session" ? await pending : await pending.set("Cookie", "__session=x");
     expect(response.status).toBe(503);
     expect(response.body.code).toBe("snapshot_unavailable");
+    expect(response.body.evidence).toEqual(
+      name === "missing target"
+        ? { stage: "subject", cause: "project-unavailable" }
+        : name === "missing session"
+          ? { stage: "capture", cause: "session-cookie-unavailable" }
+          : name === "unsafe redirect"
+            ? { stage: "capture", cause: "capture-origin-mismatch" }
+            : { stage: "capture", cause: "capture-unavailable" },
+    );
+    expect(JSON.stringify(response.body)).not.toContain("no chromium");
+    expect(JSON.stringify(response.body)).not.toContain("timeout");
     expect(complete).not.toHaveBeenCalled();
     expect(Object.values(writes).every((count) => count === 0)).toBe(true);
   });
@@ -309,6 +328,10 @@ describe("snapshot observe route", () => {
     const response = await post(rejected.app);
     expect(response.status).toBe(503);
     expect(response.body.code).toBe("snapshot_unavailable");
+    expect(response.body.evidence).toEqual({
+      stage: "image",
+      cause: "capture-bytes-invalid",
+    });
     expect(rejected.complete).not.toHaveBeenCalled();
   });
 
@@ -358,6 +381,11 @@ describe("snapshot observe route", () => {
     const response = await post(app);
     expect(response.status).toBe(503);
     expect(response.body.code).toBe("snapshot_unavailable");
+    expect(response.body.evidence).toEqual({
+      stage: "capture",
+      cause: "capture-unavailable",
+    });
+    expect(JSON.stringify(response.body)).not.toContain("grant already consumed");
     expect(capture).toHaveBeenCalledTimes(1);
     expect(complete).not.toHaveBeenCalled();
   });

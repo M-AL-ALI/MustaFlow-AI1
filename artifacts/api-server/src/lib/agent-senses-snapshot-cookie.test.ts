@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { sanitizeCaptureConsoleError, screenshotRequestHeaders } from "./agent-senses";
+import {
+  chromiumExecutableCandidates,
+  sanitizeCaptureConsoleError,
+  screenshotRequestHeaders,
+} from "./agent-senses";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const source = fs.readFileSync(path.join(dir, "agent-senses.ts"), "utf8");
@@ -41,5 +45,27 @@ describe("snapshot cookie cage", () => {
   it("keeps page overlays independent of ambient browser declarations", () => {
     expect(source).toContain("type OverlayDocument");
     expect(source).not.toContain("document: Document");
+  });
+
+  it("discovers content-addressed Nix Chromium from PATH instead of guessing its hash", () => {
+    const candidates = chromiumExecutableCandidates(
+      "/nix/store/runtime/bin:/nix/store/chromium-hash/bin",
+      undefined,
+      "linux",
+      ":",
+    );
+    expect(candidates).toContain("/nix/store/chromium-hash/bin/chromium");
+    expect(candidates).toContain("/nix/store/chromium-hash/bin/chromium-browser");
+  });
+
+  it("keeps an explicit Chromium override first and de-duplicates candidates", () => {
+    const candidates = chromiumExecutableCandidates(
+      "/runtime/bin:/runtime/bin",
+      "/approved/chromium",
+      "linux",
+      ":",
+    );
+    expect(candidates[0]).toBe("/approved/chromium");
+    expect(new Set(candidates).size).toBe(candidates.length);
   });
 });

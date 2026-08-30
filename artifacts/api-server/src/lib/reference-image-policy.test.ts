@@ -48,4 +48,12 @@ describe("reference image implementation policy", () => {
     expect(prompt).toContain("VISUAL INTENT: DIAGNOSE");
     expect(prompt).not.toContain("Reproduce the attached reference faithfully");
   });
+
+  it("treats reference data as inspection when the user forbids project changes", () => {
+    const prompt = referenceAwarePrompt(
+      "Do not change this project. Read the attached screenshot as reference data and answer briefly.",
+    );
+    expect(prompt).toContain("VISUAL INTENT: DIAGNOSE");
+    expect(prompt).not.toContain("reference to build or restyle from");
+  });
 });

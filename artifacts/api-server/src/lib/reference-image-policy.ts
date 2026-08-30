@@ -1,3 +1,5 @@
+import { isExplicitNoProjectMutationRequest } from "@workspace/ora-contracts";
+
 export const REFERENCE_IMAGE_IMPLEMENTATION_POLICY =
   "Reproduce the attached reference faithfully, including its layout, structure, styling, colours, spacing, and flow. When several images are attached, first map which image belongs to which page, which navigation and footer elements repeat, and how the pages connect; if that mapping is genuinely ambiguous, ask exactly one focused question before building. Say briefly which details were visible, which backend or permission behaviour you inferred, and which unseen hover, loading, empty, error, or signed-out states you had to design. If a third-party brand name or logo is visible, replace only that brand with the user's own brand when supplied, otherwise a neutral placeholder, and tell the user once in one plain sentence that you did so. Never block, warn, lecture, judge intent, or repeat that note in later turns. Treat imperfect phone photos as valid specifications and preserve their intended composition rather than requiring a polished mockup.";
 
@@ -13,6 +15,9 @@ const MATCH_VISUAL_PATTERN =
  * silently mean "build": the user's words must establish diagnose or match.
  */
 export function classifyVisualInputIntent(userPrompt: string): VisualInputIntent {
+  // Whole-project no-mutation language is stronger than a later reference-data
+  // noun. The attachment is evidence to inspect, never an instruction to build.
+  if (isExplicitNoProjectMutationRequest(userPrompt)) return "diagnose";
   const diagnose = DIAGNOSE_VISUAL_PATTERN.test(userPrompt);
   const match = MATCH_VISUAL_PATTERN.test(userPrompt);
   if (diagnose && !match) return "diagnose";
