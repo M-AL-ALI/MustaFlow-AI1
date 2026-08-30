@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   chromiumExecutableCandidates,
+  isAllowedScreenshotUrl,
   sanitizeCaptureConsoleError,
   screenshotRequestHeaders,
 } from "./agent-senses";
@@ -67,5 +68,24 @@ describe("snapshot cookie cage", () => {
     );
     expect(candidates[0]).toBe("/approved/chromium");
     expect(new Set(candidates).size).toBe(candidates.length);
+  });
+
+  it("allows only the exact declared IPv4 loopback origin through the private-address guard", async () => {
+    const trusted = "http://127.0.0.1:8080";
+    await expect(
+      isAllowedScreenshotUrl("http://127.0.0.1:8080/api/projects/51/preview/", trusted),
+    ).resolves.toBe(true);
+    await expect(
+      isAllowedScreenshotUrl("http://127.0.0.1:8081/api/projects/51/preview/", trusted),
+    ).resolves.toBe(false);
+    await expect(
+      isAllowedScreenshotUrl("http://10.0.0.5:8080/api/projects/51/preview/", trusted),
+    ).resolves.toBe(false);
+    await expect(
+      isAllowedScreenshotUrl(
+        "http://127.0.0.1:8080/api/projects/51/preview/",
+        "http://localhost:8080",
+      ),
+    ).resolves.toBe(false);
   });
 });

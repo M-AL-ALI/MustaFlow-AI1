@@ -299,6 +299,13 @@ export interface ScreenshotInput {
    */
   exactOriginCookies?: Array<{ name: string; value: string }>;
   exactCookieOrigin?: string;
+  /**
+   * Optional server-local origin for capturing this process's own authenticated
+   * preview route without a public-DNS hairpin. Only an exact
+   * http://127.0.0.1:<port> origin is eligible; every other private address
+   * remains blocked by the normal SSRF guard.
+   */
+  trustedLoopbackOrigin?: string;
   /** Optional viewport-relative crop. Coordinates are clamped by the caller. */
   clip?: { x: number; y: number; width: number; height: number };
   /**
@@ -362,6 +369,41 @@ export function screenshotRequestHeaders(
   return withoutCookie;
 }
 
+function normalizedTrustedLoopbackOrigin(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "http:" ||
+      parsed.hostname !== "127.0.0.1" ||
+      !parsed.port ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+export async function isAllowedScreenshotUrl(
+  requestUrl: string,
+  trustedLoopbackOrigin?: string,
+): Promise<boolean> {
+  try {
+    const trustedOrigin = normalizedTrustedLoopbackOrigin(trustedLoopbackOrigin);
+    if (trustedOrigin && new URL(requestUrl).origin === trustedOrigin) return true;
+  } catch {
+    return false;
+  }
+  return isSafeResolvedUrl(requestUrl);
+}
+
 const STATIC_CHROMIUM_PATHS = [
   "/nix/store/chromium",
   "/nix/var/nix/profiles/default/bin/chromium",
@@ -417,7 +459,7 @@ async function availableChromiumExecutables(): Promise<string[]> {
 export async function takeScreenshot(input: ScreenshotInput): Promise<ScreenshotResult> {
   if (!input.inlineHtml) {
     if (!isHttpUrl(input.url)) return { ok: false, error: "URL must be http(s)" };
-    if (!(await isSafeResolvedUrl(input.url)))
+    if (!(await isAllowedScreenshotUrl(input.url, input.trustedLoopbackOrigin)))
       return { ok: false, error: "URL points to a private/internal host" };
   }
   const w = Math.min(Math.max(input.width ?? 1280, 320), 1920);
@@ -488,7 +530,7 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
       if (reqUrl.startsWith("data:") || reqUrl.startsWith("about:")) {
         return route.continue();
       }
-      if (!(await isSafeResolvedUrl(reqUrl))) {
+      if (!(await isAllowedScreenshotUrl(reqUrl, input.trustedLoopbackOrigin))) {
         return route.abort("blockedbyclient");
       }
       const headers = screenshotRequestHeaders(
