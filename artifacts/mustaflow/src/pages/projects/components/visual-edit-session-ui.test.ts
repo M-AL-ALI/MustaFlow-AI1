@@ -8,6 +8,15 @@ const source = readFileSync(
 );
 
 describe("visual edit session UI contract", () => {
+  it("replays edit mode even when the bridge ready message arrived before the parent listener", () => {
+    expect(source).toContain("if (win) {");
+    expect(source).not.toContain("if (win && veReadyRef.current)");
+    expect(source).toContain(
+      'win.postMessage({ __mustaflow_edit: true, type: "setMode", on: editMode }, "*")',
+    );
+    expect(source).toContain('if (data.type === "ready")');
+  });
+
   it("opens one server session and binds every source change to it", () => {
     expect(source).toContain("/visual-edit/sessions`");
     expect(source).toContain("sessionId: veSessionId");

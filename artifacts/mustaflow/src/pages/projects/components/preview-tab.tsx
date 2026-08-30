@@ -614,12 +614,15 @@ export function PreviewTab({
   useEffect(() => {
     veReadyRef.current = false;
   }, [iframeKey]);
-  // Notify iframe whenever editMode toggles — but only after the bridge has
-  // announced itself, otherwise the message would arrive before listeners
-  // are attached.
+  // Notify the iframe whenever editMode toggles. The bridge announces itself
+  // when possible, but always send the current mode as well:
+  // the bridge's one-time ready message can legitimately arrive before this
+  // parent listener mounts, while a later user toggle happens after the
+  // iframe listener is ready. The bridge ready handler still replays the
+  // mode for the opposite race (parent toggles before the iframe is ready).
   useEffect(() => {
     const win = iframeRef.current?.contentWindow;
-    if (win && veReadyRef.current) {
+    if (win) {
       try {
         win.postMessage({ __mustaflow_edit: true, type: "setMode", on: editMode }, "*");
       } catch {
