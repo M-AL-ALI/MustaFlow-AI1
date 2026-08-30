@@ -67,6 +67,7 @@ import {
 } from "../lib/background-plan-step";
 import { publishTaskEvent } from "../lib/event-bus";
 import {
+  isExplicitNoProjectMutationRequest,
   intentReceiptEnforcementRequested,
   judgeZeroIntent,
   type ZeroIntentExplicitControl,
@@ -194,6 +195,7 @@ async function persistAuthoritativeIntent(input: {
   requestId: string;
   legacyIntent(): string;
   explicitControl?: ZeroIntentExplicitControl;
+  mutationForbidden: boolean;
   planMode: boolean;
   approvedPlanStep: boolean;
   imageGenerationRequested: boolean;
@@ -599,6 +601,7 @@ router.post(
           return classifiedForReceipt?.legacyIntent ?? "converse";
         },
         explicitControl: authoritativeExplicitAgentIntent as ZeroIntentExplicitControl | undefined,
+        mutationForbidden: isExplicitNoProjectMutationRequest(content),
         planMode: Boolean(planMode),
         approvedPlanStep: Boolean(stagedBackgroundPlanStep),
         imageGenerationRequested,
@@ -2109,6 +2112,7 @@ router.post(
               ? "plan"
               : (classifiedForReceipt?.legacyIntent ?? "converse"),
         explicitControl: authoritativeExplicitAgentIntent as ZeroIntentExplicitControl | undefined,
+        mutationForbidden: isExplicitNoProjectMutationRequest(content),
         planMode: Boolean(planMode),
         approvedPlanStep: false,
         imageGenerationRequested: false,

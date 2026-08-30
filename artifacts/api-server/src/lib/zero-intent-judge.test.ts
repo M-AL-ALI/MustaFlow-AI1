@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { judgeZeroIntent, type ZeroIntentJudgeInput } from "./zero-intent-judge";
+import {
+  isExplicitNoProjectMutationRequest,
+  judgeZeroIntent,
+  type ZeroIntentJudgeInput,
+} from "./zero-intent-judge";
 import type { IntentResult } from "./builder";
 
 function input(overrides: Partial<ZeroIntentJudgeInput> = {}): ZeroIntentJudgeInput {
   return {
     planMode: false,
     approvedPlanStep: false,
+    mutationForbidden: false,
     imageGenerationRequested: false,
     attachments: [],
     classify: async () => ({
@@ -60,6 +65,40 @@ describe("zero intent shadow judge", () => {
     await expect(
       judgeZeroIntent(input({ attachments: [{ kind: "image", url: "opaque-ref" }] })),
     ).resolves.toMatchObject({ intent: "answer", decidingSource: "classifier" });
+  });
+
+  it("keeps an attached reference question out of the build path when the user forbids changes", async () => {
+    const classify = vi.fn(async () => ({
+      intent: "mutate" as const,
+      legacyIntent: "build" as const,
+      confidence: 0.99,
+      decisionSource: "classifier" as const,
+    }));
+    const content =
+      "Do not change this project. Read both attached items as reference data and answer briefly.";
+
+    expect(isExplicitNoProjectMutationRequest(content)).toBe(true);
+    await expect(
+      judgeZeroIntent(
+        input({
+          mutationForbidden: isExplicitNoProjectMutationRequest(content),
+          attachments: [{ kind: "image" }, { kind: "file" }],
+          classify,
+        }),
+      ),
+    ).resolves.toEqual({
+      intent: "answer",
+      decidingSource: "user_explicit",
+      confidence: null,
+      reasonCode: "explicit_control",
+    });
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it("does not mistake an object-specific editing constraint for a whole-project no-change control", () => {
+    expect(
+      isExplicitNoProjectMutationRequest("Do not change the heading; update the footer."),
+    ).toBe(false);
   });
 
   it("routes classifier fallback and low confidence to one clarification", async () => {
