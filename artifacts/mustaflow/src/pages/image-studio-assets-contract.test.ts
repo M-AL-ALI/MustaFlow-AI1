@@ -28,6 +28,14 @@ describe("Image Studio unified asset contract", () => {
     expect(source).toContain("Brand role for");
     expect(source).toContain("Save details");
     expect(source).toContain("App sizes");
+    expect(source).toContain("Ask Zero for alt text");
+    expect(source).toContain("/alt-text-proposal");
+    expect(source).toContain("Review it, then save when it is right");
+    expect(source).toContain(
+      "Zero proposed this description automatically. Review it before saving.",
+    );
+    expect(source).toContain("Private · not malware-scanned");
+    expect(source).toContain("Decoded safely before use");
     expect(source).toContain("/derivatives");
   });
 

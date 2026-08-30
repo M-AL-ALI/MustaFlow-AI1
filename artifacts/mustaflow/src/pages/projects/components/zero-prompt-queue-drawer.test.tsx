@@ -35,6 +35,7 @@ function queuePayload(
     id: string;
     position: number;
     currentText: string;
+    assetIds?: number[];
     state?: string;
     terminalEvidence?: Record<string, unknown> | null;
   }>,
@@ -201,7 +202,7 @@ describe("Zero prompt queue drawer", () => {
 
   it("supports add, reorder, edit, and delete through the governed routes", async () => {
     const payload = queuePayload([
-      { id: "first", position: 1, currentText: "First" },
+      { id: "first", position: 1, currentText: "First", assetIds: [42] },
       { id: "second", position: 2, currentText: "Second" },
     ]);
     mockedAuthFetch.mockImplementation(async (_path, init) =>
@@ -245,7 +246,10 @@ describe("Zero prompt queue drawer", () => {
     await waitFor(() => expect(mockedAuthFetch).toHaveBeenCalledTimes(7));
     expect(mockedAuthFetch.mock.calls[5]).toEqual([
       "/api/projects/7/prompt-queue/first",
-      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ text: "First edited" }) }),
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ text: "First edited", assetIds: [42] }),
+      }),
     ]);
 
     await user.click(screen.getByRole("button", { name: "Delete prompt 1" }));

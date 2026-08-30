@@ -27,6 +27,7 @@ import { startKnowledgePromotionScheduler } from "./lib/knowledge-promotion";
 import { startStuckRunScheduler } from "./lib/stuck-run-scheduler";
 import { generalLimiter } from "./lib/rateLimit";
 import { clerkSignupAdmissionLimiter } from "./lib/signup-admission";
+import { registerAssetAltTextWorker } from "./lib/asset-alt-text-analysis";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -51,6 +52,7 @@ void startDurableQueue(async (payload) => {
 }).then(async () => {
   await registerJobWorkers();
   void registerGdprErasureWorker(runGdprErasure);
+  void registerAssetAltTextWorker();
 });
 
 // Kick off the domain renewal scheduler (Task #559).

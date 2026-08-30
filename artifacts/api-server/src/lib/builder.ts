@@ -1734,6 +1734,72 @@ Return ONE plain-text brief (no markdown headings, no JSON). Be specific and sho
   }
 }
 
+export type ImageAltTextProposal = {
+  text: string;
+  usage: {
+    provider: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedProviderCostUsd: number;
+  };
+};
+
+/** A bounded vision call that proposes editable alt text; it never saves it. */
+export async function proposeImageAltText(
+  image: BuilderImageAttachment,
+  signal?: AbortSignal,
+): Promise<ImageAltTextProposal> {
+  const { createChatCompletion, resolveStageProvider } = await import("./ai-providers");
+  const { provider, model } = resolveStageProvider("plan", "lite", "gpt-5-nano");
+  const response = await createChatCompletion({
+    provider,
+    model,
+    zeroCall: { tier: "lite", stage: "plan" },
+    max_completion_tokens: 160,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Write concise accessibility alt text for the supplied image. Describe only visible, meaningful content. Do not start with 'image of' or 'picture of'. Return one plain sentence and nothing else.",
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Propose editable alt text under 500 characters." },
+          { type: "image_url", image_url: { url: image.dataUri } },
+        ] as unknown as string,
+      },
+    ],
+    signal,
+  });
+  const raw = response.choices[0]?.message?.content?.trim() ?? "";
+  const text = raw
+    .replace(/^['"]|['"]$/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 500);
+  if (!text)
+    throw new EmptyCompletionError({
+      finishReason: response.choices[0]?.finish_reason ?? null,
+      outputTokens: response.usage?.completion_tokens ?? 0,
+      reasoningTokens: response.usage?.completion_tokens_details?.reasoning_tokens ?? undefined,
+      refusal: Boolean(response.choices[0]?.message?.refusal),
+    });
+  const inputTokens = response.usage?.prompt_tokens ?? 0;
+  const outputTokens = response.usage?.completion_tokens ?? 0;
+  return {
+    text,
+    usage: {
+      provider,
+      model,
+      inputTokens,
+      outputTokens,
+      estimatedProviderCostUsd: computeModelUsdCost(model, inputTokens, outputTokens),
+    },
+  };
+}
+
 /**
  * Append a user-role message to the messages array. If image attachments are
  * provided, sends the prompt + images as multimodal content parts so vision

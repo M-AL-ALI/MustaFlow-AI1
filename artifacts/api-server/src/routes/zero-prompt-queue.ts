@@ -48,6 +48,11 @@ function assetIds(value: unknown, res: Response): readonly number[] | null {
   return ids.map(Number);
 }
 
+function optionalAssetIds(value: unknown, res: Response): readonly number[] | undefined | null {
+  if (value === undefined) return undefined;
+  return assetIds(value, res);
+}
+
 function projectId(req: Request, res: Response): number | null {
   const value = Number(req.params.id);
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -315,14 +320,26 @@ export function createZeroPromptQueueRouter(
       const actor = actorId(req, res);
       const target = itemId(req.params.itemId, res);
       const currentText = text(req.body?.text, res);
-      if (id === null || actor === null || target === null || currentText === null) return;
+      const attachments = optionalAssetIds(req.body?.assetIds, res);
+      if (
+        id === null ||
+        actor === null ||
+        target === null ||
+        currentText === null ||
+        attachments === null
+      )
+        return;
       try {
+        if (attachments !== undefined) {
+          await assertAssets({ ownerUserId: actor, projectId: id, assetIds: attachments });
+        }
         res.json(
           await store.edit(id, {
             kind: "edit",
             order: 1,
             target: { kind: "queue-item", itemId: target },
             text: currentText,
+            assetIds: attachments,
             provenance: mutationProvenance(actor, createId, now),
           }),
         );

@@ -79,22 +79,30 @@ describe("Zero prompt queue decision engine", () => {
     });
   });
 
-  it("edits without changing state or position and retains original text in provenance", () => {
-    const before = queueItem("a", 1);
+  it("edits text and attachments without changing state or position and retains originals in provenance", () => {
+    const before = { ...queueItem("a", 1), assetIds: [9, 3] };
     const result = applyZeroPromptQueueMutation(
       createZeroPromptQueueSnapshot("project-52", [before]),
-      operation({ kind: "edit", target: { kind: "queue-item", itemId: "a" }, text: "New text" }),
+      operation({
+        kind: "edit",
+        target: { kind: "queue-item", itemId: "a" },
+        text: "New text",
+        assetIds: [7, 3, 7],
+      }),
     );
     expect(result.snapshot.items[0]).toMatchObject({
       state: "queued",
       position: 1,
       currentText: "New text",
+      assetIds: [3, 7],
     });
     expect(result.event).toMatchObject({
       type: "queue.item.edited",
       originalText: before.currentText,
       currentText: "New text",
       position: 1,
+      originalAssetIds: [3, 9],
+      assetIds: [3, 7],
     });
   });
 
