@@ -636,6 +636,15 @@ export function PreviewTab({
     }
   }, [editMode, iframeKey]);
   useEffect(() => {
+    if (!editMode) return;
+    const timeout = window.setTimeout(() => {
+      if (veReadyRef.current) return;
+      setVeToast("This preview cannot be edited directly. Ask Zero to make the change instead.");
+      setEditMode(false);
+    }, 2_500);
+    return () => window.clearTimeout(timeout);
+  }, [editMode, iframeKey]);
+  useEffect(() => {
     let cancelled = false;
     if (editMode && !veSessionId) {
       void authFetch(`/api/projects/${project.id}/visual-edit/sessions`, {
@@ -1354,6 +1363,10 @@ export function PreviewTab({
       if (!data || typeof data !== "object") return;
       // ── Visual Edit messages (Task #539) ──
       if (data.__mustaflow_edit) {
+        if (data.type === "modeApplied") {
+          veReadyRef.current = true;
+          return;
+        }
         if (data.type === "pointContext") {
           const waiter = pointContextWaiterRef.current;
           if (waiter && waiter.requestId === data.requestId) {

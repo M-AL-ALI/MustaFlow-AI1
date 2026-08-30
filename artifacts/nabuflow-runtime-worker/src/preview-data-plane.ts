@@ -2,6 +2,7 @@ import { getSandbox } from "@cloudflare/sandbox";
 import {
   PREVIEW_DATA_PREFIX,
   PREVIEW_GRANT_QUERY_PARAM,
+  VISUAL_EDIT_SCRIPT,
   parseRuntimeIdentityForNamespace,
   verifyPreviewGrant,
   type PreviewGrantClaims,
@@ -174,7 +175,10 @@ export async function handlePreviewDataPlaneRequest(
       redirect: "manual",
       ...(body === null ? {} : ({ duplex: "half" } as RequestInit & { duplex: "half" })),
     });
-    return sanitizeUpstreamResponse(await sandbox.containerFetch(upstreamRequest, claims.port));
+    return await sanitizeUpstreamResponse(
+      await sandbox.containerFetch(upstreamRequest, claims.port),
+      request.method,
+    );
   } catch (error) {
     if (!(error instanceof PreviewHttpError)) throw error;
     await recordPreviewAudit(dependencies.coordinator, requestId, request, null, {
@@ -368,7 +372,46 @@ function unsafeCookieDomain(setCookie: string): boolean {
   );
 }
 
-function sanitizeUpstreamResponse(upstream: Response): Response {
+function injectVisualEditBridge(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let carry = "";
+  let injected = false;
+  const carryLength = "</body>".length - 1;
+
+  return body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        const text = carry + decoder.decode(chunk, { stream: true });
+        carry = "";
+        if (injected) {
+          if (text) controller.enqueue(encoder.encode(text));
+          return;
+        }
+        const bodyClose = text.toLowerCase().indexOf("</body>");
+        if (bodyClose >= 0) {
+          controller.enqueue(
+            encoder.encode(text.slice(0, bodyClose) + VISUAL_EDIT_SCRIPT + text.slice(bodyClose)),
+          );
+          injected = true;
+          return;
+        }
+        const emitLength = Math.max(0, text.length - carryLength);
+        if (emitLength > 0) controller.enqueue(encoder.encode(text.slice(0, emitLength)));
+        carry = text.slice(emitLength);
+      },
+      flush(controller) {
+        const text = carry + decoder.decode();
+        controller.enqueue(encoder.encode(injected ? text : text + VISUAL_EDIT_SCRIPT));
+      },
+    }),
+  );
+}
+
+async function sanitizeUpstreamResponse(
+  upstream: Response,
+  requestMethod: string,
+): Promise<Response> {
   const headers = new Headers(upstream.headers);
   const connectionTokens = (headers.get("connection") ?? "")
     .split(",")
@@ -390,7 +433,19 @@ function sanitizeUpstreamResponse(upstream: Response): Response {
   headers.set("cache-control", "private, no-store");
   headers.set("cross-origin-embedder-policy", PREVIEW_EMBEDDER_POLICY);
   headers.set("cross-origin-resource-policy", PREVIEW_EMBEDDING_POLICY);
-  return new Response(upstream.body, {
+  const injectBridge =
+    requestMethod === "GET" &&
+    upstream.status >= 200 &&
+    upstream.status < 300 &&
+    upstream.body !== null &&
+    (headers.get("content-type") ?? "").toLowerCase().includes("text/html");
+  if (injectBridge) {
+    headers.delete("content-length");
+    headers.delete("content-encoding");
+    headers.delete("etag");
+    headers.set("x-nabuflow-preview-bridge", "visual-edit-v1");
+  }
+  return new Response(injectBridge ? injectVisualEditBridge(upstream.body!) : upstream.body, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers,

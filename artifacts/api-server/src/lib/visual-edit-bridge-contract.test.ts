@@ -7,5 +7,9 @@ describe("visual edit bridge selection contract", () => {
     expect(VISUAL_EDIT_SCRIPT).toContain("selected: el.classList.contains");
     expect(VISUAL_EDIT_SCRIPT).toContain('document.querySelectorAll(".__mfm_sel")');
     expect(VISUAL_EDIT_SCRIPT).not.toContain('document.querySelector(".__mfm_sel")');
+    expect(VISUAL_EDIT_SCRIPT).toContain("TRUSTED_PARENT_ORIGINS");
+    expect(VISUAL_EDIT_SCRIPT).toContain("ev.source === window.parent");
+    expect(VISUAL_EDIT_SCRIPT).toContain('type:"modeApplied"');
+    expect(VISUAL_EDIT_SCRIPT).not.toContain('postMessage(payload, "*")');
   });
 });
