@@ -15,8 +15,11 @@
  */
 
 import { Parser } from "htmlparser2";
+import { constants as fsConstants } from "node:fs";
+import { access } from "node:fs/promises";
 import { promises as dns } from "node:dns";
 import { isIP } from "node:net";
+import { delimiter as pathDelimiter, join as joinPath } from "node:path";
 import { logger } from "./logger";
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -359,15 +362,57 @@ export function screenshotRequestHeaders(
   return withoutCookie;
 }
 
-const CHROMIUM_PATHS = [
-  process.env.PLAYWRIGHT_CHROMIUM_PATH,
+const STATIC_CHROMIUM_PATHS = [
   "/nix/store/chromium",
   "/nix/var/nix/profiles/default/bin/chromium",
   "/run/current-system/sw/bin/chromium",
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
   "/usr/bin/google-chrome",
-].filter(Boolean) as string[];
+];
+
+/**
+ * Replit/Nix exposes Chromium through a content-addressed PATH entry. The hash
+ * changes when the platform image changes, so a hard-coded /nix/store path is
+ * not a durable runtime contract. Build the closed candidate list from the
+ * configured override, the current PATH, and conventional system locations.
+ */
+export function chromiumExecutableCandidates(
+  pathValue = process.env.PATH ?? "",
+  configuredPath = process.env.PLAYWRIGHT_CHROMIUM_PATH,
+  platform: NodeJS.Platform = process.platform,
+  delimiter = pathDelimiter,
+): string[] {
+  const names =
+    platform === "win32"
+      ? ["chromium.exe", "chrome.exe"]
+      : ["chromium", "chromium-browser", "google-chrome"];
+  const fromPath = pathValue
+    .split(delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .flatMap((entry) =>
+      names.map((name) =>
+        platform === "win32" ? joinPath(entry, name) : `${entry.replace(/\/+$/u, "")}/${name}`,
+      ),
+    );
+  return [
+    ...new Set([configuredPath, ...fromPath, ...STATIC_CHROMIUM_PATHS].filter(Boolean)),
+  ] as string[];
+}
+
+async function availableChromiumExecutables(): Promise<string[]> {
+  const available: string[] = [];
+  for (const candidate of chromiumExecutableCandidates()) {
+    try {
+      await access(candidate, fsConstants.X_OK);
+      available.push(candidate);
+    } catch {
+      // An unavailable candidate is not a launch attempt.
+    }
+  }
+  return available;
+}
 
 export async function takeScreenshot(input: ScreenshotInput): Promise<ScreenshotResult> {
   if (!input.inlineHtml) {
@@ -390,7 +435,7 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
   try {
     // Try bundled browser first; fall back to system chromium paths.
     let launched = false;
-    for (const exePath of [undefined, ...CHROMIUM_PATHS]) {
+    for (const exePath of [undefined, ...(await availableChromiumExecutables())]) {
       try {
         browser = await chromium.launch({
           headless: true,
