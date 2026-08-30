@@ -349,7 +349,7 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
   on: {
     error: (err, req, target) => {
       logger.warn({ err }, "Preview proxy upstream error");
-      const expressReq = req as IncomingMessage & { originalUrl?: string };
+      const expressReq = req as PreviewProxyRequest;
       const projectId = projectIdFromUrl(expressReq.originalUrl ?? req.url) ?? 0;
       const maybeRes = target as Partial<Response> & {
         headersSent?: boolean;
@@ -364,32 +364,28 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
           const isEnvError = (err as NodeJS.ErrnoException).code === "ENOTFOUND";
           if (isEnvError) {
             const expressResponse = maybeRes as Response;
-            void loadPreviewProject(projectId)
-              .then((p) =>
-                serveProjectFilesPreview(
+            void serveProjectFilesPreview(
+              expressResponse,
+              projectId,
+              previewFilePathFromUrl(expressReq.originalUrl ?? req.url),
+              {
+                visualEditEnabled: expressReq.mustaFlowPublicPreview === undefined,
+                showStaticBanner: true,
+                previewState: "static-fallback",
+              },
+            ).catch((fallbackErr: unknown) => {
+              logger.warn({ err: fallbackErr, projectId }, "Preview DB fallback failed");
+              try {
+                sendHtml(
                   expressResponse,
-                  projectId,
-                  previewFilePathFromUrl(expressReq.originalUrl ?? req.url),
-                  {
-                    projectStatus: p?.status ?? "draft",
-                    showStaticBanner: true,
-                    previewState: "static-fallback",
-                  },
-                ),
-              )
-              .catch((fallbackErr: unknown) => {
-                logger.warn({ err: fallbackErr, projectId }, "Preview DB fallback failed");
-                try {
-                  sendHtml(
-                    expressResponse,
-                    502,
-                    PROXY_UNAVAILABLE_HTML(projectId),
-                    "proxy-unavailable",
-                  );
-                } catch {
-                  /* swallow */
-                }
-              });
+                  502,
+                  PROXY_UNAVAILABLE_HTML(projectId),
+                  "proxy-unavailable",
+                );
+              } catch {
+                /* swallow */
+              }
+            });
             return;
           }
           sendHtml(
@@ -444,7 +440,7 @@ export async function handleLivePreviewHttp(
   // Container layer not configured in this environment — serve files from DB.
   if (!(await isContainerLayerConfigured())) {
     await serveProjectFilesPreview(res, project.id, previewFilePathFromUrl(sourceRequestUrl), {
-      projectStatus: project.status,
+      visualEditEnabled: options?.publicRequestUrl === undefined,
       showStaticBanner: true,
       previewState: "static-fallback",
     });
@@ -488,7 +484,7 @@ export async function handleLivePreviewHttp(
   const reachable = await tenantRuntimeProvider.isGatewayReachable();
   if (!reachable) {
     await serveProjectFilesPreview(res, project.id, previewFilePathFromUrl(sourceRequestUrl), {
-      projectStatus: project.status,
+      visualEditEnabled: options?.publicRequestUrl === undefined,
       showStaticBanner: true,
       previewState: "static-fallback",
     });
