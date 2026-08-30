@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getPreviewAddress,
+  getPreviewIframeSandbox,
   getPreviewRecoveryControl,
   getServerPreviewBadge,
   hasServerPreviewAccess,
@@ -13,6 +14,21 @@ describe("preview access UI", () => {
     expect(hasServerPreviewAccess("gateway")).toBe(true);
     expect(hasServerPreviewAccess("unavailable")).toBe(false);
     expect(hasServerPreviewAccess(undefined)).toBe(false);
+  });
+
+  it("lets isolated server previews retain their signed browser session", () => {
+    expect(getPreviewIframeSandbox({ serverPreviewLive: true, webContainerLive: false })).toContain(
+      "allow-same-origin",
+    );
+    expect(getPreviewIframeSandbox({ serverPreviewLive: false, webContainerLive: true })).toContain(
+      "allow-same-origin",
+    );
+  });
+
+  it("keeps same-origin database previews opaque to protect the editor", () => {
+    expect(getPreviewIframeSandbox({ serverPreviewLive: false, webContainerLive: false })).toBe(
+      "allow-scripts allow-forms allow-popups",
+    );
   });
 
   it("presents the active provider transport honestly", () => {

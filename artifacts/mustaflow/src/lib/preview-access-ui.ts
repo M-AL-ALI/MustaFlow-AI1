@@ -6,6 +6,20 @@ export function hasServerPreviewAccess(
   return previewAccess === "direct" || previewAccess === "gateway";
 }
 
+/**
+ * Server and WebContainer previews run on isolated origins and need their own
+ * origin so browser-managed session and module loading work. Database-backed
+ * static previews stay on the application origin and therefore remain opaque.
+ */
+export function getPreviewIframeSandbox(input: {
+  serverPreviewLive: boolean;
+  webContainerLive: boolean;
+}): string {
+  return input.serverPreviewLive || input.webContainerLive
+    ? "allow-scripts allow-forms allow-popups allow-same-origin allow-modals"
+    : "allow-scripts allow-forms allow-popups";
+}
+
 export type AgenticPreviewUnavailablePresentation = {
   title: string;
   message: string;

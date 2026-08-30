@@ -361,41 +361,18 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
         !maybeRes.headersSent
       ) {
         try {
-          const isEnvError = (err as NodeJS.ErrnoException).code === "ENOTFOUND";
-          if (isEnvError) {
-            const expressResponse = maybeRes as Response;
-            void serveProjectFilesPreview(
-              expressResponse,
-              projectId,
-              previewFilePathFromUrl(expressReq.originalUrl ?? req.url),
-              {
-                visualEditEnabled: expressReq.mustaFlowPublicPreview === undefined,
-                showStaticBanner: true,
-                previewState: "static-fallback",
-              },
-            ).catch((fallbackErr: unknown) => {
-              logger.warn({ err: fallbackErr, projectId }, "Preview DB fallback failed");
-              try {
-                sendHtml(
-                  expressResponse,
-                  502,
-                  PROXY_UNAVAILABLE_HTML(projectId),
-                  "proxy-unavailable",
-                );
-              } catch {
-                /* swallow */
-              }
-            });
-            return;
-          }
           sendHtml(
             maybeRes as Response,
             502,
-            ERROR_HTML(
-              projectId,
-              "Couldn't reach the dev server inside the container. It may still be starting or have crashed — check the logs and retry.",
-            ),
-            "server-unreachable",
+            (err as NodeJS.ErrnoException).code === "ENOTFOUND"
+              ? PROXY_UNAVAILABLE_HTML(projectId)
+              : ERROR_HTML(
+                  projectId,
+                  "Couldn't reach the dev server inside the container. It may still be starting or have crashed — check the logs and retry.",
+                ),
+            (err as NodeJS.ErrnoException).code === "ENOTFOUND"
+              ? "proxy-unavailable"
+              : "server-unreachable",
           );
         } catch {
           /* swallow */
@@ -437,8 +414,13 @@ export async function handleLivePreviewHttp(
     return;
   }
 
-  // Container layer not configured in this environment — serve files from DB.
+  // Runtime-selected previews fail explicitly when the container layer is
+  // unavailable. Only a genuinely static request may use the DB fallback.
   if (!(await isContainerLayerConfigured())) {
+    if (shouldRouteToLivePreview(project)) {
+      sendHtml(res, 502, PROXY_UNAVAILABLE_HTML(project.id), "proxy-unavailable");
+      return;
+    }
     await serveProjectFilesPreview(res, project.id, previewFilePathFromUrl(sourceRequestUrl), {
       visualEditEnabled: options?.publicRequestUrl === undefined,
       showStaticBanner: true,
@@ -483,11 +465,7 @@ export async function handleLivePreviewHttp(
   // 503 would trigger the COLD_START_HTML auto-refresh meta tag.
   const reachable = await tenantRuntimeProvider.isGatewayReachable();
   if (!reachable) {
-    await serveProjectFilesPreview(res, project.id, previewFilePathFromUrl(sourceRequestUrl), {
-      visualEditEnabled: options?.publicRequestUrl === undefined,
-      showStaticBanner: true,
-      previewState: "static-fallback",
-    });
+    sendHtml(res, 502, PROXY_UNAVAILABLE_HTML(project.id), "proxy-unavailable");
     return;
   }
 

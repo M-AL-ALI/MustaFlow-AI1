@@ -86,6 +86,29 @@ const previewProject = () => ({
   runtimePort: 3000,
 });
 
+function responseRecorder() {
+  const record = { status: 0, headers: new Map<string, string>(), body: "" };
+  const response = {
+    setHeader(name: string, value: string) {
+      record.headers.set(name, value);
+      return response;
+    },
+    status(value: number) {
+      record.status = value;
+      return response;
+    },
+    type(value: string) {
+      record.headers.set("Content-Type", value);
+      return response;
+    },
+    send(value: string) {
+      record.body = value;
+      return response;
+    },
+  } as unknown as Response;
+  return { record, response };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   state.project = previewProject();
@@ -125,6 +148,24 @@ describe("preview reads never mutate runtime identity", () => {
     );
 
     expect(state.serveProjectFilesPreview).toHaveBeenCalledTimes(1);
+    expect(state.update).not.toHaveBeenCalled();
+  });
+
+  it("never serves same-origin project code after runtime transport was selected", async () => {
+    state.isContainerLayerConfigured.mockResolvedValue(false);
+    const { record, response } = responseRecorder();
+
+    await handleLivePreviewHttp(
+      { originalUrl: "/api/projects/17/preview/" } as Request,
+      response,
+      vi.fn() as NextFunction,
+      previewProject(),
+    );
+
+    expect(record.status).toBe(502);
+    expect(record.headers.get("X-MustaFlow-Preview-State")).toBe("proxy-unavailable");
+    expect(record.body).toContain("Container preview unavailable");
+    expect(state.serveProjectFilesPreview).not.toHaveBeenCalled();
     expect(state.update).not.toHaveBeenCalled();
   });
 

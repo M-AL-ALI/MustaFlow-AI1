@@ -59,6 +59,7 @@ import {
 } from "@workspace/api-client-react";
 import {
   getPreviewAddress,
+  getPreviewIframeSandbox,
   getPreviewRecoveryControl,
   getServerPreviewBadge,
   hasServerPreviewAccess,
@@ -224,16 +225,9 @@ type PreviewTabProps = {
 };
 
 // ─── Security note ────────────────────────────────────────────────────────────
-// The preview iframe uses sandbox="allow-scripts allow-forms allow-popups".
-// allow-same-origin is intentionally OMITTED so the iframe receives a null origin
-// and cannot read parent window data, cookies, localStorage, or secrets.
-//
-// Consequence: contentWindow access is cross-origin and will throw SecurityError.
-// Console capture and health-check DOM inspection are therefore not available.
-//
-// TODO (multi-user launch): serve previews from a separate subdomain with
-// short-lived signed URLs, or use a container-based preview system.
-// This will restore full isolation AND allow opt-in postMessage console bridging.
+// Database-backed previews use a null origin so same-origin project HTML cannot
+// read editor state. Server and WebContainer previews run on isolated origins;
+// they retain their own origin so signed sessions and module loading work.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function PreviewTab({
@@ -1268,7 +1262,7 @@ export function PreviewTab({
   // Build completion must not reboot the browser runtime: source edits belong
   // to Vite HMR, while dependency/config changes trigger their precise actions.
   const isAgentic = project.builderMode === "agentic";
-  const serverPreviewLive = isAgentic && hasServerPreviewAccess(previewAccess);
+  const serverPreviewLive = hasServerPreviewAccess(previewAccess);
   const agenticPreviewUnavailable = isAgentic && !serverPreviewLive;
   const previewRecoveryControl = getPreviewRecoveryControl({
     hasRuntime: Boolean(project.containerId),
@@ -1681,11 +1675,7 @@ export function PreviewTab({
         aria-label="App preview"
         className={cn("w-full border-0", extraClass)}
         style={extraStyle}
-        sandbox={
-          webContainerLive
-            ? "allow-scripts allow-forms allow-popups allow-same-origin allow-modals"
-            : "allow-scripts allow-forms allow-popups"
-        }
+        sandbox={getPreviewIframeSandbox({ serverPreviewLive, webContainerLive })}
         onLoad={handleIframeLoad}
       />
     );
@@ -2973,7 +2963,7 @@ export function PreviewTab({
           let label: string;
           let subtitle: string;
           let badgeClass: string;
-          if (isAgentic && serverBadge) {
+          if (serverBadge) {
             label = serverBadge.label;
             subtitle = serverBadge.subtitle;
             badgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/25";

@@ -1452,7 +1452,6 @@ export default function ProjectWorkspacePage() {
   const containerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshContainerStatus = useCallback(async () => {
-    if (!containerLayerConfigured) return null;
     try {
       const data = await getContainerStatus(projectId);
       if (!data) return null;
@@ -1467,7 +1466,7 @@ export default function ProjectWorkspacePage() {
       setPreviewAccess("unavailable");
       return null;
     }
-  }, [containerLayerConfigured, projectId]);
+  }, [projectId]);
 
   // Seed the UI from project data, then verify any claimed live state against
   // provider truth. The stored row is not a liveness receipt.
@@ -1483,7 +1482,6 @@ export default function ProjectWorkspacePage() {
 
   // Poll container status when starting
   useEffect(() => {
-    if (!containerLayerConfigured) return;
     if (containerStatus === "starting" || containerStarting) {
       if (containerPollRef.current) return;
       containerPollRef.current = setInterval(() => {
@@ -1512,10 +1510,9 @@ export default function ProjectWorkspacePage() {
         containerPollRef.current = null;
       }
     };
-  }, [containerStatus, containerStarting, refreshContainerStatus, containerLayerConfigured]);
+  }, [containerStatus, containerStarting, refreshContainerStatus]);
 
   const handleStartContainer = useCallback(() => {
-    if (!containerLayerConfigured) return;
     setContainerStarting(true);
     setContainerStatus("starting");
     setPreviewAccess("unavailable");
@@ -1531,10 +1528,9 @@ export default function ProjectWorkspacePage() {
         setContainerUrl(null);
         setPreviewAccess("unavailable");
       });
-  }, [projectId, containerLayerConfigured]);
+  }, [projectId]);
 
   const handleStopContainer = useCallback(() => {
-    if (!containerLayerConfigured) return;
     stopContainer(projectId)
       .then(() => {
         setContainerStatus("hibernated");
@@ -1543,7 +1539,7 @@ export default function ProjectWorkspacePage() {
         setContainerStarting(false);
       })
       .catch(() => {});
-  }, [projectId, containerLayerConfigured]);
+  }, [projectId]);
   // ── End container state ────────────────────────────────────────────────────
 
   // ── Provisioning state (Task #738 + #988) ──────────────────────────────────
