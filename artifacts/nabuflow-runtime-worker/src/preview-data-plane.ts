@@ -12,8 +12,15 @@ import type { ControlAuditRecord, ControlCoordinator } from "./model";
 import { NabuflowSandbox } from "./runtime-backend";
 
 const PREVIEW_COOKIE_PREFIX = "__Host-nabuflow_preview_";
-const PREVIEW_EMBEDDING_POLICY = "same-site";
+// Preview documents are intentionally framed by the NabuFlow app, which lives
+// on a different site from the Cloudflare runtime gateway. `same-site` makes
+// Chromium replace the iframe with a blocked-page error before the signed
+// preview session can render. The grant/session boundary remains the data
+// access control; frame-ancestors limits presentation to MustaFlow surfaces.
+const PREVIEW_EMBEDDING_POLICY = "cross-origin";
 const PREVIEW_EMBEDDER_POLICY = "require-corp";
+const PREVIEW_FRAME_ANCESTORS_POLICY =
+  "frame-ancestors https://mustaflow.com https://*.mustaflow.com";
 const CLOCK_SKEW_SECONDS = 5;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -109,6 +116,7 @@ export async function handlePreviewDataPlaneRequest(
           "cache-control": "no-store",
           "cross-origin-embedder-policy": PREVIEW_EMBEDDER_POLICY,
           "cross-origin-resource-policy": PREVIEW_EMBEDDING_POLICY,
+          "content-security-policy": PREVIEW_FRAME_ANCESTORS_POLICY,
           location: url.toString(),
           "referrer-policy": "no-referrer",
           "set-cookie": buildSessionCookie(cookieName, grants[0], claims.exp, nowMs),
@@ -433,6 +441,10 @@ async function sanitizeUpstreamResponse(
   headers.set("cache-control", "private, no-store");
   headers.set("cross-origin-embedder-policy", PREVIEW_EMBEDDER_POLICY);
   headers.set("cross-origin-resource-policy", PREVIEW_EMBEDDING_POLICY);
+  // Preserve the tenant's own CSP as a separate enforced policy. Multiple CSP
+  // policies intersect; this adds framing protection without weakening or
+  // replacing the app's resource restrictions.
+  headers.append("content-security-policy", PREVIEW_FRAME_ANCESTORS_POLICY);
   const injectBridge =
     requestMethod === "GET" &&
     upstream.status >= 200 &&
@@ -466,6 +478,7 @@ function previewErrorResponse(
         "cache-control": "no-store",
         "cross-origin-embedder-policy": PREVIEW_EMBEDDER_POLICY,
         "cross-origin-resource-policy": PREVIEW_EMBEDDING_POLICY,
+        "content-security-policy": PREVIEW_FRAME_ANCESTORS_POLICY,
         "content-type": "application/json; charset=utf-8",
         ...(status === 401 ? { "www-authenticate": 'Preview realm="nabuflow-staging"' } : {}),
       },

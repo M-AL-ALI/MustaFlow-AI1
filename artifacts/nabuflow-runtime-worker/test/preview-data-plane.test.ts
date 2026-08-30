@@ -175,8 +175,11 @@ describe("authenticated preview data plane", () => {
     expect(redeemed?.headers.get("set-cookie")).toMatch(
       /HttpOnly; Secure; SameSite=None; Max-Age=300; Path=\/$/,
     );
-    expect(redeemed?.headers.get("cross-origin-resource-policy")).toBe("same-site");
+    expect(redeemed?.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
     expect(redeemed?.headers.get("cross-origin-embedder-policy")).toBe("require-corp");
+    expect(redeemed?.headers.get("content-security-policy")).toBe(
+      "frame-ancestors https://mustaflow.com https://*.mustaflow.com",
+    );
 
     const replay = await redeem(token, "/hello");
     expect(replay?.status).toBe(409);
@@ -190,8 +193,11 @@ describe("authenticated preview data plane", () => {
       { coordinator, sandbox, nowMs: TEST_NOW_MS },
     );
     expect(session?.status).toBe(200);
-    expect(session?.headers.get("cross-origin-resource-policy")).toBe("same-site");
+    expect(session?.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
     expect(session?.headers.get("cross-origin-embedder-policy")).toBe("require-corp");
+    expect(session?.headers.get("content-security-policy")).toContain(
+      "frame-ancestors https://mustaflow.com https://*.mustaflow.com",
+    );
     expect(sandbox.httpRequests[0]?.url).toBe("https://tenant.preview.invalid/hello?value=1");
   });
 
@@ -218,6 +224,29 @@ describe("authenticated preview data plane", () => {
     expect(html).toContain("Get Started");
   });
 
+  it("preserves tenant CSP while restricting cross-site framing to MustaFlow", async () => {
+    sandbox.responseFactory = () =>
+      new Response("<!doctype html><html><body>Preview</body></html>", {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "content-security-policy": "default-src 'self'",
+        },
+      });
+    const redeemed = await redeem(await grant());
+    const response = await handlePreviewDataPlaneRequest(
+      new Request(`${origin}${PREVIEW_DATA_PREFIX}/${identity}/`, {
+        headers: { cookie: cookieFrom(redeemed!) },
+      }),
+      env,
+      { coordinator, sandbox, nowMs: TEST_NOW_MS },
+    );
+
+    const policy = response?.headers.get("content-security-policy") ?? "";
+    expect(policy).toContain("default-src 'self'");
+    expect(policy).toContain("frame-ancestors https://mustaflow.com https://*.mustaflow.com");
+    expect(response?.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+  });
+
   it.each([
     ["expired", async () => grant({ issuedAt: nowSeconds - 400, expiresAt: nowSeconds - 100 })],
     [
@@ -242,8 +271,11 @@ describe("authenticated preview data plane", () => {
       nowMs: TEST_NOW_MS,
     });
     expect(missing?.status).toBe(401);
-    expect(missing?.headers.get("cross-origin-resource-policy")).toBe("same-site");
+    expect(missing?.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
     expect(missing?.headers.get("cross-origin-embedder-policy")).toBe("require-corp");
+    expect(missing?.headers.get("content-security-policy")).toBe(
+      "frame-ancestors https://mustaflow.com https://*.mustaflow.com",
+    );
     await expect(missing?.json()).resolves.toMatchObject({ code: "preview_auth_required" });
 
     const token = await grant({ jti: "unredeemed-cookie-jti" });
