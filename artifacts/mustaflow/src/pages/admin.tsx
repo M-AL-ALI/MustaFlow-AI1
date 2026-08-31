@@ -62,6 +62,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { OraRoutingDiagnosticsPanel } from "@/components/admin/ora-routing-diagnostics-panel";
 import { AdminBreadcrumbs } from "@/components/admin/admin-breadcrumbs";
 import { AdminAccountAccessPanel } from "@/components/admin/account-access-panel";
+import { ProjectRetirementPanel } from "@/components/admin/project-retirement-panel";
 import { authFetch } from "@/lib/api-fetch";
 
 function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
@@ -456,6 +457,8 @@ export default function AdminPage() {
           </>
         )}
       </div>
+
+      {isOwner && <ProjectRetirementPanel />}
 
       {isOwner && (
         <div className="border border-border rounded-xl bg-card overflow-hidden">
