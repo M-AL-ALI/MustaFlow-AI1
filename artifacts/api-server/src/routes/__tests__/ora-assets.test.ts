@@ -235,12 +235,14 @@ describe("DELETE /ora/assets/:id", () => {
 describe("chat.ts persists generated outputs to the asset library", () => {
   const chatSrc = readFileSync(path.join(__dirname, "../public-ai/chat.ts"), "utf8");
 
-  it("the file_generation branch persists generated files", () => {
+  it("the file_generation branch reserves, completes, and cancels generated files", () => {
     const fileBranch = extractIfStatementByCondition(
       chatSrc,
       'decision.tool === "file_generation" && decision.fileFormat',
     );
-    expect(fileBranch).toContain("persistOraAsset");
+    expect(fileBranch).toContain("reserveOraGeneratedAsset");
+    expect(fileBranch).toContain("completeOraGeneratedAsset");
+    expect(fileBranch).toContain("cancelOraGeneratedAsset");
     expect(fileBranch).toContain('kind: "file"');
   });
 
@@ -253,9 +255,11 @@ describe("chat.ts persists generated outputs to the asset library", () => {
     expect(imageBranch).toContain('kind: "image"');
   });
 
-  it("generate-file route persists too", () => {
+  it("generate-file route reserves, completes, and cancels too", () => {
     const genSrc = readFileSync(path.join(__dirname, "../public-ai/generate-file.ts"), "utf8");
-    expect(genSrc).toContain("persistOraAsset");
+    expect(genSrc).toContain("reserveOraGeneratedAsset");
+    expect(genSrc).toContain("completeOraGeneratedAsset");
+    expect(genSrc).toContain("cancelOraGeneratedAsset");
   });
 });
 
