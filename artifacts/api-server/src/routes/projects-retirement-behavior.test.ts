@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => {
     providerStop: vi.fn(),
     providerDestroy: vi.fn(),
     providerDeploy: vi.fn(),
+    resolveStaff: vi.fn(),
   };
 });
 
@@ -192,6 +193,7 @@ vi.mock("../lib/adminAuth", () => ({
   requireOwner: (_req: express.Request, _res: express.Response, next: express.NextFunction) =>
     next(),
   isAdminUser: vi.fn(async () => true),
+  resolveStaffPrincipal: mocks.resolveStaff,
 }));
 
 vi.mock("../lib/jobs", () => ({
@@ -343,6 +345,119 @@ describe("project retirement route behavior", () => {
     });
     mocks.cancelLocalJobs.mockReturnValue({ canceled: 0 });
     mocks.cancelProvisioning.mockReturnValue({ canceled: false });
+    mocks.resolveStaff.mockImplementation(async (userId: string) => ({
+      userId,
+      role: "owner",
+      source: "user_roles",
+      grantedBy: "platform-owner",
+    }));
+  });
+
+  it("denies a non-owner Operator retry override before reconciliation", async () => {
+    mocks.resolveStaff.mockResolvedValueOnce({
+      userId: "staff-operator",
+      role: "operator",
+      source: "user_roles",
+      grantedBy: "platform-owner",
+    });
+    mocks.selectResults = [[]];
+
+    const response = await request(appAs("staff-operator")).post("/projects/77/retirement/retry");
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Project not found" });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("allows a platform Owner to reconcile a non-owned legacy terminal receipt", async () => {
+    const progress = initialProjectRetirementProgress();
+    mocks.selectResults = [
+      [],
+      [{ id: 77 }],
+      [
+        {
+          id: "retirement-77",
+          projectId: 77,
+          state: "failed",
+          completedAt: NOW,
+          failureCode: "project_retirement_legacy_runtime_retained",
+          progress,
+        },
+      ],
+    ];
+
+    const response = await request(appAs("staff-owner")).post("/projects/77/retirement/retry");
+
+    expect(response.status).toBe(202);
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        code: "project_retirement_reconciliation_accepted",
+        projectId: 77,
+        state: "accepted",
+        cleanupScheduled: true,
+        cleanupScheduleState: "enqueued",
+        statusUrl: "/api/projects/77/retirement",
+      }),
+    );
+    expect(mocks.retireAccess).toHaveBeenCalledTimes(1);
+    expect(mocks.durableEnqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves retry self-service for an ordinary project owner", async () => {
+    mocks.resolveStaff.mockResolvedValueOnce(null);
+    mocks.selectResults = [
+      [{ id: 77 }],
+      [{ id: 77 }],
+      [
+        {
+          id: "retirement-77",
+          projectId: 77,
+          state: "failed",
+          completedAt: NOW,
+          failureCode: "project_retirement_attempts_exhausted",
+          progress: initialProjectRetirementProgress(),
+        },
+      ],
+    ];
+
+    const response = await request(appAs("owner-77")).post("/projects/77/retirement/retry");
+
+    expect(response.status).toBe(202);
+    expect(response.body.code).toBe("project_retirement_reconciliation_accepted");
+    expect(mocks.durableEnqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns reconciliation eligibility computed from the central contract", async () => {
+    const progress = initialProjectRetirementProgress();
+    mocks.resolveStaff.mockResolvedValueOnce({
+      userId: "staff-operator",
+      role: "operator",
+      source: "user_roles",
+      grantedBy: "platform-owner",
+    });
+    mocks.selectResults = [
+      [],
+      [
+        {
+          id: "retirement-77",
+          projectId: 77,
+          state: "failed",
+          attemptCount: 4,
+          completedAt: NOW,
+          failureCode: "project_retirement_legacy_runtime_retained",
+          failureTarget: null,
+          progress,
+          createdAt: NOW,
+          startedAt: NOW,
+        },
+      ],
+    ];
+
+    const response = await request(appAs("staff-operator")).get("/projects/77/retirement");
+
+    expect(response.status).toBe(200);
+    expect(response.body.reconciliationEligible).toBe(false);
   });
 
   it("adopts an exact legacy tombstone through preflight and one v2 receipt", async () => {

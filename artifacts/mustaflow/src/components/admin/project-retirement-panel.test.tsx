@@ -177,6 +177,487 @@ describe("ProjectRetirementPanel", () => {
     ]);
   });
 
+  it("loads one project retirement status with an authenticated read-only request", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          operationId: "retirement-5",
+          projectId: 5,
+          state: "running",
+          attemptCount: 2,
+          progress: { internal: "not rendered" },
+          failureCode: null,
+          failureTarget: null,
+          createdAt: "2026-08-31T12:00:00.000Z",
+          startedAt: "2026-08-31T12:01:00.000Z",
+          completedAt: null,
+          reconciliationEligible: false,
+        },
+        200,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "5");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(authFetch).toHaveBeenCalledWith("/api/projects/5/retirement", { method: "GET" });
+    expect(await screen.findByText("Cleanup is running.")).toBeVisible();
+    expect(screen.getByText("Attempt count: 2.")).toBeVisible();
+    expect(screen.queryByText("not rendered")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Retry governed cleanup for Project 5" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("rejects a non-positive project ID without making a request", async () => {
+    const user = userEvent.setup();
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "0");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(await screen.findByText("Enter a positive whole-number project ID.")).toBeVisible();
+    expect(authFetch).not.toHaveBeenCalled();
+  });
+
+  it("explicitly refuses Project 51 without making a request", async () => {
+    const user = userEvent.setup();
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "51");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(
+      await screen.findByText("Project 51 is excluded from the authorized retirement manifest."),
+    ).toBeVisible();
+    expect(authFetch).not.toHaveBeenCalled();
+  });
+
+  it("clears a loaded receipt and validation failure when the project ID changes", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          operationId: "retirement-5",
+          projectId: 5,
+          state: "running",
+          attemptCount: 2,
+          failureCode: null,
+          completedAt: null,
+          reconciliationEligible: false,
+        },
+        200,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+    const input = screen.getByRole("spinbutton", { name: "Retired project ID" });
+    await user.type(input, "5");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+    expect(await screen.findByText("Cleanup is running.")).toBeVisible();
+
+    await user.clear(input);
+    await user.type(input, "51");
+    expect(screen.queryByText("Cleanup is running.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+    expect(
+      await screen.findByText("Project 51 is excluded from the authorized retirement manifest."),
+    ).toBeVisible();
+
+    await user.clear(input);
+    await user.type(input, "27");
+    expect(
+      screen.queryByText("Project 51 is excluded from the authorized retirement manifest."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("rejects a typed-looking retirement status returned with a non-200 HTTP status", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          operationId: "retirement-5",
+          projectId: 5,
+          state: "failed",
+          attemptCount: 4,
+          failureCode: "project_retirement_attempts_exhausted",
+          completedAt: "2026-08-31T12:05:00.000Z",
+          reconciliationEligible: true,
+        },
+        409,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "5");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(
+      await screen.findByText(
+        "Retirement status could not be loaded. Check the project ID and try again.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Retry governed cleanup for Project 5" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows retry only when the server marks the loaded receipt reconciliation-eligible", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch)
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            operationId: "retirement-27",
+            projectId: 27,
+            state: "failed",
+            attemptCount: 2,
+            failureCode: "project_retirement_operation_unavailable",
+            completedAt: null,
+            reconciliationEligible: false,
+          },
+          200,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            operationId: "retirement-27",
+            projectId: 27,
+            state: "failed",
+            attemptCount: 4,
+            failureCode: "project_retirement_completion_evidence_incomplete",
+            completedAt: "2026-08-31T12:05:00.000Z",
+            reconciliationEligible: false,
+          },
+          200,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            operationId: "retirement-27",
+            projectId: 27,
+            state: "failed",
+            attemptCount: 4,
+            failureCode: "project_retirement_attempts_exhausted",
+            completedAt: "2026-08-31T12:05:00.000Z",
+            reconciliationEligible: true,
+          },
+          200,
+        ),
+      );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "27");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(
+      await screen.findByText("Cleanup attempt failed and remains eligible for automatic retry."),
+    ).toBeVisible();
+    expect(screen.getByText("The cleanup operation was temporarily unavailable.")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Retry governed cleanup for Project 27" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+    expect(await screen.findByText("Cleanup ended with a terminal failure.")).toBeVisible();
+    expect(screen.getByText("The cleanup completion evidence is incomplete.")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Retry governed cleanup for Project 27" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+    expect(screen.getByText("Governed cleanup exhausted its automatic attempts.")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Retry governed cleanup for Project 27" }),
+    ).toBeVisible();
+  });
+
+  it("locks a loaded terminal retry and renders the accepted status receipt", async () => {
+    const user = userEvent.setup();
+    let resolveRetry!: (response: Response) => void;
+    vi.mocked(authFetch)
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            operationId: "retirement-44",
+            projectId: 44,
+            state: "failed",
+            attemptCount: 4,
+            failureCode: "project_retirement_runtime_destroy_unverified",
+            completedAt: "2026-08-31T12:05:00.000Z",
+            reconciliationEligible: true,
+          },
+          200,
+        ),
+      )
+      .mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolveRetry = resolve;
+        }),
+      );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "44");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+    const retry = await screen.findByRole("button", {
+      name: "Retry governed cleanup for Project 44",
+    });
+
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+
+    expect(authFetch).toHaveBeenCalledTimes(2);
+    expect(authFetch).toHaveBeenNthCalledWith(2, "/api/projects/44/retirement/retry", {
+      method: "POST",
+    });
+    resolveRetry(
+      jsonResponse(
+        {
+          code: "project_retirement_cleanup_pending",
+          operationId: "reconciliation-44",
+          projectId: 44,
+          state: "accepted",
+          cleanupScheduled: false,
+          cleanupScheduleState: "unavailable",
+          retryable: true,
+        },
+        503,
+      ),
+    );
+
+    expect(await screen.findByText("Moved to Trash; cleanup scheduling is pending.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "/api/projects/44/retirement" })).toHaveAttribute(
+      "href",
+      "/api/projects/44/retirement",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry governed cleanup for Project 44" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "an accepted body returned as HTTP 200",
+      200,
+      {
+        code: "project_retirement_reconciliation_accepted",
+        operationId: "reconciliation-5",
+        projectId: 5,
+        state: "accepted",
+        cleanupScheduled: true,
+        cleanupScheduleState: "enqueued",
+        statusUrl: "/api/projects/5/retirement",
+      },
+    ],
+    [
+      "an unscheduled body returned as HTTP 202",
+      202,
+      {
+        code: "project_retirement_reconciliation_accepted",
+        operationId: "reconciliation-5",
+        projectId: 5,
+        state: "accepted",
+        cleanupScheduled: false,
+        cleanupScheduleState: "unavailable",
+        statusUrl: "/api/projects/5/retirement",
+      },
+    ],
+    [
+      "a scheduled body returned as HTTP 503",
+      503,
+      {
+        code: "project_retirement_cleanup_pending",
+        operationId: "reconciliation-5",
+        projectId: 5,
+        state: "accepted",
+        cleanupScheduled: true,
+        cleanupScheduleState: "enqueued",
+        retryable: true,
+        statusUrl: "/api/projects/5/retirement",
+      },
+    ],
+    [
+      "an external status URL",
+      202,
+      {
+        code: "project_retirement_reconciliation_accepted",
+        operationId: "reconciliation-5",
+        projectId: 5,
+        state: "accepted",
+        cleanupScheduled: true,
+        cleanupScheduleState: "enqueued",
+        statusUrl: "https://example.invalid/retirement/5",
+      },
+    ],
+  ])("rejects %s", async (_label, retryStatus, retryBody) => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch)
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            operationId: "retirement-5",
+            projectId: 5,
+            state: "failed",
+            attemptCount: 4,
+            failureCode: "project_retirement_attempts_exhausted",
+            completedAt: "2026-08-31T12:05:00.000Z",
+            reconciliationEligible: true,
+          },
+          200,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse(retryBody, retryStatus));
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "5");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Retry governed cleanup for Project 5" }),
+    );
+
+    expect(
+      await screen.findByText("Governed cleanup could not be retried. Try again shortly."),
+    ).toBeVisible();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("does not expose raw status errors or response bodies", async () => {
+    const user = userEvent.setup();
+    const rawError = `SQLSTATE_XX000: ${"private provider response ".repeat(20)}`;
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          code: "project_retirement_not_found",
+          error: rawError,
+          internal: { responseBody: "must not render" },
+        },
+        404,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "5");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(
+      await screen.findByText(
+        "Retirement status could not be loaded. Check the project ID and try again.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(rawError)).not.toBeInTheDocument();
+    expect(screen.queryByText("must not render")).not.toBeInTheDocument();
+  });
+
+  it("offers only the governed reconciliation retry, locks duplicate clicks, and renders its accepted receipt", async () => {
+    const user = userEvent.setup();
+    let resolveRetry!: (response: Response) => void;
+    vi.mocked(authFetch)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          code: "project_retirement_batch_partially_accepted",
+          receipts: [
+            {
+              projectId: 12,
+              state: "refused",
+              code: "project_retirement_reconciliation_required",
+              error: "This project's earlier cleanup needs governed reconciliation.",
+            },
+            {
+              projectId: 13,
+              state: "refused",
+              code: "project_retirement_managed_addon_unverified",
+              error: "This project has an add-on whose safe removal cannot be verified yet.",
+            },
+          ],
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolveRetry = resolve;
+        }),
+      );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("textbox"), PROJECT_RETIREMENT_CONFIRMATION);
+    await user.click(screen.getByRole("button", { name: "Retire 54 authorized test projects" }));
+
+    const retry = await screen.findByRole("button", {
+      name: "Retry governed cleanup for Project 12",
+    });
+    expect(
+      screen.queryByRole("button", { name: "Retry governed cleanup for Project 13" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+
+    expect(authFetch).toHaveBeenCalledTimes(2);
+    expect(authFetch).toHaveBeenNthCalledWith(2, "/api/projects/12/retirement/retry", {
+      method: "POST",
+    });
+
+    resolveRetry(
+      jsonResponse({
+        code: "project_retirement_reconciliation_accepted",
+        operationId: "reconciliation-12",
+        projectId: 12,
+        state: "accepted",
+        cleanupScheduled: true,
+        cleanupScheduleState: "enqueued",
+        queueJobId: "queue-12",
+        statusUrl: "/api/projects/12/retirement",
+      }),
+    );
+
+    expect(await screen.findByText("Cleanup was accepted and queued.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "/api/projects/12/retirement" })).toHaveAttribute(
+      "href",
+      "/api/projects/12/retirement",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry governed cleanup for Project 12" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not expose raw retry errors", async () => {
+    const user = userEvent.setup();
+    const rawError = `SQLSTATE_XX000: ${"provider stack detail ".repeat(20)}`;
+    vi.mocked(authFetch)
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: "project_retirement_batch_refused",
+            receipts: [
+              {
+                projectId: 14,
+                state: "refused",
+                code: "project_retirement_reconciliation_required",
+              },
+            ],
+          },
+          409,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: "project_retirement_not_terminal",
+            error: rawError,
+          },
+          409,
+        ),
+      );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("textbox"), PROJECT_RETIREMENT_CONFIRMATION);
+    await user.click(screen.getByRole("button", { name: "Retire 54 authorized test projects" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Retry governed cleanup for Project 14",
+      }),
+    );
+
+    expect(
+      await screen.findByText(
+        "This retirement receipt is not eligible for another governed cleanup.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(rawError)).not.toBeInTheDocument();
+  });
+
   it("does not expose technical, long, or unexpectedly thrown error text", async () => {
     const user = userEvent.setup();
     const technicalError = "SQLSTATE_23505: duplicate_key stack trace";

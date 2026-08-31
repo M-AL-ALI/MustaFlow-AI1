@@ -51,6 +51,7 @@ import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
 import {
   acceptProjectRetirement,
+  decideProjectRetirementReconciliation,
   decideProjectRestoreAdmission,
   enqueueProjectRetirementOperation,
   hasProjectRestoreReplayReceipt,
@@ -58,6 +59,7 @@ import {
   presentProjectRetirementPreflightRefusal,
   preflightProjectRetirement,
   PROJECT_LIFECYCLE_LOCK_NAMESPACE,
+  PROJECT_RETIREMENT_MAX_RECONCILIATIONS,
   readProjectRetirementOperation,
   RESTORED_PROJECT_CONTROL_PLANE_STATE,
   requestProjectRetirementReconciliation,
@@ -67,7 +69,7 @@ import {
   isDurableWorkerReady,
   QUEUE_PROJECT_RETIREMENT,
 } from "../lib/durable-queue";
-import { requireAdmin, requireOwner } from "../lib/adminAuth";
+import { requireAdmin, requireOwner, resolveStaffPrincipal } from "../lib/adminAuth";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1664,9 +1666,9 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
     .from(projectsTable)
     .where(and(eq(projectsTable.id, params.data.id), eq(projectsTable.ownerId, req.userId)))
     .limit(1);
+  const staffPrincipal = await resolveStaffPrincipal(req.userId);
   if (!owned) {
-    const { isAdminUser } = await import("../lib/adminAuth");
-    if (!(await isAdminUser(req.userId))) {
+    if (staffPrincipal?.role !== "owner" && staffPrincipal?.role !== "operator") {
       res.status(404).json({ error: "Project not found" });
       return;
     }
@@ -1678,6 +1680,31 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
       .json({ code: "project_retirement_not_found", error: "No retirement receipt exists." });
     return;
   }
+  const persistedProgress = operation.progress as unknown;
+  const persistedReconciliation =
+    persistedProgress && typeof persistedProgress === "object" && !Array.isArray(persistedProgress)
+      ? (persistedProgress as Record<string, unknown>).reconciliation
+      : null;
+  const persistedReconciliationGeneration =
+    persistedReconciliation &&
+    typeof persistedReconciliation === "object" &&
+    !Array.isArray(persistedReconciliation)
+      ? (persistedReconciliation as Record<string, unknown>).generation
+      : persistedReconciliation === undefined
+        ? 0
+        : null;
+  const reconciliationGeneration =
+    Number.isSafeInteger(persistedReconciliationGeneration) &&
+    (persistedReconciliationGeneration as number) >= 0
+      ? (persistedReconciliationGeneration as number)
+      : PROJECT_RETIREMENT_MAX_RECONCILIATIONS;
+  const reconciliation = decideProjectRetirementReconciliation({
+    state: operation.state,
+    completedAt: operation.completedAt,
+    failureCode: operation.failureCode,
+    generation: reconciliationGeneration,
+    allowLegacyAdminReconciliation: staffPrincipal?.role === "owner",
+  });
   res.json({
     operationId: operation.id,
     projectId: operation.projectId,
@@ -1689,6 +1716,7 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
     createdAt: operation.createdAt,
     startedAt: operation.startedAt,
     completedAt: operation.completedAt,
+    reconciliationEligible: reconciliation.allowed,
   });
 });
 
@@ -1707,9 +1735,9 @@ router.post("/projects/:id/retirement/retry", async (req, res): Promise<void> =>
     .from(projectsTable)
     .where(and(eq(projectsTable.id, params.data.id), eq(projectsTable.ownerId, req.userId)))
     .limit(1);
-  const { isAdminUser } = await import("../lib/adminAuth");
-  const isAdmin = await isAdminUser(req.userId);
-  if (!owned && !isAdmin) {
+  const staffPrincipal = await resolveStaffPrincipal(req.userId);
+  const isPlatformOwner = staffPrincipal?.role === "owner";
+  if (!owned && !isPlatformOwner) {
     res.status(404).json({ error: "Project not found" });
     return;
   }
@@ -1725,8 +1753,8 @@ router.post("/projects/:id/retirement/retry", async (req, res): Promise<void> =>
   const reconciliation = await requestProjectRetirementReconciliation({
     projectId: params.data.id,
     requestedBy: req.userId,
-    ownerId: isAdmin ? undefined : req.userId,
-    allowLegacyAdminReconciliation: isAdmin,
+    ownerId: isPlatformOwner ? undefined : req.userId,
+    allowLegacyAdminReconciliation: isPlatformOwner,
   });
   if (!("operationId" in reconciliation)) {
     const status = reconciliation.code === "project_retirement_not_found" ? 404 : 409;
