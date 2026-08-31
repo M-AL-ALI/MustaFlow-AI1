@@ -29,6 +29,18 @@ describe("strict Cloudflare retirement proofs", () => {
     preferredRegion: null,
   };
 
+  it("needs no Cloudflare binding to prove an empty cache target set", async () => {
+    delete process.env.CF_ACCOUNT_ID;
+    delete process.env.CF_API_TOKEN;
+    delete process.env.CF_KV_NAMESPACE_ID;
+    delete process.env.CF_ZONE_ID;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cloudflare.purgeCacheForHostnames([])).resolves.toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("does not call a failed KV deletion verified", async () => {
     vi.stubGlobal(
       "fetch",

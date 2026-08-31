@@ -336,6 +336,24 @@ describe("governed project retirement coordinator", () => {
     expect(source).toContain("await tenantRuntimeProvider.status(runtimeId)");
   });
 
+  it("skips only the unconfigured legacy KV surface and still retires runtime routes", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function deactivatePublishedRoutes");
+    const end = source.indexOf("function securityResourceKey", start);
+    const route = source.slice(start, end);
+
+    expect(route).toContain("resolveLegacyHostnameKvPosture()");
+    expect(route).not.toContain("if (!process.env.CF_KV_NAMESPACE_ID)");
+    expect(route).toContain('legacyKvPosture.state === "configured"');
+    expect(route).toContain('? "verified_absent" : "not_configured"');
+    expect(route).toContain("legacyHostnameKv: verifiedLegacyHostnameKv");
+    expect(route).toContain("routeInventoryProvider.inventoryProductionRoutes");
+    expect(route).toContain("routeInventoryProvider.retireObservedProductionRoute");
+    expect(route.indexOf("resolveLegacyHostnameKvPosture()")).toBeLessThan(
+      route.indexOf("routeInventoryProvider.inventoryProductionRoutes"),
+    );
+  });
+
   it("fences stale-running crash recovery so an old worker cannot complete", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     expect(source).toContain('eq(projectRetirementOperationsTable.state, "running")');

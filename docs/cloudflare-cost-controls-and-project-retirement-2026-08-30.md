@@ -136,6 +136,14 @@ Production activation is ordered and must stop at the first typed discrepancy:
 - `PROJECT_RETIREMENT_EXECUTION_ENABLED` remained absent during this publication;
   boot logs carried the expected fail-closed warning and no retirement mutation
   was invoked.
+- Activation publication commit `f82139402b1fbd6c47c5f63ab654f798e24e78ee`,
+  tree `97f09a9a62b9b7a3dbddc113d07289ef8ec25430`, passed the 22-check
+  `ora_gate` release gate and is served by `/api/version`; `/api/healthz`
+  reports the same build commit with every named subsystem `ok`.
+- Fresh production boot `3c58ac19` completed all 152 startup migrations. It
+  adopted the six legacy Trash tombstones (projects 8, 9, 11, 12, 14, and 15)
+  and surfaced the stale Snapshot-Worker KV dependency described below before
+  any broad retirement batch was invoked.
 
 No hard project deletion, database-row deletion, source deletion, secret
 deletion, asset deletion while referenced, Fly mutation, or pantry/build-kitchen
@@ -225,3 +233,16 @@ under `A:/NabuFlowLab/evidence/cloudflare-cost-controls-2026-08-30/`.
     separate irreversible-action authority.** No deletion occurred. Fixed by
     moving that observation to a separate authorization boundary. Preventive: the
     activation contract now forbids duplicate cleanup during retirement rollout.
+14. **Retirement treated the deliberately absent legacy Workers KV namespace as a
+    required production route registry.** The live provider inventory proves the
+    KV namespace list is empty; current published routing lives in the Runtime
+    Worker's Control Durable Object. The six adopted legacy tombstones therefore
+    stopped before any provider call with typed
+    `project_retirement_operation_unavailable`, and the broad batch was withheld.
+    Fixed by making the legacy KV posture explicit: absent namespace plus disabled
+    edge serving is `not_configured`, while required, partial, or ambiguous KV
+    configurations still fail closed. Runtime route inventory and absence proofs
+    remain mandatory. Preventive: the activation decision table, persisted
+    `legacyHostnameKv` receipt, zero-provider-call empty-cache test, and coordinator
+    ordering guard prevent this retired call site from blocking or weakening the
+    authoritative route cleanup again.

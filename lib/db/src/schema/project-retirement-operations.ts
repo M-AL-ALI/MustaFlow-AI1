@@ -20,6 +20,11 @@ export type ProjectRetirementProgress = {
   route: {
     state: "pending" | "deactivating" | "verified_absent" | "failed";
     failureCode: string | null;
+    /** Legacy Snapshot-Worker hostname KV is optional; current routes use the runtime registry. */
+    legacyHostnameKv?: {
+      state: "not_configured" | "verified_absent" | "failed";
+      failureCode: string | null;
+    };
     hostnames: Array<{
       hostname: string;
       state: "absent" | "present" | "unavailable";

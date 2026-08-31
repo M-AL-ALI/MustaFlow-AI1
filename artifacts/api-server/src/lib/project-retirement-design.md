@@ -66,5 +66,10 @@ recreates, wakes, or starts infrastructure.
 Every failure carries one of the closed `PROJECT_RETIREMENT_FAILURE_CODES` and
 the exact runtime target where relevant. A provider status response after
 destroy is not absence and produces
-`project_retirement_runtime_destroy_unverified`. Missing control/KV bindings
-produce `project_retirement_operation_unavailable`; they do not silently pass.
+`project_retirement_runtime_destroy_unverified`. The legacy Snapshot-Worker KV
+surface is explicitly `not_configured` when edge serving is disabled and no KV
+namespace exists; current production routes are still inventoried and retired
+through the runtime Control Durable Object. A configured, required, or partial
+legacy KV surface remains strict: missing bindings produce
+`project_retirement_operation_unavailable`, and ambiguous inventory or deletion
+never counts as absence.

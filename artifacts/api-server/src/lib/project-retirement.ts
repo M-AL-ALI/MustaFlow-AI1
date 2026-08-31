@@ -54,6 +54,7 @@ import {
   type ProjectRetirementFailure,
   type ProjectRetirementRuntimeTarget,
 } from "./project-retirement-contract";
+import { resolveLegacyHostnameKvPosture } from "./project-retirement-activation";
 
 export * from "./project-retirement-contract";
 
@@ -279,7 +280,15 @@ async function deactivatePublishedRoutes(
     ...customHostnames,
     ...purchasedDomains.map((domain) => domain.hostname),
   ].filter((hostname, index, all) => all.indexOf(hostname) === index);
-  if (!process.env.CF_KV_NAMESPACE_ID) {
+  const legacyKvPosture = resolveLegacyHostnameKvPosture();
+  if (legacyKvPosture.state === "blocked") {
+    progress.route.state = "failed";
+    progress.route.failureCode = "project_retirement_operation_unavailable";
+    progress.route.legacyHostnameKv = {
+      state: "failed",
+      failureCode: "project_retirement_operation_unavailable",
+    };
+    await updateProgress(operation.id, progress, leaseVersion);
     throw new ProjectRetirementStepError({
       code: "project_retirement_operation_unavailable",
       target: null,
@@ -287,8 +296,18 @@ async function deactivatePublishedRoutes(
     });
   }
 
-  const inventory = await inventoryHostnameKVRoutesByProject(operation.projectId);
+  const inventory =
+    legacyKvPosture.state === "configured"
+      ? await inventoryHostnameKVRoutesByProject(operation.projectId)
+      : { state: "complete" as const, observations: [] };
   if (inventory.state !== "complete") {
+    progress.route.state = "failed";
+    progress.route.failureCode = "project_retirement_route_deactivation_unverified";
+    progress.route.legacyHostnameKv = {
+      state: "failed",
+      failureCode: "project_retirement_route_deactivation_unverified",
+    };
+    await updateProgress(operation.id, progress, leaseVersion);
     throw new ProjectRetirementStepError({
       code: "project_retirement_route_deactivation_unverified",
       target: null,
@@ -298,7 +317,10 @@ async function deactivatePublishedRoutes(
   const observedByHostname = new Map(
     inventory.observations.map((observation) => [observation.hostname, observation]),
   );
-  const kvHostnames = [...new Set([...knownHostnames, ...observedByHostname.keys()])];
+  const kvHostnames =
+    legacyKvPosture.state === "configured"
+      ? [...new Set([...knownHostnames, ...observedByHostname.keys()])]
+      : [];
   const routeResults = await mapInBoundedBatches(kvHostnames, (hostname) => {
     const observation = observedByHostname.get(hostname);
     return observation
@@ -314,6 +336,10 @@ async function deactivatePublishedRoutes(
   if (routeResults.some((result) => result.state === "unavailable" && result.stage === "delete")) {
     progress.route.state = "failed";
     progress.route.failureCode = "project_retirement_route_deactivation_failed";
+    progress.route.legacyHostnameKv = {
+      state: "failed",
+      failureCode: "project_retirement_route_deactivation_failed",
+    };
     await updateProgress(operation.id, progress, leaseVersion);
     throw new ProjectRetirementStepError({
       code: "project_retirement_route_deactivation_failed",
@@ -324,6 +350,10 @@ async function deactivatePublishedRoutes(
   if (routeResults.some((result) => result.state !== "absent")) {
     progress.route.state = "failed";
     progress.route.failureCode = "project_retirement_route_deactivation_unverified";
+    progress.route.legacyHostnameKv = {
+      state: "failed",
+      failureCode: "project_retirement_route_deactivation_unverified",
+    };
     await updateProgress(operation.id, progress, leaseVersion);
     throw new ProjectRetirementStepError({
       code: "project_retirement_route_deactivation_unverified",
@@ -331,6 +361,11 @@ async function deactivatePublishedRoutes(
       retryable: true,
     });
   }
+  progress.route.legacyHostnameKv = {
+    state: legacyKvPosture.state === "configured" ? "verified_absent" : "not_configured",
+    failureCode: null,
+  };
+  await updateProgress(operation.id, progress, leaseVersion);
 
   const runtimeRouteHostnames: string[] = [];
   const routeInventoryProvider = supportsProductionRouteInventory(tenantRuntimeProvider)
@@ -437,9 +472,11 @@ async function deactivatePublishedRoutes(
     });
   }
   const verifiedRuntimeRoutes = runtimeRouteProgress(progress).runtimeRoutes ?? [];
+  const verifiedLegacyHostnameKv = progress.route.legacyHostnameKv;
   progress.route = {
     state: "verified_absent",
     failureCode: null,
+    legacyHostnameKv: verifiedLegacyHostnameKv,
     hostnames: progress.route.hostnames,
     cache: { state: "purged" },
   };

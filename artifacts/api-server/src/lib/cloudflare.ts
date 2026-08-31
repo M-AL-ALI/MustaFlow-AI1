@@ -2347,8 +2347,8 @@ export function cloudflareHostnameCacheTag(hostname: string): string | null {
 
 /** Exact eviction for every cached path and regional Cache API key of a hostname. */
 export async function purgeCacheForHostnames(hostnames: string[]): Promise<boolean> {
-  if (!cfEnabled()) return false;
   if (hostnames.length === 0) return true;
+  if (!cfEnabled()) return false;
 
   const tags = [...new Set(hostnames.map(cloudflareHostnameCacheTag))];
   if (tags.some((tag) => tag === null)) return false;
