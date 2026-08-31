@@ -70,6 +70,14 @@ function mockActiveLifecycleLock(projectId: number): ReturnType<typeof vi.fn> {
 }
 
 describe("project lifecycle sessions", () => {
+  const lateMutationPaths = [
+    ["GitHub manual connection", "/projects/9201/github/connect"],
+    ["GitHub push", "/projects/9201/github/push"],
+    ["GitHub branch creation", "/projects/9201/github/create-branch"],
+    ["GitHub pull-request creation", "/projects/9201/github/open-pr"],
+    ["share-link creation", "/projects/9201/share"],
+  ] as const;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectResults = [];
@@ -162,6 +170,61 @@ describe("project lifecycle sessions", () => {
       null,
     );
   });
+
+  it.each(lateMutationPaths)("classifies %s as a project lifecycle mutation", (_name, path) => {
+    expect(projectMutationLifecycleProjectId({ method: "POST", path })).toBe(9201);
+  });
+
+  it.each(lateMutationPaths)(
+    "refuses %s after the project is tombstoned without starting caller work",
+    async (_name, path) => {
+      mocks.selectResults = [[]];
+      const response = responseHarness();
+      const next = vi.fn() as NextFunction;
+
+      await requireActiveProjectMutationLifecycleSession(
+        {
+          userId: "owner-9201",
+          method: "POST",
+          path,
+        } as unknown as Request,
+        response,
+        next,
+      );
+
+      expect(response.status).toHaveBeenCalledWith(404);
+      expect(response.json).toHaveBeenCalledWith({ error: "Project not found" });
+      expect(next).not.toHaveBeenCalled();
+      expect(mocks.connect).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(lateMutationPaths)(
+    "holds the response lifecycle lock across successful async %s work",
+    async (_name, path) => {
+      mocks.selectResults = [[{ ownerId: "owner-9201", organizationId: null }]];
+      const release = mockActiveLifecycleLock(9201);
+      const response = responseHarness();
+      const next = vi.fn() as NextFunction;
+
+      await requireActiveProjectMutationLifecycleSession(
+        {
+          userId: "owner-9201",
+          method: "POST",
+          path,
+        } as unknown as Request,
+        response,
+        next,
+      );
+
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(mocks.connect).toHaveBeenCalledTimes(1);
+      expect(release).not.toHaveBeenCalled();
+
+      response.emit("finish");
+      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    },
+  );
 
   it("leaves governed retirement retry to its tombstone-aware owner and admin boundary", async () => {
     const response = responseHarness();

@@ -273,8 +273,10 @@ describe("consented support operations", () => {
     const access = source("../routes/support-access.ts");
     const operations = source("../routes/support-operations.ts");
     const owner = source("../../../mustaflow/src/pages/support-owner-actions.tsx");
-    expect(access).toContain("staffDisplayName: requestedIdentity.displayName");
-    expect(access).toContain("staffImageUrl: requestedIdentity.imageUrl");
+    expect(access).toContain("const staffDisplayName = requestedIdentity.displayName");
+    expect(access).toContain("const staffImageUrl = requestedIdentity.imageUrl");
+    expect(access).toContain("staffDisplayName,");
+    expect(access).toContain("staffImageUrl,");
     expect(operations).toContain("readGrantEvents(ticketId)");
     expect(owner).toContain("Full support access receipt #");
     expect(owner).toContain("event.actorDisplayName");

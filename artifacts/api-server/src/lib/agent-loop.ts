@@ -5552,12 +5552,19 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           .where(eq(projectsTable.id, input.projectId));
         if (!project) return { ok: false, observation: "ERROR: project not found" };
         const { materializeProjectAsset } = await import("../routes/assets");
-        const receipt = await materializeProjectAsset({
-          userId: project.ownerUserId,
-          projectId: input.projectId,
-          assetId: id,
-          path: args.path,
-        });
+        const { withActiveProjectLifecycle } = await import("./project-lifecycle");
+        const lifecycle = await withActiveProjectLifecycle(input.projectId, async () =>
+          materializeProjectAsset({
+            userId: project.ownerUserId,
+            projectId: input.projectId,
+            assetId: id,
+            path: args.path,
+          }),
+        );
+        if (lifecycle.state === "inactive") {
+          return { ok: false, observation: "ERROR: project is unavailable" };
+        }
+        const receipt = lifecycle.value;
         return {
           ok: true,
           observation: `Upload #${id} is now a restorable project file at ${receipt.path}. Reference it as ${receipt.src}.`,
@@ -7180,188 +7187,202 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         geometry: requestedGeometry,
       });
       if (!preflight.ok) return { ok: false, observation: `ERROR: ${preflight.code}` };
-      await safeEvent(
-        input.onEvent,
-        "take_screenshot",
-        `Capturing screenshot of ${targetUrl || "preview"}…`,
-      );
-      const shot = await takeScreenshot({
-        url: targetUrl,
-        inlineHtml: !requestedUrl && !previewUrl ? (fallbackHtml ?? undefined) : undefined,
-        width,
-        height,
-        fullPage,
-        clip: clip ?? undefined,
-        signal: input.signal,
-      });
-      ctx.senseCounts.screenshot += 1;
-      if (!shot.ok) {
-        return {
-          ok: false,
-          observation: `ERROR: take_screenshot failed: ${shot.error ?? "unknown"}`,
-        };
-      }
-      const actualBytes = shot.bytes ?? 0;
-      if (actualBytes > ctx.screenshotBudget.remaining) {
-        // Reject: the capture exceeded the remaining budget. Do not deduct.
-        return {
-          ok: false,
-          observation: `ERROR: screenshot (${actualBytes} bytes) exceeds remaining budget (${ctx.screenshotBudget.remaining} bytes). Reduce viewport size or skip full_page.`,
-        };
-      }
-      ctx.screenshotBudget.remaining = Math.max(ctx.screenshotBudget.remaining - actualBytes, 0);
-      if (!shot.base64 || actualBytes <= 0) {
-        return { ok: false, observation: "ERROR: visual_evidence_capture_empty" };
-      }
-      const geometry: ZeroVisualEvidenceGeometry = {
-        ...requestedGeometry,
-        url: shot.finalUrl ?? requestedGeometry.url,
-        // Pair identity is the viewport plus clip, not the resulting crop's
-        // pixel dimensions (which equal clip.width/height).
-        width,
-        height,
-      };
-      const evidenceCheck = checkZeroVisualEvidence(evidenceState.value, {
-        phase,
-        pairId,
-        geometry,
-      });
-      if (!evidenceCheck.ok) {
-        return { ok: false, observation: `ERROR: ${evidenceCheck.code}` };
-      }
-
-      const screenshotBuffer = Buffer.from(shot.base64, "base64");
-      const { eq, desc } = await import("drizzle-orm");
-      const [project] = await db
-        .select({ ownerId: projectsTable.ownerId })
-        .from(projectsTable)
-        .where(eq(projectsTable.id, input.projectId))
-        .limit(1);
-      if (!project?.ownerId) {
-        return { ok: false, observation: "ERROR: visual_evidence_project_unavailable" };
-      }
-      let actorUserId = input.queuePromotionActorId ?? project.ownerId;
-      if (input.taskId) {
-        const [task] = await db
-          .select({ provenanceActorUserId: agentTasksTable.provenanceActorUserId })
-          .from(agentTasksTable)
-          .where(eq(agentTasksTable.id, input.taskId))
-          .limit(1);
-        actorUserId = task?.provenanceActorUserId ?? actorUserId;
-      }
-      const [latestVersion] = await db
-        .select({ id: projectVersionsTable.id })
-        .from(projectVersionsTable)
-        .where(eq(projectVersionsTable.projectId, input.projectId))
-        .orderBy(desc(projectVersionsTable.id))
-        .limit(1);
-      const { beginAssetUpload, reserveAsset, completeAsset, rejectReservedAsset } =
-        await import("./asset-registry");
-      const { assetR2Configured, putAssetBuffer, deleteAssetObject } = await import("./asset-r2");
-      if (!assetR2Configured()) {
-        return { ok: false, observation: "ERROR: visual_evidence_storage_unavailable" };
-      }
-      let reservation: Awaited<ReturnType<typeof reserveAsset>>;
-      try {
-        reservation = await reserveAsset({
-          ownerUserId: project.ownerId,
-          actorUserId,
-          projectId: input.projectId,
-          threadKey: `project:${input.projectId}`,
-          scope: "project",
-          kind: "snapshot",
-          source: "zero-agent-screenshot",
-          filename: `zero-${phase}-${pairId ?? input.taskId ?? "evidence"}.png`,
-          mimeType: "image/png",
-          sizeBytes: screenshotBuffer.length,
-          versionId: latestVersion?.id ?? null,
-          taskId: input.taskId ?? null,
-          context: {
-            route: geometry.url,
-            viewport: { width: geometry.width, height: geometry.height, deviceMode: "custom" },
-            region: geometry.clip ?? undefined,
-            consoleErrors: shot.consoleErrors ?? [],
-            visualEvidencePhase: phase,
-            visualEvidencePairId: pairId,
-          },
-        });
-      } catch (error) {
-        const code =
-          error && typeof error === "object" && "code" in error
-            ? String((error as { code: unknown }).code)
-            : "visual_evidence_storage_unavailable";
-        return { ok: false, observation: `ERROR: ${code}` };
-      }
-      try {
-        const claim = await beginAssetUpload({ assetId: reservation.id, actorUserId });
-        if (!claim) throw new Error("visual_evidence_reservation_unavailable");
-        await putAssetBuffer({
-          key: reservation.storageKey,
-          body: screenshotBuffer,
-          contentType: "image/png",
-        });
-        const { createHash } = await import("node:crypto");
-        await completeAsset({
-          assetId: reservation.id,
-          ownerUserId: project.ownerId,
-          actorUserId,
-          sha256: createHash("sha256").update(screenshotBuffer).digest("hex"),
-          scanState: "not-required",
-        });
-      } catch (error) {
-        await rejectReservedAsset({
-          assetId: reservation.id,
-          ownerUserId: project.ownerId,
-          actorUserId,
-          code: "asset_storage_unavailable",
-        }).catch(() => undefined);
-        await deleteAssetObject(reservation.storageKey).catch(() => undefined);
-        logger.warn(
-          { error, projectId: input.projectId, taskId: input.taskId ?? null },
-          "zero visual evidence storage failed",
+      const { withActiveProjectLifecycle } = await import("./project-lifecycle");
+      const capture = await withActiveProjectLifecycle(input.projectId, async () => {
+        await safeEvent(
+          input.onEvent,
+          "take_screenshot",
+          `Capturing screenshot of ${targetUrl || "preview"}…`,
         );
-        return { ok: false, observation: "ERROR: visual_evidence_storage_unavailable" };
-      }
-      evidenceState.value = recordZeroVisualEvidence(
-        evidenceState.value,
-        { phase, pairId, geometry },
-        reservation.id,
-      );
-      const contentUrl = `/api/assets/${reservation.id}/content`;
-      await safeEvent(
-        input.onEvent,
-        "visual_evidence",
-        JSON.stringify({
-          assetId: reservation.id,
-          contentUrl,
+        const shot = await takeScreenshot({
+          url: targetUrl,
+          inlineHtml: !requestedUrl && !previewUrl ? (fallbackHtml ?? undefined) : undefined,
+          width,
+          height,
+          fullPage,
+          clip: clip ?? undefined,
+          signal: input.signal,
+        });
+        ctx.senseCounts.screenshot += 1;
+        if (!shot.ok) {
+          return {
+            ok: false,
+            observation: `ERROR: take_screenshot failed: ${shot.error ?? "unknown"}`,
+          };
+        }
+        const actualBytes = shot.bytes ?? 0;
+        if (actualBytes > ctx.screenshotBudget.remaining) {
+          // Reject: the capture exceeded the remaining budget. Do not deduct.
+          return {
+            ok: false,
+            observation: `ERROR: screenshot (${actualBytes} bytes) exceeds remaining budget (${ctx.screenshotBudget.remaining} bytes). Reduce viewport size or skip full_page.`,
+          };
+        }
+        ctx.screenshotBudget.remaining = Math.max(ctx.screenshotBudget.remaining - actualBytes, 0);
+        if (!shot.base64 || actualBytes <= 0) {
+          return { ok: false, observation: "ERROR: visual_evidence_capture_empty" };
+        }
+        const geometry: ZeroVisualEvidenceGeometry = {
+          ...requestedGeometry,
+          url: shot.finalUrl ?? requestedGeometry.url,
+          // Pair identity is the viewport plus clip, not the resulting crop's
+          // pixel dimensions (which equal clip.width/height).
+          width,
+          height,
+        };
+        const evidenceCheck = checkZeroVisualEvidence(evidenceState.value, {
           phase,
           pairId,
-          label: phase === "before" ? "Before" : phase === "after" ? "After" : "Visual evidence",
-        }),
-      );
-      // Task #533: return the base64 separately so the loop can attach it as
-      // an image_url block on a follow-up user message and switch to the
-      // provider's VISION_MODEL for the next turn. The tool observation
-      // itself stays small (metadata only) — the image flows via the user
-      // message that the loop appends after the tool response.
-      return {
-        ok: true,
-        observation: JSON.stringify({
-          url: targetUrl || "(inline)",
-          bytes: shot.bytes ?? null,
-          width: shot.width ?? null,
-          height: shot.height ?? null,
-          mimeType: "image/png",
-          budgetRemaining: ctx.screenshotBudget.remaining,
-          attachedToNextTurn: true,
-          assetId: reservation.id,
-          contentUrl,
-          evidencePhase: phase,
-          evidencePairId: pairId,
-        }),
-        imageBase64: shot.base64 ?? undefined,
-        imageMimeType: "image/png",
-      };
+          geometry,
+        });
+        if (!evidenceCheck.ok) {
+          return { ok: false, observation: `ERROR: ${evidenceCheck.code}` };
+        }
+
+        const screenshotBuffer = Buffer.from(shot.base64, "base64");
+        const { eq, desc } = await import("drizzle-orm");
+        const [project] = await db
+          .select({ ownerId: projectsTable.ownerId })
+          .from(projectsTable)
+          .where(eq(projectsTable.id, input.projectId))
+          .limit(1);
+        if (!project?.ownerId) {
+          return { ok: false, observation: "ERROR: visual_evidence_project_unavailable" };
+        }
+        let actorUserId = input.queuePromotionActorId ?? project.ownerId;
+        if (input.taskId) {
+          const [task] = await db
+            .select({ provenanceActorUserId: agentTasksTable.provenanceActorUserId })
+            .from(agentTasksTable)
+            .where(eq(agentTasksTable.id, input.taskId))
+            .limit(1);
+          actorUserId = task?.provenanceActorUserId ?? actorUserId;
+        }
+        const [latestVersion] = await db
+          .select({ id: projectVersionsTable.id })
+          .from(projectVersionsTable)
+          .where(eq(projectVersionsTable.projectId, input.projectId))
+          .orderBy(desc(projectVersionsTable.id))
+          .limit(1);
+        const { beginAssetUpload, reserveAsset, completeAsset, rejectReservedAsset } =
+          await import("./asset-registry");
+        const { assetR2Configured, putAssetBuffer, deleteAssetObject } = await import("./asset-r2");
+        if (!assetR2Configured()) {
+          return { ok: false, observation: "ERROR: visual_evidence_storage_unavailable" };
+        }
+        const stored = await (async () => {
+          let reservation: Awaited<ReturnType<typeof reserveAsset>>;
+          try {
+            reservation = await reserveAsset({
+              ownerUserId: project.ownerId,
+              actorUserId,
+              projectId: input.projectId,
+              threadKey: `project:${input.projectId}`,
+              scope: "project",
+              kind: "snapshot",
+              source: "zero-agent-screenshot",
+              filename: `zero-${phase}-${pairId ?? input.taskId ?? "evidence"}.png`,
+              mimeType: "image/png",
+              sizeBytes: screenshotBuffer.length,
+              versionId: latestVersion?.id ?? null,
+              taskId: input.taskId ?? null,
+              context: {
+                route: geometry.url,
+                viewport: { width: geometry.width, height: geometry.height, deviceMode: "custom" },
+                region: geometry.clip ?? undefined,
+                consoleErrors: shot.consoleErrors ?? [],
+                visualEvidencePhase: phase,
+                visualEvidencePairId: pairId,
+              },
+            });
+          } catch (error) {
+            const code =
+              error && typeof error === "object" && "code" in error
+                ? String((error as { code: unknown }).code)
+                : "visual_evidence_storage_unavailable";
+            return { ok: false as const, observation: `ERROR: ${code}` };
+          }
+          try {
+            const claim = await beginAssetUpload({ assetId: reservation.id, actorUserId });
+            if (!claim) throw new Error("visual_evidence_reservation_unavailable");
+            await putAssetBuffer({
+              key: reservation.storageKey,
+              body: screenshotBuffer,
+              contentType: "image/png",
+            });
+            const { createHash } = await import("node:crypto");
+            await completeAsset({
+              assetId: reservation.id,
+              ownerUserId: project.ownerId,
+              actorUserId,
+              sha256: createHash("sha256").update(screenshotBuffer).digest("hex"),
+              scanState: "not-required",
+            });
+            return { ok: true as const, reservation };
+          } catch (error) {
+            await rejectReservedAsset({
+              assetId: reservation.id,
+              ownerUserId: project.ownerId,
+              actorUserId,
+              code: "asset_storage_unavailable",
+            }).catch(() => undefined);
+            await deleteAssetObject(reservation.storageKey).catch(() => undefined);
+            logger.warn(
+              { error, projectId: input.projectId, taskId: input.taskId ?? null },
+              "zero visual evidence storage failed",
+            );
+            return {
+              ok: false as const,
+              observation: "ERROR: visual_evidence_storage_unavailable",
+            };
+          }
+        })();
+        if (!stored.ok) return stored;
+        const reservation = stored.reservation;
+        evidenceState.value = recordZeroVisualEvidence(
+          evidenceState.value,
+          { phase, pairId, geometry },
+          reservation.id,
+        );
+        const contentUrl = `/api/assets/${reservation.id}/content`;
+        await safeEvent(
+          input.onEvent,
+          "visual_evidence",
+          JSON.stringify({
+            assetId: reservation.id,
+            contentUrl,
+            phase,
+            pairId,
+            label: phase === "before" ? "Before" : phase === "after" ? "After" : "Visual evidence",
+          }),
+        );
+        // Task #533: return the base64 separately so the loop can attach it as
+        // an image_url block on a follow-up user message and switch to the
+        // provider's VISION_MODEL for the next turn. The tool observation
+        // itself stays small (metadata only) — the image flows via the user
+        // message that the loop appends after the tool response.
+        return {
+          ok: true,
+          observation: JSON.stringify({
+            url: targetUrl || "(inline)",
+            bytes: shot.bytes ?? null,
+            width: shot.width ?? null,
+            height: shot.height ?? null,
+            mimeType: "image/png",
+            budgetRemaining: ctx.screenshotBudget.remaining,
+            attachedToNextTurn: true,
+            assetId: reservation.id,
+            contentUrl,
+            evidencePhase: phase,
+            evidencePairId: pairId,
+          }),
+          imageBase64: shot.base64 ?? undefined,
+          imageMimeType: "image/png",
+        };
+      });
+      return capture.state === "active"
+        ? capture.value
+        : { ok: false, observation: "ERROR: visual_evidence_project_unavailable" };
     }
     case "web_fetch": {
       const { webFetch } = await import("./agent-senses");
@@ -8196,6 +8217,18 @@ const CREATIVE_CREDIT_COST: Record<
 };
 
 async function executeCreativeTool(
+  ctx: ToolCtx,
+): Promise<{ ok: boolean; observation: string; noTruncate?: boolean }> {
+  const { withActiveProjectLifecycle } = await import("./project-lifecycle");
+  const lifecycle = await withActiveProjectLifecycle(ctx.input.projectId, async () =>
+    executeCreativeToolWithinLifecycle(ctx),
+  );
+  return lifecycle.state === "active"
+    ? lifecycle.value
+    : { ok: false, observation: "ERROR: project is unavailable" };
+}
+
+async function executeCreativeToolWithinLifecycle(
   ctx: ToolCtx,
 ): Promise<{ ok: boolean; observation: string; noTruncate?: boolean }> {
   const { name, args, workspace, input } = ctx;

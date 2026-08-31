@@ -85,6 +85,8 @@ export async function sendEmailWithStatus(opts: {
   subject: string;
   html: string;
   text?: string;
+  signal?: AbortSignal;
+  idempotencyKey?: string;
 }): Promise<EmailDeliveryStatus> {
   if (!resendEnabled()) {
     logger.debug(
@@ -96,13 +98,23 @@ export async function sendEmailWithStatus(opts: {
   try {
     const from = resolveDefaultSender("SMTP_FROM");
     const client = createClient();
-    const { error } = await client.emails.send({
-      from,
-      to: opts.to,
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-    });
+    type ResendSendOptions = NonNullable<Parameters<typeof client.emails.send>[1]> & {
+      signal?: AbortSignal;
+    };
+    const requestOptions: ResendSendOptions = {
+      ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    };
+    const { error } = await client.emails.send(
+      {
+        from,
+        to: opts.to,
+        subject: opts.subject,
+        html: opts.html,
+        text: opts.text,
+      },
+      requestOptions,
+    );
     if (error) {
       logger.warn(
         { err: error, to: opts.to, subject: opts.subject },

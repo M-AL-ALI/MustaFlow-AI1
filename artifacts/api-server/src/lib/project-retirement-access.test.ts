@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  canvasAbTestsTable,
+  canvasVariantsTable,
   previewSessionsTable,
   shareLinksTable,
   supportAccessGrantsTable,
@@ -11,6 +13,7 @@ import {
 import { initialProjectRetirementProgress } from "./project-retirement-contract";
 import {
   PROJECT_RETIREMENT_NONTERMINAL_SUPPORT_SESSION_STATUSES,
+  PROJECT_RETIREMENT_NONTERMINAL_CANVAS_AB_TEST_STATUSES,
   PROJECT_RETIREMENT_OPEN_GRANT_STATUSES,
   retireProjectAccessSurfaces,
 } from "./project-retirement-access";
@@ -64,6 +67,7 @@ describe("project retirement access revocation", () => {
       "approved",
       "applying",
     ]);
+    expect(PROJECT_RETIREMENT_NONTERMINAL_CANVAS_AB_TEST_STATUSES).toEqual(["running", "paused"]);
   });
 
   it("revokes only live project-bound access and returns an exact receipt", async () => {
@@ -78,6 +82,8 @@ describe("project retirement access revocation", () => {
         ],
       ],
       [supportZeroSessionsTable, [{ id: 41 }]],
+      [canvasVariantsTable, [{ id: 51 }, { id: 52 }, { id: 53 }]],
+      [canvasAbTestsTable, [{ id: 61 }, { id: 62 }]],
     ]);
     const harness = fakeTransaction(returnedRows);
     const progress = await retireProjectAccessSurfaces(harness.tx as never, {
@@ -92,16 +98,26 @@ describe("project retirement access revocation", () => {
       previewSessionsRevoked: 1,
       supportGrantsRevoked: 2,
       supportSessionsInterrupted: 1,
+      canvasShareTokensCleared: 3,
+      canvasAbTestsEnded: 2,
     });
     expect(harness.updates.map((call) => call.table)).toEqual([
       shareLinksTable,
       previewSessionsTable,
       supportAccessGrantsTable,
       supportZeroSessionsTable,
+      canvasVariantsTable,
+      canvasAbTestsTable,
     ]);
 
-    const [sharePredicate, previewPredicate, grantPredicate, sessionPredicate] =
-      harness.updates.map((call) => renderedPredicate(call.predicate));
+    const [
+      sharePredicate,
+      previewPredicate,
+      grantPredicate,
+      sessionPredicate,
+      canvasSharePredicate,
+      canvasAbPredicate,
+    ] = harness.updates.map((call) => renderedPredicate(call.predicate));
     expect(sharePredicate.sql).toContain('"share_links"."project_id" = $1');
     expect(sharePredicate.sql).toContain('"share_links"."revoked" = $2');
     expect(sharePredicate.params).toEqual([7, false]);
@@ -120,6 +136,12 @@ describe("project retirement access revocation", () => {
       "approved",
       "applying",
     ]);
+    expect(canvasSharePredicate.sql).toContain('"canvas_variants"."project_id" = $1');
+    expect(canvasSharePredicate.sql).toContain('"canvas_variants"."share_token" is not null');
+    expect(canvasSharePredicate.params).toEqual([7]);
+    expect(canvasAbPredicate.sql).toContain('"canvas_ab_tests"."project_id" = $1');
+    expect(canvasAbPredicate.sql).toContain('"canvas_ab_tests"."status" in ($2, $3)');
+    expect(canvasAbPredicate.params).toEqual([7, "running", "paused"]);
   });
 
   it("uses the database clock and writes one sanitized provenance event per revoked grant", async () => {
@@ -129,6 +151,8 @@ describe("project retirement access revocation", () => {
         [previewSessionsTable, [{ id: 2 }]],
         [supportAccessGrantsTable, [{ id: 3, ticketId: 30 }]],
         [supportZeroSessionsTable, [{ id: 4 }]],
+        [canvasVariantsTable, [{ id: 5 }]],
+        [canvasAbTestsTable, [{ id: 6 }]],
       ]),
     );
     await retireProjectAccessSurfaces(harness.tx as never, {
@@ -141,12 +165,18 @@ describe("project retirement access revocation", () => {
     const previewUpdate = harness.updates.find((call) => call.table === previewSessionsTable)!;
     const grantUpdate = harness.updates.find((call) => call.table === supportAccessGrantsTable)!;
     const sessionUpdate = harness.updates.find((call) => call.table === supportZeroSessionsTable)!;
+    const canvasShareUpdate = harness.updates.find((call) => call.table === canvasVariantsTable)!;
+    const canvasAbUpdate = harness.updates.find((call) => call.table === canvasAbTestsTable)!;
     expect(shareUpdate.values.revokedAt).toBeInstanceOf(SQL);
     expect(previewUpdate.values.revokedAt).toBeInstanceOf(SQL);
     expect(grantUpdate.values.decidedAt).toBeInstanceOf(SQL);
     expect(grantUpdate.values.revokedAt).toBeInstanceOf(SQL);
     expect(grantUpdate.values.closedAt).toBeInstanceOf(SQL);
     expect(sessionUpdate.values.completedAt).toBeInstanceOf(SQL);
+    expect(canvasShareUpdate.values.shareToken).toBeNull();
+    expect(canvasShareUpdate.values.updatedAt).toBeInstanceOf(SQL);
+    expect(canvasAbUpdate.values.status).toBe("ended");
+    expect(canvasAbUpdate.values.endedAt).toBeInstanceOf(SQL);
     expect(sessionUpdate.values.terminal).toEqual({
       contract: "support-zero-session-terminal-v1",
       outcome: "interrupted",
@@ -192,6 +222,8 @@ describe("project retirement access revocation", () => {
       previewSessionsRevoked: 0,
       supportGrantsRevoked: 0,
       supportSessionsInterrupted: 0,
+      canvasShareTokensCleared: 0,
+      canvasAbTestsEnded: 0,
     });
   });
 });

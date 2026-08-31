@@ -11,6 +11,16 @@ export type ProjectRetirementTargetProgress = {
 };
 
 export type ProjectRetirementProgress = {
+  /** Closed semantics identity; older/malformed receipts never authorize restore. */
+  semantics: "project-retirement-v2";
+  /**
+   * Minimal replay receipt written atomically with clearing the project tombstone.
+   * It intentionally carries no user content, provider response, hostname, or secret.
+   */
+  restore?: {
+    state: "restored";
+    restoredAt: string;
+  };
   reconciliation?: {
     generation: number;
     parentOperationId: string;
@@ -51,6 +61,8 @@ export type ProjectRetirementProgress = {
     previewSessionsRevoked: number;
     supportGrantsRevoked: number;
     supportSessionsInterrupted: number;
+    canvasShareTokensCleared: number;
+    canvasAbTestsEnded: number;
   };
   /** Legacy CDN objects under the numeric project prefix; keys never enter the receipt. */
   legacyR2: {

@@ -1,8 +1,18 @@
-import { and, eq, inArray, isNull, sql, type ExtractTablesWithRelations } from "drizzle-orm";
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  sql,
+  type ExtractTablesWithRelations,
+} from "drizzle-orm";
 import type { NodePgTransaction } from "drizzle-orm/node-postgres";
 import type * as DatabaseSchema from "@workspace/db/schema";
 import {
   previewSessionsTable,
+  canvasAbTestsTable,
+  canvasVariantsTable,
   shareLinksTable,
   supportAccessGrantsTable,
   supportGrantEventsTable,
@@ -21,6 +31,10 @@ export const PROJECT_RETIREMENT_NONTERMINAL_SUPPORT_SESSION_STATUSES = [
   "proposal_ready",
   "approved",
   "applying",
+] as const;
+export const PROJECT_RETIREMENT_NONTERMINAL_CANVAS_AB_TEST_STATUSES = [
+  "running",
+  "paused",
 ] as const;
 
 const SUPPORT_SESSION_RETIREMENT_TERMINAL = {
@@ -117,6 +131,34 @@ export async function retireProjectAccessSurfaces(
     )
     .returning({ id: supportZeroSessionsTable.id });
 
+  const clearedCanvasShareTokens = await tx
+    .update(canvasVariantsTable)
+    .set({
+      shareToken: null,
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(
+      and(
+        eq(canvasVariantsTable.projectId, input.projectId),
+        isNotNull(canvasVariantsTable.shareToken),
+      ),
+    )
+    .returning({ id: canvasVariantsTable.id });
+
+  const endedCanvasAbTests = await tx
+    .update(canvasAbTestsTable)
+    .set({
+      status: "ended",
+      endedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(
+      and(
+        eq(canvasAbTestsTable.projectId, input.projectId),
+        inArray(canvasAbTestsTable.status, PROJECT_RETIREMENT_NONTERMINAL_CANVAS_AB_TEST_STATUSES),
+      ),
+    )
+    .returning({ id: canvasAbTestsTable.id });
+
   return {
     ...input.progress,
     access: {
@@ -125,6 +167,8 @@ export async function retireProjectAccessSurfaces(
       previewSessionsRevoked: revokedPreviewSessions.length,
       supportGrantsRevoked: revokedSupportGrants.length,
       supportSessionsInterrupted: interruptedSupportSessions.length,
+      canvasShareTokensCleared: clearedCanvasShareTokens.length,
+      canvasAbTestsEnded: endedCanvasAbTests.length,
     },
   };
 }

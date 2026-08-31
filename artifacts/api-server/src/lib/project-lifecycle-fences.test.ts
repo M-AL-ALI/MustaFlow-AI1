@@ -36,8 +36,11 @@ const packagesRoutesSource = read("../routes/packages.ts");
 const workflowsRoutesSource = read("../routes/workflows.ts");
 const aiInlineRoutesSource = read("../routes/ai-inline.ts");
 const githubRoutesSource = read("../routes/github.ts");
+const sharingRoutesSource = read("../routes/sharing.ts");
 const assetsRoutesSource = read("../routes/assets.ts");
 const developerModeRoutesSource = read("../routes/developer-mode.ts");
+const snapshotObserveRoutesSource = read("../routes/snapshot-observe.ts");
+const imageGenerationJobsSource = read("./image-generation-jobs.ts");
 
 const routeBlock = (source: string, anchor: string): string => {
   const start = source.indexOf(anchor);
@@ -47,19 +50,19 @@ const routeBlock = (source: string, anchor: string): string => {
 };
 
 describe("project lifecycle mutation fences", () => {
-  it("preempts local work before Trash waits on the lifecycle lock", () => {
+  it("cancels local work only after the locked Trash acceptance commits", () => {
     const routes = read("../routes/projects.ts");
     const ownerDelete = routeBlock(routes, 'router.delete("/projects/:id"');
     expect(ownerDelete.indexOf("cancelLocalProjectJobs(params.data.id)")).toBeGreaterThan(-1);
-    expect(ownerDelete.indexOf("cancelLocalProjectJobs(params.data.id)")).toBeLessThan(
+    expect(ownerDelete.indexOf("cancelLocalProjectJobs(params.data.id)")).toBeGreaterThan(
       ownerDelete.indexOf("acceptProjectRetirement({"),
     );
-    expect(ownerDelete.indexOf("cancelLocalProjectProvisioning(params.data.id)")).toBeLessThan(
+    expect(ownerDelete.indexOf("cancelLocalProjectProvisioning(params.data.id)")).toBeGreaterThan(
       ownerDelete.indexOf("acceptProjectRetirement({"),
     );
     const adminBatch = routeBlock(routes, 'router.post(\n  "/admin/projects/retirement/batch"');
     expect(adminBatch.indexOf("cancelLocalProjectJobs(projectId)")).toBeGreaterThan(-1);
-    expect(adminBatch.indexOf("cancelLocalProjectJobs(projectId)")).toBeLessThan(
+    expect(adminBatch.indexOf("cancelLocalProjectJobs(projectId)")).toBeGreaterThan(
       adminBatch.indexOf("acceptProjectRetirement({"),
     );
   });
@@ -147,6 +150,7 @@ describe("project lifecycle mutation fences", () => {
       "router.use(snapshotObserveRouter)",
       "router.use(assetsRouter)",
       "router.use(githubRouter)",
+      "router.use(sharingRouter)",
       "router.use(containersRouter)",
       "router.use(imagesRouter)",
       "router.use(checkRunsRouter)",
@@ -166,6 +170,28 @@ describe("project lifecycle mutation fences", () => {
     expect(githubRoutesSource).toContain("acquireProjectLifecycleSession(projectId)");
     expect(githubRoutesSource).toContain("await lifecycleSession.release()");
     expect(assetsRoutesSource).toContain("requireAssetProjectLifecycle");
+  });
+
+  it("keeps GitHub provider writes and share-link creation behind the central response lock", () => {
+    const centralFence = routesIndexSource.indexOf(
+      "router.use(requireActiveProjectMutationLifecycleSession)",
+    );
+    const githubMount = routesIndexSource.indexOf("router.use(githubRouter)");
+    const sharingMount = routesIndexSource.indexOf("router.use(sharingRouter)");
+
+    expect(centralFence).toBeGreaterThan(-1);
+    expect(githubMount).toBeGreaterThan(centralFence);
+    expect(sharingMount).toBeGreaterThan(centralFence);
+
+    for (const path of [
+      '"/projects/:id/github/connect"',
+      '"/projects/:id/github/push"',
+      '"/projects/:id/github/create-branch"',
+      '"/projects/:id/github/open-pr"',
+    ]) {
+      expect(githubRoutesSource).toContain(path);
+    }
+    expect(sharingRoutesSource).toContain('"/projects/:id/share"');
   });
 
   it("keeps diagnostic and log observation reads provider-mutation free", () => {
@@ -231,7 +257,8 @@ describe("project lifecycle mutation fences", () => {
   });
 
   it("treats an active retirement duplicate as an existing scheduled receipt", () => {
-    expect(retirementSource).toContain('if (outcome.status === "duplicate") return operationId');
+    expect(retirementSource).toContain("return decideProjectRetirementSchedulingReceipt(outcome)");
+    expect(retirementSource).not.toContain("queueJobId: accepted.operationId");
   });
 
   it("does not report domain deletion until certificate and route absence are confirmed", () => {
@@ -285,6 +312,150 @@ describe("project lifecycle mutation fences", () => {
     ).toBeGreaterThanOrEqual(5);
     expect(containersSource).toContain("production_container_destroy_unconfirmed");
     expect(containersSource).toContain("preview_container_destroy_unconfirmed");
+  });
+
+  it("keeps every Zero-owned asset mutation inside the project lifecycle boundary", () => {
+    const placeUpload = agentLoopSource.slice(
+      agentLoopSource.indexOf('case "place_upload"'),
+      agentLoopSource.indexOf('case "list_files"'),
+    );
+    expect(placeUpload.indexOf("withActiveProjectLifecycle(input.projectId")).toBeLessThan(
+      placeUpload.indexOf("materializeProjectAsset({"),
+    );
+
+    const visualEvidence = agentLoopSource.slice(
+      agentLoopSource.indexOf('case "take_screenshot"'),
+      agentLoopSource.indexOf('case "web_fetch"'),
+    );
+    expect(visualEvidence.indexOf("withActiveProjectLifecycle(input.projectId")).toBeLessThan(
+      visualEvidence.indexOf("reservation = await reserveAsset({"),
+    );
+    expect(visualEvidence.indexOf("reservation = await reserveAsset({")).toBeLessThan(
+      visualEvidence.indexOf("await completeAsset({"),
+    );
+
+    const creativeWrapper = agentLoopSource.slice(
+      agentLoopSource.indexOf("async function executeCreativeTool("),
+      agentLoopSource.indexOf("async function executeCreativeToolWithinLifecycle("),
+    );
+    const creativeWork = agentLoopSource.slice(
+      agentLoopSource.indexOf("async function executeCreativeToolWithinLifecycle("),
+      agentLoopSource.indexOf(
+        "// ─────────────────────────────────────────────────────────────────────────────\n// Post-loop check runner",
+      ),
+    );
+    expect(creativeWrapper).toContain("withActiveProjectLifecycle(ctx.input.projectId");
+    expect(creativeWrapper).toContain("executeCreativeToolWithinLifecycle(ctx)");
+    expect(creativeWork).toContain("reserveAssetAgainstAvailableQuota({");
+    expect(creativeWork).toContain("await completeAsset({");
+  });
+
+  it("keeps every HTTP project-owned asset write behind one response lifecycle session", () => {
+    const centralFence = routesIndexSource.indexOf(
+      "router.use(requireActiveProjectMutationLifecycleSession)",
+    );
+    for (const mount of [
+      "router.use(snapshotObserveRouter)",
+      "router.use(assetsRouter)",
+      "router.use(imagesRouter)",
+      "router.use(imageGenRouter)",
+    ]) {
+      expect(routesIndexSource.indexOf(mount)).toBeGreaterThan(centralFence);
+    }
+
+    expect(assetsRoutesSource).toContain(
+      'router.post("/projects/:id/assets/reserve", requireProjectAccess("member")',
+    );
+    const assetLifecycle = assetsRoutesSource.indexOf(
+      'router.use("/assets/:assetId", requireAssetProjectLifecycle)',
+    );
+    for (const route of [
+      'router.post("/assets/:assetId/alt-text-proposal"',
+      'router.put("/assets/:assetId/content"',
+      'router.delete("/assets/:assetId/reservation"',
+      'router.patch("/assets/:assetId"',
+      'router.post("/assets/:assetId/derivatives"',
+      'router.delete("/assets/:assetId"',
+    ]) {
+      expect(assetsRoutesSource.indexOf(route)).toBeGreaterThan(assetLifecycle);
+    }
+    const contentUpload = routeBlock(assetsRoutesSource, 'router.put("/assets/:assetId/content"');
+    expect(contentUpload.indexOf("holdResponseProjectLifecycleSession(res)")).toBeLessThan(
+      contentUpload.indexOf("await putAssetStream({"),
+    );
+    expect(contentUpload.indexOf("await completeAsset({")).toBeLessThan(
+      contentUpload.indexOf("await releaseLifecycleHold()"),
+    );
+    const derivatives = routeBlock(
+      assetsRoutesSource,
+      'router.post("/assets/:assetId/derivatives"',
+    );
+    expect(derivatives).toContain("const reserved = await reserveAsset({");
+    expect(derivatives).toContain("await completeAsset({");
+    expect(assetsRoutesSource).toContain('"/projects/:id/assets/:assetId/materialize"');
+    expect(assetsRoutesSource).toContain('"/projects/:id/assets/:assetId/replace"');
+    expect(assetsRoutesSource).not.toContain("withActiveProjectLifecycle");
+
+    const generatedImage = routeBlock(
+      imagesRoutesSource,
+      'router.post(\n  "/projects/:id/generate-image"',
+    );
+    expect(generatedImage.indexOf("holdResponseProjectLifecycleSession(res)")).toBeLessThan(
+      generatedImage.indexOf("reserveAssetAgainstAvailableQuota({"),
+    );
+    expect(generatedImage.indexOf("await completeAsset({")).toBeLessThan(
+      generatedImage.indexOf("await releaseLifecycleHold()"),
+    );
+    expect(imagesRoutesSource).not.toContain("withActiveProjectLifecycle");
+
+    const snapshotRoute = routeBlock(
+      snapshotObserveRoutesSource,
+      'router.post("/projects/:id/observe/snapshot"',
+    );
+    expect(snapshotRoute).toContain("dependencies.complete({");
+    expect(snapshotObserveRoutesSource).toContain("const asset = await reserveAsset({");
+    expect(snapshotObserveRoutesSource).toContain("await completeAsset({");
+    expect(snapshotObserveRoutesSource).not.toContain("withActiveProjectLifecycle");
+  });
+
+  it("releases HTTP image admission before detached workers reacquire without nesting", () => {
+    const generateRoute = routeBlock(imageGenRoutesSource, 'router.post("/images/generate"');
+    expect(generateRoute.indexOf("requireActiveProjectLifecycleFor(projectId")).toBeLessThan(
+      generateRoute.indexOf("enqueueImageJob(baseOpts)"),
+    );
+    const editRoute = routeBlock(imageGenRoutesSource, 'router.post("/images/:id/edit"');
+    expect(editRoute.indexOf("admitGeneratedImageProjectLifecycle(parent.projectId")).toBeLessThan(
+      editRoute.indexOf("enqueueImageEditJob({"),
+    );
+    const deleteRoute = routeBlock(imageGenRoutesSource, 'router.delete("/images/:id"');
+    expect(
+      deleteRoute.indexOf("admitGeneratedImageProjectLifecycle(existing.projectId"),
+    ).toBeLessThan(deleteRoute.indexOf("deleteReadyAsset({"));
+
+    const enqueueGeneration = imageGenerationJobsSource.slice(
+      imageGenerationJobsSource.indexOf("export async function enqueueImageJob("),
+      imageGenerationJobsSource.indexOf("async function runImageJob("),
+    );
+    const enqueueEdit = imageGenerationJobsSource.slice(
+      imageGenerationJobsSource.indexOf("export async function enqueueImageEditJob("),
+      imageGenerationJobsSource.indexOf("async function runImageEditJob("),
+    );
+    expect(enqueueGeneration).toContain("void runImageJob(");
+    expect(enqueueGeneration).not.toContain("await runImageJob(");
+    expect(enqueueEdit).toContain("void runImageEditJob(");
+    expect(enqueueEdit).not.toContain("await runImageEditJob(");
+
+    for (const worker of ["runImageJob", "runImageEditJob"]) {
+      const start = imageGenerationJobsSource.indexOf(`async function ${worker}(`);
+      const next = imageGenerationJobsSource.indexOf("\nasync function ", start + 20);
+      const body = imageGenerationJobsSource.slice(start, next < 0 ? undefined : next);
+      expect(body).toContain("acquireProjectLifecycleSession(opts.projectId)");
+      expect(body.indexOf("acquireProjectLifecycleSession(opts.projectId)")).toBeLessThan(
+        body.indexOf("await beginAssetUpload({"),
+      );
+      expect(body).not.toContain("requireActiveProjectLifecycleFor");
+      expect(body).not.toContain("withActiveProjectLifecycle");
+    }
   });
 
   it("keeps snapshot upload and domain fulfillment inside lifecycle receipts", () => {
