@@ -465,19 +465,6 @@ export function decideProjectRetirementReceiptMode(input: {
     : "replace_incompatible_terminal";
 }
 
-export function planLegacyProjectRetirementAdoptions(input: {
-  deletedProjectIds: number[];
-  projectsWithReceipts: ReadonlySet<number>;
-}): Array<{ projectId: number; operationId: string }> {
-  return [...new Set(input.deletedProjectIds)]
-    .filter((projectId) => !input.projectsWithReceipts.has(projectId))
-    .sort((left, right) => left - right)
-    .map((projectId) => ({
-      projectId,
-      operationId: legacyProjectRetirementOperationId(projectId),
-    }));
-}
-
 export type ProjectRetirementSchedulingReceipt =
   | { state: "enqueued"; jobId: string }
   | { state: "already_scheduled" }

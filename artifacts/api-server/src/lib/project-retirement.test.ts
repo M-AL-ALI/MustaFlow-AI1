@@ -300,22 +300,6 @@ describe("project retirement foundation", () => {
     ).toEqual({ allowed: true, reason: "legacy_admin_reconciliation" });
   });
 
-  it("adopts legacy tombstones once with stable deterministic identities", () => {
-    const first = retirement.planLegacyProjectRetirementAdoptions({
-      deletedProjectIds: [9, 4, 9],
-      projectsWithReceipts: new Set(),
-    });
-    expect(first).toEqual([
-      { projectId: 4, operationId: "project-retirement:legacy:v2:4" },
-      { projectId: 9, operationId: "project-retirement:legacy:v2:9" },
-    ]);
-    const second = retirement.planLegacyProjectRetirementAdoptions({
-      deletedProjectIds: [4, 9],
-      projectsWithReceipts: new Set(first.map((entry) => entry.projectId)),
-    });
-    expect(second).toEqual([]);
-  });
-
   it("uses a fresh collision-safe identity when replacing an incompatible terminal", () => {
     expect(
       retirement.projectRetirementOperationIdForReceiptMode({

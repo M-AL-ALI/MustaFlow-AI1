@@ -5553,13 +5553,15 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         if (!project) return { ok: false, observation: "ERROR: project not found" };
         const { materializeProjectAsset } = await import("../routes/assets");
         const { withActiveProjectLifecycle } = await import("./project-lifecycle");
-        const lifecycle = await withActiveProjectLifecycle(input.projectId, async () =>
-          materializeProjectAsset({
-            userId: project.ownerUserId,
-            projectId: input.projectId,
-            assetId: id,
-            path: args.path,
-          }),
+        const lifecycle = await withActiveProjectLifecycle(
+          input.projectId,
+          async () =>
+            await materializeProjectAsset({
+              userId: project.ownerUserId,
+              projectId: input.projectId,
+              assetId: id,
+              path: args.path,
+            }),
         );
         if (lifecycle.state === "inactive") {
           return { ok: false, observation: "ERROR: project is unavailable" };
