@@ -2,14 +2,22 @@
   "schema": "nabuflow-cloudflare-cost-controls-v1",
   "capturedAt": "2026-08-30",
   "status": "lab_verified_awaiting_governed_rollout",
-  "database": "none",
+  "database": {
+    "unit": "none",
+    "releaseGate": "ora_gate",
+    "releaseGateEnvironment": "lab",
+    "releaseGateStore": "A:/NabuFlowLab/.postgres/ora-gate"
+  },
   "environment": "A:/NabuFlowLab/work",
   "store": "A:/NabuFlowLab/.pnpm-store",
   "kind": "application-worker-schema-contract-hardening",
   "identity": {
     "branch": "codex/cloudflare-cost-controls",
     "baseSha": "28133158cf9e4fbb56efef3f095ec7fc59a178f2",
-    "baseTree": "c242958e6283c7d5ff0f5d6d24ce212a943e5bd5"
+    "baseTree": "c242958e6283c7d5ff0f5d6d24ce212a943e5bd5",
+    "verifiedImplementationSha": "49c7ec5c2e0351fd3ee6d051b81d9c205cb1a676",
+    "rolloutGuardSha": "2f2993cf70fc4df66b549f86ad64929c0d931230",
+    "rolloutGuardTree": "9e90dd82b00538c6610f2cc1c26477941be6beb1"
   },
   "trashContract": {
     "preserves": [
@@ -81,9 +89,20 @@
     },
     "runtimeWorker": { "files": 36, "passed": 330 },
     "tenantRuntimeContracts": { "files": 20, "passed": 196 },
+    "releaseGate": {
+      "sha": "49c7ec5c2e0351fd3ee6d051b81d9c205cb1a676",
+      "passed": 22,
+      "warned": 0,
+      "failed": 0,
+      "database": "ora_gate",
+      "environment": "lab",
+      "store": "A:/NabuFlowLab/.postgres/ora-gate",
+      "kind": "test-harness",
+      "receipt": "A:/NabuFlowLab/evidence/cloudflare-cost-controls-2026-08-30/release-gate-final-49c7ec5c-retry.txt"
+    },
     "typecheck": "passed",
     "lint": "passed",
-    "prettierChangedFiles": 209,
+    "prettierChangedFiles": 213,
     "diffCheck": "passed",
     "lockfileChanges": 0,
     "newCredentialPatternHits": 0

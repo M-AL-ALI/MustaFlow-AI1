@@ -3,7 +3,7 @@
 Date: 2026-08-30
 Status: implementation verified in the lab; production activation requires the
 governed rollout described below
-Database: none for lab verification
+Database: `none` for isolated unit verification; `ora_gate` for the release gate
 Environment: `A:/NabuFlowLab/work`
 Store: `A:/NabuFlowLab/.pnpm-store`
 Kind: application, Worker, schema, and contract hardening
@@ -94,20 +94,27 @@ clone contract exists.
 
 Production activation is ordered and must stop at the first typed discrepancy:
 
-1. Merge and publish the exact verified application tree.
-2. Prove the boot migration count and `/api/version` commit/tree.
-3. Redeploy every changed Worker surface from that exact SHA and verify its
-   `CF_VERSION_METADATA` stamp.
-4. Wait past the old signed-URL window, then run bounded asset-storage
+1. Merge the exact verified application tree without publishing it yet.
+2. Publish the application once with `PROJECT_RETIREMENT_EXECUTION_ENABLED`
+   absent. Prove the migration and `/api/version` commit/tree, and prove no
+   retirement worker registered or legacy Trash row was adopted.
+3. Redeploy the Runtime, acceptance, and snapshot Worker surfaces from that
+   exact SHA. Verify every available `CF_VERSION_METADATA` stamp and stop if the
+   snapshot production control path cannot be identified without placeholder
+   configuration.
+4. Set `PROJECT_RETIREMENT_EXECUTION_ENABLED=true` through hidden production
+   configuration and republish once. Prove the boot migration count, worker
+   registration, and exact application commit/tree again.
+5. Wait past the old signed-URL window, then run bounded asset-storage
    reconciliation until `remainingUnmeasured` is zero.
-5. Re-read project 51 and the exact batch set.
-6. Invoke one governed admin retirement batch for
+6. Re-read project 51 and the exact batch set.
+7. Invoke one governed admin retirement batch for
    `1..50,52,53,54,55`; never use a range expansion inside the product.
-7. Poll every operation receipt to a completed or typed partial terminal.
-8. Prove retired projects have no serving routes or running tenant runtimes and
+8. Poll every operation receipt to a completed or typed partial terminal.
+9. Prove retired projects have no serving routes or running tenant runtimes and
    prove project 51 is unchanged and healthy.
-9. Remove a duplicate acceptance Worker only after the canonical disabled Worker
-   is proven live by exact source identity.
+10. Remove a duplicate acceptance Worker only after the canonical disabled Worker
+    is proven live by exact source identity.
 
 No hard project deletion, database-row deletion, source deletion, secret
 deletion, asset deletion while referenced, Fly mutation, or pantry/build-kitchen
@@ -130,7 +137,12 @@ change is part of this rollout.
   Normalized failure delta versus the recorded base: zero.
 - Root typecheck: passed.
 - Root lint: passed.
-- Changed-file Prettier: 209 files checked, passed.
+- Release gate on implementation tip `49c7ec5c2e0351fd3ee6d051b81d9c205cb1a676`:
+  22 passed, 0 warned, 0 failed; database `ora_gate`, environment lab, store A.
+- Rollout-guard code tip: `2f2993cf70fc4df66b549f86ad64929c0d931230`;
+  tree `9e90dd82b00538c6610f2cc1c26477941be6beb1`.
+- Changed-file Prettier: 213 files checked across the implementation and guard
+  follow-up, passed.
 - `git diff --check`: passed.
 - High-confidence secret scan: no newly added credential-shaped literal.
 - Lockfile changes: zero.
@@ -157,3 +169,21 @@ under `A:/NabuFlowLab/evidence/cloudflare-cost-controls-2026-08-30/`.
 5. **The acceptance publish path was implicit.** Fixed with an explicit guarded
    manifest script. Preventive: the acceptance configuration and deploy helper
    are covered by contract tests.
+6. **Application boot could begin provider cleanup before compatible Workers were
+   live.** Fixed by making retirement execution explicitly opt-in and disabled by
+   default. Preventive: exact-value activation tests and the two-stage rollout
+   contract keep Trash writes and cleanup fail closed until Worker parity is
+   proven.
+7. **Trash promised automatic permanent removal although no purger exists.** Fixed
+   by describing only the real 30-day recovery window until governed purge ships.
+   Preventive: a web regression test forbids the false terminal phrase.
+8. **The first final release-gate attempt had no local test database.** It failed
+   19/22 with loopback connection refusals and did not authorize publication. The
+   dedicated A-drive `ora_gate` harness was started and bootstrapped using the CI
+   sequence; the clean retry passed 22/22. Preventive: every gate receipt names its
+   database, environment, store, and kind.
+9. **C-drive free space fell during the release workload.** The cause was measured:
+   the Windows-managed pagefile expanded to 13,946,441,728 bytes. No repository,
+   package, test, PostgreSQL, or browser artifact was written to C. Preventive:
+   paired drive readings remain mandatory; OS-managed virtual memory is reported
+   rather than deleted or reconfigured.
