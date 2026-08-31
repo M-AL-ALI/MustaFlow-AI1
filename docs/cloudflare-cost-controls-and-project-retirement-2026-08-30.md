@@ -1,8 +1,8 @@
 # Cloudflare cost controls and recoverable project retirement
 
 Date: 2026-08-30
-Status: implementation verified in the lab; production activation requires the
-governed rollout described below
+Status: application and compatible Worker parity published; governed retirement
+activation and batch remain pending
 Database: `none` for isolated unit verification; `ora_gate` for the release gate
 Environment: `A:/NabuFlowLab/work`
 Store: `A:/NabuFlowLab/.pnpm-store`
@@ -72,7 +72,8 @@ cache state cannot revive a restored draft.
 - Tenant runtime sandboxes use Cloudflare's `basic` instance type. The trusted
   pantry and build kitchen remain separate service bindings and are unchanged.
 - `deploy:acceptance` is an explicit guarded script in the Runtime Worker package
-  manifest. This is the only manifest change; no dependency or lockfile changed.
+  manifest. The dormant snapshot package's generic and production deploy scripts
+  are explicit fail-closed guards. No dependency or lockfile changed.
 
 ### Asset byte accounting
 
@@ -98,10 +99,16 @@ Production activation is ordered and must stop at the first typed discrepancy:
 2. Publish the application once with `PROJECT_RETIREMENT_EXECUTION_ENABLED`
    absent. Prove the migration and `/api/version` commit/tree, and prove no
    retirement worker registered or legacy Trash row was adopted.
-3. Redeploy the Runtime, acceptance, and snapshot Worker surfaces from that
-   exact SHA. Verify every available `CF_VERSION_METADATA` stamp and stop if the
-   snapshot production control path cannot be identified without placeholder
-   configuration.
+3. Inventory the live Worker surfaces, then redeploy every Worker that is both
+   live and changed from that exact SHA. Verify every available
+   `CF_VERSION_METADATA` stamp. The 2026-08-31 provider inventory found only the
+   Runtime and acceptance Workers live; both were redeployed from
+   `b001cba86e3f163e00d3094cf82360347c28ae9f`. No snapshot Worker exists in the
+   account, and the checked snapshot configuration contains placeholder KV ids,
+   no production route, and no version metadata. Its production script therefore
+   fails closed, as does its generic deploy script. Activation must stop if a
+   snapshot Worker later appears without an audited configuration, guarded
+   deployment path, and source-identity proof.
 4. Set `PROJECT_RETIREMENT_EXECUTION_ENABLED=true` through hidden production
    configuration and republish once. Prove the boot migration count, worker
    registration, and exact application commit/tree again.
@@ -113,8 +120,22 @@ Production activation is ordered and must stop at the first typed discrepancy:
 8. Poll every operation receipt to a completed or typed partial terminal.
 9. Prove retired projects have no serving routes or running tenant runtimes and
    prove project 51 is unchanged and healthy.
-10. Remove a duplicate acceptance Worker only after the canonical disabled Worker
-    is proven live by exact source identity.
+10. Record any duplicate acceptance Worker for a separate, explicit provider
+    deletion authorization. Do not delete it during retirement activation.
+
+### Live rollout receipts on 2026-08-31
+
+- Application commit `b001cba86e3f163e00d3094cf82360347c28ae9f`, tree
+  `221ba04c2c3a33ae82918903c1fac06d26e9b223`, served by both governed version
+  endpoints; `/api/healthz` reported `startupMigrations: "ok"`.
+- Runtime Worker version `88f99983-ad03-4d40-92f9-c0cf1f34a56a`, active at
+  100%, with exact full-SHA message and `git-b001cba8` tag.
+- Acceptance Worker version `2c3caa96-4c40-4f53-a114-463c17638518`, active at
+  100%, with exact full-SHA message and `ACCEPTANCE_STAGING_ENABLED=false`.
+- Live Cloudflare Worker inventory contained no `mustaflow-snapshot-worker`.
+- `PROJECT_RETIREMENT_EXECUTION_ENABLED` remained absent during this publication;
+  boot logs carried the expected fail-closed warning and no retirement mutation
+  was invoked.
 
 No hard project deletion, database-row deletion, source deletion, secret
 deletion, asset deletion while referenced, Fly mutation, or pantry/build-kitchen
@@ -187,3 +208,20 @@ under `A:/NabuFlowLab/evidence/cloudflare-cost-controls-2026-08-30/`.
    package, test, PostgreSQL, or browser artifact was written to C. Preventive:
    paired drive readings remain mandatory; OS-managed virtual memory is reported
    rather than deleted or reconfigured.
+10. **A dormant snapshot package still exposed an unsafe production command.**
+    Live Cloudflare inventory proved no snapshot Worker exists, while the checked
+    configuration still contains placeholders. Fixed by making production deploy
+    fail closed. Preventive: a regression test forbids both generic and production
+    Wrangler deployment until the surface has an audited configuration and
+    identity path.
+11. **The shared Owner refusal named only Admin Page access, even when protecting
+    project retirement.** Fixed with action-neutral factual copy. Preventive: the
+    central authorization test exercises the retirement path and pins the receipt.
+12. **The retirement design prose allowed restore after any terminal although the
+    implementation correctly requires completed cleanup.** Fixed by naming the
+    completed prerequisite. Preventive: restore tests continue to reject accepted,
+    running, and non-completed terminal operations.
+13. **The rollout text instructed deletion of a duplicate acceptance Worker without
+    separate irreversible-action authority.** No deletion occurred. Fixed by
+    moving that observation to a separate authorization boundary. Preventive: the
+    activation contract now forbids duplicate cleanup during retirement rollout.

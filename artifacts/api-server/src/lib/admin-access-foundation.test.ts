@@ -30,7 +30,12 @@ vi.mock("@workspace/db", () => ({
 }));
 vi.mock("./logger", () => ({ logger: { error: vi.fn() } }));
 
-import { requireAdmin, requireSupportResolver, staffRoleAllowsRequest } from "./adminAuth";
+import {
+  requireAdmin,
+  requireOwner,
+  requireSupportResolver,
+  staffRoleAllowsRequest,
+} from "./adminAuth";
 import { decideStaffRemoval, decideStaffRoleChange } from "./admin-role-policy";
 
 function response() {
@@ -141,6 +146,38 @@ describe("Admin Page access foundation", () => {
         actorRole: "operator",
         kind: "refusal",
         outcome: "role_lacks_action",
+      }),
+    ]);
+  });
+
+  it("keeps the shared Owner refusal truthful for every protected action", async () => {
+    state.role = "operator";
+    const req = request("/api/admin/projects/retirement/batch", "POST");
+    req.staffPrincipal = {
+      userId: "operator_test",
+      role: "operator",
+      source: "user_roles",
+      grantedBy: "owner_test",
+    };
+    const { res, result } = response();
+    const next = vi.fn() as unknown as NextFunction;
+
+    await requireOwner(req, res, next);
+
+    expect(result).toEqual({
+      statusCode: 403,
+      body: {
+        error: "Only an Owner can perform this action.",
+        code: "admin_owner_required",
+      },
+    });
+    expect(next).not.toHaveBeenCalled();
+    expect(state.receipts).toEqual([
+      expect.objectContaining({
+        actorUserId: "operator_test",
+        actorRole: "operator",
+        kind: "refusal",
+        outcome: "owner_required",
       }),
     ]);
   });

@@ -58,7 +58,7 @@ cleanup for existing Trash projects; it does not restore or wake them.
 
 Source files, versions, assets, secrets, database data, and all other project
 rows remain for Trash recovery. Restore refuses while cleanup is accepted or
-running. After a terminal it only clears the tombstone; it never republishes,
+running. After completed cleanup it only clears the tombstone; it never republishes,
 recreates, wakes, or starts infrastructure.
 
 ## Failure contract

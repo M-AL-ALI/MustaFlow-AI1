@@ -5,8 +5,8 @@
   "description": "Cloudflare Worker that serves MustaFlow published project snapshots from R2",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:production": "wrangler deploy --env production",
+    "deploy": "node -e \"console.error('Deployment is blocked: no live snapshot Worker exists and the checked configuration contains placeholders.'); process.exit(1)\"",
+    "deploy:production": "node -e \"console.error('Production deployment is blocked: no live snapshot Worker exists and the checked configuration contains placeholders.'); process.exit(1)\"",
     "typecheck": "tsc --noEmit",
     "tail": "wrangler tail"
   },

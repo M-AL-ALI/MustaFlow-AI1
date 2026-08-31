@@ -237,7 +237,7 @@ export async function requireOwner(req: Request, res: Response, next: NextFuncti
   }
   await recordRefusal(req, principal.userId, principal.role, "owner_required");
   res.status(403).json({
-    error: "Only an Owner can change Admin Page access.",
+    error: "Only an Owner can perform this action.",
     code: "admin_owner_required",
   });
 }

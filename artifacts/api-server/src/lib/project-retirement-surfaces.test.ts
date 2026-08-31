@@ -101,4 +101,20 @@ describe("project retirement route and serving surfaces", () => {
     expect(snapshotWorker).toContain("cache.put(cacheKey, response.clone())");
     expect(runtimeWorker).toContain('headers.set("cache-control", "private, no-store")');
   });
+
+  it("keeps the dormant snapshot Worker production path fail closed", () => {
+    const manifest = JSON.parse(source("../../../snapshot-worker/package.json")) as {
+      scripts?: Record<string, string>;
+    };
+    const deploy = manifest.scripts?.deploy ?? "";
+    const deployProduction = manifest.scripts?.["deploy:production"] ?? "";
+
+    expect(deploy).toContain("process.exit(1)");
+    expect(deploy).toContain("no live snapshot Worker exists");
+    expect(deploy).not.toContain("wrangler deploy");
+    expect(deployProduction).toContain("process.exit(1)");
+    expect(deployProduction).toContain("no live snapshot Worker exists");
+    expect(deployProduction).toContain("checked configuration contains placeholders");
+    expect(deployProduction).not.toContain("wrangler deploy");
+  });
 });
