@@ -26,11 +26,13 @@ import {
 import { CloudflareRuntimeControlError } from "./cloudflare-runtime-provider";
 import {
   discoverCloudflareSecurityResources,
+  inventoryCustomHostnamesByHostname,
   inventoryHostnameKVRoutesByProject,
   purgeCacheForHostnames,
   retireCloudflareSecurityResource,
   retireCustomHostname,
   retireHostnameKV,
+  retireLegacyR2ProjectPrefix,
   retireObservedHostnameKV,
 } from "./cloudflare";
 import {
@@ -40,21 +42,31 @@ import {
 } from "./durable-queue";
 import {
   decideProjectJobAdmission,
+  decideProjectRetirementReceiptMode,
   decideProjectRetirementReconciliation,
+  decideProjectRetirementSchedulingReceipt,
   classifyStoredRuntimePointer,
+  hasCurrentProjectRetirementCompletionEvidence,
   initialProjectRetirementProgress,
-  planLegacyProjectRetirementAdoptions,
   planHostnameCertificateRetirements,
+  projectRetirementOperationIdForReceiptMode,
+  projectRetirementCacheHostnames,
+  projectRetirementProviderHostnames,
   PROJECT_LIFECYCLE_LOCK_NAMESPACE,
   PROJECT_RETIREMENT_LEASE_MINUTES,
   PROJECT_RETIREMENT_MAX_ATTEMPTS,
   PROJECT_RETIREMENT_TASK_STATUSES,
   projectRetirementFailure,
   type ProjectJobAdmission,
+  type ExistingProjectRetirementReceipt,
   type ProjectRetirementFailure,
+  type ProjectRetirementPreflightRefusalCode,
   type ProjectRetirementRuntimeTarget,
+  type ProjectRetirementSchedulingReceipt,
 } from "./project-retirement-contract";
 import { resolveLegacyHostnameKvPosture } from "./project-retirement-activation";
+import { retireProjectAccessSurfaces } from "./project-retirement-access";
+import { readProjectRetirementPreflight } from "./project-retirement-preflight";
 
 export * from "./project-retirement-contract";
 
@@ -64,6 +76,102 @@ export type AcceptedProjectRetirement = {
   state: "accepted";
 };
 
+export type CompletedProjectRetirement = {
+  operationId: string;
+  projectId: number;
+  state: "completed";
+};
+
+export type RefusedProjectRetirement = {
+  projectId: number;
+  state: "refused";
+  code: ProjectRetirementPreflightRefusalCode;
+};
+
+export type ProjectRetirementPreflightResult =
+  | { projectId: number; state: "allowed" }
+  | RefusedProjectRetirement;
+
+type ProjectRetirementTransaction = Parameters<typeof retireProjectAccessSurfaces>[0];
+
+async function readLatestProjectRetirementOperation(
+  tx: ProjectRetirementTransaction,
+  projectId: number,
+): Promise<ExistingProjectRetirementReceipt | null> {
+  const [operation] = await tx
+    .select({
+      id: projectRetirementOperationsTable.id,
+      state: projectRetirementOperationsTable.state,
+      completedAt: projectRetirementOperationsTable.completedAt,
+      progress: projectRetirementOperationsTable.progress,
+    })
+    .from(projectRetirementOperationsTable)
+    .where(eq(projectRetirementOperationsTable.projectId, projectId))
+    .orderBy(desc(projectRetirementOperationsTable.createdAt))
+    .limit(1);
+  return operation ?? null;
+}
+
+/**
+ * Read-only early check used by HTTP callers for a prompt refusal. Acceptance
+ * repeats the same check under the lifecycle advisory lock; callers must not
+ * mutate or cancel work until that locked decision has committed.
+ */
+export async function preflightProjectRetirement(input: {
+  projectId: number;
+  ownerId?: string;
+  allowLegacyDeleted?: boolean;
+}): Promise<ProjectRetirementPreflightResult | null> {
+  return db.transaction(async (tx) => {
+    const predicates = [
+      eq(projectsTable.id, input.projectId),
+      ...(input.allowLegacyDeleted ? [] : [isNull(projectsTable.deletedAt)]),
+      ...(input.ownerId ? [eq(projectsTable.ownerId, input.ownerId)] : []),
+    ];
+    const [existing] = await tx
+      .select({
+        id: projectsTable.id,
+        testContainerId: projectsTable.testContainerId,
+        dbProvider: projectsTable.dbProvider,
+        provisioningStatus: projectsTable.provisioningStatus,
+        previewDbStatus: projectsTable.previewDbStatus,
+        deletedAt: projectsTable.deletedAt,
+      })
+      .from(projectsTable)
+      .where(and(...predicates))
+      .limit(1);
+    if (!existing) return null;
+    if (existing.deletedAt !== null) {
+      const existingOperation = await readLatestProjectRetirementOperation(tx, existing.id);
+      const receiptMode = decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation,
+      });
+      if (receiptMode === "reuse_in_flight" || receiptMode === "reuse_completed") {
+        return { projectId: existing.id, state: "allowed" as const };
+      }
+      if (receiptMode === "refuse_incompatible_active") {
+        return {
+          projectId: existing.id,
+          state: "refused" as const,
+          code: "project_retirement_receipt_upgrade_in_progress" as const,
+        };
+      }
+      if (receiptMode === "refuse_terminal_reconciliation_required") {
+        return {
+          projectId: existing.id,
+          state: "refused" as const,
+          code: "project_retirement_reconciliation_required" as const,
+        };
+      }
+    }
+    const preflight = await readProjectRetirementPreflight(tx, existing);
+    return preflight.allowed
+      ? { projectId: existing.id, state: "allowed" as const }
+      : { projectId: existing.id, state: "refused" as const, code: preflight.code };
+  });
+}
+
 /**
  * The single mutation boundary for both owner and bounded-admin retirement.
  * Tombstone, receipt, schedule suspension and provenance commit together.
@@ -72,36 +180,105 @@ export async function acceptProjectRetirement(input: {
   projectId: number;
   requestedBy: string;
   ownerId?: string;
-}): Promise<AcceptedProjectRetirement | null> {
+  allowLegacyDeleted?: boolean;
+}): Promise<
+  AcceptedProjectRetirement | CompletedProjectRetirement | RefusedProjectRetirement | null
+> {
   const { disableProjectDeploymentSchedulesStatement } = await import("./deployment-scheduler");
-  const operationId = crypto.randomUUID();
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${input.projectId})`,
     );
     const predicates = [
       eq(projectsTable.id, input.projectId),
-      isNull(projectsTable.deletedAt),
+      ...(input.allowLegacyDeleted ? [] : [isNull(projectsTable.deletedAt)]),
       ...(input.ownerId ? [eq(projectsTable.ownerId, input.ownerId)] : []),
     ];
     const [existing] = await tx
-      .select({ id: projectsTable.id, name: projectsTable.name })
+      .select({
+        id: projectsTable.id,
+        name: projectsTable.name,
+        testContainerId: projectsTable.testContainerId,
+        dbProvider: projectsTable.dbProvider,
+        provisioningStatus: projectsTable.provisioningStatus,
+        previewDbStatus: projectsTable.previewDbStatus,
+        deletedAt: projectsTable.deletedAt,
+      })
       .from(projectsTable)
       .where(and(...predicates))
       .limit(1);
     if (!existing) return null;
-    const [project] = await tx
-      .update(projectsTable)
-      .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-      .where(and(...predicates))
-      .returning({ id: projectsTable.id });
+    const existingOperation =
+      existing.deletedAt === null
+        ? null
+        : await readLatestProjectRetirementOperation(tx, existing.id);
+    const receiptMode = decideProjectRetirementReceiptMode({
+      deleted: existing.deletedAt !== null,
+      existingOperation,
+    });
+    if (receiptMode === "refuse_incompatible_active") {
+      return {
+        projectId: existing.id,
+        state: "refused" as const,
+        code: "project_retirement_receipt_upgrade_in_progress",
+      };
+    }
+    if (receiptMode === "refuse_terminal_reconciliation_required") {
+      return {
+        projectId: existing.id,
+        state: "refused" as const,
+        code: "project_retirement_reconciliation_required",
+      };
+    }
+    if (receiptMode === "reuse_completed") {
+      return {
+        operationId: existingOperation!.id,
+        projectId: existing.id,
+        state: "completed" as const,
+      };
+    }
+    if (receiptMode === "reuse_in_flight") {
+      return {
+        operationId: existingOperation!.id,
+        projectId: existing.id,
+        state: "accepted" as const,
+      };
+    }
+    const preflight = await readProjectRetirementPreflight(tx, existing);
+    if (!preflight.allowed) {
+      return {
+        projectId: existing.id,
+        state: "refused" as const,
+        code: preflight.code,
+      };
+    }
+    const operationId = projectRetirementOperationIdForReceiptMode({
+      mode: receiptMode,
+      projectId: existing.id,
+      freshOperationId: crypto.randomUUID(),
+    });
+    const project =
+      receiptMode === "retire_active"
+        ? (
+            await tx
+              .update(projectsTable)
+              .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
+              .where(and(...predicates, isNull(projectsTable.deletedAt)))
+              .returning({ id: projectsTable.id })
+          )[0]
+        : { id: existing.id };
     if (!project) return null;
+    const progress = await retireProjectAccessSurfaces(tx, {
+      projectId: project.id,
+      actorUserId: input.requestedBy,
+      progress: initialProjectRetirementProgress(),
+    });
     await tx.insert(projectRetirementOperationsTable).values({
       id: operationId,
       projectId: project.id,
       requestedBy: input.requestedBy,
       state: "accepted",
-      progress: initialProjectRetirementProgress(),
+      progress,
     });
     await tx.execute(disableProjectDeploymentSchedulesStatement(project.id));
     await tx
@@ -113,14 +290,16 @@ export async function acceptProjectRetirement(input: {
           inArray(assetAnalysisEventsTable.status, ["queued", "started"]),
         ),
       );
-    await tx.insert(projectActivityTable).values({
-      projectId: existing.id,
-      actorId: input.requestedBy,
-      actorName: null,
-      eventType: "delete",
-      summary: `Project "${existing.name}" was moved to Trash`,
-      metadata: { projectName: existing.name, operationId },
-    });
+    if (receiptMode === "retire_active") {
+      await tx.insert(projectActivityTable).values({
+        projectId: existing.id,
+        actorId: input.requestedBy,
+        actorName: null,
+        eventType: "delete",
+        summary: `Project "${existing.name}" was moved to Trash`,
+        metadata: { projectName: existing.name, operationId },
+      });
+    }
     return { operationId, projectId: project.id, state: "accepted" as const };
   });
 }
@@ -457,9 +636,13 @@ async function deactivatePublishedRoutes(
     }
   }
 
-  const cachePurged = await purgeCacheForHostnames([
-    ...new Set([...kvHostnames, ...runtimeRouteHostnames]),
-  ]);
+  const cachePurged = await purgeCacheForHostnames(
+    projectRetirementCacheHostnames({
+      knownHostnames,
+      legacyKvHostnames: kvHostnames,
+      runtimeRouteHostnames,
+    }),
+  );
   if (!cachePurged) {
     progress.route.state = "failed";
     progress.route.cache = { state: "failed" };
@@ -488,6 +671,52 @@ function securityResourceKey(resource: CloudflareSecurityResourceReceipt): strin
   return `${resource.kind}:${resource.rulesetId ?? ""}:${resource.id}`;
 }
 
+async function retireLegacyCdnObjects(
+  operation: ProjectRetirementOperation,
+  progress: ProjectRetirementProgress,
+  leaseVersion: number,
+): Promise<void> {
+  progress.legacyR2 ??= {
+    state: "pending",
+    discoveredCount: 0,
+    deletedCount: 0,
+    failureCode: null,
+  };
+  if (
+    progress.legacyR2.state === "verified_absent" ||
+    progress.legacyR2.state === "not_configured"
+  ) {
+    return;
+  }
+
+  progress.legacyR2.state = "deleting";
+  progress.legacyR2.failureCode = null;
+  await updateProgress(operation.id, progress, leaseVersion);
+
+  const outcome = await retireLegacyR2ProjectPrefix(operation.projectId);
+  progress.legacyR2.discoveredCount = outcome.discoveredCount;
+  progress.legacyR2.deletedCount = outcome.deletedCount;
+  if (outcome.state === "not_configured") {
+    progress.legacyR2.state = "not_configured";
+    await updateProgress(operation.id, progress, leaseVersion);
+    return;
+  }
+  if (outcome.state === "absent") {
+    progress.legacyR2.state = "verified_absent";
+    await updateProgress(operation.id, progress, leaseVersion);
+    return;
+  }
+
+  const code =
+    outcome.stage === "delete"
+      ? "project_retirement_legacy_r2_release_failed"
+      : "project_retirement_legacy_r2_release_unverified";
+  progress.legacyR2.state = "failed";
+  progress.legacyR2.failureCode = code;
+  await updateProgress(operation.id, progress, leaseVersion);
+  throw new ProjectRetirementStepError({ code, target: null, retryable: true });
+}
+
 async function releaseTrackedDomainSecurityResources(
   operation: ProjectRetirementOperation,
   progress: ProjectRetirementProgress,
@@ -502,9 +731,68 @@ async function releaseTrackedDomainSecurityResources(
     })
     .from(projectDomainsTable)
     .where(eq(projectDomainsTable.projectId, operation.projectId));
+  const purchasedDomains = await db
+    .select({ hostname: purchasedDomainsTable.hostname })
+    .from(purchasedDomainsTable)
+    .where(eq(purchasedDomainsTable.projectId, operation.projectId));
+
+  // The legacy projects.custom_domain surface has no security_config column.
+  // Include it as a synthetic discovery target when no project_domains row
+  // shadows the hostname, so its deterministic WAF resources cannot escape.
+  const [legacyProject] = await db
+    .select({
+      hostname: projectsTable.customDomain,
+      cfHostnameId: projectsTable.cfHostnameId,
+    })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, operation.projectId))
+    .limit(1);
+  const securityDomains: Array<{
+    id: number | null;
+    hostname: string;
+    cfHostnameId: string | null;
+    securityConfig: DomainSecurityConfig | null;
+  }> = [
+    ...domains,
+    ...(legacyProject?.hostname &&
+    !domains.some((domain) => domain.hostname === legacyProject.hostname)
+      ? [
+          {
+            id: null,
+            hostname: legacyProject.hostname,
+            cfHostnameId: legacyProject.cfHostnameId,
+            securityConfig: null,
+          },
+        ]
+      : []),
+  ];
+
+  const providerHostnameInventory = await inventoryCustomHostnamesByHostname(
+    projectRetirementProviderHostnames([
+      ...domains.map((domain) => domain.hostname),
+      legacyProject?.hostname,
+      ...purchasedDomains.map((domain) => domain.hostname),
+    ]),
+  );
+  if (providerHostnameInventory.state !== "complete") {
+    throw new ProjectRetirementStepError({
+      code: "project_retirement_domain_security_release_unverified",
+      target: null,
+      retryable: true,
+    });
+  }
+  for (const match of providerHostnameInventory.matches) {
+    if (securityDomains.some((domain) => domain.cfHostnameId === match.id)) continue;
+    securityDomains.push({
+      id: null,
+      hostname: match.hostname,
+      cfHostnameId: match.id,
+      securityConfig: null,
+    });
+  }
 
   progress.securityResources ??= [];
-  const discoveries = await mapInBoundedBatches(domains, (domain) =>
+  const discoveries = await mapInBoundedBatches(securityDomains, (domain) =>
     discoverCloudflareSecurityResources({
       hostname: domain.hostname,
       cfHostnameId: domain.cfHostnameId,
@@ -512,7 +800,7 @@ async function releaseTrackedDomainSecurityResources(
       existing: domain.securityConfig?.cloudflareResources ?? [],
     }),
   );
-  const discoveredConfigs = domains.map((domain, index) => {
+  const discoveredConfigs = securityDomains.map((domain, index) => {
     const resources = discoveries[index]!.resources;
     const securityConfig: DomainSecurityConfig = {
       ...((domain.securityConfig ?? {}) as DomainSecurityConfig),
@@ -543,6 +831,10 @@ async function releaseTrackedDomainSecurityResources(
   });
   await db.transaction(async (tx) => {
     for (const discovered of discoveredConfigs) {
+      if (discovered.domain.id === null) {
+        discovered.domain.securityConfig = discovered.securityConfig;
+        continue;
+      }
       const persisted = await tx
         .update(projectDomainsTable)
         .set({ securityConfig: discovered.securityConfig, updatedAt: sql`now()` })
@@ -587,10 +879,14 @@ async function releaseTrackedDomainSecurityResources(
     string,
     {
       resource: CloudflareSecurityResourceReceipt;
-      domains: Array<{ id: number; hostname: string; securityConfig: DomainSecurityConfig }>;
+      domains: Array<{
+        id: number | null;
+        hostname: string;
+        securityConfig: DomainSecurityConfig;
+      }>;
     }
   >();
-  for (const domain of domains) {
+  for (const domain of securityDomains) {
     const securityConfig = (domain.securityConfig ?? {}) as DomainSecurityConfig;
     for (const resource of securityConfig.cloudflareResources ?? []) {
       const key = securityResourceKey(resource);
@@ -658,6 +954,7 @@ async function releaseTrackedDomainSecurityResources(
     }));
     await db.transaction(async (tx) => {
       for (const next of nextConfigs) {
+        if (next.domain.id === null) continue;
         const cleared = await tx
           .update(projectDomainsTable)
           .set({ securityConfig: next.value, updatedAt: sql`now()` })
@@ -721,6 +1018,10 @@ async function releaseCustomHostnameCertificates(
     })
     .from(projectDomainsTable)
     .where(eq(projectDomainsTable.projectId, operation.projectId));
+  const purchasedDomains = await db
+    .select({ hostname: purchasedDomainsTable.hostname })
+    .from(purchasedDomainsTable)
+    .where(eq(purchasedDomainsTable.projectId, operation.projectId));
 
   // Repair the old two-write crash window deterministically: the previous
   // implementation only nulled a row after strict provider absence, so a null
@@ -740,6 +1041,34 @@ async function releaseCustomHostnameCertificates(
     legacyProject: { cfHostnameId: project.cfHostnameId, hostname: project.customDomain },
     domains,
   });
+  const hostnameInventory = await inventoryCustomHostnamesByHostname(
+    projectRetirementProviderHostnames([
+      project.customDomain,
+      ...domains.map((domain) => domain.hostname),
+      ...purchasedDomains.map((domain) => domain.hostname),
+    ]),
+  );
+  if (hostnameInventory.state !== "complete") {
+    throw new ProjectRetirementStepError({
+      code: "project_retirement_domain_release_unverified",
+      target: null,
+      retryable: true,
+    });
+  }
+  for (const match of hostnameInventory.matches) {
+    const knownTarget = planned.find((target) => target.cfHostnameId === match.id);
+    if (knownTarget) {
+      if (!knownTarget.hostnames.includes(match.hostname))
+        knownTarget.hostnames.push(match.hostname);
+      continue;
+    }
+    planned.push({
+      cfHostnameId: match.id,
+      hostnames: [match.hostname],
+      projectDomainIds: [],
+      legacyProjectPointer: false,
+    });
+  }
 
   progress.hostnameCertificates ??= [];
   progress.domains ??= [];
@@ -773,7 +1102,10 @@ async function releaseCustomHostnameCertificates(
     receipt.state = "releasing";
     receipt.failureCode = null;
     for (const domainReceipt of progress.domains) {
-      if (target.projectDomainIds.includes(domainReceipt.domainId)) {
+      if (
+        domainReceipt.domainId !== null &&
+        target.projectDomainIds.includes(domainReceipt.domainId)
+      ) {
         domainReceipt.state = "releasing";
         domainReceipt.failureCode = null;
       }
@@ -789,7 +1121,10 @@ async function releaseCustomHostnameCertificates(
       receipt.state = "failed";
       receipt.failureCode = code;
       for (const domainReceipt of progress.domains) {
-        if (target.projectDomainIds.includes(domainReceipt.domainId)) {
+        if (
+          domainReceipt.domainId !== null &&
+          target.projectDomainIds.includes(domainReceipt.domainId)
+        ) {
           domainReceipt.state = "failed";
           domainReceipt.failureCode = code;
         }
@@ -801,7 +1136,10 @@ async function releaseCustomHostnameCertificates(
     receipt.state = "verified_absent";
     receipt.failureCode = null;
     for (const domainReceipt of progress.domains) {
-      if (target.projectDomainIds.includes(domainReceipt.domainId)) {
+      if (
+        domainReceipt.domainId !== null &&
+        target.projectDomainIds.includes(domainReceipt.domainId)
+      ) {
         domainReceipt.state = "verified_absent";
         domainReceipt.failureCode = null;
       }
@@ -869,7 +1207,7 @@ async function releaseCustomHostnameCertificates(
   }
 }
 
-async function detachPurchasedDomains(
+async function retainPurchasedDomainAssignments(
   operation: ProjectRetirementOperation,
   progress: ProjectRetirementProgress,
   leaseVersion: number,
@@ -914,59 +1252,22 @@ async function detachPurchasedDomains(
     }
   }
   await updateProgress(operation.id, progress, leaseVersion);
-  for (const receipt of purchasedReceipts) {
-    if (domains.some((domain) => domain.id === receipt.purchasedDomainId)) {
-      receipt.state = "detached";
-    }
-  }
-  await db.transaction(async (tx) => {
-    const associationIds = associations.map((association) => association.id);
-    if (associationIds.length > 0) {
-      const removedAssociations = await tx
-        .delete(projectDomainsTable)
-        .where(
-          and(
-            eq(projectDomainsTable.projectId, operation.projectId),
-            inArray(projectDomainsTable.id, associationIds),
-          ),
-        )
-        .returning({ id: projectDomainsTable.id });
-      if (removedAssociations.length !== associationIds.length) {
-        throw new ProjectRetirementLeaseLostError();
-      }
-    }
-    const detached = await tx
-      .update(purchasedDomainsTable)
-      .set({ projectId: null, updatedAt: sql`now()` })
-      .where(eq(purchasedDomainsTable.projectId, operation.projectId))
-      .returning({ id: purchasedDomainsTable.id });
-    if (detached.length !== domains.length) throw new ProjectRetirementLeaseLostError();
-    const fenced = await tx
-      .update(projectRetirementOperationsTable)
-      .set({
-        progress,
-        leaseExpiresAt: sql`now() + interval '${sql.raw(
-          String(PROJECT_RETIREMENT_LEASE_MINUTES),
-        )} minutes'`,
-        updatedAt: sql`now()`,
-      })
-      .where(
-        and(
-          eq(projectRetirementOperationsTable.id, operation.id),
-          eq(projectRetirementOperationsTable.state, "running"),
-          eq(projectRetirementOperationsTable.leaseVersion, leaseVersion),
-        ),
-      )
-      .returning({ id: projectRetirementOperationsTable.id });
-    if (fenced.length !== 1) throw new ProjectRetirementLeaseLostError();
-  });
+  // Trash is recoverable. Registration ownership, billing, the project
+  // assignment, and its project_domains configuration therefore remain intact.
+  // Public serving is already disabled and absence-proven by the preceding
+  // route/certificate steps. Permanent deletion owns the later detach policy.
+  for (const receipt of purchasedReceipts) receipt.state = "retained";
+  await updateProgress(operation.id, progress, leaseVersion);
 }
 
 async function destroyRuntimeTargets(
   operation: ProjectRetirementOperation,
   progress: ProjectRetirementProgress,
   leaseVersion: number,
-): Promise<{ clearContainerPointer: boolean; clearProductionPointer: boolean }> {
+): Promise<{
+  clearContainerPointer: boolean;
+  clearProductionPointer: boolean;
+}> {
   const namespace = process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE;
   if (!namespace) {
     throw new ProjectRetirementStepError({
@@ -980,6 +1281,7 @@ async function destroyRuntimeTargets(
     .select({
       containerId: projectsTable.containerId,
       prodContainerId: projectsTable.prodContainerId,
+      testContainerId: projectsTable.testContainerId,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, operation.projectId));
@@ -994,6 +1296,22 @@ async function destroyRuntimeTargets(
   progress.retainedLegacyRuntimePointers ??= [];
   let clearContainerPointer = project.containerId === null;
   let clearProductionPointer = project.prodContainerId === null;
+  // testContainerId belongs to the historical Fly-backed testing workflow. It
+  // is not a Cloudflare preview identity and must never be sent to the current
+  // tenant-runtime provider or silently cleared. Retain it as explicit typed
+  // evidence so cleanup cannot complete until a separately governed Fly path
+  // has preserved any SQLite data and proven the machine absent.
+  if (
+    project.testContainerId &&
+    !progress.retainedLegacyRuntimePointers.some((item) => item.pointer === "testContainerId")
+  ) {
+    progress.retainedLegacyRuntimePointers.push({
+      pointer: "testContainerId",
+      identity: project.testContainerId,
+      reason: "legacy_runtime_provider",
+    });
+    await updateProgress(operation.id, progress, leaseVersion);
+  }
   for (const stored of [
     { pointer: "containerId" as const, identity: project.containerId },
     { pointer: "prodContainerId" as const, identity: project.prodContainerId },
@@ -1078,8 +1396,8 @@ async function destroyRuntimeTargets(
 
 export async function enqueueProjectRetirementOperation(
   operationId: string,
-): Promise<string | null> {
-  if (!isDurableWorkerReady(QUEUE_PROJECT_RETIREMENT)) return null;
+): Promise<ProjectRetirementSchedulingReceipt> {
+  if (!isDurableWorkerReady(QUEUE_PROJECT_RETIREMENT)) return { state: "unavailable" };
   const outcome = await durableEnqueueRawResult(
     QUEUE_PROJECT_RETIREMENT,
     { operationId },
@@ -1091,11 +1409,7 @@ export async function enqueueProjectRetirementOperation(
       dedupeMode: "active",
     },
   );
-  if (outcome.status === "enqueued") return outcome.jobId;
-  // An active duplicate means cleanup is already scheduled. The operation id is
-  // the stable receipt identity; callers must not turn suppression into a false 503.
-  if (outcome.status === "duplicate") return operationId;
-  return null;
+  return decideProjectRetirementSchedulingReceipt(outcome);
 }
 
 export type ProjectRetirementReconciliationRequest =
@@ -1163,13 +1477,18 @@ export async function requestProjectRetirementReconciliation(input: {
     });
     if (!decision.allowed) return { code: decision.code };
 
-    const progress = initialProjectRetirementProgress() as ReconciliableRetirementProgress;
+    let progress = initialProjectRetirementProgress() as ReconciliableRetirementProgress;
     progress.reconciliation = {
       generation: generation + 1,
       parentOperationId: latest.id,
       requestedBy: input.requestedBy,
       reason: decision.reason,
     };
+    progress = (await retireProjectAccessSurfaces(tx, {
+      projectId: input.projectId,
+      actorUserId: input.requestedBy,
+      progress,
+    })) as ReconciliableRetirementProgress;
     await tx.insert(projectRetirementOperationsTable).values({
       id: operationId,
       projectId: input.projectId,
@@ -1254,11 +1573,19 @@ export async function runProjectRetirementOperation(operationId: string): Promis
   try {
     await cancelQueuedTasks(claimed, progress, claimed.leaseVersion);
     await deactivatePublishedRoutes(claimed, progress, claimed.leaseVersion);
+    await retireLegacyCdnObjects(claimed, progress, claimed.leaseVersion);
     await releaseTrackedDomainSecurityResources(claimed, progress, claimed.leaseVersion);
     await releaseCustomHostnameCertificates(claimed, progress, claimed.leaseVersion);
-    await detachPurchasedDomains(claimed, progress, claimed.leaseVersion);
+    await retainPurchasedDomainAssignments(claimed, progress, claimed.leaseVersion);
     const pointerDisposition = await destroyRuntimeTargets(claimed, progress, claimed.leaseVersion);
     const hasRetainedLegacyPointers = progress.retainedLegacyRuntimePointers.length > 0;
+    if (!hasRetainedLegacyPointers && !hasCurrentProjectRetirementCompletionEvidence(progress)) {
+      throw new ProjectRetirementStepError({
+        code: "project_retirement_completion_evidence_incomplete",
+        target: null,
+        retryable: false,
+      });
+    }
     await db.transaction(async (tx) => {
       const fenced = await tx
         .update(projectRetirementOperationsTable)
@@ -1280,6 +1607,13 @@ export async function runProjectRetirementOperation(operationId: string): Promis
         publishedSnapshotId: null,
         stagingPublishedSnapshotId: null,
         activePreviewSessionId: null,
+        domainStatus: sql`CASE
+          WHEN ${projectsTable.customDomain} IS NULL THEN 'unconfigured'
+          ELSE 'pending_verification'
+        END`,
+        sslStatus: "pending",
+        sslVerifiedAt: null,
+        sslError: null,
         updatedAt: sql`now()`,
         ...(pointerDisposition.clearContainerPointer
           ? { containerId: null, containerUrl: null, containerStatus: "stopped" }
@@ -1288,6 +1622,15 @@ export async function runProjectRetirementOperation(operationId: string): Promis
           ? { prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" }
           : {}),
       };
+      await tx
+        .update(projectDomainsTable)
+        .set({
+          sslStatus: "pending",
+          sslLastCheckedAt: null,
+          sslExpiresAt: null,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(projectDomainsTable.projectId, claimed.projectId));
       await tx
         .update(projectsTable)
         .set(pointerUpdates)
@@ -1359,49 +1702,7 @@ export async function runProjectRetirementOperation(operationId: string): Promis
   }
 }
 
-/**
- * Boot-time adoption for tombstones created before governed retirement existed.
- * Deterministic ids and ON CONFLICT make repeated boots a zero-write no-op.
- */
-export async function adoptLegacyProjectRetirementOperations(limit = 50): Promise<number> {
-  const projects = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(
-      and(
-        isNotNull(projectsTable.deletedAt),
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${projectRetirementOperationsTable}
-          WHERE ${projectRetirementOperationsTable.projectId} = ${projectsTable.id}
-        )`,
-      ),
-    )
-    .orderBy(projectsTable.id)
-    .limit(limit);
-  let created = 0;
-  const planned = planLegacyProjectRetirementAdoptions({
-    deletedProjectIds: projects.map((project) => project.id),
-    projectsWithReceipts: new Set(),
-  });
-  for (const project of planned) {
-    const inserted = await db
-      .insert(projectRetirementOperationsTable)
-      .values({
-        id: project.operationId,
-        projectId: project.projectId,
-        requestedBy: "system:legacy-trash-reconciliation",
-        state: "accepted",
-        progress: initialProjectRetirementProgress(),
-      })
-      .onConflictDoNothing({ target: projectRetirementOperationsTable.id })
-      .returning({ id: projectRetirementOperationsTable.id });
-    created += inserted.length;
-  }
-  return created;
-}
-
 export async function resumeProjectRetirementOperations(): Promise<number> {
-  await adoptLegacyProjectRetirementOperations();
   await db
     .update(projectRetirementOperationsTable)
     .set({

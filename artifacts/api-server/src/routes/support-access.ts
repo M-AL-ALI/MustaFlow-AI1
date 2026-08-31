@@ -18,6 +18,7 @@ import {
   presentSupportGrants,
   recordSupportGrantEvent,
 } from "../lib/support-access";
+import { withActiveProjectLifecycle } from "../lib/project-lifecycle";
 import { deliverSupportConsequence, supportProductUrl } from "../lib/support-user-delivery";
 
 const router: IRouter = Router();
@@ -65,6 +66,8 @@ router.post(
       });
       return;
     }
+    const staffDisplayName = requestedIdentity.displayName;
+    const staffImageUrl = requestedIdentity.imageUrl;
     const [ticket] = await db
       .select({
         id: supportTicketsTable.id,
@@ -77,89 +80,102 @@ router.post(
       .from(supportTicketsTable)
       .leftJoin(projectsTable, eq(projectsTable.id, supportTicketsTable.projectId))
       .where(and(eq(supportTicketsTable.id, ticketId), isNull(projectsTable.deletedAt)));
-    if (!ticket || !ticket.projectId || ticket.userId !== ticket.projectOwnerId) {
+    if (!ticket || !ticket.projectId || !ticket.userId || ticket.userId !== ticket.projectOwnerId) {
       res.status(409).json({
         error: "This ticket is not linked to a project owned by the requester.",
         code: "support_project_not_consentable",
       });
       return;
     }
+    const projectId = ticket.projectId;
+    const ownerUserId = ticket.userId;
+    const projectName = ticket.projectName ?? `Project #${projectId}`;
     try {
-      const now = new Date();
-      const expiredOpenGrants = await db
-        .update(supportAccessGrantsTable)
-        .set({ status: "expired", closedAt: now })
-        .where(
-          and(
-            eq(supportAccessGrantsTable.ticketId, ticketId),
-            inArray(supportAccessGrantsTable.status, ["pending", "active"]),
-            lte(supportAccessGrantsTable.expiresAt, now),
-          ),
-        )
-        .returning();
-      for (const expiredGrant of expiredOpenGrants) {
+      const lifecycle = await withActiveProjectLifecycle(projectId, async () => {
+        const now = new Date();
+        const expiredOpenGrants = await db
+          .update(supportAccessGrantsTable)
+          .set({ status: "expired", closedAt: now })
+          .where(
+            and(
+              eq(supportAccessGrantsTable.ticketId, ticketId),
+              inArray(supportAccessGrantsTable.status, ["pending", "active"]),
+              lte(supportAccessGrantsTable.expiresAt, now),
+            ),
+          )
+          .returning();
+        for (const expiredGrant of expiredOpenGrants) {
+          await recordSupportGrantEvent({
+            grantId: expiredGrant.id,
+            ticketId,
+            projectId: expiredGrant.projectId,
+            actorUserId: req.userId!,
+            event: "grant_expired_before_new_request",
+            detail: { expiredAt: now.toISOString() },
+          });
+        }
+        const requestExpiresAt = new Date(Date.now() + MAX_SUPPORT_GRANT_MS);
+        const [grant] = await db
+          .insert(supportAccessGrantsTable)
+          .values({
+            ticketId,
+            projectId,
+            ownerUserId,
+            staffUserId: requestedStaffId,
+            requestedBy: req.userId!,
+            reason: parsed.data.reason,
+            status: "pending",
+            expiresAt: requestExpiresAt,
+          })
+          .returning();
         await recordSupportGrantEvent({
-          grantId: expiredGrant.id,
+          grantId: grant!.id,
           ticketId,
-          projectId: expiredGrant.projectId,
+          projectId,
           actorUserId: req.userId!,
-          event: "grant_expired_before_new_request",
-          detail: { expiredAt: now.toISOString() },
+          event: "access_requested",
+          detail: {
+            reason: parsed.data.reason,
+            staffUserId: requestedStaffId,
+            staffDisplayName,
+            staffImageUrl,
+            requestExpiresAt: requestExpiresAt.toISOString(),
+          },
         });
-      }
-      const requestExpiresAt = new Date(Date.now() + MAX_SUPPORT_GRANT_MS);
-      const [grant] = await db
-        .insert(supportAccessGrantsTable)
-        .values({
+        const email = supportAccessRequestTemplate({
           ticketId,
-          projectId: ticket.projectId,
-          ownerUserId: ticket.userId,
-          staffUserId: requestedStaffId,
-          requestedBy: req.userId!,
+          projectName,
+          staffName: staffDisplayName,
           reason: parsed.data.reason,
-          status: "pending",
-          expiresAt: requestExpiresAt,
-        })
-        .returning();
-      await recordSupportGrantEvent({
-        grantId: grant!.id,
-        ticketId,
-        projectId: ticket.projectId,
-        actorUserId: req.userId!,
-        event: "access_requested",
-        detail: {
-          reason: parsed.data.reason,
-          staffUserId: requestedStaffId,
-          staffDisplayName: requestedIdentity.displayName,
-          staffImageUrl: requestedIdentity.imageUrl,
-          requestExpiresAt: requestExpiresAt.toISOString(),
-        },
+          requestExpiresAt,
+          decisionUrl: supportProductUrl(`/support/tickets/${ticketId}`),
+        });
+        const delivery = await deliverSupportConsequence({
+          ticketId,
+          projectId,
+          recipientUserId: ownerUserId,
+          recipientEmail: ticket.userEmail,
+          actorUserId: req.userId!,
+          actorName: staffDisplayName,
+          kind: "access_request",
+          notification: {
+            type: "support_access_requested",
+            title: `${staffDisplayName} is requesting project access`,
+            body: `${projectName}: ${parsed.data.reason}`,
+            metadata: { requestExpiresAt: requestExpiresAt.toISOString(), grantId: grant!.id },
+          },
+          email,
+        });
+        return { grant, delivery };
       });
-      const email = supportAccessRequestTemplate({
-        ticketId,
-        projectName: ticket.projectName ?? `Project #${ticket.projectId}`,
-        staffName: requestedIdentity.displayName,
-        reason: parsed.data.reason,
-        requestExpiresAt,
-        decisionUrl: supportProductUrl(`/support/tickets/${ticketId}`),
-      });
-      const delivery = await deliverSupportConsequence({
-        ticketId,
-        projectId: ticket.projectId,
-        recipientUserId: ticket.userId,
-        recipientEmail: ticket.userEmail,
-        actorUserId: req.userId!,
-        actorName: requestedIdentity.displayName,
-        kind: "access_request",
-        notification: {
-          type: "support_access_requested",
-          title: `${requestedIdentity.displayName} is requesting project access`,
-          body: `${ticket.projectName ?? `Project #${ticket.projectId}`}: ${parsed.data.reason}`,
-          metadata: { requestExpiresAt: requestExpiresAt.toISOString(), grantId: grant!.id },
-        },
-        email,
-      });
-      res.status(201).json({ grant, delivery });
+      if (lifecycle.state === "inactive") {
+        res.status(409).json({
+          error: "This ticket is not linked to an active project owned by the requester.",
+          code: "support_project_not_consentable",
+        });
+        return;
+      }
+      res.status(201).json(lifecycle.value);
     } catch (error) {
       const code = (error as { code?: string } | null)?.code;
       if (code === "23505") {
@@ -278,39 +294,65 @@ router.post("/support/access-requests/:id/decision", async (req, res): Promise<v
     res.status(404).json({ error: "Access request not found." });
     return;
   }
-  const now = new Date();
-  if (effectiveSupportGrantStatus(grant, now) === "expired") {
+  const lifecycle = await withActiveProjectLifecycle(grant.projectId, async () => {
+    const [currentGrant] = await db
+      .select()
+      .from(supportAccessGrantsTable)
+      .where(
+        and(
+          eq(supportAccessGrantsTable.id, grantId),
+          eq(supportAccessGrantsTable.ownerUserId, req.userId!),
+          eq(supportAccessGrantsTable.status, "pending"),
+        ),
+      );
+    if (!currentGrant) return { state: "not_found" as const };
+
+    const now = new Date();
+    if (effectiveSupportGrantStatus(currentGrant, now) === "expired") {
+      return { state: "expired" as const };
+    }
+    const expiresAt =
+      parsed.data.decision === "grant"
+        ? new Date(
+            now.getTime() +
+              Math.min((parsed.data.durationMinutes ?? 60) * 60_000, MAX_SUPPORT_GRANT_MS),
+          )
+        : null;
+    const status = parsed.data.decision === "grant" ? "active" : "declined";
+    const [updated] = await db
+      .update(supportAccessGrantsTable)
+      .set({ status, decidedAt: now, expiresAt })
+      .where(
+        and(
+          eq(supportAccessGrantsTable.id, grantId),
+          eq(supportAccessGrantsTable.status, "pending"),
+        ),
+      )
+      .returning();
+    if (!updated) return { state: "already_decided" as const };
+    await recordSupportGrantEvent({
+      grantId,
+      ticketId: updated.ticketId,
+      projectId: updated.projectId,
+      actorUserId: req.userId!,
+      event: status === "active" ? "access_granted" : "access_declined",
+      detail: expiresAt ? { expiresAt: expiresAt.toISOString() } : {},
+    });
+    return { state: "updated" as const, grant: updated };
+  });
+  if (lifecycle.state === "inactive" || lifecycle.value.state === "not_found") {
+    res.status(404).json({ error: "Access request not found." });
+    return;
+  }
+  if (lifecycle.value.state === "expired") {
     res.status(410).json({ error: "This access request has expired. Nothing was granted." });
     return;
   }
-  const expiresAt =
-    parsed.data.decision === "grant"
-      ? new Date(
-          now.getTime() +
-            Math.min((parsed.data.durationMinutes ?? 60) * 60_000, MAX_SUPPORT_GRANT_MS),
-        )
-      : null;
-  const status = parsed.data.decision === "grant" ? "active" : "declined";
-  const [updated] = await db
-    .update(supportAccessGrantsTable)
-    .set({ status, decidedAt: now, expiresAt })
-    .where(
-      and(eq(supportAccessGrantsTable.id, grantId), eq(supportAccessGrantsTable.status, "pending")),
-    )
-    .returning();
-  if (!updated) {
+  if (lifecycle.value.state === "already_decided") {
     res.status(409).json({ error: "This request was already decided." });
     return;
   }
-  await recordSupportGrantEvent({
-    grantId,
-    ticketId: updated.ticketId,
-    projectId: updated.projectId,
-    actorUserId: req.userId!,
-    event: status === "active" ? "access_granted" : "access_declined",
-    detail: expiresAt ? { expiresAt: expiresAt.toISOString() } : {},
-  });
-  res.json({ grant: updated });
+  res.json({ grant: lifecycle.value.grant });
 });
 
 router.post("/support/access-grants/:id/revoke", async (req, res): Promise<void> => {

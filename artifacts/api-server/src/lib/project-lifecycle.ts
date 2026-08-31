@@ -180,9 +180,11 @@ async function maybeReleaseResponseProjectLifecycleSession(
 const PROJECT_MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
- * Resolve the project governed by an authenticated HTTP mutation.  Trash and
- * restore are the two lifecycle transitions themselves, so they deliberately
- * sit outside the active-project admission boundary.
+ * Resolve the project governed by an authenticated HTTP mutation. Trash,
+ * restore, and governed retirement reconciliation are lifecycle transitions
+ * themselves, so they deliberately sit outside the active-project admission
+ * boundary. Each transition performs its own ownership check and acquires the
+ * same lifecycle advisory lock while it changes state.
  */
 export function projectMutationLifecycleProjectId(input: {
   method: string;
@@ -197,8 +199,14 @@ export function projectMutationLifecycleProjectId(input: {
   if (!Number.isSafeInteger(projectId) || projectId < 1) return null;
   const requestProjectRoot = `/projects/${match[1]}`;
   if (method === "DELETE" && normalizedPath.toLowerCase() === requestProjectRoot) return null;
-  if (method === "POST" && normalizedPath.toLowerCase() === `${requestProjectRoot}/restore`) {
-    return null;
+  if (method === "POST") {
+    const lifecyclePath = normalizedPath.toLowerCase();
+    if (
+      lifecyclePath === `${requestProjectRoot}/restore` ||
+      lifecyclePath === `${requestProjectRoot}/retirement/retry`
+    ) {
+      return null;
+    }
   }
   return projectId;
 }

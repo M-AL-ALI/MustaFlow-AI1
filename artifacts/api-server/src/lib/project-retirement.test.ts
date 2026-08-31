@@ -2,6 +2,46 @@ import { describe, expect, it } from "vitest";
 import { deriveRuntimeIdentity } from "@workspace/tenant-runtime-contracts";
 import * as retirement from "./project-retirement-contract";
 
+function completedRetirementProgress() {
+  const progress = retirement.initialProjectRetirementProgress();
+  progress.route = {
+    state: "verified_absent",
+    failureCode: null,
+    legacyHostnameKv: { state: "not_configured", failureCode: null },
+    hostnames: [],
+    runtimeRoutes: [],
+    cache: { state: "purged" },
+  };
+  progress.tasks = {
+    state: "canceled",
+    count: 0,
+    terminalized: 0,
+    creditsRefunded: 0,
+    telemetryFlushed: 0,
+  };
+  progress.access = {
+    state: "revoked",
+    shareLinksRevoked: 0,
+    previewSessionsRevoked: 0,
+    supportGrantsRevoked: 0,
+    supportSessionsInterrupted: 0,
+    canvasShareTokensCleared: 0,
+    canvasAbTestsEnded: 0,
+  };
+  progress.legacyR2 = {
+    state: "not_configured",
+    discoveredCount: 0,
+    deletedCount: 0,
+    failureCode: null,
+  };
+  progress.runtimes = progress.runtimes.map((runtime) => ({
+    ...runtime,
+    state: "verified_absent",
+    failureCode: null,
+  }));
+  return progress;
+}
+
 describe("project retirement foundation", () => {
   it("denies background work when the active-project read does not find the project", () => {
     expect(retirement.decideProjectJobAdmission({ projectId: 51, activeProjectId: null })).toEqual({
@@ -27,15 +67,60 @@ describe("project retirement foundation", () => {
   it.each([null, "accepted", "running", "failed", "canceled"])(
     "refuses restore when the latest cleanup receipt is %s",
     (state) => {
-      expect(retirement.decideProjectRestoreAdmission(state)).toEqual({
+      expect(
+        retirement.decideProjectRestoreAdmission({
+          state,
+          progress: completedRetirementProgress(),
+        }),
+      ).toEqual({
         allowed: false,
         code: "project_retirement_cleanup_unverified",
       });
     },
   );
 
-  it("admits restore only after a completed cleanup receipt", () => {
-    expect(retirement.decideProjectRestoreAdmission("completed")).toEqual({ allowed: true });
+  it("refuses an old completed label without current complete absence evidence", () => {
+    const current = completedRetirementProgress();
+    const { semantics: _semantics, ...legacy } = current;
+    expect(
+      retirement.decideProjectRestoreAdmission({ state: "completed", progress: legacy }),
+    ).toEqual({
+      allowed: false,
+      code: "project_retirement_cleanup_unverified",
+    });
+    expect(
+      retirement.decideProjectRestoreAdmission({
+        state: "completed",
+        progress: { ...current, retainedLegacyRuntimePointers: [{ pointer: "containerId" }] },
+      }),
+    ).toMatchObject({ allowed: false });
+  });
+
+  it("admits restore only after every current absence proof is terminal", () => {
+    expect(
+      retirement.decideProjectRestoreAdmission({
+        state: "completed",
+        progress: completedRetirementProgress(),
+      }),
+    ).toEqual({ allowed: true });
+  });
+
+  it("keeps a terminal label unreachable while access evidence is pending", () => {
+    const progress = completedRetirementProgress();
+    progress.access = retirement.initialProjectRetirementProgress().access;
+    expect(retirement.hasCurrentProjectRetirementCompletionEvidence(progress)).toBe(false);
+  });
+
+  it("recognizes only a current completed operation as a restore replay", () => {
+    const progress = completedRetirementProgress();
+    progress.restore = { state: "restored", restoredAt: "2026-08-31T12:00:00.000Z" };
+    expect(retirement.hasProjectRestoreReplayReceipt({ state: "completed", progress })).toBe(true);
+    expect(
+      retirement.hasProjectRestoreReplayReceipt({
+        state: "completed",
+        progress: { ...progress, semantics: "older" },
+      }),
+    ).toBe(false);
   });
 
   it("restores retained project data into a truthful non-serving control-plane state", () => {
@@ -72,6 +157,19 @@ describe("project retirement foundation", () => {
     expect(retirement.RESTORED_PROJECT_CONTROL_PLANE_STATE).not.toHaveProperty("customDomain");
     expect(retirement.RESTORED_PROJECT_CONTROL_PLANE_STATE).not.toHaveProperty("neonProjectId");
     expect(retirement.RESTORED_PROJECT_CONTROL_PLANE_STATE).not.toHaveProperty("dbConnectionId");
+    expect(
+      retirement.matchesRestoredProjectControlPlaneState({
+        ...retirement.RESTORED_PROJECT_CONTROL_PLANE_STATE,
+        id: 51,
+        publicSlug: "stable-history",
+      }),
+    ).toBe(true);
+    expect(
+      retirement.matchesRestoredProjectControlPlaneState({
+        ...retirement.RESTORED_PROJECT_CONTROL_PLANE_STATE,
+        status: "published",
+      }),
+    ).toBe(false);
   });
 
   it("enumerates preview and both production slots exactly once", () => {
@@ -202,20 +300,123 @@ describe("project retirement foundation", () => {
     ).toEqual({ allowed: true, reason: "legacy_admin_reconciliation" });
   });
 
-  it("adopts legacy tombstones once with stable deterministic identities", () => {
-    const first = retirement.planLegacyProjectRetirementAdoptions({
-      deletedProjectIds: [9, 4, 9],
-      projectsWithReceipts: new Set(),
+  it("uses a fresh collision-safe identity when replacing an incompatible terminal", () => {
+    expect(
+      retirement.projectRetirementOperationIdForReceiptMode({
+        mode: "adopt_legacy_tombstone",
+        projectId: 51,
+        freshOperationId: "fresh-receipt",
+      }),
+    ).toBe("project-retirement:legacy:v2:51");
+    expect(
+      retirement.projectRetirementOperationIdForReceiptMode({
+        mode: "replace_incompatible_terminal",
+        projectId: 51,
+        freshOperationId: "fresh-receipt",
+      }),
+    ).toBe("fresh-receipt");
+  });
+
+  it("never presents the operation identity as a durable queue job identity", () => {
+    expect(
+      retirement.decideProjectRetirementSchedulingReceipt({
+        status: "enqueued",
+        jobId: "pg-boss-job",
+      }),
+    ).toEqual({ state: "enqueued", jobId: "pg-boss-job" });
+    expect(retirement.decideProjectRetirementSchedulingReceipt({ status: "duplicate" })).toEqual({
+      state: "already_scheduled",
     });
-    expect(first).toEqual([
-      { projectId: 4, operationId: "project-retirement:legacy:v1:4" },
-      { projectId: 9, operationId: "project-retirement:legacy:v1:9" },
-    ]);
-    const second = retirement.planLegacyProjectRetirementAdoptions({
-      deletedProjectIds: [4, 9],
-      projectsWithReceipts: new Set(first.map((entry) => entry.projectId)),
+    expect(retirement.decideProjectRetirementSchedulingReceipt({ status: "failed" })).toEqual({
+      state: "unavailable",
     });
-    expect(second).toEqual([]);
+  });
+
+  it("normalizes and deduplicates every configured provider hostname", () => {
+    expect(
+      retirement.projectRetirementProviderHostnames([
+        "App.Example.com.",
+        "app.example.com",
+        null,
+        " bought.example.com ",
+      ]),
+    ).toEqual(["app.example.com", "bought.example.com"]);
+  });
+
+  it("creates current receipts and never lets an old receipt shadow current semantics", () => {
+    const currentProgress = completedRetirementProgress();
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: false,
+        existingOperation: {
+          id: "completed-before-restore",
+          state: "completed",
+          completedAt: new Date(),
+          progress: currentProgress,
+        },
+      }),
+    ).toBe("retire_active");
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation: null,
+      }),
+    ).toBe("adopt_legacy_tombstone");
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation: {
+          id: "project-retirement:legacy:v2:51",
+          state: "completed",
+          completedAt: new Date(),
+          progress: currentProgress,
+        },
+      }),
+    ).toBe("reuse_completed");
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation: {
+          id: "project-retirement:legacy:v1:51",
+          state: "completed",
+          completedAt: new Date(),
+          progress: {},
+        },
+      }),
+    ).toBe("replace_incompatible_terminal");
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation: {
+          id: "project-retirement:legacy:v1:51",
+          state: "running",
+          completedAt: null,
+          progress: {},
+        },
+      }),
+    ).toBe("refuse_incompatible_active");
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation: {
+          id: "current-failed",
+          state: "failed",
+          completedAt: new Date(),
+          progress: currentProgress,
+        },
+      }),
+    ).toBe("refuse_terminal_reconciliation_required");
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation: {
+          id: "current-running",
+          state: "running",
+          completedAt: null,
+          progress: retirement.initialProjectRetirementProgress(),
+        },
+      }),
+    ).toBe("reuse_in_flight");
   });
 
   it("deduplicates legacy and row hostname pointers into one provider retirement", () => {
@@ -271,6 +472,16 @@ describe("project retirement foundation", () => {
         pointer: "prodContainerId",
       }),
     ).resolves.toEqual({ state: "valid", role: "production", slot: "green" });
+  });
+
+  it("purges every known and observed hostname even when no legacy KV route exists", () => {
+    expect(
+      retirement.projectRetirementCacheHostnames({
+        knownHostnames: ["slug.mustaflow.app", "custom.example.test"],
+        legacyKvHostnames: [],
+        runtimeRouteHostnames: ["custom.example.test", "runtime.example.test"],
+      }),
+    ).toEqual(["slug.mustaflow.app", "custom.example.test", "runtime.example.test"]);
   });
 
   it("retains malformed, cross-namespace, cross-project, and wrong-role pointers", async () => {

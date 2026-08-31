@@ -15,6 +15,8 @@ type SupportEmail = {
   text: string;
 };
 
+const SUPPORT_EMAIL_DELIVERY_TIMEOUT_MS = 8_000;
+
 export type DeliverSupportConsequenceInput = {
   ticketId: number;
   projectId: number | null;
@@ -81,9 +83,21 @@ export async function deliverSupportConsequence(
     return delivery!;
   });
 
+  const providerSignal = AbortSignal.timeout(SUPPORT_EMAIL_DELIVERY_TIMEOUT_MS);
   const providerStatus = input.recipientEmail
-    ? await sendEmailWithStatus({ to: input.recipientEmail, ...input.email })
+    ? await sendEmailWithStatus({
+        to: input.recipientEmail,
+        ...input.email,
+        signal: providerSignal,
+        idempotencyKey: `support-delivery:${pending.id}`,
+      })
     : "failed";
+  if (providerSignal.aborted) {
+    // The provider may have accepted the request before its response was lost.
+    // Keep the durable receipt pending rather than claiming sent or failed; the
+    // idempotency key makes a governed retry safe.
+    return { ...pending, emailStatus: "pending" };
+  }
   const emailStatus: SupportDeliveryStatus = providerStatus === "sent" ? "sent" : "failed";
   const emailFailureReason =
     providerStatus === "skipped"

@@ -292,28 +292,130 @@ describe("governed project retirement coordinator", () => {
     );
   });
 
-  it("atomically tombstones with the operation receipt and returns accepted, never completed", () => {
+  it("atomically tombstones, revokes access, and persists the returned access progress", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const start = source.indexOf("export async function acceptProjectRetirement");
     const end = source.indexOf("class ProjectRetirementStepError", start);
     const route = source.slice(start, end);
+    const transaction = route.indexOf("db.transaction(async (tx)");
+    const tombstone = route.indexOf("deletedAt: sql`now()`", transaction);
+    const accessRevocation = route.indexOf(
+      "const progress = await retireProjectAccessSurfaces(tx",
+      tombstone,
+    );
+    const operationInsert = route.indexOf(
+      "tx.insert(projectRetirementOperationsTable)",
+      accessRevocation,
+    );
 
-    expect(route).toContain("db.transaction(async (tx)");
+    expect(transaction).toBeGreaterThan(-1);
     expect(route).toContain("PROJECT_LIFECYCLE_LOCK_NAMESPACE");
-    expect(route).toContain("tx.insert(projectRetirementOperationsTable)");
-    expect(route).toContain("deletedAt: sql`now()`");
+    expect(tombstone).toBeGreaterThan(transaction);
+    expect(accessRevocation).toBeGreaterThan(tombstone);
+    expect(operationInsert).toBeGreaterThan(accessRevocation);
+    expect(route.slice(accessRevocation, operationInsert)).toContain(
+      "progress: initialProjectRetirementProgress()",
+    );
+    expect(route.slice(operationInsert)).toContain("progress,");
     expect(route).toContain('state: "accepted"');
     expect(route).toContain("disableProjectDeploymentSchedulesStatement");
-    expect(route).not.toContain('state: "completed"');
+    expect(route.slice(operationInsert)).not.toContain('state: "completed"');
   });
 
-  it("restores only after completed cleanup, checks ownership first, and never starts a runtime", () => {
+  it("re-revokes access in every governed reconciliation receipt", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("export async function requestProjectRetirementReconciliation");
+    const end = source.indexOf("export async function runProjectRetirementOperation", start);
+    const reconciliation = source.slice(start, end);
+    const lock = reconciliation.indexOf("pg_advisory_xact_lock");
+    const access = reconciliation.indexOf("retireProjectAccessSurfaces(tx", lock);
+    const insert = reconciliation.indexOf("tx.insert(projectRetirementOperationsTable)", access);
+
+    expect(lock).toBeGreaterThan(-1);
+    expect(access).toBeGreaterThan(lock);
+    expect(insert).toBeGreaterThan(access);
+    expect(reconciliation.slice(access, insert)).toContain("progress,");
+  });
+
+  it("cannot stamp completed before validating the complete current receipt", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("export async function runProjectRetirementOperation");
+    const end = source.indexOf("export async function resumeProjectRetirementOperations", start);
+    const run = source.slice(start, end);
+    const evidence = run.indexOf("hasCurrentProjectRetirementCompletionEvidence(progress)");
+    const typedFailure = run.indexOf(
+      'code: "project_retirement_completion_evidence_incomplete"',
+      evidence,
+    );
+    const completed = run.indexOf('state: "completed"', typedFailure);
+
+    expect(evidence).toBeGreaterThan(-1);
+    expect(typedFailure).toBeGreaterThan(evidence);
+    expect(completed).toBeGreaterThan(typedFailure);
+  });
+
+  it("allows only strict legacy R2 absence or no configuration and blocks unavailable cleanup", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function retireLegacyCdnObjects");
+    const end = source.indexOf("async function releaseTrackedDomainSecurityResources", start);
+    const legacyR2 = source.slice(start, end);
+    const notConfigured = legacyR2.indexOf('if (outcome.state === "not_configured")');
+    const verifiedAbsent = legacyR2.indexOf('if (outcome.state === "absent")');
+    const typedFailure = legacyR2.indexOf("const code =", verifiedAbsent);
+    const failedProgress = legacyR2.indexOf('progress.legacyR2.state = "failed"', typedFailure);
+    const persistedFailure = legacyR2.indexOf(
+      "await updateProgress(operation.id, progress, leaseVersion)",
+      failedProgress,
+    );
+    const thrownFailure = legacyR2.indexOf(
+      "throw new ProjectRetirementStepError",
+      persistedFailure,
+    );
+    const runStart = source.indexOf("export async function runProjectRetirementOperation");
+    const runEnd = source.indexOf(
+      "export async function resumeProjectRetirementOperations",
+      runStart,
+    );
+    const run = source.slice(runStart, runEnd);
+
+    expect(notConfigured).toBeGreaterThan(-1);
+    expect(legacyR2.slice(notConfigured, verifiedAbsent)).toContain(
+      'progress.legacyR2.state = "not_configured"',
+    );
+    expect(legacyR2.slice(notConfigured, verifiedAbsent)).toContain("return;");
+    expect(verifiedAbsent).toBeGreaterThan(notConfigured);
+    expect(legacyR2.slice(verifiedAbsent, typedFailure)).toContain(
+      'progress.legacyR2.state = "verified_absent"',
+    );
+    expect(legacyR2.slice(verifiedAbsent, typedFailure)).toContain("return;");
+    expect(legacyR2.slice(typedFailure, failedProgress)).toContain(
+      '"project_retirement_legacy_r2_release_failed"',
+    );
+    expect(legacyR2.slice(typedFailure, failedProgress)).toContain(
+      '"project_retirement_legacy_r2_release_unverified"',
+    );
+    expect(failedProgress).toBeGreaterThan(typedFailure);
+    expect(persistedFailure).toBeGreaterThan(failedProgress);
+    expect(thrownFailure).toBeGreaterThan(persistedFailure);
+    expect(run.indexOf("await retireLegacyCdnObjects")).toBeLessThan(
+      run.indexOf('state: "completed"'),
+    );
+    expect(run.slice(run.indexOf("} catch (error)"))).toContain('state: "failed"');
+    expect(run.slice(run.indexOf("} catch (error)"))).toContain("failureCode: receipt.code");
+  });
+
+  it("restores only after complete current evidence, replays safely, and never starts a runtime", () => {
     const source = readFileSync(new URL("../routes/projects.ts", import.meta.url), "utf8");
     const start = source.indexOf('router.post("/projects/:id/restore"');
     const end = source.indexOf('router.get("/projects/:id/retirement"', start);
     const restore = source.slice(start, end);
 
-    expect(restore).toContain("decideProjectRestoreAdmission(latestRetirement?.state ?? null)");
+    expect(restore).toContain("const retirementEvidence = {");
+    expect(restore).toContain("progress: latestRetirement?.progress ?? null");
+    expect(restore).toContain("decideProjectRestoreAdmission(retirementEvidence)");
+    expect(restore).toContain("hasProjectRestoreReplayReceipt(retirementEvidence)");
+    expect(restore).toContain("matchesRestoredProjectControlPlaneState(ownedProject)");
+    expect(restore).toContain('kind: "already_restored"');
     expect(restore).toContain('code: "project_retirement_cleanup_unverified"');
     expect(restore).toContain("eq(projectsTable.ownerId, userId)");
     expect(restore.indexOf("eq(projectsTable.ownerId, userId)")).toBeLessThan(
@@ -321,7 +423,24 @@ describe("governed project retirement coordinator", () => {
     );
     expect(restore).not.toContain('activeRetirement.state === "failed"');
     expect(restore).toContain("pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}");
+    expect(restore).toContain("jsonb_set(");
+    expect(restore).toContain("jsonb_build_object('state', 'restored', 'restoredAt', now())");
+    expect(restore).toContain("isNull(projectsTable.deletedAt)");
+    expect(restore).toContain("recovery window expired");
+    expect(restore).not.toMatch(
+      /shareLinksTable|supportAccessGrantsTable|supportAccessSessionsTable|canvasVariantsTable|canvasAbTestsTable/,
+    );
     expect(restore).not.toMatch(/\.start\(|enqueueProvisionProjectJob|enqueueJob/);
+    const lock = restore.indexOf("pg_advisory_xact_lock");
+    const ownerRead = restore.indexOf("eq(projectsTable.ownerId, userId)", lock);
+    const receiptRead = restore.indexOf(".from(projectRetirementOperationsTable)", ownerRead);
+    const receiptWrite = restore.indexOf("jsonb_set(", receiptRead);
+    const tombstoneClear = restore.indexOf("deletedAt: null", receiptWrite);
+    expect(lock).toBeGreaterThan(-1);
+    expect(ownerRead).toBeGreaterThan(lock);
+    expect(receiptRead).toBeGreaterThan(ownerRead);
+    expect(receiptWrite).toBeGreaterThan(receiptRead);
+    expect(tombstoneClear).toBeGreaterThan(receiptWrite);
   });
 
   it("clears pointers only after route and all three runtime absence checks", () => {
@@ -354,6 +473,22 @@ describe("governed project retirement coordinator", () => {
     );
   });
 
+  it("retains the historical testing-workflow pointer instead of misrouting it to Cloudflare", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function destroyRuntimeTargets");
+    const end = source.indexOf("export async function enqueueProjectRetirementOperation", start);
+    const runtimes = source.slice(start, end);
+    const pointerUpdateStart = source.indexOf("const pointerUpdates =", end);
+    const pointerUpdateEnd = source.indexOf("await tx", pointerUpdateStart);
+    const pointerUpdates = source.slice(pointerUpdateStart, pointerUpdateEnd);
+
+    expect(runtimes).toContain("testContainerId: projectsTable.testContainerId");
+    expect(runtimes).toContain('pointer: "testContainerId"');
+    expect(runtimes).toContain('reason: "legacy_runtime_provider"');
+    expect(runtimes).not.toContain('{ pointer: "testContainerId" as const');
+    expect(pointerUpdates).not.toContain("testContainerId: null");
+  });
+
   it("fences stale-running crash recovery so an old worker cannot complete", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     expect(source).toContain('eq(projectRetirementOperationsTable.state, "running")');
@@ -378,19 +513,22 @@ describe("governed project retirement coordinator", () => {
     expect(source.slice(verified, pointerClear)).toContain("ProjectRetirementStepError");
     expect(source.slice(verified, pointerClear)).toContain("db.transaction(async (tx)");
     expect(source.slice(pointerClear)).toContain("progress,");
-    const purchasedDetach = source.slice(source.indexOf("async function detachPurchasedDomains"));
-    expect(purchasedDetach).toContain("delete(projectDomainsTable)");
-    expect(purchasedDetach).toContain("inArray(projectDomainsTable.id, associationIds)");
-    expect(purchasedDetach.indexOf("delete(projectDomainsTable)")).toBeLessThan(
-      purchasedDetach.indexOf("update(purchasedDomainsTable)"),
+    const purchasedRetention = source.slice(
+      source.indexOf("async function retainPurchasedDomainAssignments"),
     );
+    expect(purchasedRetention).toContain('receipt.state = "retained"');
+    expect(purchasedRetention).not.toContain("delete(projectDomainsTable)");
+    expect(purchasedRetention).not.toContain("update(purchasedDomainsTable)");
+    expect(source).toContain("WHEN ${projectsTable.customDomain} IS NULL THEN 'unconfigured'");
+    expect(source).toContain("ELSE 'pending_verification'");
+    expect(source).toContain("sslLastCheckedAt: null");
   });
 
   it("deduplicates legacy and multi-domain hostname pointers under one atomic receipt", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const release = source.slice(
       source.indexOf("async function releaseCustomHostnameCertificates"),
-      source.indexOf("async function detachPurchasedDomains"),
+      source.indexOf("async function retainPurchasedDomainAssignments"),
     );
 
     expect(release).toContain("projectsTable.cfHostnameId");
@@ -401,11 +539,71 @@ describe("governed project retirement coordinator", () => {
     expect(release).toContain("projectRetirementOperationsTable.leaseVersion");
   });
 
+  it("retires strict provider hostname matches when database pointers are null or stale", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function releaseCustomHostnameCertificates");
+    const end = source.indexOf("async function retainPurchasedDomainAssignments", start);
+    const release = source.slice(start, end);
+    const pointerPlan = release.indexOf("planHostnameCertificateRetirements");
+    const inventory = release.indexOf("inventoryCustomHostnamesByHostname", pointerPlan);
+    const inventoryFailure = release.indexOf(
+      'if (hostnameInventory.state !== "complete")',
+      inventory,
+    );
+    const merge = release.indexOf(
+      "for (const match of hostnameInventory.matches)",
+      inventoryFailure,
+    );
+    const providerTarget = release.indexOf("cfHostnameId: match.id", merge);
+    const retirement = release.indexOf("await retireCustomHostname(cfHostnameId)", providerTarget);
+
+    expect(pointerPlan).toBeGreaterThan(-1);
+    expect(inventory).toBeGreaterThan(pointerPlan);
+    expect(release.slice(inventory, inventoryFailure)).toContain("project.customDomain");
+    expect(release.slice(inventory, inventoryFailure)).toContain(
+      "domains.map((domain) => domain.hostname)",
+    );
+    expect(release.slice(inventory, inventoryFailure)).toContain(
+      "purchasedDomains.map((domain) => domain.hostname)",
+    );
+    expect(inventoryFailure).toBeGreaterThan(inventory);
+    expect(release.slice(inventoryFailure, merge)).toContain(
+      'code: "project_retirement_domain_release_unverified"',
+    );
+    expect(merge).toBeGreaterThan(inventoryFailure);
+    expect(release.slice(merge, providerTarget)).toContain("target.cfHostnameId === match.id");
+    expect(providerTarget).toBeGreaterThan(merge);
+    expect(release.slice(providerTarget, retirement)).toContain("hostnames: [match.hostname]");
+    expect(release.slice(providerTarget, retirement)).toContain("projectDomainIds: []");
+    expect(release.slice(providerTarget, retirement)).toContain("legacyProjectPointer: false");
+    expect(retirement).toBeGreaterThan(providerTarget);
+  });
+
+  it("strictly inventories purchased-domain hostnames for security before certificate release", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function releaseTrackedDomainSecurityResources");
+    const end = source.indexOf("async function releaseCustomHostnameCertificates", start);
+    const security = source.slice(start, end);
+    const purchasedRead = security.indexOf(".from(purchasedDomainsTable)");
+    const inventory = security.indexOf("inventoryCustomHostnamesByHostname", purchasedRead);
+    const purchasedInput = security.indexOf(
+      "purchasedDomains.map((domain) => domain.hostname)",
+      inventory,
+    );
+    const discovery = security.indexOf("discoverCloudflareSecurityResources", purchasedInput);
+
+    expect(purchasedRead).toBeGreaterThan(-1);
+    expect(inventory).toBeGreaterThan(purchasedRead);
+    expect(purchasedInput).toBeGreaterThan(inventory);
+    expect(discovery).toBeGreaterThan(purchasedInput);
+    expect(security).toContain('code: "project_retirement_domain_security_release_unverified"');
+  });
+
   it("retires tracked security resources and purchased assignments before runtime pointers", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const security = source.indexOf("await releaseTrackedDomainSecurityResources");
     const certificates = source.indexOf("await releaseCustomHostnameCertificates", security);
-    const purchased = source.indexOf("await detachPurchasedDomains", certificates);
+    const purchased = source.indexOf("await retainPurchasedDomainAssignments", certificates);
     const runtime = source.indexOf("await destroyRuntimeTargets", purchased);
 
     expect(security).toBeGreaterThan(-1);
@@ -431,6 +629,20 @@ describe("governed project retirement coordinator", () => {
     );
   });
 
+  it("includes a legacy-only custom domain in strict security discovery", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function releaseTrackedDomainSecurityResources");
+    const end = source.indexOf("async function releaseCustomHostnameCertificates", start);
+    const security = source.slice(start, end);
+
+    expect(security).toContain("hostname: projectsTable.customDomain");
+    expect(security).toContain("cfHostnameId: projectsTable.cfHostnameId");
+    expect(security).toContain("const securityDomains:");
+    expect(security).toContain("id: null");
+    expect(security).toContain("mapInBoundedBatches(securityDomains");
+    expect(security).toContain("if (discovered.domain.id === null)");
+  });
+
   it("terminalizes an expired fourth-attempt crash with a retryable typed receipt", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const resume = source.indexOf("export async function resumeProjectRetirementOperations");
@@ -445,16 +657,16 @@ describe("governed project retirement coordinator", () => {
     );
   });
 
-  it("adopts legacy tombstones at boot without any runtime start or restore", () => {
+  it("resumes existing receipts at boot without implicitly adopting legacy tombstones", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
-    const adopt = source.indexOf("export async function adoptLegacyProjectRetirementOperations");
-    const resume = source.indexOf("export async function resumeProjectRetirementOperations", adopt);
-    const block = source.slice(adopt, resume);
+    const resume = source.indexOf("export async function resumeProjectRetirementOperations");
+    const read = source.indexOf("export async function readProjectRetirementOperation", resume);
+    const block = source.slice(resume, read);
 
-    expect(block).toContain("isNotNull(projectsTable.deletedAt)");
-    expect(block).toContain("system:legacy-trash-reconciliation");
-    expect(block).toContain(".onConflictDoNothing");
-    expect(block).not.toMatch(/\.start\(|restore/);
+    expect(block).toContain("enqueueProjectRetirementOperation(operation.id)");
+    expect(block).not.toContain("projectsTable");
+    expect(block).not.toContain(".insert(");
+    expect(source).not.toContain("adoptLegacyProjectRetirementOperations");
   });
 
   it("prevents atomic file writes from racing past the project tombstone", () => {

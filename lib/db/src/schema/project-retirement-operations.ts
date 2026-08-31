@@ -11,6 +11,16 @@ export type ProjectRetirementTargetProgress = {
 };
 
 export type ProjectRetirementProgress = {
+  /** Closed semantics identity; older/malformed receipts never authorize restore. */
+  semantics: "project-retirement-v2";
+  /**
+   * Minimal replay receipt written atomically with clearing the project tombstone.
+   * It intentionally carries no user content, provider response, hostname, or secret.
+   */
+  restore?: {
+    state: "restored";
+    restoredAt: string;
+  };
   reconciliation?: {
     generation: number;
     parentOperationId: string;
@@ -45,8 +55,24 @@ export type ProjectRetirementProgress = {
     creditsRefunded: number;
     telemetryFlushed: number;
   };
+  access: {
+    state: "pending" | "revoked";
+    shareLinksRevoked: number;
+    previewSessionsRevoked: number;
+    supportGrantsRevoked: number;
+    supportSessionsInterrupted: number;
+    canvasShareTokensCleared: number;
+    canvasAbTestsEnded: number;
+  };
+  /** Legacy CDN objects under the numeric project prefix; keys never enter the receipt. */
+  legacyR2: {
+    state: "pending" | "deleting" | "not_configured" | "verified_absent" | "failed";
+    discoveredCount: number;
+    deletedCount: number;
+    failureCode: string | null;
+  };
   domains: Array<{
-    domainId: number;
+    domainId: number | null;
     hostname: string;
     state: "pending" | "releasing" | "verified_absent" | "failed";
     failureCode: string | null;
@@ -65,7 +91,7 @@ export type ProjectRetirementProgress = {
   }>;
   /** Exact zone security resources removed before a domain pointer is lost. */
   securityResources?: Array<{
-    domainId: number;
+    domainId: number | null;
     hostname: string;
     kind: "ruleset_rule" | "firewall_rule" | "firewall_filter" | "rate_limit" | "mtls_certificate";
     providerId: string;
@@ -74,21 +100,22 @@ export type ProjectRetirementProgress = {
     state: "pending" | "releasing" | "verified_absent" | "failed";
     failureCode: string | null;
   }>;
-  /** Purchased-domain ownership survives; only its project assignment is retired. */
+  /** Purchased-domain ownership and recoverable project assignment both survive Trash. */
   purchasedDomains?: Array<{
     purchasedDomainId: number;
     projectDomainId: number | null;
     hostname: string;
-    state: "pending" | "detached";
+    state: "pending" | "retained";
   }>;
   retainedLegacyRuntimePointers: Array<{
-    pointer: "containerId" | "prodContainerId";
+    pointer: "containerId" | "prodContainerId" | "testContainerId";
     identity: string;
     reason:
       | "runtime_identity_malformed"
       | "runtime_namespace_mismatch"
       | "runtime_project_mismatch"
-      | "runtime_role_slot_mismatch";
+      | "runtime_role_slot_mismatch"
+      | "legacy_runtime_provider";
   }>;
   runtimes: ProjectRetirementTargetProgress[];
 };

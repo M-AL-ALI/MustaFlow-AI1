@@ -1,6 +1,7 @@
-import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gt, inArray, isNull } from "drizzle-orm";
 import {
   db,
+  projectsTable,
   supportAccessGrantsTable,
   supportGrantEventsTable,
   supportZeroSessionsTable,
@@ -51,8 +52,15 @@ export async function findLiveSupportGrant(input: {
 }): Promise<SupportAccessGrant | null> {
   const now = input.now ?? new Date();
   const [grant] = await db
-    .select()
+    .select({ ...getTableColumns(supportAccessGrantsTable) })
     .from(supportAccessGrantsTable)
+    .innerJoin(
+      projectsTable,
+      and(
+        eq(projectsTable.id, supportAccessGrantsTable.projectId),
+        isNull(projectsTable.deletedAt),
+      ),
+    )
     .where(
       and(
         eq(supportAccessGrantsTable.projectId, input.projectId),

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -53,6 +53,10 @@ import {
   acceptProjectRetirement,
   decideProjectRestoreAdmission,
   enqueueProjectRetirementOperation,
+  hasProjectRestoreReplayReceipt,
+  matchesRestoredProjectControlPlaneState,
+  presentProjectRetirementPreflightRefusal,
+  preflightProjectRetirement,
   PROJECT_LIFECYCLE_LOCK_NAMESPACE,
   readProjectRetirementOperation,
   RESTORED_PROJECT_CONTROL_PLANE_STATE,
@@ -1543,14 +1547,16 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
     // cannot use the ordinary active-project middleware, so the check belongs
     // inside this locked transaction.
     const [ownedProject] = await tx
-      .select({ id: projectsTable.id })
+      .select()
       .from(projectsTable)
       .where(
         and(
           eq(projectsTable.id, params.data.id),
           eq(projectsTable.ownerId, userId),
-          sql`${projectsTable.deletedAt} IS NOT NULL`,
-          sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
+          or(
+            isNull(projectsTable.deletedAt),
+            sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
+          ),
         ),
       )
       .limit(1);
@@ -1562,11 +1568,43 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
       .where(eq(projectRetirementOperationsTable.projectId, params.data.id))
       .orderBy(desc(projectRetirementOperationsTable.createdAt))
       .limit(1);
+    const retirementEvidence = {
+      state: latestRetirement?.state ?? null,
+      progress: latestRetirement?.progress ?? null,
+    };
+    if (ownedProject.deletedAt === null) {
+      return hasProjectRestoreReplayReceipt(retirementEvidence) &&
+        matchesRestoredProjectControlPlaneState(ownedProject)
+        ? { kind: "already_restored" as const, project: ownedProject }
+        : { kind: "not_found" as const };
+    }
     // Restore is safe only after the latest governed receipt proves that every
-    // public/provider surface is absent. A failed terminal is evidence of the
-    // opposite, even when it carries completedAt.
-    const restoreAdmission = decideProjectRestoreAdmission(latestRetirement?.state ?? null);
+    // public/provider surface is absent. A completed label without current,
+    // structurally complete evidence fails closed.
+    const restoreAdmission = decideProjectRestoreAdmission(retirementEvidence);
     if (!restoreAdmission.allowed) {
+      return { kind: "blocked" as const, operation: latestRetirement ?? null };
+    }
+    const [restoreReceipt] = await tx
+      .update(projectRetirementOperationsTable)
+      .set({
+        progress: sql`jsonb_set(
+          ${projectRetirementOperationsTable.progress},
+          '{restore}',
+          jsonb_build_object('state', 'restored', 'restoredAt', now()),
+          true
+        )`,
+        updatedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(projectRetirementOperationsTable.id, latestRetirement!.id),
+          eq(projectRetirementOperationsTable.projectId, params.data.id),
+          eq(projectRetirementOperationsTable.state, "completed"),
+        ),
+      )
+      .returning({ id: projectRetirementOperationsTable.id });
+    if (!restoreReceipt) {
       return { kind: "blocked" as const, operation: latestRetirement ?? null };
     }
     const [project] = await tx
@@ -1591,7 +1629,8 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
         ),
       )
       .returning();
-    return project ? { kind: "restored" as const, project } : { kind: "not_found" as const };
+    if (!project) throw new Error("project_restore_lifecycle_invariant");
+    return { kind: "restored" as const, project };
   });
   if (restoreResult.kind === "blocked") {
     res.status(409).json({
@@ -1697,12 +1736,13 @@ router.post("/projects/:id/retirement/retry", async (req, res): Promise<void> =>
     });
     return;
   }
-  const queueJobId = await enqueueProjectRetirementOperation(reconciliation.operationId);
-  if (!queueJobId) {
+  const scheduling = await enqueueProjectRetirementOperation(reconciliation.operationId);
+  if (scheduling.state === "unavailable") {
     res.status(503).json({
       ...reconciliation,
       code: "project_retirement_cleanup_pending",
       cleanupScheduled: false,
+      cleanupScheduleState: scheduling.state,
       retryable: true,
     });
     return;
@@ -1711,7 +1751,8 @@ router.post("/projects/:id/retirement/retry", async (req, res): Promise<void> =>
     ...reconciliation,
     code: "project_retirement_reconciliation_accepted",
     cleanupScheduled: true,
-    queueJobId,
+    cleanupScheduleState: scheduling.state,
+    ...(scheduling.state === "enqueued" ? { queueJobId: scheduling.jobId } : {}),
     statusUrl: `/api/projects/${params.data.id}/retirement`,
   });
 });
@@ -1749,26 +1790,66 @@ router.post(
 
     const receipts = [];
     let cleanupPending = false;
+    let acceptedCount = 0;
+    let refusedCount = 0;
     for (const projectId of requested as number[]) {
-      // Preempt local work before waiting on its lifecycle lock. The lock still
-      // provides the no-late-write guarantee; cancellation keeps Trash from
-      // waiting behind a long AI/provider operation that already holds it.
-      const localCancellation = cancelLocalProjectJobs(projectId);
-      const provisioningCancellation = cancelLocalProjectProvisioning(projectId);
+      const preliminary = await preflightProjectRetirement({
+        projectId,
+        allowLegacyDeleted: true,
+      });
+      if (!preliminary) {
+        receipts.push({ projectId, state: "not_found" as const });
+        continue;
+      }
+      if (preliminary.state === "refused") {
+        refusedCount += 1;
+        receipts.push({
+          ...preliminary,
+          error: presentProjectRetirementPreflightRefusal(preliminary.code),
+        });
+        continue;
+      }
       const accepted = await acceptProjectRetirement({
         projectId,
         requestedBy: req.userId!,
+        allowLegacyDeleted: true,
       });
       if (!accepted) {
         receipts.push({ projectId, state: "not_found" as const });
         continue;
       }
-      const queueJobId = await enqueueProjectRetirementOperation(accepted.operationId);
-      if (!queueJobId) {
+      if (accepted.state === "refused") {
+        refusedCount += 1;
+        receipts.push({
+          ...accepted,
+          error: presentProjectRetirementPreflightRefusal(accepted.code),
+        });
+        continue;
+      }
+      // The repeated preflight inside acceptProjectRetirement is authoritative.
+      // Never cancel live work until that locked decision has actually committed
+      // the tombstone; a refused Trash request must remain side-effect free.
+      const localCancellation = cancelLocalProjectJobs(projectId);
+      const provisioningCancellation = cancelLocalProjectProvisioning(projectId);
+      acceptedCount += 1;
+      if (accepted.state === "completed") {
+        receipts.push({
+          ...accepted,
+          cleanupScheduled: false,
+          cleanupComplete: true,
+          localCancellation,
+          provisioningCancellation,
+          statusUrl: `/api/projects/${projectId}/retirement`,
+        });
+        continue;
+      }
+      const scheduling = await enqueueProjectRetirementOperation(accepted.operationId);
+      if (scheduling.state === "unavailable") {
         cleanupPending = true;
         receipts.push({
           ...accepted,
           cleanupScheduled: false,
+          cleanupScheduleState: scheduling.state,
           localCancellation,
           provisioningCancellation,
         });
@@ -1777,7 +1858,8 @@ router.post(
       receipts.push({
         ...accepted,
         cleanupScheduled: true,
-        queueJobId,
+        cleanupScheduleState: scheduling.state,
+        ...(scheduling.state === "enqueued" ? { queueJobId: scheduling.jobId } : {}),
         localCancellation,
         provisioningCancellation,
         statusUrl: `/api/projects/${projectId}/retirement`,
@@ -1793,7 +1875,25 @@ router.post(
       });
       return;
     }
-    res.status(202).json({ code: "project_retirement_batch_accepted", receipts });
+    if (acceptedCount === 0 && refusedCount > 0) {
+      res.status(409).json({ code: "project_retirement_batch_refused", receipts });
+      return;
+    }
+    if (acceptedCount === 0) {
+      res.status(404).json({
+        code: "project_retirement_batch_not_found",
+        error: "No matching projects were found.",
+        receipts,
+      });
+      return;
+    }
+    res.status(202).json({
+      code:
+        refusedCount > 0
+          ? "project_retirement_batch_partially_accepted"
+          : "project_retirement_batch_accepted",
+      receipts,
+    });
   },
 );
 
@@ -1914,11 +2014,24 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
     return;
   }
 
-  // Stop process-local work before waiting on the lifecycle lock. Provider
-  // mutations still finish under the lock or observe their AbortSignal; Trash
-  // then commits the tombstone and cleans the final state without a late write.
-  const localCancellation = cancelLocalProjectJobs(params.data.id);
-  const provisioningCancellation = cancelLocalProjectProvisioning(params.data.id);
+  const preliminary = await preflightProjectRetirement({
+    projectId: params.data.id,
+    ownerId: req.userId!,
+  });
+  if (!preliminary) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (preliminary.state === "refused") {
+    res.status(409).json({
+      code: preliminary.code,
+      error: presentProjectRetirementPreflightRefusal(preliminary.code),
+      deleted: false,
+      cleanupScheduled: false,
+    });
+    return;
+  }
+
   const result = await acceptProjectRetirement({
     projectId: params.data.id,
     requestedBy: req.userId!,
@@ -1929,8 +2042,21 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
     res.status(404).json({ error: "Project not found" });
     return;
   }
-  const queueJobId = await enqueueProjectRetirementOperation(result.operationId);
-  if (!queueJobId) {
+  if (result.state === "refused") {
+    res.status(409).json({
+      code: result.code,
+      error: presentProjectRetirementPreflightRefusal(result.code),
+      deleted: false,
+      cleanupScheduled: false,
+    });
+    return;
+  }
+  // The locked acceptance is authoritative. Cancellation happens only after
+  // the project is in Trash, so a refused request cannot interrupt live work.
+  const localCancellation = cancelLocalProjectJobs(params.data.id);
+  const provisioningCancellation = cancelLocalProjectProvisioning(params.data.id);
+  const scheduling = await enqueueProjectRetirementOperation(result.operationId);
+  if (scheduling.state === "unavailable") {
     res.status(503).json({
       code: "project_retirement_cleanup_pending",
       error:
@@ -1938,6 +2064,7 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
       retryable: true,
       deleted: true,
       cleanupScheduled: false,
+      cleanupScheduleState: scheduling.state,
       projectId: result.projectId,
       operationId: result.operationId,
       state: "accepted",
@@ -1953,8 +2080,9 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
     projectId: result.projectId,
     operationId: result.operationId,
     state: "accepted",
-    queueJobId,
     cleanupScheduled: true,
+    cleanupScheduleState: scheduling.state,
+    ...(scheduling.state === "enqueued" ? { queueJobId: scheduling.jobId } : {}),
     localCancellation,
     provisioningCancellation,
     statusUrl: `/api/projects/${result.projectId}/retirement`,

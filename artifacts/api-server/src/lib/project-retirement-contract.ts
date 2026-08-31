@@ -9,6 +9,73 @@ export const PROJECT_RETIREMENT_MAX_ATTEMPTS = 4;
 export const PROJECT_RETIREMENT_MAX_RECONCILIATIONS = 2;
 export const PROJECT_RETIREMENT_LEASE_MINUTES = 10;
 
+export const PROJECT_RETIREMENT_PREFLIGHT_REFUSAL_CODES = [
+  "project_retirement_legacy_runtime_requires_migration",
+  "project_retirement_managed_addon_unverified",
+  "project_retirement_remote_build_in_progress",
+  "project_retirement_provider_provisioning_in_progress",
+  "project_retirement_sqlite_recovery_unverified",
+  "project_retirement_receipt_upgrade_in_progress",
+  "project_retirement_reconciliation_required",
+] as const;
+
+export type ProjectRetirementPreflightRefusalCode =
+  (typeof PROJECT_RETIREMENT_PREFLIGHT_REFUSAL_CODES)[number];
+
+export type ProjectRetirementPreflightDecision =
+  | { allowed: true }
+  | { allowed: false; code: ProjectRetirementPreflightRefusalCode };
+
+const PROJECT_RETIREMENT_PREFLIGHT_MESSAGES: Readonly<
+  Record<ProjectRetirementPreflightRefusalCode, string>
+> = {
+  project_retirement_legacy_runtime_requires_migration:
+    "This project uses an older runtime that cannot be retired safely yet.",
+  project_retirement_managed_addon_unverified:
+    "This project has an add-on whose safe removal cannot be verified yet.",
+  project_retirement_remote_build_in_progress:
+    "This project has a mobile build in progress. Wait for it to finish before moving the project to Trash.",
+  project_retirement_provider_provisioning_in_progress:
+    "This project is still setting up its runtime or database. Wait for setup to finish before moving it to Trash.",
+  project_retirement_sqlite_recovery_unverified:
+    "This project's database cannot be preserved and restored safely yet.",
+  project_retirement_receipt_upgrade_in_progress:
+    "This project's earlier Trash cleanup is still running and must finish before its safety receipt can be upgraded.",
+  project_retirement_reconciliation_required:
+    "This project's Trash cleanup did not finish safely. Retry its governed cleanup before continuing.",
+};
+
+export function presentProjectRetirementPreflightRefusal(
+  code: ProjectRetirementPreflightRefusalCode,
+): string {
+  return PROJECT_RETIREMENT_PREFLIGHT_MESSAGES[code];
+}
+
+export function decideProjectRetirementPreflight(input: {
+  hasLegacyRuntime: boolean;
+  hasUnverifiedManagedAddon: boolean;
+  hasInFlightRemoteBuild: boolean;
+  hasInFlightProviderProvisioning: boolean;
+  hasUnverifiedSqliteRecovery: boolean;
+}): ProjectRetirementPreflightDecision {
+  if (input.hasLegacyRuntime) {
+    return { allowed: false, code: "project_retirement_legacy_runtime_requires_migration" };
+  }
+  if (input.hasInFlightProviderProvisioning) {
+    return { allowed: false, code: "project_retirement_provider_provisioning_in_progress" };
+  }
+  if (input.hasUnverifiedSqliteRecovery) {
+    return { allowed: false, code: "project_retirement_sqlite_recovery_unverified" };
+  }
+  if (input.hasUnverifiedManagedAddon) {
+    return { allowed: false, code: "project_retirement_managed_addon_unverified" };
+  }
+  if (input.hasInFlightRemoteBuild) {
+    return { allowed: false, code: "project_retirement_remote_build_in_progress" };
+  }
+  return { allowed: true };
+}
+
 export const PROJECT_RETIREMENT_TASK_STATUSES = [
   "queued",
   "answering",
@@ -34,10 +101,13 @@ export const PROJECT_RETIREMENT_FAILURE_CODES = [
   "project_retirement_domain_release_unverified",
   "project_retirement_domain_security_release_failed",
   "project_retirement_domain_security_release_unverified",
+  "project_retirement_legacy_r2_release_failed",
+  "project_retirement_legacy_r2_release_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
   "project_retirement_legacy_runtime_retained",
   "project_retirement_attempts_exhausted",
+  "project_retirement_completion_evidence_incomplete",
   "project_retirement_operation_unavailable",
 ] as const;
 
@@ -56,6 +126,8 @@ const RETRYABLE_TERMINAL_FAILURE_CODES = new Set<ProjectRetirementFailureCode>([
   "project_retirement_domain_release_unverified",
   "project_retirement_domain_security_release_failed",
   "project_retirement_domain_security_release_unverified",
+  "project_retirement_legacy_r2_release_failed",
+  "project_retirement_legacy_r2_release_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
   "project_retirement_attempts_exhausted",
@@ -117,6 +189,131 @@ export type ProjectRestoreAdmission =
   | { allowed: true }
   | { allowed: false; code: "project_retirement_cleanup_unverified" };
 
+export const PROJECT_RETIREMENT_SEMANTICS = "project-retirement-v2" as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonnegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function hasExactCurrentRuntimeAbsenceReceipts(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length !== PROJECT_RETIREMENT_RUNTIME_TARGETS.length) {
+    return false;
+  }
+  const expected = new Set(
+    PROJECT_RETIREMENT_RUNTIME_TARGETS.map((target) => `${target.role}:${target.slot}`),
+  );
+  const observed = new Set<string>();
+  for (const entry of value) {
+    if (
+      !isRecord(entry) ||
+      entry.state !== "verified_absent" ||
+      entry.failureCode !== null ||
+      !isNonnegativeInteger(entry.attempts) ||
+      typeof entry.role !== "string" ||
+      typeof entry.slot !== "string"
+    ) {
+      return false;
+    }
+    observed.add(`${entry.role}:${entry.slot}`);
+  }
+  return observed.size === expected.size && [...observed].every((target) => expected.has(target));
+}
+
+/**
+ * Validate the complete current absence receipt. Merely carrying a terminal
+ * state is insufficient: old or truncated JSONB receipts fail closed.
+ */
+export function hasCurrentProjectRetirementCompletionEvidence(progress: unknown): boolean {
+  if (!isRecord(progress) || progress.semantics !== PROJECT_RETIREMENT_SEMANTICS) return false;
+
+  const route = progress.route;
+  if (!isRecord(route) || route.state !== "verified_absent" || route.failureCode !== null) {
+    return false;
+  }
+  const legacyHostnameKv = route.legacyHostnameKv;
+  if (
+    !isRecord(legacyHostnameKv) ||
+    !["not_configured", "verified_absent"].includes(String(legacyHostnameKv.state)) ||
+    legacyHostnameKv.failureCode !== null ||
+    !Array.isArray(route.hostnames) ||
+    !route.hostnames.every(
+      (receipt) => isRecord(receipt) && receipt.state === "absent" && receipt.stage === null,
+    ) ||
+    !Array.isArray(route.runtimeRoutes) ||
+    !route.runtimeRoutes.every(
+      (receipt) => isRecord(receipt) && receipt.state === "verified_absent",
+    ) ||
+    !isRecord(route.cache) ||
+    route.cache.state !== "purged"
+  ) {
+    return false;
+  }
+
+  const tasks = progress.tasks;
+  if (
+    !isRecord(tasks) ||
+    tasks.state !== "canceled" ||
+    !["count", "terminalized", "creditsRefunded", "telemetryFlushed"].every((field) =>
+      isNonnegativeInteger(tasks[field]),
+    )
+  ) {
+    return false;
+  }
+
+  const access = progress.access;
+  if (
+    !isRecord(access) ||
+    access.state !== "revoked" ||
+    ![
+      "shareLinksRevoked",
+      "previewSessionsRevoked",
+      "supportGrantsRevoked",
+      "supportSessionsInterrupted",
+      "canvasShareTokensCleared",
+      "canvasAbTestsEnded",
+    ].every((field) => isNonnegativeInteger(access[field]))
+  ) {
+    return false;
+  }
+
+  const legacyR2 = progress.legacyR2;
+  if (
+    !isRecord(legacyR2) ||
+    !["not_configured", "verified_absent"].includes(String(legacyR2.state)) ||
+    legacyR2.failureCode !== null ||
+    !isNonnegativeInteger(legacyR2.discoveredCount) ||
+    !isNonnegativeInteger(legacyR2.deletedCount) ||
+    legacyR2.discoveredCount !== legacyR2.deletedCount
+  ) {
+    return false;
+  }
+
+  const allTerminal = (value: unknown, terminal: string): boolean =>
+    Array.isArray(value) &&
+    value.every(
+      (receipt) =>
+        isRecord(receipt) &&
+        receipt.state === terminal &&
+        (!("failureCode" in receipt) || receipt.failureCode === null),
+    );
+  if (
+    !allTerminal(progress.domains, "verified_absent") ||
+    !allTerminal(progress.hostnameCertificates, "verified_absent") ||
+    !allTerminal(progress.securityResources, "verified_absent") ||
+    !allTerminal(progress.purchasedDomains, "retained") ||
+    !Array.isArray(progress.retainedLegacyRuntimePointers) ||
+    progress.retainedLegacyRuntimePointers.length !== 0 ||
+    !hasExactCurrentRuntimeAbsenceReceipts(progress.runtimes)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * A restored project keeps its source, immutable versions, database, secrets,
  * assets, and publish history, but it must not inherit any claim that a retired
@@ -154,12 +351,35 @@ export const RESTORED_PROJECT_CONTROL_PLANE_STATE = {
 } as const;
 
 /** Restore is earned only by a receipt proving every cleanup step completed. */
-export function decideProjectRestoreAdmission(
-  latestRetirementState: string | null,
-): ProjectRestoreAdmission {
-  return latestRetirementState === "completed"
+export function decideProjectRestoreAdmission(input: {
+  state: string | null;
+  progress: unknown;
+}): ProjectRestoreAdmission {
+  return input.state === "completed" &&
+    hasCurrentProjectRetirementCompletionEvidence(input.progress)
     ? { allowed: true }
     : { allowed: false, code: "project_retirement_cleanup_unverified" };
+}
+
+export function hasProjectRestoreReplayReceipt(input: {
+  state: string | null;
+  progress: unknown;
+}): boolean {
+  if (!decideProjectRestoreAdmission(input).allowed || !isRecord(input.progress)) return false;
+  const restore = input.progress.restore;
+  return (
+    isRecord(restore) &&
+    restore.state === "restored" &&
+    typeof restore.restoredAt === "string" &&
+    Number.isFinite(Date.parse(restore.restoredAt))
+  );
+}
+
+export function matchesRestoredProjectControlPlaneState(project: unknown): boolean {
+  if (!isRecord(project)) return false;
+  return Object.entries(RESTORED_PROJECT_CONTROL_PLANE_STATE).every(
+    ([field, expected]) => project[field] === expected,
+  );
 }
 
 /**
@@ -185,20 +405,95 @@ export function decideProjectRetirementClaim(input: {
 }
 
 export function legacyProjectRetirementOperationId(projectId: number): string {
-  return `project-retirement:legacy:v1:${projectId}`;
+  return `project-retirement:legacy:v2:${projectId}`;
 }
 
-export function planLegacyProjectRetirementAdoptions(input: {
-  deletedProjectIds: number[];
-  projectsWithReceipts: ReadonlySet<number>;
-}): Array<{ projectId: number; operationId: string }> {
-  return [...new Set(input.deletedProjectIds)]
-    .filter((projectId) => !input.projectsWithReceipts.has(projectId))
-    .sort((left, right) => left - right)
-    .map((projectId) => ({
-      projectId,
-      operationId: legacyProjectRetirementOperationId(projectId),
-    }));
+export function projectRetirementOperationIdForReceiptMode(input: {
+  mode: ProjectRetirementReceiptMode;
+  projectId: number;
+  freshOperationId: string;
+}): string {
+  return input.mode === "adopt_legacy_tombstone"
+    ? legacyProjectRetirementOperationId(input.projectId)
+    : input.freshOperationId;
+}
+
+export type ProjectRetirementReceiptMode =
+  | "retire_active"
+  | "adopt_legacy_tombstone"
+  | "reuse_in_flight"
+  | "reuse_completed"
+  | "replace_incompatible_terminal"
+  | "refuse_incompatible_active"
+  | "refuse_terminal_reconciliation_required";
+
+export type ExistingProjectRetirementReceipt = {
+  id: string;
+  state: string;
+  completedAt: Date | null;
+  progress: unknown;
+};
+
+/**
+ * Active projects always earn a fresh retirement receipt, including a project
+ * that was restored after an earlier completed retirement. A legacy tombstone
+ * is adopted exactly once; subsequent exact-ID requests reuse its receipt.
+ */
+export function decideProjectRetirementReceiptMode(input: {
+  deleted: boolean;
+  existingOperation: ExistingProjectRetirementReceipt | null;
+}): ProjectRetirementReceiptMode {
+  if (!input.deleted) return "retire_active";
+  if (input.existingOperation === null) return "adopt_legacy_tombstone";
+  const operation = input.existingOperation;
+  const currentSemantics =
+    isRecord(operation.progress) && operation.progress.semantics === PROJECT_RETIREMENT_SEMANTICS;
+  const active =
+    operation.state === "accepted" ||
+    operation.state === "running" ||
+    (operation.state === "failed" && operation.completedAt === null);
+  if (active) return currentSemantics ? "reuse_in_flight" : "refuse_incompatible_active";
+  if (operation.state === "failed") return "refuse_terminal_reconciliation_required";
+  if (operation.state === "completed") {
+    return decideProjectRestoreAdmission({ state: operation.state, progress: operation.progress })
+      .allowed
+      ? "reuse_completed"
+      : "replace_incompatible_terminal";
+  }
+  return currentSemantics
+    ? "refuse_terminal_reconciliation_required"
+    : "replace_incompatible_terminal";
+}
+
+export type ProjectRetirementSchedulingReceipt =
+  | { state: "enqueued"; jobId: string }
+  | { state: "already_scheduled" }
+  | { state: "unavailable" };
+
+export function decideProjectRetirementSchedulingReceipt(
+  input:
+    | { status: "enqueued"; jobId: string }
+    | { status: "duplicate" }
+    | { status: "unavailable" }
+    | { status: "failed" },
+): ProjectRetirementSchedulingReceipt {
+  if (input.status === "enqueued") return { state: "enqueued", jobId: input.jobId };
+  if (input.status === "duplicate") return { state: "already_scheduled" };
+  return { state: "unavailable" };
+}
+
+/** One normalized hostname inventory shared by route, certificate, and security cleanup. */
+export function projectRetirementProviderHostnames(
+  hostnames: readonly (string | null | undefined)[],
+): string[] {
+  return [
+    ...new Set(
+      hostnames
+        .filter((hostname): hostname is string => typeof hostname === "string")
+        .map((hostname) => hostname.trim().toLowerCase().replace(/\.$/u, ""))
+        .filter((hostname) => hostname.length > 0),
+    ),
+  ].sort();
 }
 
 export function projectRetirementFailure(
@@ -209,6 +504,7 @@ export function projectRetirementFailure(
 
 export function initialProjectRetirementProgress(): ProjectRetirementProgress {
   return {
+    semantics: PROJECT_RETIREMENT_SEMANTICS,
     route: {
       state: "pending",
       failureCode: null,
@@ -221,6 +517,21 @@ export function initialProjectRetirementProgress(): ProjectRetirementProgress {
       terminalized: 0,
       creditsRefunded: 0,
       telemetryFlushed: 0,
+    },
+    access: {
+      state: "pending",
+      shareLinksRevoked: 0,
+      previewSessionsRevoked: 0,
+      supportGrantsRevoked: 0,
+      supportSessionsInterrupted: 0,
+      canvasShareTokensCleared: 0,
+      canvasAbTestsEnded: 0,
+    },
+    legacyR2: {
+      state: "pending",
+      discoveredCount: 0,
+      deletedCount: 0,
+      failureCode: null,
     },
     domains: [],
     hostnameCertificates: [],
@@ -319,4 +630,23 @@ export async function classifyStoredRuntimePointer(input: {
     role: parsed.role,
     slot: parsed.slot,
   } as StoredRuntimePointerClassification;
+}
+
+/**
+ * Every known or observed hostname is a cache eviction target, even when the
+ * retired legacy KV registry is intentionally absent. A removed route can
+ * still have a stale Cache API entry, so route inventory alone is insufficient.
+ */
+export function projectRetirementCacheHostnames(input: {
+  knownHostnames: readonly string[];
+  legacyKvHostnames: readonly string[];
+  runtimeRouteHostnames: readonly string[];
+}): string[] {
+  return [
+    ...new Set([
+      ...input.knownHostnames,
+      ...input.legacyKvHostnames,
+      ...input.runtimeRouteHostnames,
+    ]),
+  ];
 }

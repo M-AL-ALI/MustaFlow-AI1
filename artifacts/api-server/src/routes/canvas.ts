@@ -18,8 +18,8 @@
  *   - POST /canvas/ab-tests/:testId/convert — record a conversion event (cookie-based).
  *   - GET  /canvas/ab/:testId/{*splat}   — public A/B traffic-split serve route.
  */
-import { Router, type IRouter } from "express";
-import { and, eq, desc, lt, sql } from "drizzle-orm";
+import { Router, type IRouter, type Response } from "express";
+import { and, desc, eq, getTableColumns, isNull, sql } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -39,11 +39,17 @@ import { resolveProjectFileBytes } from "../lib/project-file-asset-reference";
 import { writeKnowledge } from "../lib/knowledge";
 import { logger } from "../lib/logger";
 import { graduateCanvasVariantAtomically } from "../lib/canvas-variant-graduation";
+import {
+  acquireProjectLifecycleSession,
+  holdResponseProjectLifecycleSession,
+  registerProjectWorkController,
+  responseProjectLifecycleSession,
+} from "../lib/project-lifecycle";
 import crypto from "node:crypto";
 
 const router: IRouter = Router();
 
-const STALE_VARIANT_MS = 24 * 60 * 60 * 1000;
+const CANVAS_VARIANT_GENERATION_CAP_MS = 3 * 60_000;
 const MAX_VARIANTS_PER_EXPLORATION = 8;
 const MIN_VARIANTS_PER_EXPLORATION = 2;
 const DEFAULT_VARIANT_LABELS = [
@@ -56,6 +62,81 @@ const DEFAULT_VARIANT_LABELS = [
   "Variant G",
   "Variant H",
 ];
+
+const activeCanvasAbTestProject = sql<boolean>`EXISTS (
+  SELECT 1
+  FROM ${projectsTable}
+  WHERE ${projectsTable.id} = ${canvasAbTestsTable.projectId}
+    AND ${projectsTable.deletedAt} IS NULL
+)`;
+
+async function findActiveSharedCanvasVariant(token: string): Promise<CanvasVariant | undefined> {
+  const [row] = await db
+    .select({ ...getTableColumns(canvasVariantsTable) })
+    .from(canvasVariantsTable)
+    .innerJoin(
+      projectsTable,
+      and(eq(projectsTable.id, canvasVariantsTable.projectId), isNull(projectsTable.deletedAt)),
+    )
+    .where(eq(canvasVariantsTable.shareToken, token));
+  return row;
+}
+
+async function findActiveCanvasAbTest(testId: number) {
+  const [test] = await db
+    .select({ ...getTableColumns(canvasAbTestsTable) })
+    .from(canvasAbTestsTable)
+    .innerJoin(
+      projectsTable,
+      and(eq(projectsTable.id, canvasAbTestsTable.projectId), isNull(projectsTable.deletedAt)),
+    )
+    .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
+  return test;
+}
+
+async function recordActiveCanvasAbTestMetric(
+  testId: number,
+  metric: "viewsA" | "viewsB" | "conversionsA" | "conversionsB",
+): Promise<boolean> {
+  const increment = {
+    viewsA: { viewsA: sql`${canvasAbTestsTable.viewsA} + 1` },
+    viewsB: { viewsB: sql`${canvasAbTestsTable.viewsB} + 1` },
+    conversionsA: { conversionsA: sql`${canvasAbTestsTable.conversionsA} + 1` },
+    conversionsB: { conversionsB: sql`${canvasAbTestsTable.conversionsB} + 1` },
+  }[metric];
+  const updated = await db
+    .update(canvasAbTestsTable)
+    .set(increment)
+    .where(
+      and(
+        eq(canvasAbTestsTable.id, testId),
+        eq(canvasAbTestsTable.status, "running"),
+        activeCanvasAbTestProject,
+      ),
+    )
+    .returning({ id: canvasAbTestsTable.id });
+  return updated.length === 1;
+}
+
+async function recordActiveCanvasAbTestConversion(
+  testId: number,
+  variant: "a" | "b",
+): Promise<boolean> {
+  if (!(await findActiveCanvasAbTest(testId))) return false;
+  return recordActiveCanvasAbTestMetric(testId, variant === "a" ? "conversionsA" : "conversionsB");
+}
+
+async function withCanvasProjectLifecycleHold<T>(
+  res: Response,
+  work: () => Promise<T>,
+): Promise<T> {
+  const release = holdResponseProjectLifecycleSession(res);
+  try {
+    return await work();
+  } finally {
+    await release();
+  }
+}
 
 /**
  * Per-variant style hints injected into each parallel runRefinePipeline call.
@@ -71,21 +152,6 @@ const VARIANT_DIRECTIONS = [
   "Go maximalist — high visual density, rich illustrations, bold section separators.",
   "Embrace glassmorphism and translucency with a vibrant gradient backdrop.",
 ];
-
-let lastPruneAt = 0;
-
-async function pruneStaleVariants(): Promise<void> {
-  const now = Date.now();
-  if (now - lastPruneAt < 60_000) return;
-  lastPruneAt = now;
-  try {
-    await db
-      .delete(canvasVariantsTable)
-      .where(lt(canvasVariantsTable.lastViewedAt, new Date(now - STALE_VARIANT_MS)));
-  } catch (err) {
-    logger.warn({ err }, "canvas: pruneStaleVariants failed");
-  }
-}
 
 function serializeVariant(v: CanvasVariant): Record<string, unknown> {
   return {
@@ -111,7 +177,7 @@ function serializeVariant(v: CanvasVariant): Record<string, unknown> {
   };
 }
 
-async function runVariantGeneration(args: {
+export async function runCanvasVariantGeneration(args: {
   variantId: number;
   projectId: number;
   projectName: string;
@@ -122,7 +188,17 @@ async function runVariantGeneration(args: {
 }): Promise<void> {
   const { variantId, projectId, projectName, projectKind, basePrompt, direction, existingFiles } =
     args;
+  const workController = new AbortController();
+  const unregisterWork = registerProjectWorkController(projectId, workController);
+  let lifecycleSession: Awaited<ReturnType<typeof acquireProjectLifecycleSession>> = null;
   try {
+    lifecycleSession = await acquireProjectLifecycleSession(projectId);
+    if (!lifecycleSession || workController.signal.aborted) return;
+    const signal = AbortSignal.any([
+      workController.signal,
+      AbortSignal.timeout(CANVAS_VARIANT_GENERATION_CAP_MS),
+    ]);
+    signal.throwIfAborted();
     await db
       .update(canvasVariantsTable)
       .set({ status: "generating", updatedAt: new Date() })
@@ -144,6 +220,7 @@ async function runVariantGeneration(args: {
       userPrompt,
       agentMode: "power",
       existingFiles,
+      signal,
     });
 
     const changedByPath = new Map(result.changedFiles.map((f) => [f.path, f]));
@@ -163,6 +240,7 @@ async function runVariantGeneration(args: {
       snapshot.push({ path: ch.path, content: ch.content, mimeType: ch.mimeType });
     }
 
+    signal.throwIfAborted();
     await db
       .update(canvasVariantsTable)
       .set({
@@ -177,13 +255,18 @@ async function runVariantGeneration(args: {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn({ err, variantId, projectId }, "canvas: variant generation failed");
-    await db
-      .update(canvasVariantsTable)
-      .set({ status: "failed", errorMessage: msg.slice(0, 500), updatedAt: new Date() })
-      .where(eq(canvasVariantsTable.id, variantId))
-      .catch(() => {
-        /* non-fatal */
-      });
+    if (lifecycleSession) {
+      await db
+        .update(canvasVariantsTable)
+        .set({ status: "failed", errorMessage: msg.slice(0, 500), updatedAt: new Date() })
+        .where(eq(canvasVariantsTable.id, variantId))
+        .catch(() => {
+          /* non-fatal */
+        });
+    }
+  } finally {
+    unregisterWork();
+    await lifecycleSession?.release();
   }
 }
 
@@ -306,7 +389,7 @@ router.post(
       const v = inserts[i]!;
       const direction = VARIANT_DIRECTIONS[i % VARIANT_DIRECTIONS.length]!;
       setImmediate(() => {
-        void runVariantGeneration({
+        void runCanvasVariantGeneration({
           variantId: v.id,
           projectId,
           projectName: project.name,
@@ -328,7 +411,6 @@ router.get(
   requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
-    void pruneStaleVariants();
     const rows = await db
       .select()
       .from(canvasVariantsTable)
@@ -823,30 +905,39 @@ router.post(
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const vid = Number(req.params.vid);
-
-    const [variant] = await db
-      .select()
-      .from(canvasVariantsTable)
-      .where(and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, vid)));
-    if (!variant) {
-      res.status(404).json({ error: "Variant not found" });
-      return;
-    }
-    if (variant.status !== "ready") {
-      res.status(409).json({ error: "Variant is not ready to share" });
+    const lifecycleSession = responseProjectLifecycleSession(res);
+    if (lifecycleSession.projectId !== projectId || !(await lifecycleSession.assertActive())) {
+      res.status(404).json({ error: "Project not found" });
       return;
     }
 
-    let token = variant.shareToken;
-    if (!token) {
-      token = crypto.randomUUID();
-      await db
-        .update(canvasVariantsTable)
-        .set({ shareToken: token, updatedAt: new Date() })
-        .where(eq(canvasVariantsTable.id, vid));
-    }
+    await withCanvasProjectLifecycleHold(res, async () => {
+      const [variant] = await db
+        .select()
+        .from(canvasVariantsTable)
+        .where(and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, vid)));
+      if (!variant) {
+        res.status(404).json({ error: "Variant not found" });
+        return;
+      }
+      if (variant.status !== "ready") {
+        res.status(409).json({ error: "Variant is not ready to share" });
+        return;
+      }
 
-    res.json({ token, shareUrl: `/api/canvas/share/${token}/` });
+      let token = variant.shareToken;
+      if (!token) {
+        token = crypto.randomUUID();
+        await db
+          .update(canvasVariantsTable)
+          .set({ shareToken: token, updatedAt: new Date() })
+          .where(
+            and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, vid)),
+          );
+      }
+
+      res.json({ token, shareUrl: `/api/canvas/share/${token}/` });
+    });
   },
 );
 
@@ -858,10 +949,7 @@ router.get("/canvas/share/:token/{*splat}", async (req, res): Promise<void> => {
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
 
-  const [row] = await db
-    .select()
-    .from(canvasVariantsTable)
-    .where(eq(canvasVariantsTable.shareToken, token));
+  const row = await findActiveSharedCanvasVariant(token);
 
   if (!row) {
     res
@@ -1075,77 +1163,90 @@ router.post(
   requireProjectOwnership,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
-    const body = req.body as
-      | {
-          variantAId?: unknown;
-          variantBId?: unknown;
-          trafficSplitPct?: unknown;
-          metric?: unknown;
-        }
-      | undefined;
-
-    const variantAId = typeof body?.variantAId === "number" ? body.variantAId : 0;
-    const variantBId = typeof body?.variantBId === "number" ? body.variantBId : 0;
-    const trafficSplitPct =
-      typeof body?.trafficSplitPct === "number"
-        ? Math.max(10, Math.min(90, Math.floor(body.trafficSplitPct)))
-        : 50;
-    const metric = typeof body?.metric === "string" ? body.metric.slice(0, 50) : "clicks";
-
-    if (!variantAId || !variantBId) {
-      res.status(400).json({ error: "variantAId and variantBId are required" });
+    const lifecycleSession = responseProjectLifecycleSession(res);
+    if (lifecycleSession.projectId !== projectId || !(await lifecycleSession.assertActive())) {
+      res.status(404).json({ error: "Project not found" });
       return;
     }
-    if (variantAId === variantBId) {
-      res.status(400).json({ error: "variantAId and variantBId must be different" });
-      return;
-    }
+    await withCanvasProjectLifecycleHold(res, async () => {
+      const body = req.body as
+        | {
+            variantAId?: unknown;
+            variantBId?: unknown;
+            trafficSplitPct?: unknown;
+            metric?: unknown;
+          }
+        | undefined;
 
-    const [varA, varB] = await Promise.all([
-      db
-        .select()
-        .from(canvasVariantsTable)
-        .where(
-          and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, variantAId)),
-        )
-        .then((r) => r[0]),
-      db
-        .select()
-        .from(canvasVariantsTable)
-        .where(
-          and(eq(canvasVariantsTable.projectId, projectId), eq(canvasVariantsTable.id, variantBId)),
-        )
-        .then((r) => r[0]),
-    ]);
+      const variantAId = typeof body?.variantAId === "number" ? body.variantAId : 0;
+      const variantBId = typeof body?.variantBId === "number" ? body.variantBId : 0;
+      const trafficSplitPct =
+        typeof body?.trafficSplitPct === "number"
+          ? Math.max(10, Math.min(90, Math.floor(body.trafficSplitPct)))
+          : 50;
+      const metric = typeof body?.metric === "string" ? body.metric.slice(0, 50) : "clicks";
 
-    if (!varA || !varB) {
-      res.status(404).json({ error: "One or both variants not found in this project" });
-      return;
-    }
-    if (varA.status !== "ready" || varB.status !== "ready") {
-      res.status(409).json({ error: "Both variants must be ready before starting an A/B test" });
-      return;
-    }
+      if (!variantAId || !variantBId) {
+        res.status(400).json({ error: "variantAId and variantBId are required" });
+        return;
+      }
+      if (variantAId === variantBId) {
+        res.status(400).json({ error: "variantAId and variantBId must be different" });
+        return;
+      }
 
-    const [test] = await db
-      .insert(canvasAbTestsTable)
-      .values({ projectId, variantAId, variantBId, trafficSplitPct, metric, status: "running" })
-      .returning();
+      const [varA, varB] = await Promise.all([
+        db
+          .select()
+          .from(canvasVariantsTable)
+          .where(
+            and(
+              eq(canvasVariantsTable.projectId, projectId),
+              eq(canvasVariantsTable.id, variantAId),
+            ),
+          )
+          .then((r) => r[0]),
+        db
+          .select()
+          .from(canvasVariantsTable)
+          .where(
+            and(
+              eq(canvasVariantsTable.projectId, projectId),
+              eq(canvasVariantsTable.id, variantBId),
+            ),
+          )
+          .then((r) => r[0]),
+      ]);
 
-    res.status(201).json({
-      id: test!.id,
-      projectId: test!.projectId,
-      variantAId: test!.variantAId,
-      variantBId: test!.variantBId,
-      trafficSplitPct: test!.trafficSplitPct,
-      metric: test!.metric,
-      status: test!.status,
-      viewsA: 0,
-      viewsB: 0,
-      conversionsA: 0,
-      conversionsB: 0,
-      testUrl: `/api/canvas/ab/${test!.id}/`,
-      createdAt: test!.createdAt.toISOString(),
+      if (!varA || !varB) {
+        res.status(404).json({ error: "One or both variants not found in this project" });
+        return;
+      }
+      if (varA.status !== "ready" || varB.status !== "ready") {
+        res.status(409).json({ error: "Both variants must be ready before starting an A/B test" });
+        return;
+      }
+
+      const [test] = await db
+        .insert(canvasAbTestsTable)
+        .values({ projectId, variantAId, variantBId, trafficSplitPct, metric, status: "running" })
+        .returning();
+
+      res.status(201).json({
+        id: test!.id,
+        projectId: test!.projectId,
+        variantAId: test!.variantAId,
+        variantBId: test!.variantBId,
+        trafficSplitPct: test!.trafficSplitPct,
+        metric: test!.metric,
+        status: test!.status,
+        viewsA: 0,
+        viewsB: 0,
+        conversionsA: 0,
+        conversionsB: 0,
+        testUrl: `/api/canvas/ab/${test!.id}/`,
+        createdAt: test!.createdAt.toISOString(),
+      });
     });
   },
 );
@@ -1219,19 +1320,13 @@ router.post("/canvas/ab-tests/:testId/convert", async (req, res): Promise<void> 
   const variant = body?.variant === "b" ? "b" : "a";
 
   try {
-    if (variant === "a") {
-      await db
-        .update(canvasAbTestsTable)
-        .set({ conversionsA: sql`${canvasAbTestsTable.conversionsA} + 1` })
-        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
-    } else {
-      await db
-        .update(canvasAbTestsTable)
-        .set({ conversionsB: sql`${canvasAbTestsTable.conversionsB} + 1` })
-        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
+    if (!(await recordActiveCanvasAbTestConversion(testId, variant))) {
+      res.status(404).json({ error: "A/B test not found" });
+      return;
     }
   } catch {
-    /* non-fatal */
+    res.status(503).json({ error: "The conversion could not be recorded right now." });
+    return;
   }
   res.json({ recorded: true });
 });
@@ -1255,10 +1350,7 @@ router.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<void> => {
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
 
-  const [test] = await db
-    .select()
-    .from(canvasAbTestsTable)
-    .where(eq(canvasAbTestsTable.id, testId));
+  const test = await findActiveCanvasAbTest(testId);
 
   if (!test) {
     res
@@ -1296,20 +1388,18 @@ router.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<void> => {
 
   // Record view (best-effort, non-blocking)
   setImmediate(() => {
-    const updateSet =
-      assignedVariant === "a"
-        ? { viewsA: sql`${canvasAbTestsTable.viewsA} + 1` }
-        : { viewsB: sql`${canvasAbTestsTable.viewsB} + 1` };
-    db.update(canvasAbTestsTable)
-      .set(updateSet)
-      .where(eq(canvasAbTestsTable.id, testId))
-      .catch(() => {});
+    void recordActiveCanvasAbTestMetric(
+      testId,
+      assignedVariant === "a" ? "viewsA" : "viewsB",
+    ).catch(() => {});
   });
 
   const [row] = await db
     .select()
     .from(canvasVariantsTable)
-    .where(eq(canvasVariantsTable.id, variantId));
+    .where(
+      and(eq(canvasVariantsTable.id, variantId), eq(canvasVariantsTable.projectId, test.projectId)),
+    );
 
   if (!row || row.status !== "ready" || !row.files) {
     res
@@ -1369,10 +1459,7 @@ publicCanvasRouter.get("/canvas/share/:token/{*splat}", async (req, res): Promis
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
 
-  const [row] = await db
-    .select()
-    .from(canvasVariantsTable)
-    .where(eq(canvasVariantsTable.shareToken, token));
+  const row = await findActiveSharedCanvasVariant(token);
 
   if (!row) {
     res
@@ -1428,10 +1515,7 @@ publicCanvasRouter.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");
   const filePath = raw === "" ? "index.html" : raw;
 
-  const [test] = await db
-    .select()
-    .from(canvasAbTestsTable)
-    .where(eq(canvasAbTestsTable.id, testId));
+  const test = await findActiveCanvasAbTest(testId);
 
   if (!test) {
     res
@@ -1467,20 +1551,18 @@ publicCanvasRouter.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<
   const variantId = assignedVariant === "a" ? test.variantAId : test.variantBId;
 
   setImmediate(() => {
-    const updateSet =
-      assignedVariant === "a"
-        ? { viewsA: sql`${canvasAbTestsTable.viewsA} + 1` }
-        : { viewsB: sql`${canvasAbTestsTable.viewsB} + 1` };
-    db.update(canvasAbTestsTable)
-      .set(updateSet)
-      .where(eq(canvasAbTestsTable.id, testId))
-      .catch(() => {});
+    void recordActiveCanvasAbTestMetric(
+      testId,
+      assignedVariant === "a" ? "viewsA" : "viewsB",
+    ).catch(() => {});
   });
 
   const [row] = await db
     .select()
     .from(canvasVariantsTable)
-    .where(eq(canvasVariantsTable.id, variantId));
+    .where(
+      and(eq(canvasVariantsTable.id, variantId), eq(canvasVariantsTable.projectId, test.projectId)),
+    );
 
   if (!row || row.status !== "ready" || !row.files) {
     res
@@ -1526,19 +1608,13 @@ publicCanvasRouter.post("/canvas/ab-tests/:testId/convert", async (req, res): Pr
   const body = req.body as { variant?: unknown } | undefined;
   const variant = body?.variant === "b" ? "b" : "a";
   try {
-    if (variant === "a") {
-      await db
-        .update(canvasAbTestsTable)
-        .set({ conversionsA: sql`${canvasAbTestsTable.conversionsA} + 1` })
-        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
-    } else {
-      await db
-        .update(canvasAbTestsTable)
-        .set({ conversionsB: sql`${canvasAbTestsTable.conversionsB} + 1` })
-        .where(and(eq(canvasAbTestsTable.id, testId), eq(canvasAbTestsTable.status, "running")));
+    if (!(await recordActiveCanvasAbTestConversion(testId, variant))) {
+      res.status(404).json({ error: "A/B test not found" });
+      return;
     }
   } catch {
-    /* non-fatal */
+    res.status(503).json({ error: "The conversion could not be recorded right now." });
+    return;
   }
   res.json({ recorded: true });
 });
