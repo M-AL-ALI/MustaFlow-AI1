@@ -1,9 +1,11 @@
-import { describe, it, expect, afterAll, beforeAll } from "vitest";
+import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import express from "express";
 import request from "supertest";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
   db,
+  accountAssetQuotaTable,
+  assetsTable,
   knowledgeEntriesTable,
   oraAssetsTable,
   oraConversationsTable,
@@ -12,6 +14,18 @@ import {
 import oraConversationsRouter from "../ora-conversations";
 import oraAssetsRouter from "../ora-assets";
 import { persistOraAsset } from "../../lib/ora-assets";
+
+const storedObjects = vi.hoisted(() => new Map<string, Buffer>());
+
+vi.mock("../../lib/asset-r2", () => ({
+  putAssetBuffer: vi.fn(async (input: { key: string; body: Buffer }) => {
+    storedObjects.set(input.key, Buffer.from(input.body));
+  }),
+  readAssetBuffer: vi.fn(async (key: string) => storedObjects.get(key) ?? null),
+  deleteAssetObject: vi.fn(async (key: string) => {
+    storedObjects.delete(key);
+  }),
+}));
 
 /**
  * Phase 6 "Project Spaces" acceptance tests.
@@ -57,7 +71,14 @@ beforeAll(async () => {
 
 afterAll(async () => {
   const users = [USER_A, USER_B];
+  const linkedAssets = await db
+    .select({ assetId: oraAssetsTable.assetId })
+    .from(oraAssetsTable)
+    .where(inArray(oraAssetsTable.userId, users));
   await db.delete(oraAssetsTable).where(inArray(oraAssetsTable.userId, users));
+  const assetIds = linkedAssets.flatMap((row) => (row.assetId === null ? [] : [row.assetId]));
+  if (assetIds.length > 0) await db.delete(assetsTable).where(inArray(assetsTable.id, assetIds));
+  await db.delete(accountAssetQuotaTable).where(inArray(accountAssetQuotaTable.userId, users));
   await db.delete(knowledgeEntriesTable).where(inArray(knowledgeEntriesTable.userId, users));
   await db.delete(oraConversationsTable).where(inArray(oraConversationsTable.userId, users));
   await db.delete(oraProjectsTable).where(inArray(oraProjectsTable.userId, users));
