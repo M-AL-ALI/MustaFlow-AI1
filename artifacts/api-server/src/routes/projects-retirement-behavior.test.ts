@@ -460,6 +460,283 @@ describe("project retirement route behavior", () => {
     expect(response.body.reconciliationEligible).toBe(false);
   });
 
+  it("returns a read-only allowlisted retirement trail without raw provider metadata", async () => {
+    mocks.resolveStaff.mockResolvedValueOnce(null);
+    mocks.selectResults = [
+      [{ id: 77 }],
+      [
+        {
+          id: "retirement-77-generation-1",
+          projectId: 77,
+          state: "failed",
+          attemptCount: 4,
+          completedAt: NOW,
+          failureCode: "project_retirement_runtime_destroy_unverified",
+          failureTarget: {
+            role: "production",
+            slot: "green",
+            providerId: "must-not-cross-the-terminal-boundary",
+          },
+          progress: {
+            semantics: "project-retirement-v2",
+            reconciliation: {
+              generation: 1,
+              parentOperationId: "raw-parent-operation-id",
+              requestedBy: "raw-actor-user-id",
+              reason: "retryable_terminal",
+            },
+            route: {
+              state: "failed",
+              failureCode: "project_retirement_route_deactivation_unverified",
+              legacyHostnameKv: {
+                state: "verified_absent",
+                failureCode: null,
+              },
+              hostnames: [
+                { hostname: "private.example.test", state: "absent", stage: null },
+                { hostname: "other.example.test", state: "unavailable", stage: "read" },
+                { hostname: "hostile.example.test", state: "raw-state", stage: "raw-stage" },
+                { hostname: "bad-stage.example.test", state: "unavailable", stage: "raw-stage" },
+              ],
+              runtimeRoutes: [
+                {
+                  hostname: "route.example.test",
+                  manifestRevision: "raw-manifest-revision",
+                  sandboxIdentity: "raw-sandbox-identity",
+                  state: "verified_absent",
+                },
+              ],
+              cache: { state: "purged", rawProviderResponse: "raw-cache-metadata" },
+            },
+            tasks: {
+              state: "canceled",
+              count: 4,
+              terminalized: 4,
+              creditsRefunded: 2,
+              telemetryFlushed: 4,
+            },
+            access: {
+              state: "revoked",
+              shareLinksRevoked: 1,
+              previewSessionsRevoked: 2,
+              supportGrantsRevoked: 3,
+              supportSessionsInterrupted: 1,
+              canvasShareTokensCleared: 2,
+              canvasAbTestsEnded: 1,
+            },
+            legacyR2: {
+              state: "verified_absent",
+              discoveredCount: 3,
+              deletedCount: 3,
+              failureCode: null,
+              objectKeys: ["raw/object/key"],
+            },
+            domains: [
+              {
+                domainId: 19,
+                hostname: "private.example.test",
+                state: "verified_absent",
+                failureCode: null,
+              },
+            ],
+            hostnameCertificates: [
+              {
+                cfHostnameId: "raw-cloudflare-hostname-id",
+                hostnames: ["private.example.test"],
+                projectDomainIds: [19],
+                state: "failed",
+                failureCode: "project_retirement_domain_release_unverified",
+              },
+            ],
+            securityResources: [
+              {
+                providerId: "raw-security-provider-id",
+                rulesetId: "raw-ruleset-id",
+                ref: "raw-security-ref",
+                hostname: "private.example.test",
+                kind: "firewall_rule",
+                state: "verified_absent",
+                failureCode: null,
+              },
+              {
+                providerId: "raw-kind-provider-id",
+                kind: "raw-kind",
+                state: "verified_absent",
+                failureCode: null,
+              },
+            ],
+            purchasedDomains: [
+              {
+                purchasedDomainId: 31,
+                projectDomainId: 19,
+                hostname: "private.example.test",
+                state: "retained",
+              },
+            ],
+            retainedLegacyRuntimePointers: [
+              {
+                pointer: "testContainerId",
+                identity: "raw-legacy-runtime-identity",
+                reason: "legacy_runtime_provider",
+              },
+            ],
+            runtimes: [
+              {
+                role: "preview",
+                slot: "primary",
+                state: "verified_absent",
+                attempts: 2,
+                failureCode: null,
+                identity: "raw-current-runtime-identity",
+              },
+              {
+                role: "raw-role",
+                slot: "primary",
+                state: "verified_absent",
+                attempts: 1,
+                failureCode: null,
+                identity: "raw-malformed-runtime-identity",
+              },
+            ],
+          },
+          createdAt: NOW,
+          startedAt: NOW,
+        },
+      ],
+    ];
+
+    const response = await request(appAs("owner-77")).get("/projects/77/retirement");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      operationId: "retirement-77-generation-1",
+      projectId: 77,
+      state: "failed",
+      failureCode: "project_retirement_runtime_destroy_unverified",
+      failureTarget: { role: "production", slot: "green" },
+      progress: {
+        semantics: "project-retirement-v2",
+        reconciliation: {
+          generation: 1,
+          reason: "retryable_terminal",
+          hasParent: true,
+        },
+        route: {
+          state: "failed",
+          hostnames: {
+            total: 4,
+            unrecognized: 2,
+            states: { absent: 1, unavailable: 2 },
+            stages: { read: 1 },
+          },
+          runtimeRoutes: {
+            total: 1,
+            states: { verified_absent: 1 },
+          },
+          cache: { state: "purged" },
+        },
+        tasks: { state: "canceled", count: 4, terminalized: 4 },
+        access: { state: "revoked", supportGrantsRevoked: 3 },
+        legacyR2: { state: "verified_absent", discoveredCount: 3, deletedCount: 3 },
+        domains: { total: 1, states: { verified_absent: 1 } },
+        hostnameCertificates: {
+          total: 1,
+          states: { failed: 1 },
+          causes: { project_retirement_domain_release_unverified: 1 },
+        },
+        securityResources: {
+          total: 2,
+          unrecognized: 1,
+          states: { verified_absent: 2 },
+          kinds: { firewall_rule: 1 },
+        },
+        purchasedDomains: { total: 1, states: { retained: 1 } },
+        retainedLegacyRuntimePointers: {
+          total: 1,
+          pointers: { testContainerId: 1 },
+          reasons: { legacy_runtime_provider: 1 },
+        },
+        runtimes: {
+          total: 2,
+          unrecognized: 1,
+          receipts: [
+            {
+              role: "preview",
+              slot: "primary",
+              state: "verified_absent",
+              attempts: 2,
+              failureCode: null,
+            },
+          ],
+        },
+      },
+    });
+    const serialized = JSON.stringify(response.body);
+    for (const forbidden of [
+      "private.example.test",
+      "raw-parent-operation-id",
+      "raw-actor-user-id",
+      "raw-manifest-revision",
+      "raw-sandbox-identity",
+      "raw-cloudflare-hostname-id",
+      "raw-security-provider-id",
+      "raw-ruleset-id",
+      "raw-security-ref",
+      "raw/object/key",
+      "raw-legacy-runtime-identity",
+      "raw-current-runtime-identity",
+      "raw-malformed-runtime-identity",
+      "raw-kind-provider-id",
+      "raw-kind",
+      "must-not-cross-the-terminal-boundary",
+      "raw-cache-metadata",
+      "raw-state",
+      "raw-stage",
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.delete).not.toHaveBeenCalled();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    assertNoProviderCall();
+  });
+
+  it("fails closed instead of reflecting an unrecognized persisted operation state", async () => {
+    mocks.resolveStaff.mockResolvedValueOnce(null);
+    mocks.selectResults = [
+      [{ id: 77 }],
+      [
+        {
+          id: "retirement-77",
+          projectId: 77,
+          state: "raw-provider-state",
+          attemptCount: 1,
+          progress: initialProjectRetirementProgress(),
+          failureCode: null,
+          failureTarget: null,
+          createdAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+        },
+      ],
+    ];
+
+    const response = await request(appAs("owner-77")).get("/projects/77/retirement");
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({
+      code: "project_retirement_receipt_invalid",
+      error: "The retirement receipt could not be read safely.",
+    });
+    expect(JSON.stringify(response.body)).not.toContain("raw-provider-state");
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.delete).not.toHaveBeenCalled();
+    assertNoProviderCall();
+  });
+
   it("adopts an exact legacy tombstone through preflight and one v2 receipt", async () => {
     const legacy = project();
     mocks.selectResults = [[legacy], [], [legacy], []];

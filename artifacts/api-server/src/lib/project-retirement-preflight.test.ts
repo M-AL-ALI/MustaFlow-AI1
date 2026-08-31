@@ -3,6 +3,7 @@ import { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { deploymentLogsTable, managedAddonsTable } from "@workspace/db/schema";
+import { deriveRuntimeIdentity } from "@workspace/tenant-runtime-contracts";
 import {
   decideProjectRetirementPreflight,
   presentProjectRetirementPreflightRefusal,
@@ -139,6 +140,8 @@ describe("project retirement fail-closed preflight", () => {
     for (const project of [
       {
         id: 7,
+        containerId: null,
+        prodContainerId: null,
         testContainerId: "legacy-machine",
         dbProvider: "none",
         provisioningStatus: "idle",
@@ -146,6 +149,8 @@ describe("project retirement fail-closed preflight", () => {
       },
       {
         id: 8,
+        containerId: null,
+        prodContainerId: null,
         testContainerId: null,
         dbProvider: "sqlite",
         provisioningStatus: "idle",
@@ -153,6 +158,8 @@ describe("project retirement fail-closed preflight", () => {
       },
       {
         id: 9,
+        containerId: null,
+        prodContainerId: null,
         testContainerId: null,
         dbProvider: "none",
         provisioningStatus: "provisioning",
@@ -160,6 +167,8 @@ describe("project retirement fail-closed preflight", () => {
       },
       {
         id: 10,
+        containerId: null,
+        prodContainerId: null,
         testContainerId: null,
         dbProvider: "none",
         provisioningStatus: "ready",
@@ -173,6 +182,132 @@ describe("project retirement fail-closed preflight", () => {
     }
   });
 
+  it("admits only current-namespace preview and production pointer roles", async () => {
+    process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE = "production";
+    const preview = await deriveRuntimeIdentity({
+      namespace: "production",
+      projectId: 11,
+      role: "preview",
+      slot: "primary",
+    });
+    for (const slot of ["blue", "green"] as const) {
+      const production = await deriveRuntimeIdentity({
+        namespace: "production",
+        projectId: 11,
+        role: "production",
+        slot,
+      });
+      const harness = readOnlyTransaction(new Map());
+      await expect(
+        readProjectRetirementPreflight(harness.tx as never, {
+          id: 11,
+          containerId: preview,
+          prodContainerId: production,
+          testContainerId: null,
+          dbProvider: "none",
+          provisioningStatus: "idle",
+          previewDbStatus: "none",
+        }),
+      ).resolves.toEqual({ allowed: true });
+      expect(harness.reads).toHaveLength(2);
+    }
+  });
+
+  it("refuses every legacy stored-pointer signature before dependent reads", async () => {
+    process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE = "production";
+    const identities = {
+      wrongNamespacePreview: await deriveRuntimeIdentity({
+        namespace: "legacy",
+        projectId: 12,
+        role: "preview",
+        slot: "primary",
+      }),
+      wrongNamespaceProduction: await deriveRuntimeIdentity({
+        namespace: "legacy",
+        projectId: 12,
+        role: "production",
+        slot: "blue",
+      }),
+      wrongProjectPreview: await deriveRuntimeIdentity({
+        namespace: "production",
+        projectId: 13,
+        role: "preview",
+        slot: "primary",
+      }),
+      wrongProjectProduction: await deriveRuntimeIdentity({
+        namespace: "production",
+        projectId: 13,
+        role: "production",
+        slot: "green",
+      }),
+      previewInProductionPointer: await deriveRuntimeIdentity({
+        namespace: "production",
+        projectId: 12,
+        role: "preview",
+        slot: "primary",
+      }),
+      productionInPreviewPointer: await deriveRuntimeIdentity({
+        namespace: "production",
+        projectId: 12,
+        role: "production",
+        slot: "blue",
+      }),
+    };
+    const cases = [
+      { containerId: "fly-preview", prodContainerId: null },
+      { containerId: null, prodContainerId: "fly-production" },
+      { containerId: identities.wrongNamespacePreview, prodContainerId: null },
+      { containerId: null, prodContainerId: identities.wrongNamespaceProduction },
+      { containerId: identities.wrongProjectPreview, prodContainerId: null },
+      { containerId: null, prodContainerId: identities.wrongProjectProduction },
+      { containerId: null, prodContainerId: identities.previewInProductionPointer },
+      { containerId: identities.productionInPreviewPointer, prodContainerId: null },
+    ];
+    for (const pointers of cases) {
+      const harness = readOnlyTransaction(new Map());
+      await expect(
+        readProjectRetirementPreflight(harness.tx as never, {
+          id: 12,
+          ...pointers,
+          testContainerId: null,
+          dbProvider: "none",
+          provisioningStatus: "idle",
+          previewDbStatus: "none",
+        }),
+      ).resolves.toEqual({
+        allowed: false,
+        code: "project_retirement_legacy_runtime_requires_migration",
+      });
+      expect(harness.reads).toEqual([]);
+    }
+  });
+
+  it("fails closed when a stored pointer cannot be bound to a deployment namespace", async () => {
+    delete process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE;
+    const pointer = await deriveRuntimeIdentity({
+      namespace: "production",
+      projectId: 14,
+      role: "preview",
+      slot: "primary",
+    });
+    const harness = readOnlyTransaction(new Map());
+    await expect(
+      readProjectRetirementPreflight(harness.tx as never, {
+        id: 14,
+        containerId: pointer,
+        prodContainerId: null,
+        testContainerId: null,
+        dbProvider: "none",
+        provisioningStatus: "idle",
+        previewDbStatus: "none",
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      code: "project_retirement_legacy_runtime_requires_migration",
+    });
+    expect(harness.reads).toEqual([]);
+  });
+
   it("treats every managed add-on row as unverified because no provider absence receipt exists", async () => {
     const harness = readOnlyTransaction(
       new Map([[managedAddonsTable, [{ id: 91, status: "removed", removedAt: new Date() }]]]),
@@ -180,6 +315,8 @@ describe("project retirement fail-closed preflight", () => {
     await expect(
       readProjectRetirementPreflight(harness.tx as never, {
         id: 19,
+        containerId: null,
+        prodContainerId: null,
         testContainerId: null,
         dbProvider: "none",
         provisioningStatus: "idle",
@@ -200,6 +337,8 @@ describe("project retirement fail-closed preflight", () => {
     await expect(
       readProjectRetirementPreflight(blocked.tx as never, {
         id: 23,
+        containerId: null,
+        prodContainerId: null,
         testContainerId: null,
         dbProvider: "postgres",
         provisioningStatus: "ready",
@@ -225,6 +364,8 @@ describe("project retirement fail-closed preflight", () => {
     await expect(
       readProjectRetirementPreflight(allowed.tx as never, {
         id: 24,
+        containerId: null,
+        prodContainerId: null,
         testContainerId: null,
         dbProvider: "none",
         provisioningStatus: "idle",
@@ -248,6 +389,8 @@ describe("project retirement fail-closed preflight", () => {
     expect(accept.indexOf("readProjectRetirementPreflight(tx, existing)")).toBeLessThan(
       accept.indexOf(".update(projectsTable)"),
     );
+    expect(accept).toContain("containerId: projectsTable.containerId");
+    expect(accept).toContain("prodContainerId: projectsTable.prodContainerId");
     expect(accept.indexOf('state: "refused" as const')).toBeLessThan(
       accept.indexOf(".update(projectsTable)"),
     );
@@ -256,6 +399,8 @@ describe("project retirement fail-closed preflight", () => {
       retirement.indexOf("export async function acceptProjectRetirement"),
     );
     expect(preliminaryRead).toContain("readProjectRetirementPreflight(tx, existing)");
+    expect(preliminaryRead).toContain("containerId: projectsTable.containerId");
+    expect(preliminaryRead).toContain("prodContainerId: projectsTable.prodContainerId");
     expect(preliminaryRead).not.toMatch(/\.insert\(|\.update\(|\.delete\(|\.execute\(/u);
 
     const routes = readFileSync(new URL("../routes/projects.ts", import.meta.url), "utf8");

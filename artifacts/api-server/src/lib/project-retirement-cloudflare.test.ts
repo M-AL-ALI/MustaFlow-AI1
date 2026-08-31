@@ -515,6 +515,36 @@ describe("strict Cloudflare retirement proofs", () => {
     }
   });
 
+  it("fails cache purge closed when the provider denies the purge permission", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          success: false,
+          errors: [{ code: 10000, message: "Authentication error" }],
+        },
+        { status: 403 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cloudflare.purgeCacheForHostnames(["published.example.test"])).resolves.toBe(
+      false,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails cache purge closed when an HTTP success does not carry provider success", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ success: false, result: null }, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cloudflare.purgeCacheForHostnames(["published.example.test"])).resolves.toBe(
+      false,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("inventories overwritten hostname history by project id", async () => {
     const fetchMock = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/keys?")) {

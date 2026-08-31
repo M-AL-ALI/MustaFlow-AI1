@@ -997,21 +997,83 @@ export class CloudflareRuntimeProvider
     options?: RuntimeOperationOptions,
   ): Promise<boolean> {
     const locator = await this.locator(runtimeId, projectId);
-    await this.request({
-      method: "DELETE",
-      path: this.path(locator),
-      body: { locator },
-      idempotencyKey: crypto.randomUUID(),
-      operation: this.operationOptions(
-        "runtime.destroy",
-        RUNTIME_CONTROL_OPERATION_BOUND_MS,
-        "runtime_destroy_timeout",
-        "runtime_destroy_cancelled",
-        options,
-      ),
-      parse: { parse: () => true },
-    });
-    return true;
+    const operation = this.operationOptions(
+      "runtime.destroy",
+      RUNTIME_CONTROL_OPERATION_BOUND_MS,
+      "runtime_destroy_timeout",
+      "runtime_destroy_cancelled",
+      options,
+    );
+    const requestedBound = operation.operationTimeoutMs ?? operation.operationBoundMs;
+    const operationBoundMs = Number.isFinite(requestedBound)
+      ? Math.max(0, Math.min(requestedBound, operation.operationBoundMs))
+      : 0;
+    const startedAt = this.monotonicNow();
+    const remainingOperation = (stage: string): ControlOperationFollowOptions => {
+      if (operation.signal?.aborted) throw this.operationCancelled(operation);
+      const elapsedMs = Math.max(0, this.monotonicNow() - startedAt);
+      const remainingMs = operationBoundMs - elapsedMs;
+      if (remainingMs < CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS) {
+        throw this.operationDeadlineError(operation, {
+          elapsedMs,
+          attempts: 0,
+          lastObservedOperationState: stage,
+          operationBoundMs,
+          transportCauseCounts: {},
+          successfulObservationCount: 0,
+        });
+      }
+      return { ...operation, operationTimeoutMs: remainingMs };
+    };
+    if (await this.observeRuntimeAbsence(locator, remainingOperation("pre_observation"))) {
+      return true;
+    }
+    try {
+      await this.request({
+        method: "DELETE",
+        path: this.path(locator),
+        body: { locator },
+        idempotencyKey: crypto.randomUUID(),
+        operation: remainingOperation("delete"),
+        parse: { parse: () => true },
+      });
+    } catch (error) {
+      if (!this.isRuntimeAbsentError(error)) throw error;
+    }
+    return this.observeRuntimeAbsence(locator, remainingOperation("post_observation"));
+  }
+
+  private isRuntimeAbsentError(error: unknown): boolean {
+    return (
+      error instanceof CloudflareRuntimeControlError &&
+      error.status === 404 &&
+      error.code === "runtime_not_found"
+    );
+  }
+
+  private async observeRuntimeAbsence(
+    locator: RuntimeLocator,
+    operation: ControlOperationFollowOptions,
+  ): Promise<boolean> {
+    if (operation.signal?.aborted) throw this.operationCancelled(operation);
+    try {
+      await this.request({
+        method: "GET",
+        path: this.path(locator),
+        signal: operation.signal,
+        transportTimeoutMs: operation.operationTimeoutMs,
+        retryDelaysMs: [],
+        parse: {
+          parse: (value: unknown) =>
+            runtimeDescriptorSchema.parse((value as { runtime: unknown }).runtime),
+        },
+      });
+      return false;
+    } catch (error) {
+      if (operation.signal?.aborted) throw this.operationCancelled(operation);
+      if (this.isRuntimeAbsentError(error)) return true;
+      throw error;
+    }
   }
 
   async status(runtimeId: string): Promise<RuntimeStatus> {

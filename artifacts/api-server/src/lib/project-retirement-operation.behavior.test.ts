@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     execute: vi.fn(),
     transaction: vi.fn(),
     warn: vi.fn(),
+    purgeCacheForHostnames: vi.fn(),
   };
 });
 
@@ -79,7 +80,7 @@ vi.mock("./cloudflare", () => ({
   discoverCloudflareSecurityResources: vi.fn(async () => ({ resources: [] })),
   inventoryCustomHostnamesByHostname: vi.fn(async () => ({ state: "complete", matches: [] })),
   inventoryHostnameKVRoutesByProject: vi.fn(),
-  purgeCacheForHostnames: vi.fn(),
+  purgeCacheForHostnames: mocks.purgeCacheForHostnames,
   retireCloudflareSecurityResource: vi.fn(),
   retireCustomHostname: vi.fn(),
   retireHostnameKV: vi.fn(),
@@ -176,12 +177,46 @@ function prepareOperation(progress: ProjectRetirementProgress): void {
   );
 }
 
+function prepareRouteOperation(progress: ProjectRetirementProgress): void {
+  const claimed = {
+    id: "retirement-op-51",
+    projectId: 51,
+    requestedBy: "owner-51",
+    state: "running",
+    attemptCount: 4,
+    leaseVersion: 1,
+    progress,
+  };
+  mocks.selectResults.push(
+    [{ projectId: 51 }],
+    [{ deletedAt: new Date("2026-01-01T00:00:00.000Z") }],
+    [
+      {
+        publicSlug: "retirement-cache-test",
+        customDomain: null,
+        publishedSnapshotId: null,
+        builderMode: "agentic",
+      },
+    ],
+    [],
+    [],
+  );
+  mocks.updateReturningResults.push(
+    [claimed],
+    [{ id: claimed.id }],
+    [{ id: claimed.id }],
+    [{ id: claimed.id }],
+    [{ id: claimed.id }],
+  );
+}
+
 describe("runProjectRetirementOperation terminal behavior", () => {
   beforeEach(() => {
     mocks.selectResults.length = 0;
     mocks.updateReturningResults.length = 0;
     mocks.updateCalls.length = 0;
     mocks.warn.mockClear();
+    mocks.purgeCacheForHostnames.mockReset();
   });
 
   it("completes only after the real coordinator validates complete evidence", async () => {
@@ -227,5 +262,38 @@ describe("runProjectRetirementOperation terminal behavior", () => {
       }),
       "Project retirement attempt failed",
     );
+  });
+
+  it("does not call a published route absent when its cache purge is unverified", async () => {
+    const progress = completionProgress();
+    progress.route = {
+      state: "pending",
+      failureCode: null,
+      hostnames: [],
+      runtimeRoutes: [],
+      cache: { state: "pending" },
+    };
+    mocks.purgeCacheForHostnames.mockResolvedValue(false);
+    prepareRouteOperation(progress);
+
+    await runProjectRetirementOperation("retirement-op-51");
+
+    expect(mocks.purgeCacheForHostnames).toHaveBeenCalledWith([
+      "retirement-cache-test.mustaflow.app",
+      "retirement-cache-test-staging.mustaflow.app",
+    ]);
+    expect(progress.route).toMatchObject({
+      state: "failed",
+      failureCode: "project_retirement_route_deactivation_unverified",
+      cache: { state: "failed" },
+    });
+    expect(
+      mocks.updateCalls.some(
+        (call) =>
+          call.values.state === "failed" &&
+          call.values.failureCode === "project_retirement_route_deactivation_unverified",
+      ),
+    ).toBe(true);
+    expect(mocks.updateCalls.some((call) => call.values.state === "completed")).toBe(false);
   });
 });

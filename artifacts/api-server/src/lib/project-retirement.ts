@@ -131,6 +131,8 @@ export async function preflightProjectRetirement(input: {
     const [existing] = await tx
       .select({
         id: projectsTable.id,
+        containerId: projectsTable.containerId,
+        prodContainerId: projectsTable.prodContainerId,
         testContainerId: projectsTable.testContainerId,
         dbProvider: projectsTable.dbProvider,
         provisioningStatus: projectsTable.provisioningStatus,
@@ -198,6 +200,8 @@ export async function acceptProjectRetirement(input: {
       .select({
         id: projectsTable.id,
         name: projectsTable.name,
+        containerId: projectsTable.containerId,
+        prodContainerId: projectsTable.prodContainerId,
         testContainerId: projectsTable.testContainerId,
         dbProvider: projectsTable.dbProvider,
         provisioningStatus: projectsTable.provisioningStatus,

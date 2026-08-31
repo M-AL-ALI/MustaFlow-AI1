@@ -184,6 +184,175 @@ describe("CloudflareRuntimeProvider", () => {
     expect(calls.every((call) => typeof call.signature === "string")).toBe(true);
   });
 
+  it("proves an already-absent runtime without issuing DELETE", async () => {
+    const projectId = 5;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "production",
+      slot: "blue",
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(
+      json(
+        {
+          ok: false,
+          code: "runtime_not_found",
+          message: "Runtime not found",
+          retryable: false,
+          requestId: "destroy-already-absent-5",
+        },
+        404,
+      ),
+    );
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(provider.destroy(identity, projectId)).resolves.toBe(true);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.method ?? "GET").toBe("GET");
+  });
+
+  it("deletes a present runtime once and then proves authoritative absence", async () => {
+    const projectId = 44;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(json(runningRuntime(identity, projectId)))
+      .mockResolvedValueOnce(json({ ok: true }))
+      .mockResolvedValueOnce(
+        json(
+          {
+            ok: false,
+            code: "runtime_not_found",
+            message: "Runtime not found",
+            retryable: false,
+            requestId: "destroy-verified-absent-44",
+          },
+          404,
+        ),
+      );
+
+    const provider = new CloudflareRuntimeProvider(config);
+    await expect(provider.destroy(identity, projectId)).resolves.toBe(true);
+
+    const calls = vi.mocked(fetch).mock.calls.map(([input, init]) => ({
+      method: init?.method ?? "GET",
+      path: new URL(String(input)).pathname,
+    }));
+    expect(calls).toEqual([
+      { method: "GET", path: "/_nabuflow/control/v1/runtimes/44/preview/primary" },
+      { method: "DELETE", path: "/_nabuflow/control/v1/runtimes/44/preview/primary" },
+      { method: "GET", path: "/_nabuflow/control/v1/runtimes/44/preview/primary" },
+    ]);
+  });
+
+  it("does not issue DELETE when the authoritative pre-read is unavailable", async () => {
+    const projectId = 5;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch).mockImplementation(async () => json({ code: "temporarily_unavailable" }, 503));
+
+    const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    await expect(provider.destroy(identity, projectId)).rejects.toMatchObject({
+      status: 503,
+      code: "unexpected_control_5xx",
+      retryable: true,
+    });
+
+    expect(
+      vi.mocked(fetch).mock.calls.some(([, init]) => (init?.method ?? "GET") === "DELETE"),
+    ).toBe(false);
+  });
+
+  it("honors cancellation during the authoritative pre-read without issuing DELETE", async () => {
+    const projectId = 5;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const controller = new AbortController();
+    controller.abort();
+    vi.mocked(fetch).mockRejectedValue(new DOMException("Aborted", "AbortError"));
+
+    const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    await expect(
+      provider.destroy(identity, projectId, { signal: controller.signal }),
+    ).rejects.toMatchObject({
+      status: 499,
+      code: "runtime_destroy_cancelled",
+      retryable: false,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("uses one wall-clock budget across the pre-read, delete, and post-read", async () => {
+    const projectId = 5;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    let monotonicMs = 0;
+    vi.mocked(fetch).mockImplementation(async () => {
+      monotonicMs = 1_000;
+      return json(runningRuntime(identity, projectId));
+    });
+
+    const provider = new CloudflareRuntimeProvider(config, {
+      sleep: async () => undefined,
+      monotonicNow: () => monotonicMs,
+    });
+    await expect(
+      provider.destroy(identity, projectId, { operationTimeoutMs: 500 }),
+    ).rejects.toMatchObject({
+      status: 504,
+      code: "runtime_destroy_timeout",
+      retryable: true,
+      operationTimeoutMs: 500,
+      lastObservedOperationState: "delete",
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.method ?? "GET").toBe("GET");
+  });
+
+  it("does not report success when post-delete absence proof is unavailable", async () => {
+    const projectId = 44;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(json(runningRuntime(identity, projectId)))
+      .mockResolvedValueOnce(json({ ok: true }))
+      .mockImplementation(async () => json({ code: "temporarily_unavailable" }, 503));
+
+    const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    await expect(provider.destroy(identity, projectId)).rejects.toMatchObject({
+      status: 503,
+      code: "unexpected_control_5xx",
+      retryable: true,
+    });
+
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "DELETE"),
+    ).toHaveLength(1);
+  });
+
   it("performs a clock check and signs lifecycle requests", async () => {
     const identity = await deriveRuntimeIdentity({
       namespace: "staging",
@@ -1902,7 +2071,24 @@ describe("CloudflareRuntimeProvider", () => {
     for (const fixture of cases) {
       vi.mocked(fetch).mockReset();
       const keys: string[] = [];
+      let runtimeDeleted = false;
       vi.mocked(fetch).mockImplementation(async (input, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "GET") {
+          if (fixture.name === "runtime.destroy" && runtimeDeleted) {
+            return json(
+              {
+                ok: false,
+                code: "runtime_not_found",
+                message: "Runtime not found",
+                retryable: false,
+                requestId: "runtime-destroy-follow-absent",
+              },
+              404,
+            );
+          }
+          return json(runningRuntime(identity, projectId));
+        }
         keys.push(new Headers(init?.headers).get("idempotency-key") ?? "");
         if (keys.length === 1) {
           return json(
@@ -1923,7 +2109,10 @@ describe("CloudflareRuntimeProvider", () => {
         if (path.includes("/pantry/") || path.includes("/build-plane/")) {
           return json({ ok: true, fixture: fixture.name });
         }
-        if (init?.method === "DELETE") return json({ ok: true });
+        if (init?.method === "DELETE") {
+          runtimeDeleted = true;
+          return json({ ok: true });
+        }
         return json(runningRuntime(identity, projectId));
       });
       const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });

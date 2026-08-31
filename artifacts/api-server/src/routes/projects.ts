@@ -70,6 +70,12 @@ import {
   QUEUE_PROJECT_RETIREMENT,
 } from "../lib/durable-queue";
 import { requireAdmin, requireOwner, resolveStaffPrincipal } from "../lib/adminAuth";
+import {
+  sanitizeProjectRetirementFailureCode,
+  sanitizeProjectRetirementFailureTarget,
+  sanitizeProjectRetirementProgress,
+  sanitizeProjectRetirementState,
+} from "../lib/project-retirement-status";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1680,6 +1686,14 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
       .json({ code: "project_retirement_not_found", error: "No retirement receipt exists." });
     return;
   }
+  const operationState = sanitizeProjectRetirementState(operation.state);
+  if (!operationState) {
+    res.status(500).json({
+      code: "project_retirement_receipt_invalid",
+      error: "The retirement receipt could not be read safely.",
+    });
+    return;
+  }
   const persistedProgress = operation.progress as unknown;
   const persistedReconciliation =
     persistedProgress && typeof persistedProgress === "object" && !Array.isArray(persistedProgress)
@@ -1699,7 +1713,7 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
       ? (persistedReconciliationGeneration as number)
       : PROJECT_RETIREMENT_MAX_RECONCILIATIONS;
   const reconciliation = decideProjectRetirementReconciliation({
-    state: operation.state,
+    state: operationState,
     completedAt: operation.completedAt,
     failureCode: operation.failureCode,
     generation: reconciliationGeneration,
@@ -1708,11 +1722,11 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
   res.json({
     operationId: operation.id,
     projectId: operation.projectId,
-    state: operation.state,
+    state: operationState,
     attemptCount: operation.attemptCount,
-    progress: operation.progress,
-    failureCode: operation.failureCode,
-    failureTarget: operation.failureTarget,
+    progress: sanitizeProjectRetirementProgress(operation.progress),
+    failureCode: sanitizeProjectRetirementFailureCode(operation.failureCode),
+    failureTarget: sanitizeProjectRetirementFailureTarget(operation.failureTarget),
     createdAt: operation.createdAt,
     startedAt: operation.startedAt,
     completedAt: operation.completedAt,

@@ -3,6 +3,7 @@ import type { NodePgTransaction } from "drizzle-orm/node-postgres";
 import type * as DatabaseSchema from "@workspace/db/schema";
 import { deploymentLogsTable, managedAddonsTable } from "@workspace/db/schema";
 import {
+  classifyStoredRuntimePointer,
   decideProjectRetirementPreflight,
   type ProjectRetirementPreflightDecision,
 } from "./project-retirement-contract";
@@ -22,11 +23,34 @@ export const PROJECT_RETIREMENT_LEGACY_EAS_ENVS = ["ios", "android"] as const;
 
 export type ProjectRetirementPreflightProject = {
   id: number;
+  containerId: string | null;
+  prodContainerId: string | null;
   testContainerId: string | null;
   dbProvider: string;
   provisioningStatus: string;
   previewDbStatus: string;
 };
+
+async function hasLegacyRuntimePointer(
+  project: ProjectRetirementPreflightProject,
+): Promise<boolean> {
+  if (project.testContainerId !== null) return true;
+  const namespace = process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE ?? "";
+  for (const stored of [
+    { pointer: "containerId" as const, identity: project.containerId },
+    { pointer: "prodContainerId" as const, identity: project.prodContainerId },
+  ]) {
+    if (stored.identity === null) continue;
+    const classification = await classifyStoredRuntimePointer({
+      identity: stored.identity,
+      namespace,
+      projectId: project.id,
+      pointer: stored.pointer,
+    });
+    if (classification.state === "retained_legacy") return true;
+  }
+  return false;
+}
 
 /**
  * A database row is not a provider-absence receipt. The current managed-add-on
@@ -43,8 +67,9 @@ export async function readProjectRetirementPreflight(
   tx: ProjectRetirementTransaction,
   project: ProjectRetirementPreflightProject,
 ): Promise<ProjectRetirementPreflightDecision> {
+  const hasLegacyRuntime = await hasLegacyRuntimePointer(project);
   const projectOnlyDecision = decideProjectRetirementPreflight({
-    hasLegacyRuntime: project.testContainerId !== null,
+    hasLegacyRuntime,
     hasInFlightProviderProvisioning:
       project.provisioningStatus === "provisioning" || project.previewDbStatus === "provisioning",
     hasUnverifiedSqliteRecovery: project.dbProvider === "sqlite",
