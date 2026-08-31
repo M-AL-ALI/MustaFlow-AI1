@@ -40,6 +40,7 @@ import {
   type EnvironmentName,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
 import { execInContainer } from "../lib/tenant-runtime";
@@ -108,90 +109,96 @@ router.get("/projects/:id/addons", requireProjectOwnership, async (req, res): Pr
 });
 
 // POST /api/projects/:id/addons
-router.post("/projects/:id/addons", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const body = (req.body ?? {}) as Record<string, unknown>;
+router.post(
+  "/projects/:id/addons",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const body = (req.body ?? {}) as Record<string, unknown>;
 
-  if (!isAddonKind(body.kind)) {
-    res.status(400).json({ error: `kind must be one of: ${ADDON_KINDS.join(", ")}` });
-    return;
-  }
+    if (!isAddonKind(body.kind)) {
+      res.status(400).json({ error: `kind must be one of: ${ADDON_KINDS.join(", ")}` });
+      return;
+    }
 
-  const kind = body.kind;
+    const kind = body.kind;
 
-  // Check for existing active add-on of same kind
-  const [existing] = await db
-    .select({ id: managedAddonsTable.id, status: managedAddonsTable.status })
-    .from(managedAddonsTable)
-    .where(
-      and(
-        eq(managedAddonsTable.projectId, projectId),
-        eq(managedAddonsTable.kind, kind),
-        isNull(managedAddonsTable.removedAt),
-      ),
-    );
+    // Check for existing active add-on of same kind
+    const [existing] = await db
+      .select({ id: managedAddonsTable.id, status: managedAddonsTable.status })
+      .from(managedAddonsTable)
+      .where(
+        and(
+          eq(managedAddonsTable.projectId, projectId),
+          eq(managedAddonsTable.kind, kind),
+          isNull(managedAddonsTable.removedAt),
+        ),
+      );
 
-  if (existing) {
-    res.status(409).json({ error: `An active ${kind} add-on already exists for this project` });
-    return;
-  }
+    if (existing) {
+      res.status(409).json({ error: `An active ${kind} add-on already exists for this project` });
+      return;
+    }
 
-  // Provision the add-on (gracefully degraded — real provisioning requires external credentials)
-  const provisionResult = await provisionAddon(projectId, kind, req.userId ?? "unknown");
+    // Provision the add-on (gracefully degraded — real provisioning requires external credentials)
+    const provisionResult = await provisionAddon(projectId, kind, req.userId ?? "unknown");
 
-  const [addon] = await db
-    .insert(managedAddonsTable)
-    .values({
-      projectId,
-      kind,
-      status: provisionResult.status,
-      externalId: provisionResult.externalId ?? null,
-      connectionInfo: provisionResult.connectionInfo ?? null,
-      injectedEnvKeys: provisionResult.injectedEnvKeys,
-      plan: "free",
-      createdBy: req.userId ?? null,
-    })
-    .returning();
+    const [addon] = await db
+      .insert(managedAddonsTable)
+      .values({
+        projectId,
+        kind,
+        status: provisionResult.status,
+        externalId: provisionResult.externalId ?? null,
+        connectionInfo: provisionResult.connectionInfo ?? null,
+        injectedEnvKeys: provisionResult.injectedEnvKeys,
+        plan: "free",
+        createdBy: req.userId ?? null,
+      })
+      .returning();
 
-  // Inject env vars as project secrets
-  if (provisionResult.secretsToInject && req.userId) {
-    for (const [name, value] of Object.entries(provisionResult.secretsToInject)) {
-      try {
-        const encrypted = encryptionService.encrypt(value);
-        await db
-          .insert(secretsTable)
-          .values({
-            projectId,
-            name,
-            valueEncrypted: encrypted,
-            category: "other",
-          })
-          .onConflictDoUpdate({
-            target: [secretsTable.projectId, secretsTable.name],
-            set: { valueEncrypted: encrypted, updatedAt: new Date() },
-          });
-      } catch (err) {
-        logger.warn({ err, projectId, name }, "Failed to inject addon secret");
+    // Inject env vars as project secrets
+    if (provisionResult.secretsToInject && req.userId) {
+      for (const [name, value] of Object.entries(provisionResult.secretsToInject)) {
+        try {
+          const encrypted = encryptionService.encrypt(value);
+          await db
+            .insert(secretsTable)
+            .values({
+              projectId,
+              name,
+              valueEncrypted: encrypted,
+              category: "other",
+            })
+            .onConflictDoUpdate({
+              target: [secretsTable.projectId, secretsTable.name],
+              set: { valueEncrypted: encrypted, updatedAt: new Date() },
+            });
+        } catch (err) {
+          logger.warn({ err, projectId, name }, "Failed to inject addon secret");
+        }
       }
     }
-  }
 
-  // Record usage event
-  if (req.userId) {
-    await recordUsageEvent(projectId, req.userId, `addon_provision`, 1, {
-      resourceType: kind,
-      resourceId: String(addon.id),
-      unit: "provisions",
-    });
-  }
+    // Record usage event
+    if (req.userId) {
+      await recordUsageEvent(projectId, req.userId, `addon_provision`, 1, {
+        resourceType: kind,
+        resourceId: String(addon.id),
+        unit: "provisions",
+      });
+    }
 
-  res.status(201).json({ addon });
-});
+    res.status(201).json({ addon });
+  },
+);
 
 // DELETE /api/projects/:id/addons/:addonId
 router.delete(
   "/projects/:id/addons/:addonId",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const addonId = Number(req.params.addonId);
@@ -264,6 +271,7 @@ router.get(
 router.post(
   "/projects/:id/schedules/:sid/trigger",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const scheduleId = Number(req.params.sid);
@@ -310,6 +318,7 @@ router.post(
 router.get(
   "/projects/:id/environments",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const rows = await db
@@ -377,6 +386,7 @@ router.post(
 router.delete(
   "/projects/:id/environments/:envId",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const envId = Number(req.params.envId);
@@ -410,6 +420,7 @@ router.delete(
 router.post(
   "/projects/:id/environments/:envId/promote",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const envId = Number(req.params.envId);

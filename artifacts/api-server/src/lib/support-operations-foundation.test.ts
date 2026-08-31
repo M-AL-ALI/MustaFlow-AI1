@@ -127,14 +127,33 @@ describe("consented support operations", () => {
     expect(jobs).toContain(
       "const provenanceActorUserId = input.provenanceActorUserId ?? project.ownerId",
     );
-    expect(jobs.match(/actorUserId: provenanceActorUserId/g)).toHaveLength(2);
+    const actorAssignments = jobs.match(/actorUserId: [^,\r\n]+/g) ?? [];
+    expect(actorAssignments.length).toBeGreaterThan(0);
     expect(
-      jobs.match(/actorUserId: task\.provenanceActorUserId \?\? project\.ownerId/g),
-    ).toHaveLength(2);
+      actorAssignments.every(
+        (assignment) =>
+          assignment === "actorUserId: provenanceActorUserId" ||
+          assignment === "actorUserId: session.staffUserId" ||
+          assignment === "actorUserId: task.provenanceActorUserId ?? project.ownerId",
+      ),
+    ).toBe(true);
     expect(jobs).toContain("needsFix && !isArchitectAutoFix && !input.supportSessionId");
     expect(jobs).toContain("hasMomentNotice && !input.supportSessionId");
     expect(jobs).toContain("!isAutoFixTask &&\n                !input.supportSessionId");
-    expect(jobs.match(/await assertSupportGrantStillAuthorizesMutation\(\);/g)).toHaveLength(5);
+    const runJob = jobs.slice(
+      jobs.indexOf("export async function runJob"),
+      jobs.indexOf("async function runPostWriteMigrationSync"),
+    );
+    const projectFileCommits = runJob.match(/await writeProjectFilesAtomically\(/g) ?? [];
+    const consentedProjectFileCommits =
+      runJob.match(
+        /await assertSupportGrantStillAuthorizesMutation\(\);\s*await writeProjectFilesAtomically\(/g,
+      ) ?? [];
+    expect(projectFileCommits.length).toBeGreaterThan(0);
+    expect(consentedProjectFileCommits).toHaveLength(projectFileCommits.length);
+    expect(runJob.match(/await assertSupportGrantStillAuthorizesMutation\(\);/g)).toHaveLength(
+      projectFileCommits.length + 1,
+    );
     expect(jobs).toContain('event: applied ? "zero_change_applied" : "zero_change_interrupted"');
   });
 

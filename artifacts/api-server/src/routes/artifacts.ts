@@ -3,6 +3,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, projectArtifactsTable, projectFilesTable, type ProjectArtifact } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { logger } from "../lib/logger";
+import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
 
 const router: IRouter = Router();
 
@@ -204,13 +205,27 @@ router.delete(
       });
       return;
     }
-    await db
-      .update(projectArtifactsTable)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(eq(projectArtifactsTable.id, aid));
-    // Also cascade-delete the files for this artifact so re-creation with the
-    // same slug doesn't collide on the (project_id, path) unique index.
-    await db.delete(projectFilesTable).where(eq(projectFilesTable.artifactId, aid));
+    await db.transaction(async (tx) => {
+      const deletedFiles = await tx
+        .select({ path: projectFilesTable.path })
+        .from(projectFilesTable)
+        .where(eq(projectFilesTable.artifactId, aid));
+      await tx
+        .update(projectArtifactsTable)
+        .set({ deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(projectArtifactsTable.id, aid));
+      // Also cascade-delete the files for this artifact so re-creation with the
+      // same slug doesn't collide on the (project_id, path) unique index.
+      await tx.delete(projectFilesTable).where(eq(projectFilesTable.artifactId, aid));
+      for (const filePath of new Set(deletedFiles.map((file) => file.path))) {
+        await reconcileProjectFileAssetUsage(tx, {
+          projectId,
+          artifactId: aid,
+          filePath,
+          nextContent: null,
+        });
+      }
+    });
     res.json({ deleted: true });
   },
 );

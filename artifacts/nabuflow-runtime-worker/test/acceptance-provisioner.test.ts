@@ -11,7 +11,12 @@ import type {
   AcceptanceWorkloadVerifier,
   StoredAcceptanceLease,
 } from "../src/acceptance-provisioner-model";
-import { AcceptanceProvisionerService } from "../src/acceptance-provisioner-worker";
+import { AcceptanceProviderError } from "../src/acceptance-provider-adapters";
+import {
+  AcceptanceProvisionerService,
+  handleAcceptanceQueue,
+  handleAcceptanceScheduled,
+} from "../src/acceptance-provisioner-worker";
 import { ControlDurableObject } from "../src/control-durable-object";
 import type { DurableOperationQueueMessage, StoredDurableOperationJob } from "../src/model";
 
@@ -62,6 +67,10 @@ class MemoryStorage {
     return this.alarm;
   }
 
+  async deleteAlarm(): Promise<void> {
+    this.alarm = null;
+  }
+
   serialized(): string {
     return JSON.stringify([...this.values.entries()]);
   }
@@ -69,14 +78,22 @@ class MemoryStorage {
 
 class MemoryQueue {
   readonly messages: AcceptanceQueueMessage[] = [];
+  sendAttempts = 0;
+  failNextSend = false;
 
   async send(message: AcceptanceQueueMessage): Promise<void> {
+    this.sendAttempts += 1;
+    if (this.failNextSend) {
+      this.failNextSend = false;
+      throw new Error("injected queue send failure");
+    }
     this.messages.push(structuredClone(message));
   }
 }
 
 class FakeProviders implements AcceptanceProviderAdapters {
   calls = { create: 0, flySecret: 0, destroy: 0, verify: 0, reconcile: 0 };
+  failDestroy = false;
   readonly resources = new Map<string, { gone: boolean; configuration: boolean }>();
 
   async create(lease: StoredAcceptanceLease): Promise<AcceptanceProviderCreateResult> {
@@ -108,6 +125,9 @@ class FakeProviders implements AcceptanceProviderAdapters {
 
   async destroy(lease: StoredAcceptanceLease): Promise<void> {
     this.calls.destroy += 1;
+    if (this.failDestroy) {
+      throw new AcceptanceProviderError("acceptance_provider_unavailable", true, "timeout");
+    }
     const resource = this.resources.get(lease.leaseId);
     if (resource !== undefined) {
       resource.gone = true;
@@ -348,9 +368,12 @@ describe("staging acceptance provisioner", () => {
     f.env.CF_VERSION_METADATA.id = "acceptance-worker-previous";
     await f.service.handleQueue(firstDelivery);
     expect(f.providers.calls.create).toBe(0);
+    expect(f.queue.messages).toHaveLength(0);
+    vi.setSystemTime(NOW_MS + 5_000);
+    await f.control.alarm();
     expect(f.queue.messages).toHaveLength(1);
     const deferred = await f.control.getDurableOperation(firstDelivery.jobKey);
-    expect(deferred).toMatchObject({ state: "active", attempt: 0 });
+    expect(deferred).toMatchObject({ state: "active", attempt: 0, deploymentDeferralCount: 1 });
     expect(deferred?.events).toContainEqual(
       expect.objectContaining({
         event: "deployment-version-deferred",
@@ -366,6 +389,87 @@ describe("staging acceptance provisioner", () => {
       request(`/_nabuflow/acceptance/v1/leases/${lease.leaseId}/status`, {}, { method: "GET" }),
     );
     await expect(status.json()).resolves.toMatchObject({ state: "active", provider: "neon" });
+  });
+
+  it("terminalizes a disabled durable acceptance job before ack and prevents alarm redelivery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const requestBody = {
+      schemaVersion: 1,
+      projectId: 42,
+      scope: { provider: "neon", organizationId: "neon-dedicated" },
+      ttlSeconds: 300,
+      costCeilingMinorUnits: 0,
+    } as const;
+    const accepted = await f.service.handle(
+      request("/_nabuflow/acceptance/v1/leases", requestBody, {
+        idempotency: "disabled-durable-job-0001",
+      }),
+    );
+    expect(accepted.status).toBe(202);
+    const delivery = f.queue.messages.shift() as DurableOperationQueueMessage;
+    const acks = [vi.fn(), vi.fn()];
+    const retries = [vi.fn(), vi.fn()];
+    f.env.ACCEPTANCE_STAGING_ENABLED = "false";
+
+    await handleAcceptanceQueue(
+      {
+        messages: [
+          { body: delivery, ack: acks[0], retry: retries[0] },
+          {
+            body: {
+              schemaVersion: 1,
+              kind: "acceptance-janitor",
+              leaseId: `nal_${"a".repeat(40)}`,
+            },
+            ack: acks[1],
+            retry: retries[1],
+          },
+        ],
+      } as unknown as MessageBatch<AcceptanceQueueMessage>,
+      f.env,
+    );
+    expect(acks[0]).toHaveBeenCalledOnce();
+    expect(acks[1]).toHaveBeenCalledOnce();
+    expect(retries[0]).not.toHaveBeenCalled();
+    expect(retries[1]).not.toHaveBeenCalled();
+    const terminal = await f.control.getDurableOperation(delivery.jobKey);
+    expect(terminal).toMatchObject({
+      state: "failed",
+      ownerId: null,
+      leaseUntilMs: null,
+      abandonAtMs: null,
+      response: {
+        status: 503,
+        body: {
+          ok: false,
+          code: "acceptance_cleanup_disabled",
+          message: "Acceptance cleanup is disabled",
+          retryable: false,
+        },
+      },
+    });
+    expect(terminal?.events.at(-1)).toMatchObject({ event: "policy-disabled-terminal" });
+
+    vi.setSystemTime(NOW_MS + 60_000);
+    await f.control.alarm();
+    expect(f.queue.messages).toHaveLength(0);
+    expect((await f.control.getDurableOperation(delivery.jobKey))?.events).not.toContainEqual(
+      expect.objectContaining({ event: "alarm-redelivery" }),
+    );
+
+    f.env.ACCEPTANCE_STAGING_ENABLED = "true";
+    const replay = await f.service.handle(
+      request("/_nabuflow/acceptance/v1/leases", requestBody, {
+        idempotency: "disabled-durable-job-0001",
+      }),
+    );
+    expect(replay.status).toBe(503);
+    await expect(replay.json()).resolves.toMatchObject({
+      code: "acceptance_cleanup_disabled",
+      retryable: false,
+    });
   });
 
   it("creates an opaque idempotent lease with encrypted material and no response leakage", async () => {
@@ -634,6 +738,8 @@ describe("staging acceptance provisioner", () => {
     );
     vi.setSystemTime(NOW_MS + 300_001);
     await f.vault.alarm();
+    vi.setSystemTime(NOW_MS + 305_001);
+    await f.control.alarm();
     await drain(f);
     expect(f.providers.resources.get(lease.leaseId)?.gone).toBe(true);
 
@@ -641,6 +747,468 @@ describe("staging acceptance provisioner", () => {
     const reconciliation = await f.service.reconcileJanitor(Date.now());
     expect(reconciliation).toMatchObject({ reclaimed: 1 });
     expect(f.providers.resources.get(lease.leaseId)?.gone).toBe(true);
+  });
+
+  it("registers one coordinator-owned cleanup successor across repeated vault alarms", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "janitor-one-successor-0001",
+    );
+    vi.setSystemTime(NOW_MS + 300_001);
+    await f.vault.alarm();
+    await f.vault.alarm();
+    expect(f.queue.messages).toHaveLength(0);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "expired",
+      cleanupDispatchState: "registered",
+      cleanupDispatchAttempts: 1,
+    });
+    vi.setSystemTime(NOW_MS + 305_001);
+    await f.control.alarm();
+    expect(f.queue.messages).toHaveLength(1);
+    await f.control.alarm();
+    expect(f.queue.messages).toHaveLength(1);
+  });
+
+  it("stages a generation before enabled scheduled cleanup registers its job", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "enabled-scheduled-generation-0001",
+    );
+
+    vi.setSystemTime(NOW_MS + 300_001);
+    await handleAcceptanceScheduled(f.env, f.providers);
+
+    const registered = await f.vault.getLeaseForJanitor(lease.leaseId);
+    expect(registered).toMatchObject({
+      state: "expired",
+      cleanupDispatchGeneration: 1,
+      cleanupDispatchState: "registered",
+    });
+    const job = await f.control.getDurableOperation(registered!.cleanupDispatchJobKey!);
+    expect(job).toMatchObject({
+      kind: "acceptance-lease",
+      request: { operation: "destroy", cleanupGeneration: 1 },
+    });
+  });
+
+  it("recovers a legacy destroying lease without a generation and proves it quiesced", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "legacy-destroying-recovery-0001",
+    );
+    const legacy = await f.vault.getLeaseForJanitor(lease.leaseId);
+    expect(legacy).not.toBeNull();
+    legacy!.state = "destroying";
+    delete legacy!.cleanupDispatchGeneration;
+    delete legacy!.cleanupDispatchState;
+    delete legacy!.cleanupDispatchAttempts;
+    delete legacy!.cleanupDispatchNextAttemptAtMs;
+    delete legacy!.cleanupDispatchDeadlineMs;
+    delete legacy!.cleanupDispatchJobKey;
+    await f.vaultStorage.put(`lease:${lease.leaseId}`, legacy!);
+
+    vi.setSystemTime(NOW_MS + 300_001);
+    await handleAcceptanceScheduled(f.env, f.providers);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "expired",
+      cleanupDispatchGeneration: 1,
+      cleanupDispatchState: "registered",
+    });
+
+    vi.setSystemTime(NOW_MS + 305_001);
+    await f.control.alarm();
+    await drain(f);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "destroyed",
+      cleanupDispatchGeneration: 1,
+      cleanupDispatchState: "terminal",
+    });
+    expect(f.providers.resources.get(lease.leaseId)).toEqual({ gone: true, configuration: false });
+  });
+
+  it("fences a provider create that returns after cleanup policy terminalized its job", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    let releaseCreate!: () => void;
+    let observeCreate!: () => void;
+    const createReleased = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
+    const createObserved = new Promise<void>((resolve) => {
+      observeCreate = resolve;
+    });
+    const nativeCreate = f.providers.create.bind(f.providers);
+    vi.spyOn(f.providers, "create").mockImplementationOnce(async (lease) => {
+      observeCreate();
+      await createReleased;
+      return nativeCreate(lease);
+    });
+
+    const response = await f.service.handle(
+      request(
+        "/_nabuflow/acceptance/v1/leases",
+        {
+          schemaVersion: 1,
+          projectId: 42,
+          scope: { provider: "neon", organizationId: "neon-dedicated" },
+          ttlSeconds: 300,
+          costCeilingMinorUnits: 100,
+        },
+        { idempotency: "late-provider-create-fence-0001" },
+      ),
+    );
+    const pending = (await response.json()) as AcceptanceLeaseResponse;
+    const createMessage = f.queue.messages.shift() as DurableOperationQueueMessage;
+    const processing = f.service.handleQueue(createMessage);
+    await createObserved;
+
+    f.env.ACCEPTANCE_STAGING_ENABLED = "false";
+    await f.control.terminalizeDisabledAcceptanceOperation(createMessage.jobKey, Date.now());
+    await f.vault.alarm();
+    expect(await f.vault.getLeaseForJanitor(pending.leaseId)).toMatchObject({
+      state: "expired",
+      cleanupDispatchGeneration: 1,
+      cleanupDispatchState: "registered",
+      resource: null,
+    });
+
+    releaseCreate();
+    await processing;
+    expect(await f.vault.getLeaseForJanitor(pending.leaseId)).toMatchObject({
+      state: "failed",
+      cleanupDispatchGeneration: 2,
+      cleanupDispatchState: "pending",
+      resource: { provider: "neon" },
+    });
+    expect(f.providers.resources.get(pending.leaseId)?.gone).toBe(false);
+
+    await f.vault.alarm();
+    vi.setSystemTime(NOW_MS + 5_001);
+    await f.control.alarm();
+    await drain(f);
+    expect(f.providers.resources.get(pending.leaseId)).toEqual({
+      gone: true,
+      configuration: false,
+    });
+    expect(await f.vault.getLeaseForJanitor(pending.leaseId)).toMatchObject({
+      state: "destroyed",
+      cleanupDispatchGeneration: 2,
+      cleanupDispatchState: "terminal",
+    });
+  });
+
+  it("mints a fenced cleanup successor when the coordinator deadline terminalizes a registered job", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "cleanup-control-deadline-0001",
+    );
+    f.env.ACCEPTANCE_STAGING_ENABLED = "false";
+    await handleAcceptanceScheduled(f.env);
+    const registered = await f.vault.getLeaseForJanitor(lease.leaseId);
+    expect(registered).toMatchObject({
+      cleanupDispatchGeneration: 1,
+      cleanupDispatchState: "registered",
+    });
+    const cleanupJob = await f.control.getDurableOperation(registered!.cleanupDispatchJobKey!);
+    expect(cleanupJob?.kind).toBe("acceptance-lease");
+    const terminalAt = cleanupJob!.deadlineMs + 1;
+    await expect(
+      f.control.recordDurableOperationDeploymentObservation(
+        cleanupJob!.jobKey,
+        f.env.CF_VERSION_METADATA.id,
+        terminalAt,
+        cleanupJob!.deploymentDeferralCount ?? 0,
+      ),
+    ).resolves.toBe("terminal");
+
+    vi.setSystemTime(terminalAt);
+    await f.vault.alarm();
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "expired",
+      cleanupDispatchGeneration: 2,
+      cleanupDispatchState: "registered",
+      cleanupDispatchAttempts: 2,
+    });
+    expect(await f.vault.listAudit()).toContainEqual(
+      expect.objectContaining({
+        operation: "destroy",
+        outcome: "retrying:acceptance_operation_timeout",
+      }),
+    );
+
+    vi.setSystemTime(terminalAt + 5_001);
+    await f.control.alarm();
+    await drain(f);
+    expect(f.providers.resources.get(lease.leaseId)?.gone).toBe(true);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "destroyed",
+      cleanupDispatchState: "terminal",
+    });
+  });
+
+  it("mints a fenced cleanup successor when deployment deferrals reach their cap", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "cleanup-control-deployment-cap-0001",
+    );
+    f.env.ACCEPTANCE_STAGING_ENABLED = "false";
+    await handleAcceptanceScheduled(f.env);
+    const registered = await f.vault.getLeaseForJanitor(lease.leaseId);
+    let cleanupJob = await f.control.getDurableOperation(registered!.cleanupDispatchJobKey!);
+    let disposition: string = "deferred";
+    for (let attempt = 0; attempt < 100 && disposition !== "terminal"; attempt += 1) {
+      disposition = await f.control.recordDurableOperationDeploymentObservation(
+        cleanupJob!.jobKey,
+        "wrong-deployment-version",
+        NOW_MS + attempt + 1,
+        cleanupJob!.deploymentDeferralCount ?? 0,
+      );
+      cleanupJob = await f.control.getDurableOperation(cleanupJob!.jobKey);
+    }
+    expect(disposition).toBe("terminal");
+    expect(cleanupJob).toMatchObject({
+      state: "failed",
+      response: { body: { code: "acceptance_deployment_version_unavailable" } },
+    });
+
+    vi.setSystemTime(NOW_MS + 5_001);
+    await f.vault.alarm();
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      cleanupDispatchGeneration: 2,
+      cleanupDispatchState: "registered",
+      cleanupDispatchAttempts: 2,
+    });
+    expect(await f.vault.listAudit()).toContainEqual(
+      expect.objectContaining({
+        operation: "destroy",
+        outcome: "retrying:acceptance_deployment_version_unavailable",
+      }),
+    );
+
+    vi.setSystemTime(NOW_MS + 10_002);
+    await f.control.alarm();
+    await drain(f);
+    expect(f.providers.resources.get(lease.leaseId)?.gone).toBe(true);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "destroyed",
+      cleanupDispatchState: "terminal",
+    });
+  });
+
+  it("drains an enabled live resource in cleanup-only mode without permitting a new create", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "janitor-disabled-0001",
+    );
+    expect(f.providers.resources.get(lease.leaseId)).toEqual({
+      gone: false,
+      configuration: false,
+    });
+    expect(f.providers.calls.create).toBe(1);
+
+    f.env.ACCEPTANCE_STAGING_ENABLED = "false";
+    const blockedCreate = await f.service.handle(
+      request(
+        "/_nabuflow/acceptance/v1/leases",
+        {
+          schemaVersion: 1,
+          projectId: 42,
+          scope: { provider: "neon", organizationId: "neon-dedicated" },
+          ttlSeconds: 300,
+          costCeilingMinorUnits: 0,
+        },
+        { idempotency: "cleanup-only-blocks-create-0001" },
+      ),
+    );
+    expect(blockedCreate.status).toBe(404);
+    expect(f.providers.calls.create).toBe(1);
+
+    await handleAcceptanceScheduled(f.env);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "expired",
+      terminalCode: null,
+      cleanupDispatchState: "registered",
+    });
+    vi.setSystemTime(NOW_MS + 5_001);
+    await f.control.alarm();
+    expect(f.queue.messages).toHaveLength(1);
+    const acks = vi.fn();
+    const retries = vi.fn();
+    await handleAcceptanceQueue(
+      {
+        messages: [{ body: f.queue.messages.shift()!, ack: acks, retry: retries }],
+      } as unknown as MessageBatch<AcceptanceQueueMessage>,
+      f.env,
+      f.service,
+    );
+
+    expect(acks).toHaveBeenCalledOnce();
+    expect(retries).not.toHaveBeenCalled();
+    expect(f.providers.calls.destroy).toBe(1);
+    expect(f.providers.resources.get(lease.leaseId)).toEqual({
+      gone: true,
+      configuration: false,
+    });
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "destroyed",
+      terminalCode: null,
+      cleanupDispatchState: "terminal",
+    });
+    expect(f.vaultStorage.alarm).toBeNull();
+    expect(await f.vault.listAudit()).toContainEqual(
+      expect.objectContaining({
+        operation: "destroy",
+        outcome: "succeeded",
+        state: "destroyed",
+      }),
+    );
+  });
+
+  it("recovers one coordinator successor after an injected queue send failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "janitor-send-recovery-0001",
+    );
+    vi.setSystemTime(NOW_MS + 300_001);
+    await f.vault.alarm();
+    f.queue.failNextSend = true;
+    vi.setSystemTime(NOW_MS + 305_001);
+    await f.control.alarm();
+    expect(f.queue.messages).toHaveLength(0);
+    vi.setSystemTime(NOW_MS + 310_001);
+    await f.control.alarm();
+    expect(f.queue.messages).toHaveLength(1);
+    await f.control.alarm();
+    expect(f.queue.messages).toHaveLength(1);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "expired",
+      cleanupDispatchState: "registered",
+    });
+  });
+
+  it("bounds disabled cleanup provider retries and carries typed terminal evidence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "cleanup-only-provider-cap-0001",
+    );
+    f.env.ACCEPTANCE_STAGING_ENABLED = "false";
+    f.providers.failDestroy = true;
+    await handleAcceptanceScheduled(f.env);
+    vi.setSystemTime(NOW_MS + 5_001);
+    await f.control.alarm();
+    const delivery = f.queue.messages.shift() as DurableOperationQueueMessage;
+    const ack = vi.fn();
+    const retry = vi.fn();
+    const processing = handleAcceptanceQueue(
+      {
+        messages: [{ body: delivery, ack, retry }],
+      } as unknown as MessageBatch<AcceptanceQueueMessage>,
+      f.env,
+      f.service,
+    );
+    await vi.advanceTimersByTimeAsync(1_001);
+    await processing;
+
+    expect(ack).toHaveBeenCalledOnce();
+    expect(retry).not.toHaveBeenCalled();
+    expect(f.providers.calls.destroy).toBe(3);
+    expect(f.providers.resources.get(lease.leaseId)).toEqual({
+      gone: false,
+      configuration: false,
+    });
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "failed",
+      terminalCode: "acceptance_cleanup_incomplete",
+      cleanupDispatchState: "terminal",
+    });
+    expect(await f.control.getDurableOperation(delivery.jobKey)).toMatchObject({
+      state: "failed",
+      response: {
+        status: 503,
+        body: {
+          code: "acceptance_provider_unavailable",
+          retryable: true,
+        },
+      },
+    });
+    expect(await f.vault.listAudit()).toContainEqual(
+      expect.objectContaining({
+        operation: "destroy",
+        outcome: "failed:acceptance_provider_unavailable",
+        state: "failed",
+      }),
+    );
+    expect(f.vaultStorage.alarm).toBeNull();
+  });
+
+  it("bounds coordinator registration failures with typed cleanup evidence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const f = fixture();
+    const lease = await createLease(
+      f,
+      { provider: "fly", organizationSlug: "fly-disposable", disposable: true },
+      "janitor-registration-cap-0001",
+    );
+    f.env.ACCEPTANCE_COORDINATOR = namespace({
+      async registerDurableOperation() {
+        throw new Error("injected coordinator failure");
+      },
+    }) as never;
+    f.env.ACCEPTANCE_STAGING_ENABLED = "false";
+    for (let attempt = 0; attempt <= 12; attempt += 1) {
+      vi.setSystemTime(NOW_MS + attempt * 5_001);
+      await f.vault.alarm();
+    }
+    expect(f.queue.messages).toHaveLength(0);
+    expect(await f.vault.getLeaseForJanitor(lease.leaseId)).toMatchObject({
+      state: "failed",
+      terminalCode: "acceptance_cleanup_incomplete",
+      cleanupDispatchState: "terminal",
+      cleanupDispatchAttempts: 12,
+    });
+    expect(f.vaultStorage.alarm).toBeNull();
+    expect(await f.vault.listAudit()).toContainEqual(
+      expect.objectContaining({
+        operation: "destroy",
+        outcome: "failed:acceptance_cleanup_incomplete",
+        state: "failed",
+      }),
+    );
   });
 
   it("reclaims a provider resource lost before its locator reached the vault", async () => {

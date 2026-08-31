@@ -22,7 +22,7 @@ interface StoredVersion {
 }
 
 interface Predicate {
-  kind: "eq" | "in" | "and";
+  kind: "eq" | "in" | "and" | "isNull";
   column?: string;
   value?: unknown;
   values?: unknown[];
@@ -39,12 +39,21 @@ const harness = vi.hoisted(() => ({
   nextVersionId: 41,
   transactions: 0,
   executeValues: [] as unknown[][],
+  activeProject: true,
+  reconciliations: [] as Array<{
+    projectId: number;
+    artifactId: number | null;
+    filePath: string;
+    nextContent: string | null;
+  }>,
+  reconciliationFailure: null as Error | null,
 }));
 
 vi.mock("drizzle-orm", () => ({
   eq: (column: string, value: unknown): Predicate => ({ kind: "eq", column, value }),
   inArray: (column: string, values: unknown[]): Predicate => ({ kind: "in", column, values }),
   and: (...predicates: Predicate[]): Predicate => ({ kind: "and", predicates }),
+  isNull: (column: string): Predicate => ({ kind: "isNull", column }),
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values }),
 }));
 
@@ -68,9 +77,14 @@ vi.mock("@workspace/db", () => {
   const projectVersionsTable = {
     id: "versionId",
   };
+  const projectsTable = {
+    id: "projectId",
+    deletedAt: "projectDeletedAt",
+  };
 
   return {
     projectFilesTable,
+    projectsTable,
     projectVersionsTable,
     db: {
       transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
@@ -96,12 +110,20 @@ vi.mock("@workspace/db", () => {
             }),
           })),
           select: vi.fn(() => ({
-            from: vi.fn(() => ({
-              where: vi.fn(async (predicate: Predicate) => {
+            from: vi.fn((table: unknown) => ({
+              where: vi.fn((predicate: Predicate) => {
+                if (table === projectsTable) {
+                  const projectId = findPredicate(predicate, "eq", "projectId")?.value;
+                  const result =
+                    harness.activeProject && projectId === 51 ? [{ id: projectId }] : [];
+                  return { limit: vi.fn(async () => result.slice(0, 1)) };
+                }
                 const projectId = findPredicate(predicate, "eq", "projectId")?.value;
-                return working
-                  .filter((row) => row.projectId === projectId)
-                  .map(({ path, content, mimeType }) => ({ path, content, mimeType }));
+                return Promise.resolve(
+                  working
+                    .filter((row) => row.projectId === projectId)
+                    .map(({ path, content, mimeType }) => ({ path, content, mimeType })),
+                );
               }),
             })),
           })),
@@ -141,14 +163,33 @@ vi.mock("./artifacts", () => ({
   resolveArtifactId: vi.fn(async () => harness.artifactId),
 }));
 
+vi.mock("./project-file-asset-usage", () => ({
+  reconcileProjectFileAssetUsage: vi.fn(
+    async (
+      _tx: unknown,
+      input: {
+        projectId: number;
+        artifactId: number | null;
+        filePath: string;
+        nextContent: string | null;
+      },
+    ) => {
+      if (harness.reconciliationFailure) throw harness.reconciliationFailure;
+      harness.reconciliations.push({ ...input });
+    },
+  ),
+}));
+
 import {
   PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS,
   PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS,
   ProjectFileArtifactScopeError,
+  ProjectInactiveWriteError,
   ProjectFileVersionHandoffError,
   ProjectFileWriteError,
   writeProjectFilesAtomically,
 } from "./project-file-writer";
+import { PROJECT_LIFECYCLE_LOCK_NAMESPACE } from "./project-retirement-contract";
 
 const originalRows: StoredFile[] = [
   {
@@ -185,6 +226,9 @@ describe("atomic project file writes", () => {
     harness.nextVersionId = 41;
     harness.transactions = 0;
     harness.executeValues = [];
+    harness.activeProject = true;
+    harness.reconciliations = [];
+    harness.reconciliationFailure = null;
   });
 
   it("replaces only the resolved artifact and commits the new complete file set", async () => {
@@ -212,9 +256,37 @@ describe("atomic project file writes", () => {
       },
     ]);
     expect(harness.executeValues).toEqual([
+      [PROJECT_LIFECYCLE_LOCK_NAMESPACE, 51],
       [`${PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS}ms`],
       [`${PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS}ms`],
     ]);
+  });
+
+  it("denies a tombstoned project before any file or version mutation", async () => {
+    harness.activeProject = false;
+
+    await expect(
+      writeProjectFilesAtomically({
+        projectId: 51,
+        scope: { kind: "artifact" },
+        replaceAll: true,
+        files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
+      }),
+    ).rejects.toMatchObject({
+      name: "ProjectInactiveWriteError",
+      code: "project_inactive",
+      message: "This project is in Trash and cannot be changed.",
+    });
+    await expect(
+      writeProjectFilesAtomically({
+        projectId: 51,
+        scope: { kind: "artifact" },
+        replaceAll: true,
+        files: [],
+      }),
+    ).rejects.toBeInstanceOf(ProjectInactiveWriteError);
+    expect(harness.rows).toEqual(originalRows);
+    expect(harness.versions).toEqual([]);
   });
 
   it("preserves every original row when insertion fails after deletion", async () => {
@@ -325,6 +397,25 @@ describe("atomic project file writes", () => {
         mimeType: "text/typescript",
       },
     ]);
+    expect(harness.reconciliations).toEqual([
+      { projectId: 51, artifactId: 7, filePath: "index.ts", nextContent: "new" },
+      { projectId: 51, artifactId: 7, filePath: "old.ts", nextContent: null },
+    ]);
+  });
+
+  it("rolls file rows back when usage reconciliation fails in the transaction", async () => {
+    harness.reconciliationFailure = new Error("simulated usage insert failure");
+
+    await expect(
+      writeProjectFilesAtomically({
+        projectId: 51,
+        scope: { kind: "artifact" },
+        replaceAll: false,
+        files: [{ path: "index.ts", content: "new", mimeType: "text/typescript" }],
+      }),
+    ).rejects.toBeInstanceOf(ProjectFileWriteError);
+
+    expect(harness.rows).toEqual(originalRows);
   });
 
   it("commits the complete project snapshot and authoritative version with the file set", async () => {

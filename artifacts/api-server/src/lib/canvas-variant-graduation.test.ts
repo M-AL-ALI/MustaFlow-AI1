@@ -53,6 +53,10 @@ vi.mock("./project-file-writer", () => ({
   PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS: 10_000,
 }));
 
+vi.mock("./project-file-asset-usage", () => ({
+  reconcileProjectFileAssetUsage: vi.fn(async () => undefined),
+}));
+
 vi.mock("@workspace/db", () => {
   const projectFilesTable = {
     id: "fileId",

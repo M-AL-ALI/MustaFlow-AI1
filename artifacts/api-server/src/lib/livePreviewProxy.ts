@@ -21,7 +21,7 @@
 import type { Request, Response, NextFunction } from "express";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
 import { getAuth } from "@clerk/express";
 import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspace/db";
@@ -35,6 +35,7 @@ import { mintCloudflarePreviewGrant } from "./cloudflare-preview-grant";
 import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
+import { withActiveProjectLifecycle } from "./project-lifecycle";
 
 type PreviewProxyState =
   | "container-starting"
@@ -168,7 +169,7 @@ export async function loadPreviewProject(projectId: number): Promise<PreviewProj
       runtimePort: projectsTable.runtimePort,
     })
     .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
   if (!project) return null;
   return project;
 }
@@ -262,9 +263,10 @@ function wakeContainer(projectId: number, runtimePort: number | null): void {
   if (wakingProjects.has(projectId)) return;
 
   setImmediate(() => {
-    void (async () => {
+    void withActiveProjectLifecycle(projectId, async (session) => {
       wakingProjects.add(projectId);
       try {
+        if (!(await session.assertActive())) return;
         const [fileRows, envVars] = await Promise.all([
           db
             .select({
@@ -279,12 +281,16 @@ function wakeContainer(projectId: number, runtimePort: number | null): void {
         ]);
 
         await provisionContainer(projectId, fileRows, envVars, { servicePort: runtimePort });
+        await session.assertActive();
       } catch (err) {
         logger.warn({ err, projectId }, "wakeContainer (preview proxy) failed");
       } finally {
         wakingProjects.delete(projectId);
       }
-    })();
+    }).catch((err: unknown) => {
+      wakingProjects.delete(projectId);
+      logger.warn({ err, projectId }, "wakeContainer lifecycle admission failed");
+    });
   });
 }
 

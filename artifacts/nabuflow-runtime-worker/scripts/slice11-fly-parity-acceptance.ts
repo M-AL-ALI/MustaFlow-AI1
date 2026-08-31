@@ -1,14 +1,6 @@
 import { createHash, generateKeyPairSync, randomBytes, sign as signBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {
   deriveRuntimeIdentity,
@@ -28,11 +20,7 @@ const PROVISIONER_URL =
 const PROVISIONER_NAME = "nabuflow-acceptance-provisioner-staging";
 const DEPLOYMENT_NAMESPACE = "staging";
 const NEON_ORGANIZATION_ID = "org-young-poetry-18075521";
-const STRIPE_SANDBOX_ID = "acct_1U1r21DoZmlNFmDX";
 const FLY_ORGANIZATION_SLUG = "nabuflow-acceptance-staging";
-const FLY_IMAGE_REF =
-  "docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce";
-const MAX_COST_MINOR_UNITS = "500";
 const WORKLOAD_ISSUER = "https://staging-acceptance.mustaflow.invalid";
 const WORKLOAD_AUDIENCE = PROVISIONER_NAME;
 const RUN_ID = new Date().toISOString().replaceAll(/[:.]/gu, "");
@@ -48,7 +36,6 @@ const preCleanupEvidencePath = resolve(
   outputRoot,
   `gateway-doorman-2b-ix-b11-${RUN_ID}-precleanup.json`,
 );
-const openConfigPath = resolve(workerRoot, `wrangler.acceptance.open-${RUN_ID}.jsonc`);
 const wranglerCli = resolve(workerRoot, "node_modules", "wrangler", "bin", "wrangler.js");
 const tsxCli = resolve(workerRoot, "node_modules", "tsx", "dist", "cli.mjs");
 const artifactGatePath = resolve(workerRoot, "scripts", "artifact-layers-staging-smoke.ts");
@@ -114,7 +101,6 @@ let runtimeStarted = false;
 let artifactSha256 = "";
 let buildId = "";
 let shelfRootSha256 = "";
-let provisionerOpened = false;
 let flyApp = "";
 let flyMachine = "";
 let flyStartedAtMs: number | null = null;
@@ -186,90 +172,6 @@ function runProcess(
     });
     child.stdin.end(options.input);
   });
-}
-
-function replaceJsonString(source: string, property: string, value: string): string {
-  const escaped = property.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const pattern = new RegExp(`("${escaped}"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`, "u");
-  assertCondition(pattern.test(source), `Provisioner config is missing ${property}`);
-  return source.replace(pattern, `$1${JSON.stringify(value)}`);
-}
-
-function buildProvisionerConfig(publicKey: string): string {
-  let config = readFileSync(resolve(workerRoot, "wrangler.acceptance.jsonc"), "utf8");
-  config = config.replace(/"workers_dev"\s*:\s*false/u, '"workers_dev": true');
-  config = replaceJsonString(config, "ACCEPTANCE_STAGING_ENABLED", "true");
-  config = replaceJsonString(
-    config,
-    "ACCEPTANCE_WORKLOAD_PUBLIC_KEYS",
-    JSON.stringify({ [WORKLOAD_KEY_ID]: publicKey }),
-  );
-  config = replaceJsonString(config, "ACCEPTANCE_WORKLOAD_ISSUER", WORKLOAD_ISSUER);
-  config = replaceJsonString(config, "ACCEPTANCE_WORKLOAD_AUDIENCE", WORKLOAD_AUDIENCE);
-  config = replaceJsonString(
-    config,
-    "ACCEPTANCE_WORKLOAD_SUBJECTS",
-    JSON.stringify([WORKLOAD_SUBJECT]),
-  );
-  config = replaceJsonString(config, "ACCEPTANCE_NEON_ORGANIZATION_ID", NEON_ORGANIZATION_ID);
-  config = replaceJsonString(config, "ACCEPTANCE_STRIPE_SANDBOX_ID", STRIPE_SANDBOX_ID);
-  config = replaceJsonString(config, "ACCEPTANCE_FLY_ORGANIZATION_SLUG", FLY_ORGANIZATION_SLUG);
-  config = replaceJsonString(config, "ACCEPTANCE_FLY_IMAGE_REF", FLY_IMAGE_REF);
-  config = replaceJsonString(
-    config,
-    "ACCEPTANCE_PROVIDER_MAX_COST_MINOR_UNITS",
-    MAX_COST_MINOR_UNITS,
-  );
-  return config;
-}
-
-function deploymentVersion(output: string): string | null {
-  const matches = [...output.matchAll(/(?:Version ID|Current Version ID):\s+([0-9a-f-]{36})/giu)];
-  return matches.at(-1)?.[1] ?? null;
-}
-
-async function deployProvisioner(configPath: string, message: string): Promise<string> {
-  const result = await runProcess(
-    process.execPath,
-    [wranglerCli, "deploy", "--config", configPath, "--message", message],
-    { timeoutMs: 180_000 },
-  );
-  assertCondition(result.code === 0, `Provisioner deploy failed (${String(result.code)})`);
-  const version = deploymentVersion(`${result.stdout}\n${result.stderr}`);
-  assertCondition(version !== null, "Provisioner deploy returned no version ID");
-  return version;
-}
-
-async function verifyProvisionerClosed(): Promise<void> {
-  const deadline = Date.now() + PROVISIONER_PROPAGATION_BOUND_MS;
-  let consecutive = 0;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`${PROVISIONER_URL}/_nabuflow/acceptance/v1/readyz`, {
-        redirect: "manual",
-      });
-      const body = await readJsonResponse(response);
-      if (response.status === 404) {
-        consecutive += 1;
-        if (consecutive >= PROVISIONER_STABLE_OBSERVATIONS) {
-          record("provisioner.closed", 404, { consecutive });
-          return;
-        }
-      } else {
-        consecutive = 0;
-        record("provisioner.close.propagation", response.status, summarizeLeaseBody(body));
-      }
-    } catch (error) {
-      consecutive = 0;
-      record("provisioner.close.propagation", "transport", {
-        errorClass: error instanceof Error ? error.name : "UnknownError",
-      });
-    }
-    await new Promise((resolvePromise) =>
-      setTimeout(resolvePromise, PROVISIONER_PROPAGATION_POLL_MS),
-    );
-  }
-  throw new Error("Provisioner route did not remain closed through propagation");
 }
 
 async function calibrateClocks(): Promise<void> {
@@ -819,14 +721,11 @@ async function buildAndRunCloudflare(): Promise<CloudflareRuntimeProvider> {
   return provider;
 }
 
-async function openProvisioner(publicKey: string): Promise<void> {
-  writeFileSync(openConfigPath, buildProvisionerConfig(publicKey), { mode: 0o600 });
-  const version = await deployProvisioner(
-    openConfigPath,
-    `slice11-${RUN_ID}-temporary-lease-window`,
-  );
-  provisionerOpened = true;
-  record("provisioner.opened", 200, { version, publicSurface: "temporary_auth_gated" });
+async function verifyProvisionerAlreadyConfigured(): Promise<void> {
+  record("provisioner.deployment.externally-managed", 200, {
+    canonicalGuardedDeployRequired: true,
+    generatedConfigForbidden: true,
+  });
   const deadline = Date.now() + PROVISIONER_PROPAGATION_BOUND_MS;
   let consecutive = 0;
   while (Date.now() < deadline) {
@@ -849,11 +748,11 @@ async function openProvisioner(publicKey: string): Promise<void> {
         }
       } else {
         consecutive = 0;
-        record("provisioner.open.propagation", response.status, summarizeLeaseBody(body));
+        record("provisioner.readiness.propagation", response.status, summarizeLeaseBody(body));
       }
     } catch (error) {
       consecutive = 0;
-      record("provisioner.open.propagation", "transport", {
+      record("provisioner.readiness.propagation", "transport", {
         errorClass: error instanceof Error ? error.name : "UnknownError",
       });
     }
@@ -861,7 +760,7 @@ async function openProvisioner(publicKey: string): Promise<void> {
       setTimeout(resolvePromise, PROVISIONER_PROPAGATION_POLL_MS),
     );
   }
-  throw new Error("Provisioner route did not become ready");
+  throw new Error("The independently governed Provisioner route is not ready");
 }
 
 async function runCloudflareDatabase(
@@ -1236,7 +1135,7 @@ async function main(): Promise<void> {
     }
     provider = await buildAndRunCloudflare();
     await verifyFlyOrgEmpty("fly.org.pre-lease-empty");
-    await openProvisioner(workloadPair.publicKey);
+    await verifyProvisionerAlreadyConfigured();
     await calibrateClocks();
     const neon = await createLease("neon");
     await runCloudflareDatabase(provider, neon);
@@ -1332,21 +1231,6 @@ async function main(): Promise<void> {
         failure = failure === null ? message : `${failure}; runtime cleanup: ${message}`;
       }
     }
-    if (provisionerOpened) {
-      try {
-        const version = await deployProvisioner(
-          resolve(workerRoot, "wrangler.acceptance.jsonc"),
-          `slice11-${RUN_ID}-close-lease-window`,
-        );
-        record("provisioner.close.deployed", 200, { version });
-        await verifyProvisionerClosed();
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown Provisioner closure failure";
-        failure = failure === null ? message : `${failure}; provisioner closure: ${message}`;
-      }
-    }
-    rmSync(openConfigPath, { force: true });
     controlToken = "";
     previewPrivateKey = "";
     previewPublicKey = "";

@@ -19,6 +19,7 @@ function provider(
     zeroGenerationControlRequest: vi.fn(),
     zeroGenerationRuntimeDescriptor: vi.fn(),
     zeroGenerationRuntimeDescriptorForProject: vi.fn(),
+    zeroGenerationStartAcceptedSealedRelease: vi.fn(),
     deployArtifact: vi.fn(),
     updateRuntimeManifest: vi.fn(),
     deployLayeredArtifact: vi.fn(),

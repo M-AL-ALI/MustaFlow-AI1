@@ -35,7 +35,7 @@
     {
       "class_name": "NabuflowSandbox",
       "image": "docker.io/cloudflare/sandbox:0.12.4",
-      "instance_type": "standard-1",
+      "instance_type": "basic",
       "max_instances": 5,
     },
   ],

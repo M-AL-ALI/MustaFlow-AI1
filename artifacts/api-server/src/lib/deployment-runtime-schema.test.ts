@@ -13,6 +13,10 @@ function observation(overrides: Record<string, boolean> = {}) {
     supportDeliveryIndexesReady: true,
     promptQueueReady: true,
     projectCollaborationReady: true,
+    projectRetirementOperationsReady: true,
+    projectRetirementOperationsColumnsReady: true,
+    projectRetirementOperationsConstraintsReady: true,
+    projectRetirementOperationsIndexesReady: true,
     ...overrides,
   };
 }
@@ -25,7 +29,7 @@ describe("deployment runtime schema boundary", () => {
     });
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v2",
+      contractId: "deployment_runtime_schema_v3",
       mode: "read-only-ready",
       violations: [],
     });
@@ -43,7 +47,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v2",
+      contractId: "deployment_runtime_schema_v3",
       mode: "read-only-incomplete",
       violations: ["support_delivery_constraints_missing", "prompt_queue_missing"],
     });
@@ -61,7 +65,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v2",
+      contractId: "deployment_runtime_schema_v3",
       mode: "mutable",
       violations: [],
     });
@@ -73,9 +77,31 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v2",
+      contractId: "deployment_runtime_schema_v3",
       mode: "read-only-ready",
       violations: [],
+    });
+  });
+
+  it("fails closed when the retirement table exists with an incomplete shape", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        observation({
+          projectRetirementOperationsColumnsReady: false,
+          projectRetirementOperationsConstraintsReady: false,
+          projectRetirementOperationsIndexesReady: false,
+        }),
+      ],
+    }));
+
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toMatchObject({
+      contractId: "deployment_runtime_schema_v3",
+      mode: "read-only-incomplete",
+      violations: [
+        "project_retirement_operations_columns_missing",
+        "project_retirement_operations_constraints_missing",
+        "project_retirement_operations_indexes_missing",
+      ],
     });
   });
 

@@ -378,24 +378,54 @@ export async function refundCredits(
     );
   }
 
-  const credits = await getOrCreateCredits(userId);
-  const newBalance = credits.balance + amount;
+  await getOrCreateCredits(userId);
+  // The supplied key identifies the original charge so NabuFlow cycle billing
+  // can reverse that exact usage event. The wallet refund is a second money
+  // movement and must therefore use its own non-colliding receipt identity.
+  const refundSettlementKey = opts.settlementKey ? `${opts.settlementKey}:refund` : undefined;
+  try {
+    return await db.transaction(async (tx) => {
+      if (refundSettlementKey) {
+        const [existing] = await tx
+          .select({ balanceAfter: creditTransactionsTable.balanceAfter })
+          .from(creditTransactionsTable)
+          .where(eq(creditTransactionsTable.settlementKey, refundSettlementKey))
+          .limit(1);
+        if (existing) return existing.balanceAfter;
+      }
 
-  await db
-    .update(userCreditsTable)
-    .set({ balance: newBalance, updatedAt: sql`now()` })
-    .where(eq(userCreditsTable.userId, userId));
+      const [updated] = await tx
+        .update(userCreditsTable)
+        .set({ balance: sql`balance + ${amount}`, updatedAt: sql`now()` })
+        .where(eq(userCreditsTable.userId, userId))
+        .returning({ balance: userCreditsTable.balance });
+      if (!updated) throw new Error("credit_refund_owner_missing");
 
-  await db.insert(creditTransactionsTable).values({
-    userId,
-    projectId: opts.projectId ?? null,
-    type: "manual_adjustment",
-    amount,
-    description: `Refund: ${opts.description}`,
-    balanceAfter: newBalance,
-  });
-
-  return newBalance;
+      await tx.insert(creditTransactionsTable).values({
+        userId,
+        projectId: opts.projectId ?? null,
+        type: "refund",
+        amount,
+        description: `Refund: ${opts.description}`,
+        balanceAfter: updated.balance,
+        settlementKey: refundSettlementKey ?? null,
+      });
+      return updated.balance;
+    });
+  } catch (error) {
+    // A concurrent retry may win the unique settlement-key race after this
+    // transaction's initial read. Its committed receipt is the answer; the
+    // losing transaction rolled back its balance increment atomically.
+    if (refundSettlementKey && (error as { code?: unknown }).code === "23505") {
+      const [existing] = await db
+        .select({ balanceAfter: creditTransactionsTable.balanceAfter })
+        .from(creditTransactionsTable)
+        .where(eq(creditTransactionsTable.settlementKey, refundSettlementKey))
+        .limit(1);
+      if (existing) return existing.balanceAfter;
+    }
+    throw error;
+  }
 }
 
 // Internal helper to grant credits (starter grant, admin adjustment, etc.)

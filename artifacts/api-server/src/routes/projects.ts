@@ -6,7 +6,7 @@ import {
   projectFilesTable,
   chatMessagesTable,
   agentTasksTable,
-  projectActivityTable,
+  projectRetirementOperationsTable,
 } from "@workspace/db";
 import {
   listAccessibleProjectIds,
@@ -27,8 +27,9 @@ import {
   GetAgentRoutingQueryParams,
   GetAgentRoutingResponse,
 } from "@workspace/api-zod";
-import { resolveAgentIdentity, enqueueJob } from "../lib/jobs";
+import { cancelLocalProjectJobs, resolveAgentIdentity, enqueueJob } from "../lib/jobs";
 import {
+  cancelLocalProjectProvisioning,
   enqueueProvisionProjectJob,
   provisionPreviewDb,
   getRollingAverageMs,
@@ -48,6 +49,21 @@ import {
 } from "../lib/workspace-tenancy";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
+import {
+  acceptProjectRetirement,
+  decideProjectRestoreAdmission,
+  enqueueProjectRetirementOperation,
+  PROJECT_LIFECYCLE_LOCK_NAMESPACE,
+  readProjectRetirementOperation,
+  RESTORED_PROJECT_CONTROL_PLANE_STATE,
+  requestProjectRetirementReconciliation,
+} from "../lib/project-retirement";
+import {
+  getDurableWorkerReadiness,
+  isDurableWorkerReady,
+  QUEUE_PROJECT_RETIREMENT,
+} from "../lib/durable-queue";
+import { requireAdmin, requireOwner } from "../lib/adminAuth";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1519,28 +1535,267 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Unauthenticated" });
     return;
   }
-  // Manual ownership check — requireProjectOwnership filters by activeProjects
-  // (deletedAt IS NULL) so it would 404 every trashed project.
-  const [project] = await db
-    .update(projectsTable)
-    .set({ deletedAt: null, updatedAt: sql`now()` })
-    .where(
-      and(
-        eq(projectsTable.id, params.data.id),
-        eq(projectsTable.ownerId, userId),
-        sql`${projectsTable.deletedAt} IS NOT NULL`,
-        sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
-      ),
-    )
-    .returning();
-  if (!project) {
+  const restoreResult = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${params.data.id})`,
+    );
+    // Prove ownership before exposing any retirement receipt. Deleted projects
+    // cannot use the ordinary active-project middleware, so the check belongs
+    // inside this locked transaction.
+    const [ownedProject] = await tx
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(
+        and(
+          eq(projectsTable.id, params.data.id),
+          eq(projectsTable.ownerId, userId),
+          sql`${projectsTable.deletedAt} IS NOT NULL`,
+          sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
+        ),
+      )
+      .limit(1);
+    if (!ownedProject) return { kind: "not_found" as const };
+
+    const [latestRetirement] = await tx
+      .select()
+      .from(projectRetirementOperationsTable)
+      .where(eq(projectRetirementOperationsTable.projectId, params.data.id))
+      .orderBy(desc(projectRetirementOperationsTable.createdAt))
+      .limit(1);
+    // Restore is safe only after the latest governed receipt proves that every
+    // public/provider surface is absent. A failed terminal is evidence of the
+    // opposite, even when it carries completedAt.
+    const restoreAdmission = decideProjectRestoreAdmission(latestRetirement?.state ?? null);
+    if (!restoreAdmission.allowed) {
+      return { kind: "blocked" as const, operation: latestRetirement ?? null };
+    }
+    const [project] = await tx
+      .update(projectsTable)
+      .set({
+        ...RESTORED_PROJECT_CONTROL_PLANE_STATE,
+        // Keep the configured hostname itself, but never restore an "active"
+        // serving claim after its route and certificate were retired.
+        domainStatus: sql`CASE
+          WHEN ${projectsTable.customDomain} IS NULL THEN 'unconfigured'
+          ELSE 'pending_verification'
+        END`,
+        deletedAt: null,
+        updatedAt: sql`now()`,
+      })
+      .where(
+        and(
+          eq(projectsTable.id, params.data.id),
+          eq(projectsTable.ownerId, userId),
+          sql`${projectsTable.deletedAt} IS NOT NULL`,
+          sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
+        ),
+      )
+      .returning();
+    return project ? { kind: "restored" as const, project } : { kind: "not_found" as const };
+  });
+  if (restoreResult.kind === "blocked") {
+    res.status(409).json({
+      code: "project_retirement_cleanup_unverified",
+      error: "This project cannot be restored until its Trash cleanup is verified.",
+      operationId: restoreResult.operation?.id ?? null,
+    });
+    return;
+  }
+  if (restoreResult.kind === "not_found") {
     res
       .status(404)
       .json({ error: "Project not found, not owned by you, or recovery window expired" });
     return;
   }
-  res.json(GetProjectResponse.parse(project));
+  res.json(GetProjectResponse.parse(restoreResult.project));
 });
+
+router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
+  const params = DeleteProjectParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const [owned] = await db
+    .select({ id: projectsTable.id })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, params.data.id), eq(projectsTable.ownerId, req.userId)))
+    .limit(1);
+  if (!owned) {
+    const { isAdminUser } = await import("../lib/adminAuth");
+    if (!(await isAdminUser(req.userId))) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+  }
+  const operation = await readProjectRetirementOperation(params.data.id);
+  if (!operation) {
+    res
+      .status(404)
+      .json({ code: "project_retirement_not_found", error: "No retirement receipt exists." });
+    return;
+  }
+  res.json({
+    operationId: operation.id,
+    projectId: operation.projectId,
+    state: operation.state,
+    attemptCount: operation.attemptCount,
+    progress: operation.progress,
+    failureCode: operation.failureCode,
+    failureTarget: operation.failureTarget,
+    createdAt: operation.createdAt,
+    startedAt: operation.startedAt,
+    completedAt: operation.completedAt,
+  });
+});
+
+router.post("/projects/:id/retirement/retry", async (req, res): Promise<void> => {
+  const params = DeleteProjectParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
+    return;
+  }
+  const [owned] = await db
+    .select({ id: projectsTable.id })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, params.data.id), eq(projectsTable.ownerId, req.userId)))
+    .limit(1);
+  const { isAdminUser } = await import("../lib/adminAuth");
+  const isAdmin = await isAdminUser(req.userId);
+  if (!owned && !isAdmin) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  if (!isDurableWorkerReady(QUEUE_PROJECT_RETIREMENT)) {
+    res.status(503).json({
+      code: "project_retirement_worker_unavailable",
+      error: "Retirement cleanup cannot be retried right now. Please try again shortly.",
+      retryable: true,
+      worker: getDurableWorkerReadiness(QUEUE_PROJECT_RETIREMENT),
+    });
+    return;
+  }
+  const reconciliation = await requestProjectRetirementReconciliation({
+    projectId: params.data.id,
+    requestedBy: req.userId,
+    ownerId: isAdmin ? undefined : req.userId,
+    allowLegacyAdminReconciliation: isAdmin,
+  });
+  if (!("operationId" in reconciliation)) {
+    const status = reconciliation.code === "project_retirement_not_found" ? 404 : 409;
+    res.status(status).json({
+      code: reconciliation.code,
+      error: "This terminal retirement receipt is not eligible for another reconciliation.",
+    });
+    return;
+  }
+  const queueJobId = await enqueueProjectRetirementOperation(reconciliation.operationId);
+  if (!queueJobId) {
+    res.status(503).json({
+      ...reconciliation,
+      code: "project_retirement_cleanup_pending",
+      cleanupScheduled: false,
+      retryable: true,
+    });
+    return;
+  }
+  res.status(202).json({
+    ...reconciliation,
+    code: "project_retirement_reconciliation_accepted",
+    cleanupScheduled: true,
+    queueJobId,
+    statusUrl: `/api/projects/${params.data.id}/retirement`,
+  });
+});
+
+const MAX_ADMIN_RETIREMENT_BATCH = 100;
+
+router.post(
+  "/admin/projects/retirement/batch",
+  requireAdmin,
+  requireOwner,
+  async (req, res): Promise<void> => {
+    const requested = (req.body as { projectIds?: unknown })?.projectIds;
+    if (
+      !Array.isArray(requested) ||
+      requested.length < 1 ||
+      requested.length > MAX_ADMIN_RETIREMENT_BATCH ||
+      requested.some((value) => !Number.isSafeInteger(value) || Number(value) <= 0) ||
+      new Set(requested).size !== requested.length
+    ) {
+      res.status(400).json({
+        code: "project_retirement_batch_invalid",
+        error: `Choose between 1 and ${MAX_ADMIN_RETIREMENT_BATCH} unique projects.`,
+      });
+      return;
+    }
+    if (!isDurableWorkerReady(QUEUE_PROJECT_RETIREMENT)) {
+      res.status(503).json({
+        code: "project_retirement_worker_unavailable",
+        error: "Projects cannot be moved to Trash right now. Please try again shortly.",
+        retryable: true,
+        worker: getDurableWorkerReadiness(QUEUE_PROJECT_RETIREMENT),
+      });
+      return;
+    }
+
+    const receipts = [];
+    let cleanupPending = false;
+    for (const projectId of requested as number[]) {
+      // Preempt local work before waiting on its lifecycle lock. The lock still
+      // provides the no-late-write guarantee; cancellation keeps Trash from
+      // waiting behind a long AI/provider operation that already holds it.
+      const localCancellation = cancelLocalProjectJobs(projectId);
+      const provisioningCancellation = cancelLocalProjectProvisioning(projectId);
+      const accepted = await acceptProjectRetirement({
+        projectId,
+        requestedBy: req.userId!,
+      });
+      if (!accepted) {
+        receipts.push({ projectId, state: "not_found" as const });
+        continue;
+      }
+      const queueJobId = await enqueueProjectRetirementOperation(accepted.operationId);
+      if (!queueJobId) {
+        cleanupPending = true;
+        receipts.push({
+          ...accepted,
+          cleanupScheduled: false,
+          localCancellation,
+          provisioningCancellation,
+        });
+        continue;
+      }
+      receipts.push({
+        ...accepted,
+        cleanupScheduled: true,
+        queueJobId,
+        localCancellation,
+        provisioningCancellation,
+        statusUrl: `/api/projects/${projectId}/retirement`,
+      });
+    }
+    if (cleanupPending) {
+      res.status(503).json({
+        code: "project_retirement_cleanup_pending",
+        error:
+          "Projects are in Trash, but some cleanup could not be scheduled. Their retirement receipts remain pending for recovery.",
+        retryable: true,
+        receipts,
+      });
+      return;
+    }
+    res.status(202).json({ code: "project_retirement_batch_accepted", receipts });
+  },
+);
 
 router.get("/projects/:id", requireProjectAccess("viewer"), async (req, res): Promise<void> => {
   const params = GetProjectParams.safeParse(req.params);
@@ -1646,43 +1901,64 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
     return;
   }
 
-  // Fetch project name before soft-delete so we can log a meaningful summary
-  const [existing] = await db
-    .select({ id: projectsTable.id, name: projectsTable.name })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, params.data.id), activeProjects));
-
-  if (!existing) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-
-  // Log delete activity before the row is soft-deleted
-  try {
-    await db.insert(projectActivityTable).values({
-      projectId: existing.id,
-      actorId: req.userId ?? null,
-      actorName: null,
-      eventType: "delete",
-      summary: `Project "${existing.name}" was deleted`,
-      metadata: { projectName: existing.name },
+  if (!isDurableWorkerReady(QUEUE_PROJECT_RETIREMENT)) {
+    const readiness = getDurableWorkerReadiness(QUEUE_PROJECT_RETIREMENT);
+    res.status(503).json({
+      code: "project_retirement_worker_unavailable",
+      error: "This project cannot be moved to Trash right now. Please try again shortly.",
+      retryable: true,
+      deleted: false,
+      cleanupScheduled: false,
+      worker: readiness,
     });
-  } catch {
-    // non-fatal — proceed with the delete regardless
-  }
-
-  const [project] = await db
-    .update(projectsTable)
-    .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(and(eq(projectsTable.id, params.data.id), activeProjects))
-    .returning();
-
-  if (!project) {
-    res.status(404).json({ error: "Project not found" });
     return;
   }
 
-  res.status(200).json({ deleted: true, projectId: project.id });
+  // Stop process-local work before waiting on the lifecycle lock. Provider
+  // mutations still finish under the lock or observe their AbortSignal; Trash
+  // then commits the tombstone and cleans the final state without a late write.
+  const localCancellation = cancelLocalProjectJobs(params.data.id);
+  const provisioningCancellation = cancelLocalProjectProvisioning(params.data.id);
+  const result = await acceptProjectRetirement({
+    projectId: params.data.id,
+    requestedBy: req.userId!,
+    ownerId: req.userId!,
+  });
+
+  if (!result) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  const queueJobId = await enqueueProjectRetirementOperation(result.operationId);
+  if (!queueJobId) {
+    res.status(503).json({
+      code: "project_retirement_cleanup_pending",
+      error:
+        "The project is in Trash, but cleanup could not be scheduled. Its retirement receipt remains pending for recovery.",
+      retryable: true,
+      deleted: true,
+      cleanupScheduled: false,
+      projectId: result.projectId,
+      operationId: result.operationId,
+      state: "accepted",
+      localCancellation,
+      provisioningCancellation,
+      statusUrl: `/api/projects/${result.projectId}/retirement`,
+    });
+    return;
+  }
+  res.status(202).json({
+    code: "project_retirement_accepted",
+    deleted: true,
+    projectId: result.projectId,
+    operationId: result.operationId,
+    state: "accepted",
+    queueJobId,
+    cleanupScheduled: true,
+    localCancellation,
+    provisioningCancellation,
+    statusUrl: `/api/projects/${result.projectId}/retirement`,
+  });
 });
 
 // ── GET /api/projects/:id/container-health ────────────────────────────────────

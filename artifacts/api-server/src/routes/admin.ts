@@ -47,6 +47,10 @@ import {
   approveDraftSkill,
   rejectDraftSkill,
 } from "../lib/builder-skills";
+import {
+  AssetStorageReconciliationError,
+  runDurableAssetStorageReconciliation,
+} from "../lib/asset-storage-reconciliation";
 
 const router: IRouter = Router();
 
@@ -358,6 +362,42 @@ router.get("/admin/asset-health", async (_req, res): Promise<void> => {
     },
   });
 });
+
+// Explicit owner mutation: adopts exact provider byte sizes for historical
+// Image Studio objects whose old rows never carried size metadata.  It is
+// bounded, auditable through the returned receipt, and never runs on a read.
+router.post(
+  "/admin/assets/reconcile-storage-metadata",
+  requireOwner,
+  async (req, res): Promise<void> => {
+    const body = req.body as { limit?: unknown; requestId?: unknown } | undefined;
+    const requested = Number(body?.limit ?? 50);
+    const requestId = typeof body?.requestId === "string" ? body.requestId : "";
+    if (!Number.isSafeInteger(requested) || requested < 1 || requested > 50) {
+      res.status(400).json({ error: "Choose between 1 and 50 storage records at a time." });
+      return;
+    }
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(requestId)
+    ) {
+      res.status(400).json({ error: "Provide a valid reconciliation request ID." });
+      return;
+    }
+    try {
+      const receipt = await runDurableAssetStorageReconciliation({
+        requestId,
+        limit: requested,
+      });
+      res.json({ requestId, receipt });
+    } catch (error) {
+      if (error instanceof AssetStorageReconciliationError) {
+        res.status(409).json({ requestId, terminal: error.terminal });
+        return;
+      }
+      throw error;
+    }
+  },
+);
 
 // ── GET /api/admin/telemetry/calibration ─────────────────────────────────────
 // NabuFlow R2 Phase D calibration report.

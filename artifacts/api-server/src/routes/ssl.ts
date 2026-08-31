@@ -16,7 +16,7 @@
 
 import { Router, type IRouter } from "express";
 import { eq, isNull, and } from "drizzle-orm";
-import { db, projectsTable, projectDomainsTable } from "@workspace/db";
+import { db, projectsTable, projectDomainsTable, type DomainSecurityConfig } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import {
   cfEnabled,
@@ -25,8 +25,38 @@ import {
   mapCfSslStatus,
   applyDefaultWafRules,
 } from "../lib/cloudflare";
+import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 
 // ── Shared activation logic ────────────────────────────────────────────────────
+
+async function ensureTrackedDefaultWaf(
+  domainId: number,
+  hostname: string,
+  cfHostnameId: string,
+): Promise<void> {
+  const [domain] = await db
+    .select({ securityConfig: projectDomainsTable.securityConfig })
+    .from(projectDomainsTable)
+    .where(eq(projectDomainsTable.id, domainId))
+    .limit(1);
+  if (!domain) return;
+  const current = (domain.securityConfig ?? {}) as DomainSecurityConfig;
+  const receipt = await applyDefaultWafRules(
+    hostname,
+    cfHostnameId,
+    current.cloudflareResources ?? [],
+  );
+  if (JSON.stringify(receipt.resources) === JSON.stringify(current.cloudflareResources ?? [])) {
+    return;
+  }
+  await db
+    .update(projectDomainsTable)
+    .set({
+      securityConfig: { ...current, cloudflareResources: receipt.resources },
+      updatedAt: new Date(),
+    })
+    .where(eq(projectDomainsTable.id, domainId));
+}
 
 /**
  * Activate SSL for a specific project_domains row.
@@ -109,10 +139,9 @@ export async function activateSslForDomain(
         })
         .where(eq(projectDomainsTable.id, domainId));
 
-      // Apply default WAF + managed ruleset for the new hostname (best-effort, non-fatal)
-      void applyDefaultWafRules(hostname, cfHostnameId).catch(() => {
-        /* non-fatal */
-      });
+      // Await provider creation while the caller's project lifecycle lock is
+      // held, and persist the exact rule identity before returning.
+      await ensureTrackedDefaultWaf(domainId, hostname, cfHostnameId);
 
       if (isPrimary) {
         await db
@@ -153,6 +182,10 @@ export async function activateSslForDomain(
         updatedAt: new Date(),
       })
       .where(eq(projectDomainsTable.id, domainId));
+
+    // Reconcile a create that may have committed at Cloudflare before an older
+    // process crashed without persisting its receipt.
+    await ensureTrackedDefaultWaf(domainId, hostname, cfHostnameId);
 
     if (isPrimary) {
       await db
@@ -279,10 +312,9 @@ export async function activateSslForProject(
         .set({ cfHostnameId, sslStatus: status, sslError: null, updatedAt: new Date() })
         .where(eq(projectsTable.id, projectId));
 
-      // Apply default WAF + managed ruleset for the new hostname (best-effort, non-fatal)
-      void applyDefaultWafRules(domain, cfHostnameId).catch(() => {
-        /* non-fatal */
-      });
+      // The true legacy projects row has no security_config receipt document.
+      // Do not append an untracked zone rule; migrated project_domains rows use
+      // activateSslForDomain above and persist exact provider identities.
 
       return {
         sslStatus: status,
@@ -330,6 +362,7 @@ const router: IRouter = Router();
 router.post(
   "/projects/:id/domain/ssl-activate",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
 

@@ -1,70 +1,79 @@
 /**
  * Task #540 — Project uploads (drag-drop file uploads).
  *
- * Flow:
- *   1. Client POSTs metadata to /projects/:id/uploads/request-url → presigned PUT URL.
- *   2. Client PUTs the raw bytes directly to the signed URL (object storage).
- *   3. Client POSTs to /projects/:id/uploads with { name, contentType, sizeBytes, objectPath }
- *      to register the upload. Server fetches a text preview (first 8 KB of UTF-8) for
- *      CSV / JSON / plain text so the agent loop can read it later.
- *   4. Agent tools `list_uploads` and `read_upload` (see agent-loop.ts) consume these rows.
- *
- * Limits: 50 MB per file (enforced at registration time). ClamAV/AV scanning is out of
- *   scope for v1 — see "Known limitations" in replit.md.
+ * Legacy project uploads remain readable and safely deletable. New uploads use
+ * the unified R2 asset registry; the former presigned PUT handoff is closed so
+ * no upload can outlive its project lifecycle or bypass account quota/scanning.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
-import { db, projectsTable, projectUploadsTable } from "@workspace/db";
+import { assetsTable, db, pool, projectsTable, projectUploadsTable } from "@workspace/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { requireProjectOwnership } from "../lib/auth";
+import { deleteReadyAsset, recordAssetDeleted } from "../lib/asset-registry";
+import { deleteTrackedAssetStorageObjects } from "../lib/asset-storage-cleanup";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024; // 50 MB
-const TEXT_PREVIEW_BYTES = 8 * 1024;
-const TEXTLIKE_MIMES = new Set([
-  "text/plain",
-  "text/csv",
-  "text/markdown",
-  "text/tab-separated-values",
-  "application/json",
-  "application/xml",
-  "text/xml",
-  "text/html",
-  "text/javascript",
-  "application/javascript",
-  "application/typescript",
-  "text/typescript",
-  "application/x-yaml",
-  "text/yaml",
-]);
-
-function isTextlike(mime: string): boolean {
-  if (TEXTLIKE_MIMES.has(mime)) return true;
-  return mime.startsWith("text/");
-}
-
-function isPdf(mime: string, filename: string): boolean {
-  return mime === "application/pdf" || filename.toLowerCase().endsWith(".pdf");
-}
-
-async function extractPdfPreview(buf: Buffer): Promise<string | null> {
-  try {
-    // pdf-parse ships as CommonJS — use a dynamic import to avoid bundling
-    // its self-test "test/data/05-versions-space.pdf" path that runs at module
-    // import time when called via require.main.
-    const mod = (await import("pdf-parse")) as unknown as {
-      default: (data: Buffer, opts?: { max?: number }) => Promise<{ text: string }>;
-    };
-    const parsed = await mod.default(buf, { max: 5 }); // first 5 pages
-    const text = parsed.text?.trim() ?? "";
-    if (!text) return null;
-    return text.slice(0, TEXT_PREVIEW_BYTES);
-  } catch {
-    return null;
-  }
+async function legacyUploadIsReferenced(projectId: number, objectPath: string): Promise<boolean> {
+  const result = await pool.query<{ referenced: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM chat_messages
+        WHERE project_id = $1 AND position($2 in coalesce(attachments::text, '')) > 0
+       UNION ALL
+       SELECT 1 FROM agent_tasks
+        WHERE project_id = $1 AND (
+          position($2 in coalesce(attachments::text, '')) > 0
+          OR position($2 in coalesce(report::text, '')) > 0
+          OR position($2 in coalesce(staging_snapshot::text, '')) > 0
+        )
+       UNION ALL
+       SELECT 1 FROM agent_tool_calls
+        WHERE project_id = $1 AND (
+          position($2 in coalesce(stdout_preview, '')) > 0
+          OR position($2 in coalesce(args_summary, '')) > 0
+        )
+       UNION ALL
+       SELECT 1 FROM project_files
+        WHERE project_id = $1 AND position($2 in content) > 0
+       UNION ALL
+       SELECT 1 FROM project_versions
+        WHERE project_id = $1 AND position($2 in coalesce(files_snapshot::text, '')) > 0
+       UNION ALL
+       SELECT 1 FROM canvas_variants
+        WHERE project_id = $1 AND position($2 in coalesce(files::text, '')) > 0
+       UNION ALL
+       SELECT 1 FROM canvas_variant_library
+        WHERE source_project_id = $1 AND position($2 in coalesce(files::text, '')) > 0
+       UNION ALL
+       SELECT 1 FROM gallery_templates
+        WHERE source_project_id = $1 AND position($2 in coalesce(files_snapshot::text, '')) > 0
+       UNION ALL
+       SELECT 1 FROM agent_inbox
+        WHERE project_id = $1 AND position($2 in coalesce(screenshot_url, '')) > 0
+       UNION ALL
+       SELECT 1 FROM task_events event
+        JOIN agent_tasks task ON task.id=event.task_id
+        WHERE task.project_id = $1 AND (
+          position($2 in event.message) > 0
+          OR position($2 in coalesce(event.data::text, '')) > 0
+        )
+       UNION ALL
+       SELECT 1 FROM project_activity
+        WHERE project_id = $1 AND position($2 in coalesce(metadata::text, '')) > 0
+       UNION ALL
+       SELECT 1 FROM visual_edit_changes
+        WHERE project_id = $1 AND (
+          position($2 in before_content) > 0
+          OR position($2 in after_content) > 0
+        )
+     ) AS referenced`,
+    [projectId, objectPath],
+  );
+  return result.rows[0]?.referenced === true;
 }
 
 // POST /projects/:id/attachments/upload-url — get a signed PUT URL for image attachments
@@ -77,7 +86,7 @@ const ALLOWED_ATTACHMENT_TYPES = new Set(["image/png", "image/jpeg", "image/webp
 router.post(
   "/projects/:id/attachments/upload-url",
   requireProjectOwnership,
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     const body = req.body as { contentType?: string; sizeBytes?: number } | undefined;
     const contentType = body?.contentType ?? "";
 
@@ -86,26 +95,26 @@ router.post(
       return;
     }
 
-    // Server-side size gate: reject if the declared size already exceeds the cap.
-    // The client may optionally omit sizeBytes (e.g. after canvas resize where the
-    // final size is unknown); in that case we skip the pre-check and rely on the
-    // object-storage layer to enforce quotas.
+    // A declared size is mandatory because the durable reservation is the cost
+    // and provenance boundary. No signed URL may exist without a database owner.
     const sizeBytes = typeof body?.sizeBytes === "number" ? body.sizeBytes : null;
-    if (sizeBytes !== null && sizeBytes > MAX_ATTACHMENT_BYTES) {
+    if (sizeBytes === null || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1) {
+      res.status(400).json({ error: "Image size is required before upload." });
+      return;
+    }
+    if (sizeBytes > MAX_ATTACHMENT_BYTES) {
       res.status(413).json({
         error: `Image too large (${(sizeBytes / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB.`,
       });
       return;
     }
 
-    try {
-      const uploadUrl = await storage.getObjectEntityUploadURL();
-      const objectPath = storage.normalizeObjectEntityPath(uploadUrl);
-      res.json({ uploadUrl, objectPath });
-    } catch (err) {
-      req.log.error({ err }, "attachments: failed to create signed URL");
-      res.status(500).json({ error: "Failed to create upload URL" });
-    }
+    // The former direct signer could not enforce the declared byte limit and
+    // outlived the request lifecycle. All product callers now use the unified
+    // project asset reservation + authenticated content upload instead.
+    res.status(410).json({
+      error: "Upload this image from the project chat so NabuFlow can verify and protect it.",
+    });
   },
 );
 
@@ -113,118 +122,34 @@ router.post(
 router.post(
   "/projects/:id/uploads/request-url",
   requireProjectOwnership,
-  async (req: Request, res: Response) => {
+  (req: Request, res: Response) => {
     const body = req.body as { name?: string; contentType?: string; size?: number } | undefined;
     if (!body?.name || typeof body.name !== "string") {
       res.status(400).json({ error: "name is required" });
       return;
     }
-    if (typeof body.size === "number" && body.size > MAX_UPLOAD_BYTES) {
+    if (!Number.isSafeInteger(body.size) || Number(body.size) < 1) {
+      res.status(400).json({ error: "size is required" });
+      return;
+    }
+    if (Number(body.size) > MAX_UPLOAD_BYTES) {
       res
         .status(413)
         .json({ error: `File too large. Maximum is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.` });
       return;
     }
-    try {
-      const uploadURL = await storage.getObjectEntityUploadURL();
-      const objectPath = storage.normalizeObjectEntityPath(uploadURL);
-      res.json({ uploadURL, objectPath });
-    } catch (err) {
-      req.log.error({ err }, "uploads: failed to create signed URL");
-      res.status(500).json({ error: "Failed to create upload URL" });
-    }
+    res.status(410).json({
+      error: "Upload this file from the project storage panel so NabuFlow can verify it safely.",
+    });
   },
 );
 
 // POST /projects/:id/uploads — register the upload after the bytes are in storage
-router.post(
-  "/projects/:id/uploads",
-  requireProjectOwnership,
-  async (req: Request, res: Response) => {
-    const projectId = Number(req.params.id);
-    const body = req.body as
-      | { name?: string; contentType?: string; sizeBytes?: number; objectPath?: string }
-      | undefined;
-    if (!body?.name || !body?.objectPath) {
-      res.status(400).json({ error: "name and objectPath are required" });
-      return;
-    }
-    const mime = body.contentType ?? "application/octet-stream";
-
-    // Verify the object exists and read its true size from storage metadata,
-    // rather than trusting the client-reported sizeBytes (defence-in-depth for the 50 MB cap).
-    // eslint-disable-next-line no-useless-assignment
-    let actualSize = 0;
-    let file: Awaited<ReturnType<typeof storage.getObjectEntityFile>>;
-    try {
-      file = await storage.getObjectEntityFile(body.objectPath);
-      const [metadata] = await file.getMetadata();
-      actualSize = Number(metadata.size ?? 0);
-    } catch (err) {
-      req.log.warn({ err, objectPath: body.objectPath }, "uploads: object metadata fetch failed");
-      res.status(400).json({ error: "Uploaded object not found in storage" });
-      return;
-    }
-    if (actualSize <= 0) {
-      res.status(400).json({ error: "Uploaded object is empty" });
-      return;
-    }
-    if (actualSize > MAX_UPLOAD_BYTES) {
-      // Best-effort delete oversized object so we don't keep paying for it.
-      try {
-        await file.delete();
-      } catch {
-        /* ignore */
-      }
-      res
-        .status(413)
-        .json({ error: `File too large. Maximum is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.` });
-      return;
-    }
-
-    // Best-effort text preview: UTF-8 slice for textlike files,
-    // pdf-parse for PDFs.
-    let textPreview: string | null = null;
-    if (isTextlike(mime)) {
-      try {
-        const [buf] = await file.download({ start: 0, end: TEXT_PREVIEW_BYTES - 1 });
-        textPreview = buf.toString("utf8");
-      } catch (err) {
-        req.log.warn({ err, objectPath: body.objectPath }, "uploads: preview fetch failed");
-      }
-    } else if (isPdf(mime, body.name)) {
-      try {
-        const [buf] = await file.download();
-        textPreview = await extractPdfPreview(buf);
-      } catch (err) {
-        req.log.warn({ err, objectPath: body.objectPath }, "uploads: pdf parse failed");
-      }
-    }
-
-    const [row] = await db
-      .insert(projectUploadsTable)
-      .values({
-        projectId,
-        uploaderId: req.userId ?? null,
-        filename: body.name,
-        mimeType: mime,
-        sizeBytes: actualSize,
-        objectPath: body.objectPath,
-        textPreview,
-      })
-      .returning();
-
-    res.status(201).json({
-      id: row!.id,
-      filename: row!.filename,
-      mimeType: row!.mimeType,
-      sizeBytes: row!.sizeBytes,
-      objectPath: row!.objectPath,
-      hasTextPreview: !!row!.textPreview,
-      createdAt: row!.createdAt,
-    });
-  },
-);
+router.post("/projects/:id/uploads", requireProjectOwnership, (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: "Upload this file from the project storage panel so NabuFlow can verify it safely.",
+  });
+});
 
 // GET /projects/:id/uploads — list uploads
 router.get(
@@ -294,21 +219,79 @@ router.delete(
   requireProjectOwnership,
   async (req: Request, res: Response) => {
     const uploadId = Number(req.params.uploadId);
-    await db
-      .delete(projectUploadsTable)
+    const [row] = await db
+      .select({ id: projectUploadsTable.id, objectPath: projectUploadsTable.objectPath })
+      .from(projectUploadsTable)
       .where(
         and(
           eq(projectUploadsTable.id, uploadId),
           eq(projectUploadsTable.projectId, Number(req.params.id)),
         ),
-      );
+      )
+      .limit(1);
+    if (!row) {
+      res.status(404).json({ error: "Upload not found" });
+      return;
+    }
+    if (await legacyUploadIsReferenced(Number(req.params.id), row.objectPath)) {
+      res.status(409).json({
+        error: "This upload is still used by your project. Remove those uses before deleting it.",
+      });
+      return;
+    }
+    const [mirror] = await db
+      .select({ id: assetsTable.id, state: assetsTable.state })
+      .from(assetsTable)
+      .where(
+        and(
+          eq(assetsTable.projectId, Number(req.params.id)),
+          eq(assetsTable.source, "legacy-project-upload"),
+          eq(assetsTable.storageKey, row.objectPath),
+        ),
+      )
+      .limit(1);
+    if (!mirror) {
+      res.status(409).json({ error: "This older upload is still being migrated." });
+      return;
+    }
+    if (mirror.state === "ready") {
+      const pending = await deleteReadyAsset({
+        assetId: mirror.id,
+        userId: req.userId!,
+        storageBackend: "legacy-object",
+      });
+      if (
+        pending.storageBackend !== "legacy-object" ||
+        pending.storageObjects.some(
+          (object) =>
+            object.storageBackend !== "legacy-object" || object.storageKey !== row.objectPath,
+        )
+      ) {
+        res.status(409).json({ error: "This older upload is still being migrated." });
+        return;
+      }
+      // Provider absence is proved before either durable reference is removed.
+      // A transient storage failure leaves both rows recoverable.
+      try {
+        await deleteTrackedAssetStorageObjects(pending.storageObjects);
+      } catch (error) {
+        req.log.warn({ err: error, uploadId }, "uploads: storage delete did not conclude");
+        res.status(503).json({ error: "That upload could not be deleted right now. Try again." });
+        return;
+      }
+      await recordAssetDeleted({
+        assetId: mirror.id,
+        userId: req.userId!,
+        sizeBytes: pending.sizeBytes,
+      });
+    } else if (mirror.state !== "deleted") {
+      res.status(409).json({ error: "This older upload is still being migrated." });
+      return;
+    }
+    await db.delete(projectUploadsTable).where(eq(projectUploadsTable.id, row.id));
     res.json({ deleted: true });
   },
 );
-
-// Guard: keep multiplayer toggle from leaking by ensuring project belongs to owner.
-// (We re-export this so future routes can reuse the same pattern.)
-export { isTextlike };
 
 // Lightweight helper used by Manage tab middleware: confirm the project exists
 // before tossing 404s — kept here for symmetry with the rest of the router.

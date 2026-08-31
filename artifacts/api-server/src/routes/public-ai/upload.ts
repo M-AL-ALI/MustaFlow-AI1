@@ -1,5 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
+import { and, eq } from "drizzle-orm";
+import { assetsTable, db } from "@workspace/db";
 import {
   validateSession,
   incrementFileCount,
@@ -22,12 +24,18 @@ import {
   MAX_RAW_BYTES_PER_FILE,
 } from "../../lib/public-ai/file-store";
 import {
-  persistFileContextBestEffort,
+  persistFileContext,
   type PersistFileContextInput,
 } from "../../lib/public-ai/file-context-store";
+import { persistOraAssetStrict, type PersistOraAssetInput } from "../../lib/ora-assets";
+import { AssetAdmissionError } from "../../lib/asset-registry";
+import { MAX_INLINE_ASSET_ANALYSIS_BYTES } from "../../lib/asset-analysis";
+import { readAssetBuffer } from "../../lib/asset-r2";
 import { oraUploadLimiter, oraImageUploadLimiter } from "../../lib/rateLimit";
 import { logger } from "../../lib/logger";
 import { isKillSwitchActive, killSwitchBody } from "../../lib/public-ai/ora-kill-switches";
+import { resolveAuthedOraUser } from "../../lib/public-ai/authed-user";
+import { checkOraProjectWritable } from "../../lib/public-ai/ora-projects";
 
 const router = Router();
 
@@ -47,47 +55,299 @@ function officeRawMemoryFor(fileType: string, buffer: Buffer): Partial<OfficeRaw
   };
 }
 
-type PersistOraAssetInput = Parameters<
-  (typeof import("../../lib/ora-assets"))["persistOraAsset"]
->[0];
+async function persistUploadMirrors(input: {
+  asset: PersistOraAssetInput;
+  context: Omit<PersistFileContextInput, "assetId">;
+}): Promise<number> {
+  const assetId = await persistOraAssetStrict(input.asset);
+  try {
+    await persistFileContext({ ...input.context, assetId });
+  } catch (err) {
+    // The raw bytes are safely present in the Library. The in-memory context
+    // remains usable for this session, so report the durable mirror problem in
+    // logs without pretending the asset write failed.
+    logger.error({ component: "ora-upload", err }, "Failed to persist Ora file context");
+  }
+  return assetId;
+}
 
-function persistOraAssetBestEffort(input: PersistOraAssetInput): void {
-  void (async () => {
-    try {
-      const { persistOraAsset } = await import("../../lib/ora-assets");
-      await persistOraAsset(input);
-    } catch (err) {
-      logger.error({ component: "ora-upload", err }, "Failed to persist Ora upload to library");
-    }
-  })();
+function sendAssetAdmissionFailure(res: import("express").Response, error: unknown): void {
+  if (error instanceof AssetAdmissionError) {
+    res.status(error.status).json({ error: error.message, code: error.code });
+    return;
+  }
+  logger.error(
+    { component: "ora-upload", errorClass: error instanceof Error ? error.name : "unknown" },
+    "Failed to persist signed-in Ora upload",
+  );
+  res.status(503).json({
+    error: "Your file could not be saved right now. Please try again.",
+    code: "asset_storage_unavailable",
+  });
 }
 
 /**
- * Persist BOTH durable mirrors of a signed-in upload in one chained background
- * task: library asset first, then the file-context row carrying the returned
- * asset id. The link is what lets the durable path rehydrate the ORIGINAL
- * Office bytes later (layout-preserving edits after memory expiry/restart).
- * Fully best-effort — an asset failure still writes the text-only context row
- * (assetId null), and nothing here can fail the upload response.
+ * Finish the signed-in Ora upload after the account asset route has streamed
+ * the bytes into private R2. This endpoint creates metadata/context only: it
+ * never accepts a multipart body and never writes a second copy of the bytes.
  */
-function persistUploadMirrorsBestEffort(input: {
-  asset: PersistOraAssetInput;
-  context: Omit<PersistFileContextInput, "assetId">;
-}): void {
-  void (async () => {
-    let assetId: number | null = null;
-    try {
-      const { persistOraAsset } = await import("../../lib/ora-assets");
-      assetId = await persistOraAsset(input.asset);
-    } catch (err) {
-      logger.error({ component: "ora-upload", err }, "Failed to persist Ora upload to library");
-    }
-    persistFileContextBestEffort({ ...input.context, assetId });
-  })();
-}
+router.post("/public-ai/upload/attach", async (req, res) => {
+  if (isKillSwitchActive("file_upload")) {
+    res.status(503).json(killSwitchBody("file_upload"));
+    return;
+  }
+  const sessionToken = req.cookies?.["ora-session"] as string | undefined;
+  const session = sessionToken ? validateSession(sessionToken) : null;
+  if (!session) {
+    res.status(401).json({ error: "No active session. Please start a session first." });
+    return;
+  }
+  const authed = await resolveAuthedOraUser(req);
+  if (!authed) {
+    res.status(401).json({ error: "Please sign in before attaching this saved file." });
+    return;
+  }
+  const assetId = Number((req.body as { assetId?: unknown } | undefined)?.assetId);
+  if (!Number.isSafeInteger(assetId) || assetId <= 0) {
+    res.status(400).json({ error: "This saved file reference is not valid." });
+    return;
+  }
 
-// Multer limit kept at 100 MB to accommodate large documents.
-// Image-specific 4 MB cap is enforced in validateImage() using the buffer.
+  const rawProjectId = (req.body as { oraProjectId?: unknown } | undefined)?.oraProjectId;
+  let oraProjectId: number | null = null;
+  if (rawProjectId !== undefined && rawProjectId !== null && rawProjectId !== "personal") {
+    const parsedProjectId = Number(rawProjectId);
+    if (!Number.isSafeInteger(parsedProjectId) || parsedProjectId <= 0) {
+      res.status(400).json({ error: "This Ora project reference is not valid." });
+      return;
+    }
+    const writable = await checkOraProjectWritable(authed.userId, parsedProjectId);
+    if (!writable.ok) {
+      res.status(writable.status).json({ error: writable.error });
+      return;
+    }
+    oraProjectId = parsedProjectId;
+  }
+
+  const [asset] = await db
+    .select({
+      id: assetsTable.id,
+      filename: assetsTable.filename,
+      mimeType: assetsTable.mimeType,
+      sizeBytes: assetsTable.sizeBytes,
+      storageKey: assetsTable.storageKey,
+      kind: assetsTable.kind,
+    })
+    .from(assetsTable)
+    .where(
+      and(
+        eq(assetsTable.id, assetId),
+        eq(assetsTable.ownerUserId, authed.userId),
+        eq(assetsTable.state, "ready"),
+      ),
+    )
+    .limit(1);
+  if (!asset) {
+    res.status(404).json({ error: "This saved file is not available." });
+    return;
+  }
+
+  const isImage = asset.kind === "image" || asset.mimeType.startsWith("image/");
+  const libraryInput = {
+    userId: authed.userId,
+    oraProjectId,
+    kind: isImage ? ("image" as const) : ("file" as const),
+    fileName: asset.filename,
+    mimeType: asset.mimeType,
+    format: asset.filename.split(".").pop()?.toLowerCase() ?? null,
+    unifiedAssetId: asset.id,
+  };
+  let libraryAssetId: number;
+  try {
+    libraryAssetId = await persistOraAssetStrict(libraryInput);
+  } catch (error) {
+    sendAssetAdmissionFailure(res, error);
+    return;
+  }
+
+  // Storage acceptance is the 500 MB aggregate allowance. Analysis remains a
+  // separate bounded operation so one large, valid asset can never consume the
+  // application container's memory. The asset stays saved and downloadable.
+  if (asset.sizeBytes > MAX_INLINE_ASSET_ANALYSIS_BYTES) {
+    res.status(202).json({
+      assetId: libraryAssetId,
+      filename: asset.filename,
+      mimeType: asset.mimeType,
+      fileType: isImage ? "image" : (libraryInput.format ?? "file"),
+      sizeBytes: asset.sizeBytes,
+      analysisStatus: "unavailable",
+      analysisMessage:
+        "Your file is saved, but it is too large to analyze in chat right now. You can still find it in your Library.",
+    });
+    return;
+  }
+
+  let buffer: Buffer | null;
+  try {
+    buffer = await readAssetBuffer(asset.storageKey, MAX_INLINE_ASSET_ANALYSIS_BYTES);
+  } catch (error) {
+    logger.error(
+      { component: "ora-upload", errorClass: error instanceof Error ? error.name : "unknown" },
+      "Failed to read saved asset for chat analysis",
+    );
+    res.status(503).json({
+      error: "Your file is saved, but its contents could not be prepared for chat right now.",
+      code: "asset_analysis_unavailable",
+    });
+    return;
+  }
+  if (!buffer) {
+    res.status(503).json({
+      error: "Your file is saved, but its contents could not be prepared for chat right now.",
+      code: "asset_analysis_unavailable",
+    });
+    return;
+  }
+
+  if (isImage) {
+    let processed: Awaited<ReturnType<typeof processImage>>;
+    try {
+      processed = await processImage(buffer, asset.mimeType);
+    } catch {
+      res.status(422).json({
+        error: "Your image is saved, but it could not be prepared for chat analysis.",
+        code: "asset_analysis_unavailable",
+      });
+      return;
+    }
+    const stored = storeImage({
+      sessionId: session.sessionId,
+      filename: asset.filename,
+      mimeType: asset.mimeType,
+      sizeBytes: processed.sizeBytes,
+      width: processed.width,
+      height: processed.height,
+      base64: processed.base64,
+    });
+    if (!stored.ok) {
+      res.status(503).json({
+        error: "Your image is saved, but it could not be attached to chat right now.",
+        code: "asset_analysis_unavailable",
+      });
+      return;
+    }
+    const { token, payload } = incrementImageCount(session);
+    setSessionCookie(res, token);
+    res.json({
+      assetId: libraryAssetId,
+      imageRef: stored.imageRef,
+      filename: asset.filename,
+      mimeType: asset.mimeType,
+      fileType: "image",
+      sizeBytes: processed.sizeBytes,
+      width: processed.width,
+      height: processed.height,
+      imageCount: payload.imageCount,
+      imageLimit: IMAGE_LIMIT_VALUE,
+      analysisStatus: "ready",
+    });
+    return;
+  }
+
+  const validation = validateFile(buffer, asset.filename, asset.mimeType);
+  if (!validation.ok) {
+    res.status(validation.statusCode).json({ error: validation.error });
+    return;
+  }
+  const isDataset = validation.type === "csv" || validation.type === "xlsx";
+  let extractedText = "";
+  let datasetSummary: Awaited<ReturnType<typeof extractDataset>> | undefined;
+  try {
+    if (isDataset) {
+      datasetSummary = await extractDataset(buffer, validation.type as "csv" | "xlsx");
+    } else {
+      extractedText = await extractText(
+        buffer,
+        validation.type as Exclude<typeof validation.type, "csv" | "xlsx">,
+      );
+    }
+  } catch {
+    res.status(422).json({
+      error: "Your file is saved, but its contents could not be prepared for chat analysis.",
+      code: "asset_analysis_unavailable",
+    });
+    return;
+  }
+  if (!isDataset) {
+    const safety =
+      validation.type === "zip" ? scanCodeContent(extractedText) : scanContent(extractedText);
+    if (!safety.safe) {
+      res.status(422).json({
+        error: "Your file is saved, but its contents cannot be analyzed in chat.",
+        code: "asset_analysis_unavailable",
+      });
+      return;
+    }
+  }
+  const charCount = Math.min(extractedText.length, MAX_TEXT_CHARS_PER_FILE);
+  const fileRef = storeFile({
+    sessionId: session.sessionId,
+    filename: asset.filename,
+    mimeType: asset.mimeType,
+    extractedText: extractedText.slice(0, charCount),
+    charCount,
+    ...(datasetSummary ? { datasetSummary } : {}),
+    ...officeRawMemoryFor(validation.type, buffer),
+  });
+  try {
+    await persistFileContext({
+      userId: authed.userId,
+      oraProjectId,
+      fileRef,
+      sessionId: session.sessionId,
+      assetId: libraryAssetId,
+      filename: asset.filename,
+      mimeType: asset.mimeType,
+      fileType: validation.type,
+      extractedText: extractedText.slice(0, charCount),
+      charCount,
+      ...(datasetSummary ? { datasetSummary } : {}),
+    });
+  } catch (error) {
+    logger.error({ component: "ora-upload", error }, "Failed to attach saved asset context");
+    res.status(503).json({
+      error: "Your file is saved, but it could not be attached to chat right now.",
+      code: "asset_analysis_unavailable",
+    });
+    return;
+  }
+  const { token, payload } = incrementFileCount(session);
+  setSessionCookie(res, token);
+  res.json({
+    assetId: libraryAssetId,
+    fileRef,
+    filename: asset.filename,
+    mimeType: asset.mimeType,
+    fileType: validation.type,
+    charCount,
+    ...(datasetSummary
+      ? {
+          rowCount: datasetSummary.rowCount,
+          colCount: datasetSummary.colCount,
+          truncated: datasetSummary.truncated,
+          sanitizedCells: datasetSummary.sanitizedCellCount,
+          hiddenSheetsSkipped: datasetSummary.hiddenSheetsSkipped,
+        }
+      : {}),
+    fileCount: payload.fileCount,
+    fileLimit: FILE_LIMIT_VALUE,
+    analysisStatus: "ready",
+  });
+});
+
+// Anonymous legacy compatibility only. Signed-in users are diverted before
+// multer to the aggregate-quota streaming asset flow above, so these historic
+// in-memory bounds are not account upload limits.
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 100 * 1024 * 1024, files: 1 },
@@ -129,6 +389,21 @@ router.post(
     }
     next();
   },
+  async (req, res, next) => {
+    const authed = await resolveAuthedOraUser(req);
+    if (!authed) {
+      next();
+      return;
+    }
+    // Signed-in uploads must use the account asset reservation + streamed PUT
+    // path. Reject before multer so a large body is never accumulated in RAM.
+    req.resume();
+    res.status(409).json({
+      error: "Please retry this upload so it can be saved to your account safely.",
+      code: "asset_stream_upload_required",
+    });
+    res.once("finish", () => req.socket?.end());
+  },
   oraUploadLimiter,
   (req, res, next) => {
     upload.single("file")(req, res, (err) => {
@@ -155,8 +430,8 @@ router.post(
       return;
     }
 
-    // Signed-in users get their uploads copied into the durable Ora asset
-    // library so they show up under Library across devices. Best-effort.
+    // Signed-in users store one account-wide asset and link Ora Library
+    // metadata to it before the response is earned.
     const { resolveAuthedOraUser } = await import("../../lib/public-ai/authed-user");
     const authed = await resolveAuthedOraUser(req);
 
@@ -250,7 +525,24 @@ router.post(
         return;
       }
 
-      // Increment imageCount ONLY after successful validation + store.
+      let libraryAssetId: number | null = null;
+      if (authed) {
+        try {
+          libraryAssetId = await persistOraAssetStrict({
+            userId: authed.userId,
+            oraProjectId,
+            kind: "image",
+            fileName: validation.sanitizedName,
+            mimeType: validation.mimeType,
+            base64: processed.base64.replace(/^data:[^;]+;base64,/, ""),
+          });
+        } catch (error) {
+          sendAssetAdmissionFailure(res, error);
+          return;
+        }
+      }
+
+      // Increment imageCount only after durable quota admission and storage.
       const { token, payload } = incrementImageCount(session);
       setSessionCookie(res, token);
 
@@ -267,17 +559,6 @@ router.post(
         "Ora image uploaded and processed",
       );
 
-      if (authed) {
-        persistOraAssetBestEffort({
-          userId: authed.userId,
-          oraProjectId,
-          kind: "image",
-          fileName: validation.sanitizedName,
-          mimeType: validation.mimeType,
-          base64: processed.base64.replace(/^data:[^;]+;base64,/, ""),
-        });
-      }
-
       res.json({
         imageRef: storeResult.imageRef,
         filename: validation.sanitizedName,
@@ -288,6 +569,7 @@ router.post(
         height: processed.height,
         imageCount: payload.imageCount,
         imageLimit: IMAGE_LIMIT_VALUE,
+        ...(libraryAssetId === null ? {} : { assetId: libraryAssetId }),
       });
       return;
     }
@@ -374,31 +656,34 @@ router.post(
       if (authed) {
         // Chained: asset first, then the context row linked via assetId so the
         // original raw bytes stay reachable for later layout-preserving edits.
-        persistUploadMirrorsBestEffort({
-          asset: {
-            userId: authed.userId,
-            oraProjectId,
-            kind: "file",
-            fileName: validation.sanitizedName,
-            mimeType: file.mimetype,
-            base64: file.buffer.toString("base64"),
-            // v1 root of a potential version chain: later in-place edits look
-            // this asset up by (userId, fileRef) to chain their lineage.
-            sourceFileRef: fileRef,
-          },
-          context: {
-            userId: authed.userId,
-            oraProjectId,
-            fileRef,
-            sessionId: session.sessionId,
-            filename: validation.sanitizedName,
-            mimeType: file.mimetype,
-            fileType: validation.type,
-            extractedText: "",
-            charCount: 0,
-            datasetSummary: summary,
-          },
-        });
+        try {
+          await persistUploadMirrors({
+            asset: {
+              userId: authed.userId,
+              oraProjectId,
+              kind: "file",
+              fileName: validation.sanitizedName,
+              mimeType: file.mimetype,
+              base64: file.buffer.toString("base64"),
+              sourceFileRef: fileRef,
+            },
+            context: {
+              userId: authed.userId,
+              oraProjectId,
+              fileRef,
+              sessionId: session.sessionId,
+              filename: validation.sanitizedName,
+              mimeType: file.mimetype,
+              fileType: validation.type,
+              extractedText: "",
+              charCount: 0,
+              datasetSummary: summary,
+            },
+          });
+        } catch (error) {
+          sendAssetAdmissionFailure(res, error);
+          return;
+        }
       }
 
       res.json({
@@ -484,30 +769,33 @@ router.post(
     if (authed) {
       // Chained: asset first, then the context row linked via assetId so the
       // original raw bytes stay reachable for later layout-preserving edits.
-      persistUploadMirrorsBestEffort({
-        asset: {
-          userId: authed.userId,
-          oraProjectId,
-          kind: "file",
-          fileName: validation.sanitizedName,
-          mimeType: file.mimetype,
-          base64: file.buffer.toString("base64"),
-          // v1 root of a potential version chain: later in-place edits look
-          // this asset up by (userId, fileRef) to chain their lineage.
-          sourceFileRef: fileRef,
-        },
-        context: {
-          userId: authed.userId,
-          oraProjectId,
-          fileRef,
-          sessionId: session.sessionId,
-          filename: validation.sanitizedName,
-          mimeType: file.mimetype,
-          fileType: validation.type,
-          extractedText: extractedText.slice(0, charCount),
-          charCount,
-        },
-      });
+      try {
+        await persistUploadMirrors({
+          asset: {
+            userId: authed.userId,
+            oraProjectId,
+            kind: "file",
+            fileName: validation.sanitizedName,
+            mimeType: file.mimetype,
+            base64: file.buffer.toString("base64"),
+            sourceFileRef: fileRef,
+          },
+          context: {
+            userId: authed.userId,
+            oraProjectId,
+            fileRef,
+            sessionId: session.sessionId,
+            filename: validation.sanitizedName,
+            mimeType: file.mimetype,
+            fileType: validation.type,
+            extractedText: extractedText.slice(0, charCount),
+            charCount,
+          },
+        });
+      } catch (error) {
+        sendAssetAdmissionFailure(res, error);
+        return;
+      }
     }
 
     res.json({

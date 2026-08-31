@@ -43,6 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ZeroPromptQueueDrawer } from "@/pages/projects/components/zero-prompt-queue-drawer";
 import type { ZeroPromptQueueObservedPhase } from "@workspace/ora-contracts";
+import { uploadProjectAsset, type AssetUploadResult } from "@/lib/asset-upload";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -71,6 +72,7 @@ type PendingImage = {
   file: File;
   uploading?: boolean;
   uploadedUrl?: string;
+  assetId?: number;
   error?: string;
 };
 
@@ -161,36 +163,6 @@ function savePersistedMode(mode: AgentMode) {
   } catch {
     /* ignore */
   }
-}
-
-async function resizeImageForVision(file: File): Promise<Blob> {
-  const MAX = 1500;
-  return new Promise((resolve) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width <= MAX && height <= MAX) {
-        resolve(file);
-        return;
-      }
-      const scale = Math.min(MAX / width, MAX / height);
-      width = Math.round(width * scale);
-      height = Math.round(height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob((b) => resolve(b ?? file), file.type, 0.92);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(file);
-    };
-    img.src = url;
-  });
 }
 
 function PersistedToolEvents({
@@ -414,35 +386,12 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
 
   // ── Image upload ───────────────────────────────────────────────────────────
   const uploadImage = useCallback(
-    async (file: File): Promise<string | null> => {
+    async (file: File): Promise<AssetUploadResult | null> => {
       if (file.size > MAX_IMAGE_BYTES) {
         return null;
       }
       try {
-        const resized = await resizeImageForVision(file);
-        const resizedFile = new File([resized], file.name, { type: resized.type || file.type });
-        const metaRes = await authFetch(`/api/projects/${projectId}/attachments/upload-url`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            filename: resizedFile.name,
-            mimeType: resizedFile.type,
-            size: resizedFile.size,
-          }),
-        });
-        if (!metaRes.ok) return null;
-        const { uploadUrl, objectPath } = (await metaRes.json()) as {
-          uploadUrl: string;
-          objectPath: string;
-        };
-        const up = await fetch(uploadUrl, {
-          method: "PUT",
-          body: resizedFile,
-          headers: { "Content-Type": resizedFile.type },
-        });
-        if (!up.ok) return null;
-        return objectPath;
+        return await uploadProjectAsset({ projectId, file, source: "paste" });
       } catch {
         return null;
       }
@@ -466,15 +415,16 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
       for (let i = 0; i < imageFiles.length; i++) {
         const file = imageFiles[i]!;
         const objUrl = pendingItems[i]!.objectUrl;
-        const uploadedUrl = await uploadImage(file);
+        const uploaded = await uploadImage(file);
         setImages((prev) =>
           prev.map((img) =>
             img.objectUrl === objUrl
               ? {
                   ...img,
                   uploading: false,
-                  uploadedUrl: uploadedUrl ?? undefined,
-                  error: uploadedUrl ? undefined : "Upload failed",
+                  uploadedUrl: uploaded?.contentUrl,
+                  assetId: uploaded?.assetId,
+                  error: uploaded ? undefined : "Upload failed",
                 }
               : img,
           ),
@@ -588,6 +538,7 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
         kind: "image" as const,
         url: i.uploadedUrl!,
         alt: i.file.name,
+        ...(i.assetId ? { assetId: i.assetId } : {}),
       }));
 
       setPrompt("");

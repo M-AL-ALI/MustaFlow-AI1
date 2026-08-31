@@ -100,6 +100,11 @@ import {
   setProjectMaintenanceMode,
   type SnapshotFile,
 } from "../lib/cloudflare";
+import {
+  requireActiveProjectLifecycleSession,
+  responseProjectLifecycleSession,
+  withActiveProjectLifecycle,
+} from "../lib/project-lifecycle";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 const SEALED_RELEASE_CANDIDATE_LIMIT = 32;
@@ -191,443 +196,464 @@ async function promoteAcceptedArtifact(input: {
 
 // ── POST /api/projects/:id/publish ───────────────────────────────────────────
 // Supports ?env=production (default) or ?env=staging
-router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const env = (req.query.env as string | undefined) ?? "production";
+router.post(
+  "/projects/:id/publish",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const lifecycleSession = responseProjectLifecycleSession(res);
+    const env = (req.query.env as string | undefined) ?? "production";
 
-  if (env !== "production" && env !== "staging") {
-    res.status(400).json({ error: "env must be 'production' or 'staging'" });
-    return;
-  }
+    if (env !== "production" && env !== "staging") {
+      res.status(400).json({ error: "env must be 'production' or 'staging'" });
+      return;
+    }
 
-  // requireProjectOwnership already checks deletedAt — this is defense-in-depth.
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-  if (!project) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
+    // requireProjectOwnership already checks deletedAt — this is defense-in-depth.
+    const [project] = await db
+      .select()
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
 
-  // ── Production publish gate ────────────────────────────────────────────────
-  // Security rule: ALL project types (static HTML, React SPA, full-stack container)
-  // MUST publish from an immutable tested-and-approved snapshot. The mutable
-  // project_files table is NEVER consulted for production. No project type is exempt.
-  //
-  // The gate logic lives in lib/publish-gate.ts as a pure function so it is
-  // unit-testable without a DB or Express dependency.
-  const versionIdRaw = (req.body as Record<string, unknown>)?.versionId;
-  const publishVersionId = typeof versionIdRaw === "number" ? versionIdRaw : null;
+    // ── Production publish gate ────────────────────────────────────────────────
+    // Security rule: ALL project types (static HTML, React SPA, full-stack container)
+    // MUST publish from an immutable tested-and-approved snapshot. The mutable
+    // project_files table is NEVER consulted for production. No project type is exempt.
+    //
+    // The gate logic lives in lib/publish-gate.ts as a pure function so it is
+    // unit-testable without a DB or Express dependency.
+    const versionIdRaw = (req.body as Record<string, unknown>)?.versionId;
+    const publishVersionId = typeof versionIdRaw === "number" ? versionIdRaw : null;
 
-  // Track which snapshot files to publish. Null = use project_files (staging only).
-  let approvedSnapshot: FileSnapshotEntry[] | null = null;
-  let approvedVersionId: number | null = null;
-  let approvedSealedRelease: AcceptedSealedRelease | null = null;
+    // Track which snapshot files to publish. Null = use project_files (staging only).
+    let approvedSnapshot: FileSnapshotEntry[] | null = null;
+    let approvedVersionId: number | null = null;
+    let approvedSealedRelease: AcceptedSealedRelease | null = null;
 
-  if (env === "production") {
-    // Fetch specVersion when the caller supplied an explicit versionId.
-    let specVersionData: {
-      testingApprovedAt: Date | null;
-      filesSnapshot: FileSnapshotEntry[] | null;
-    } | null = null;
-    if (publishVersionId !== null) {
-      const [sv] = await db
-        .select({
-          id: projectVersionsTable.id,
-          projectId: projectVersionsTable.projectId,
-          filesSnapshot: projectVersionsTable.filesSnapshot,
-          testingApprovedAt: projectVersionsTable.testingApprovedAt,
-          sealedRelease: projectVersionsTable.sealedRelease,
-        })
-        .from(projectVersionsTable)
-        .where(
-          and(
-            eq(projectVersionsTable.id, publishVersionId),
-            eq(projectVersionsTable.projectId, projectId),
-          ),
-        );
-      // Version-not-found is a 404, handled inside evaluatePublishGate when sv is null.
-      specVersionData = sv
-        ? {
-            testingApprovedAt: sv.testingApprovedAt,
-            filesSnapshot: sv.filesSnapshot as FileSnapshotEntry[] | null,
-          }
-        : null;
-      if (sv) {
-        approvedVersionId = sv.id;
-        const parsedRelease = acceptedSealedReleaseSchema.safeParse(sv.sealedRelease);
-        approvedSealedRelease = parsedRelease.success ? parsedRelease.data : null;
+    if (env === "production") {
+      // Fetch specVersion when the caller supplied an explicit versionId.
+      let specVersionData: {
+        testingApprovedAt: Date | null;
+        filesSnapshot: FileSnapshotEntry[] | null;
+      } | null = null;
+      if (publishVersionId !== null) {
+        const [sv] = await db
+          .select({
+            id: projectVersionsTable.id,
+            projectId: projectVersionsTable.projectId,
+            filesSnapshot: projectVersionsTable.filesSnapshot,
+            testingApprovedAt: projectVersionsTable.testingApprovedAt,
+            sealedRelease: projectVersionsTable.sealedRelease,
+          })
+          .from(projectVersionsTable)
+          .where(
+            and(
+              eq(projectVersionsTable.id, publishVersionId),
+              eq(projectVersionsTable.projectId, projectId),
+            ),
+          );
+        // Version-not-found is a 404, handled inside evaluatePublishGate when sv is null.
+        specVersionData = sv
+          ? {
+              testingApprovedAt: sv.testingApprovedAt,
+              filesSnapshot: sv.filesSnapshot as FileSnapshotEntry[] | null,
+            }
+          : null;
+        if (sv) {
+          approvedVersionId = sv.id;
+          const parsedRelease = acceptedSealedReleaseSchema.safeParse(sv.sealedRelease);
+          approvedSealedRelease = parsedRelease.success ? parsedRelease.data : null;
+        }
       }
-    }
 
-    // Fetch testedVersion for the auto-resolve (no explicit versionId) path.
-    let testedVersionData: { filesSnapshot: FileSnapshotEntry[] | null } | null = null;
-    if (
-      project.testedSnapshotId !== null &&
-      project.testedSnapshotId !== undefined &&
-      publishVersionId === null
-    ) {
-      const [tv] = await db
-        .select({
-          id: projectVersionsTable.id,
-          filesSnapshot: projectVersionsTable.filesSnapshot,
-          sealedRelease: projectVersionsTable.sealedRelease,
-        })
-        .from(projectVersionsTable)
-        .where(
-          and(
-            eq(projectVersionsTable.id, project.testedSnapshotId),
-            eq(projectVersionsTable.projectId, projectId),
-          ),
-        );
-      testedVersionData = tv
-        ? { filesSnapshot: tv.filesSnapshot as FileSnapshotEntry[] | null }
-        : null;
-      if (tv) {
-        approvedVersionId = tv.id;
-        const parsedRelease = acceptedSealedReleaseSchema.safeParse(tv.sealedRelease);
-        approvedSealedRelease = parsedRelease.success ? parsedRelease.data : null;
+      // Fetch testedVersion for the auto-resolve (no explicit versionId) path.
+      let testedVersionData: { filesSnapshot: FileSnapshotEntry[] | null } | null = null;
+      if (
+        project.testedSnapshotId !== null &&
+        project.testedSnapshotId !== undefined &&
+        publishVersionId === null
+      ) {
+        const [tv] = await db
+          .select({
+            id: projectVersionsTable.id,
+            filesSnapshot: projectVersionsTable.filesSnapshot,
+            sealedRelease: projectVersionsTable.sealedRelease,
+          })
+          .from(projectVersionsTable)
+          .where(
+            and(
+              eq(projectVersionsTable.id, project.testedSnapshotId),
+              eq(projectVersionsTable.projectId, projectId),
+            ),
+          );
+        testedVersionData = tv
+          ? { filesSnapshot: tv.filesSnapshot as FileSnapshotEntry[] | null }
+          : null;
+        if (tv) {
+          approvedVersionId = tv.id;
+          const parsedRelease = acceptedSealedReleaseSchema.safeParse(tv.sealedRelease);
+          approvedSealedRelease = parsedRelease.success ? parsedRelease.data : null;
+        }
       }
-    }
 
-    const gate = evaluatePublishGate(
-      publishVersionId,
-      {
-        builderMode: project.builderMode ?? null,
-        testedSnapshotId: project.testedSnapshotId ?? null,
-        testingStatus: project.testingStatus ?? "idle",
-        containerId: project.containerId ?? null,
-      },
-      specVersionData,
-      testedVersionData,
-    );
+      const gate = evaluatePublishGate(
+        publishVersionId,
+        {
+          builderMode: project.builderMode ?? null,
+          testedSnapshotId: project.testedSnapshotId ?? null,
+          testingStatus: project.testingStatus ?? "idle",
+          containerId: project.containerId ?? null,
+        },
+        specVersionData,
+        testedVersionData,
+      );
 
-    if (!gate.ok) {
-      res.status(gate.status).json({
-        error: gate.error,
-        code: gate.code,
-        ...(gate.extra ?? {}),
-      });
-      return;
-    }
-
-    approvedSnapshot = gate.approvedSnapshot as FileSnapshotEntry[];
-    req.log.info(
-      {
-        projectId,
-        versionId: publishVersionId,
-        testedSnapshotId: project.testedSnapshotId,
-        snapshotFileCount: gate.approvedSnapshot.length,
-      },
-      publishVersionId !== null
-        ? "Production publish: using explicit approved versionId snapshot"
-        : "Production publish: using approved testedSnapshotId snapshot",
-    );
-  }
-
-  // ── Security gate: block publish when blockPublishOnCritical is on and findings exist ──
-  // Only applied to production publishes.
-  if (env === "production" && project.blockPublishOnCritical) {
-    const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
-    const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
-    if (criticalFindings.length > 0) {
-      res.status(422).json({
-        error: `Publish blocked by ${criticalFindings.length} critical security finding${criticalFindings.length !== 1 ? "s" : ""}. Resolve or dismiss them in the Quality tab before publishing.`,
-        code: "critical_findings",
-        findings: criticalFindings.slice(0, 10).map(({ checkName, finding }) => ({
-          checkName,
-          file: finding.file,
-          line: finding.line,
-          message: finding.message,
-        })),
-      });
-      return;
-    }
-  }
-
-  // ── Validation gate: block production publish on completed_with_errors ──────
-  // When the latest build snapshot has validation_status="completed_with_errors"
-  // the agentic repair loop exhausted all attempts. Require explicit opt-in via
-  // forcePublishWithErrors=true to allow publishing with known TypeScript errors.
-  if (env === "production" && !publishVersionId) {
-    const validationRead = await readReadinessEvidence(async () => {
-      const [latestVersion] = await db
-        .select({ validationStatus: projectVersionsTable.validationStatus })
-        .from(projectVersionsTable)
-        .where(eq(projectVersionsTable.projectId, projectId))
-        .orderBy(desc(projectVersionsTable.createdAt))
-        .limit(1);
-      return latestVersion ?? null;
-    });
-    if (validationRead.state === "unknown") {
-      req.log.error({ projectId }, "Validation gate evidence could not be read — blocking publish");
-      res.status(503).json({
-        error: "Readiness could not be verified. Try the publish check again.",
-        code: "workspace_readiness_unknown",
-      });
-      return;
-    }
-    if (validationRead.value?.validationStatus === "completed_with_errors") {
-      const force = (req.body as Record<string, unknown>)?.forcePublishWithErrors === true;
-      if (!force) {
-        res.status(422).json({
-          error:
-            "The latest build completed with TypeScript errors that could not be auto-repaired. Fix the errors before publishing to production, or pass forcePublishWithErrors=true to override.",
-          code: "completed_with_errors",
+      if (!gate.ok) {
+        res.status(gate.status).json({
+          error: gate.error,
+          code: gate.code,
+          ...(gate.extra ?? {}),
         });
         return;
       }
-    }
-  }
 
-  // ── Validation gate: warn on passed_with_warnings ─────────────────────────
-  // Non-required checks (e.g. TypeScript typecheck in constrained containers)
-  // failed but required checks passed. Preview works, but the build is not
-  // fully clean. Require explicit opt-in via forcePublishWithWarnings=true.
-  if (env === "production" && !publishVersionId) {
-    const warningRead = await readReadinessEvidence(async () => {
-      const [latestVersion] = await db
-        .select({ validationStatus: projectVersionsTable.validationStatus })
-        .from(projectVersionsTable)
-        .where(eq(projectVersionsTable.projectId, projectId))
-        .orderBy(desc(projectVersionsTable.createdAt))
-        .limit(1);
-      return latestVersion ?? null;
-    });
-    if (warningRead.state === "unknown") {
-      req.log.error({ projectId }, "Warning gate evidence could not be read — blocking publish");
-      res.status(503).json({
-        error: "Readiness could not be verified. Try the publish check again.",
-        code: "workspace_readiness_unknown",
-      });
-      return;
+      approvedSnapshot = gate.approvedSnapshot as FileSnapshotEntry[];
+      req.log.info(
+        {
+          projectId,
+          versionId: publishVersionId,
+          testedSnapshotId: project.testedSnapshotId,
+          snapshotFileCount: gate.approvedSnapshot.length,
+        },
+        publishVersionId !== null
+          ? "Production publish: using explicit approved versionId snapshot"
+          : "Production publish: using approved testedSnapshotId snapshot",
+      );
     }
-    if (warningRead.value?.validationStatus === "passed_with_warnings") {
-      const force = (req.body as Record<string, unknown>)?.forcePublishWithWarnings === true;
-      if (!force) {
+
+    // ── Security gate: block publish when blockPublishOnCritical is on and findings exist ──
+    // Only applied to production publishes.
+    if (env === "production" && project.blockPublishOnCritical) {
+      const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
+      const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
+      if (criticalFindings.length > 0) {
         res.status(422).json({
-          error:
-            "The latest build completed with validation warnings (non-blocking checks failed). The preview is functional, but the build is not fully clean. Fix the warnings before publishing, or pass forcePublishWithWarnings=true to override.",
-          code: "passed_with_warnings",
-        });
-        return;
-      }
-    }
-  }
-
-  // Hard invariant: for production, the gate above must always set approvedSnapshot.
-  // If it is somehow null here (code-path bug or future regression), block rather than
-  // silently falling back to the mutable project_files draft.
-  if (env === "production" && approvedSnapshot === null) {
-    req.log.error(
-      { projectId, publishVersionId },
-      "Production publish: gate passed but approvedSnapshot is null — invariant violated, blocking",
-    );
-    res.status(500).json({
-      error: "Internal error: approved snapshot unavailable for production publish.",
-      code: "internal_error",
-    });
-    return;
-  }
-
-  // For production: always use the frozen approved snapshot (set by the gate above).
-  // For staging: approvedSnapshot is null → fall back to the current project_files draft.
-  // This is the only code path that may read project_files, and only for staging.
-  const files = approvedSnapshot
-    ? approvedSnapshot.map((f) => ({
-        id: 0,
-        projectId,
-        path: f.path,
-        content: f.content,
-        mimeType: f.mimeType,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }))
-    : await db.select().from(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
-
-  if (files.length === 0) {
-    res.status(400).json({
-      error: "Cannot publish a project with no generated files. Build the app first.",
-    });
-    return;
-  }
-
-  // ── Hard block: schema-changing SQL migrations ────────────────────────────
-  // v1 policy: no automated schema changes allowed in production publishes.
-  // Operators must run migrations out-of-band and ensure DB schema matches
-  // the code before publishing. No confirmation checkbox — this is a hard block.
-  if (env === "production") {
-    const migrationViolations = detectSchemaMigrations(files);
-    if (migrationViolations.length > 0) {
-      req.log.warn(
-        { projectId, files: migrationViolations },
-        "Publish blocked: schema-changing SQL migrations detected in snapshot",
-      );
-      res.status(422).json({
-        error:
-          `Publish blocked: ${migrationViolations.length} file(s) contain schema-changing SQL ` +
-          `(ALTER TABLE, DROP TABLE, DROP COLUMN, TRUNCATE, etc.). ` +
-          `Run database migrations out-of-band and remove or guard them before publishing to production.`,
-        code: "schema_migration_detected",
-        files: migrationViolations,
-      });
-      return;
-    }
-  }
-
-  // ── Content safety scan — phishing + malware patterns ─────────────────────
-  // Only applied to production publishes (staging is a dev artefact).
-  // Admins can bypass by passing overrideSafetyCheck: true in the request body
-  // — the override is only honoured when the caller is a platform admin.
-  const overrideSafetyRequested =
-    (req.body as Record<string, unknown>)?.overrideSafetyCheck === true;
-  const overrideSafety =
-    overrideSafetyRequested && req.userId ? await isAdminUser(req.userId) : false;
-  if (env === "production" && !overrideSafety) {
-    const scanResult = scanContent(
-      files.map((f) => ({
-        path: f.path,
-        content: f.content ?? "",
-        mimeType: f.mimeType ?? undefined,
-      })),
-    );
-    if (!scanResult.ok) {
-      req.log.warn(
-        { projectId, violations: scanResult.violations },
-        "Content safety scan blocked publish",
-      );
-      res.status(422).json({
-        error: `Publish blocked: content safety scan found ${scanResult.violations.filter((v) => v.severity === "block").length} violation(s). Review it or report a false positive at /help?mode=report.`,
-        code: "content_safety_violation",
-        violations: scanResult.violations
-          .filter((v) => v.severity === "block")
-          .map((v) => ({
-            pattern: v.pattern,
-            context: v.context,
+          error: `Publish blocked by ${criticalFindings.length} critical security finding${criticalFindings.length !== 1 ? "s" : ""}. Resolve or dismiss them in the Quality tab before publishing.`,
+          code: "critical_findings",
+          findings: criticalFindings.slice(0, 10).map(({ checkName, finding }) => ({
+            checkName,
+            file: finding.file,
+            line: finding.line,
+            message: finding.message,
           })),
+        });
+        return;
+      }
+    }
+
+    // ── Validation gate: block production publish on completed_with_errors ──────
+    // When the latest build snapshot has validation_status="completed_with_errors"
+    // the agentic repair loop exhausted all attempts. Require explicit opt-in via
+    // forcePublishWithErrors=true to allow publishing with known TypeScript errors.
+    if (env === "production" && !publishVersionId) {
+      const validationRead = await readReadinessEvidence(async () => {
+        const [latestVersion] = await db
+          .select({ validationStatus: projectVersionsTable.validationStatus })
+          .from(projectVersionsTable)
+          .where(eq(projectVersionsTable.projectId, projectId))
+          .orderBy(desc(projectVersionsTable.createdAt))
+          .limit(1);
+        return latestVersion ?? null;
+      });
+      if (validationRead.state === "unknown") {
+        req.log.error(
+          { projectId },
+          "Validation gate evidence could not be read — blocking publish",
+        );
+        res.status(503).json({
+          error: "Readiness could not be verified. Try the publish check again.",
+          code: "workspace_readiness_unknown",
+        });
+        return;
+      }
+      if (validationRead.value?.validationStatus === "completed_with_errors") {
+        const force = (req.body as Record<string, unknown>)?.forcePublishWithErrors === true;
+        if (!force) {
+          res.status(422).json({
+            error:
+              "The latest build completed with TypeScript errors that could not be auto-repaired. Fix the errors before publishing to production, or pass forcePublishWithErrors=true to override.",
+            code: "completed_with_errors",
+          });
+          return;
+        }
+      }
+    }
+
+    // ── Validation gate: warn on passed_with_warnings ─────────────────────────
+    // Non-required checks (e.g. TypeScript typecheck in constrained containers)
+    // failed but required checks passed. Preview works, but the build is not
+    // fully clean. Require explicit opt-in via forcePublishWithWarnings=true.
+    if (env === "production" && !publishVersionId) {
+      const warningRead = await readReadinessEvidence(async () => {
+        const [latestVersion] = await db
+          .select({ validationStatus: projectVersionsTable.validationStatus })
+          .from(projectVersionsTable)
+          .where(eq(projectVersionsTable.projectId, projectId))
+          .orderBy(desc(projectVersionsTable.createdAt))
+          .limit(1);
+        return latestVersion ?? null;
+      });
+      if (warningRead.state === "unknown") {
+        req.log.error({ projectId }, "Warning gate evidence could not be read — blocking publish");
+        res.status(503).json({
+          error: "Readiness could not be verified. Try the publish check again.",
+          code: "workspace_readiness_unknown",
+        });
+        return;
+      }
+      if (warningRead.value?.validationStatus === "passed_with_warnings") {
+        const force = (req.body as Record<string, unknown>)?.forcePublishWithWarnings === true;
+        if (!force) {
+          res.status(422).json({
+            error:
+              "The latest build completed with validation warnings (non-blocking checks failed). The preview is functional, but the build is not fully clean. Fix the warnings before publishing, or pass forcePublishWithWarnings=true to override.",
+            code: "passed_with_warnings",
+          });
+          return;
+        }
+      }
+    }
+
+    // Hard invariant: for production, the gate above must always set approvedSnapshot.
+    // If it is somehow null here (code-path bug or future regression), block rather than
+    // silently falling back to the mutable project_files draft.
+    if (env === "production" && approvedSnapshot === null) {
+      req.log.error(
+        { projectId, publishVersionId },
+        "Production publish: gate passed but approvedSnapshot is null — invariant violated, blocking",
+      );
+      res.status(500).json({
+        error: "Internal error: approved snapshot unavailable for production publish.",
+        code: "internal_error",
       });
       return;
     }
-    // Log warnings but don't block
-    const warnViolations = scanResult.violations.filter((v) => v.severity === "warn");
-    if (warnViolations.length > 0) {
-      req.log.warn(
-        { projectId, warnViolations },
-        "Content safety scan found warnings (not blocking)",
-      );
-    }
-  }
 
-  // Generate slug on first publish; preserve existing slug on republish.
-  const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
-  const deploymentType = project.deploymentType ?? "static";
-  const productionArtifactProvider: ProductionArtifactPromotingTenantRuntimeProvider | null =
-    supportsProductionArtifactPromotion(tenantRuntimeProvider) ? tenantRuntimeProvider : null;
-  const productionDatabaseProvider: ProductionDatabaseCapabilityTenantRuntimeProvider | null =
-    supportsProductionDatabaseCapability(tenantRuntimeProvider) ? tenantRuntimeProvider : null;
-  const artifactNativeDeployment =
-    deploymentType !== "static" && productionArtifactProvider !== null;
-  const artifactNativeProduction = env === "production" && artifactNativeDeployment;
-  if (artifactNativeProduction && (approvedVersionId === null || approvedSealedRelease === null)) {
-    res.status(422).json({
-      error:
-        "The approved project version has no accepted sealed release. Rebuild it through the trusted kitchen before publishing.",
-      code: "sealed_release_required",
-      versionId: approvedVersionId,
-    });
-    return;
-  }
-  let deploymentSealedRelease = approvedSealedRelease;
-  let stagingReleaseSourceVersionId: number | null = null;
-  if (env === "staging" && artifactNativeDeployment) {
-    const sealedVersions = await db
-      .select({
-        id: projectVersionsTable.id,
-        filesSnapshot: projectVersionsTable.filesSnapshot,
-        sealedRelease: projectVersionsTable.sealedRelease,
-      })
-      .from(projectVersionsTable)
-      .where(
-        and(
-          eq(projectVersionsTable.projectId, projectId),
-          isNotNull(projectVersionsTable.sealedRelease),
-        ),
-      )
-      .orderBy(desc(projectVersionsTable.createdAt))
-      .limit(SEALED_RELEASE_CANDIDATE_LIMIT);
-    try {
-      const selected = selectAcceptedSealedReleaseForSnapshot({
-        targetSnapshot: files,
-        candidates: sealedVersions.map((version) => ({
-          id: version.id,
-          filesSnapshot: version.filesSnapshot as FileSnapshotEntry[] | null,
-          sealedRelease: version.sealedRelease,
-        })),
+    // For production: always use the frozen approved snapshot (set by the gate above).
+    // For staging: approvedSnapshot is null → fall back to the current project_files draft.
+    // This is the only code path that may read project_files, and only for staging.
+    const files = approvedSnapshot
+      ? approvedSnapshot.map((f) => ({
+          id: 0,
+          projectId,
+          path: f.path,
+          content: f.content,
+          mimeType: f.mimeType,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }))
+      : await db.select().from(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
+
+    if (files.length === 0) {
+      res.status(400).json({
+        error: "Cannot publish a project with no generated files. Build the app first.",
       });
-      deploymentSealedRelease = selected.release;
-      stagingReleaseSourceVersionId = selected.sourceVersionId;
-    } catch (error) {
-      if (!(error instanceof SealedTestingCandidateError)) throw error;
+      return;
+    }
+
+    // ── Hard block: schema-changing SQL migrations ────────────────────────────
+    // v1 policy: no automated schema changes allowed in production publishes.
+    // Operators must run migrations out-of-band and ensure DB schema matches
+    // the code before publishing. No confirmation checkbox — this is a hard block.
+    if (env === "production") {
+      const migrationViolations = detectSchemaMigrations(files);
+      if (migrationViolations.length > 0) {
+        req.log.warn(
+          { projectId, files: migrationViolations },
+          "Publish blocked: schema-changing SQL migrations detected in snapshot",
+        );
+        res.status(422).json({
+          error:
+            `Publish blocked: ${migrationViolations.length} file(s) contain schema-changing SQL ` +
+            `(ALTER TABLE, DROP TABLE, DROP COLUMN, TRUNCATE, etc.). ` +
+            `Run database migrations out-of-band and remove or guard them before publishing to production.`,
+          code: "schema_migration_detected",
+          files: migrationViolations,
+        });
+        return;
+      }
+    }
+
+    // ── Content safety scan — phishing + malware patterns ─────────────────────
+    // Only applied to production publishes (staging is a dev artefact).
+    // Admins can bypass by passing overrideSafetyCheck: true in the request body
+    // — the override is only honoured when the caller is a platform admin.
+    const overrideSafetyRequested =
+      (req.body as Record<string, unknown>)?.overrideSafetyCheck === true;
+    const overrideSafety =
+      overrideSafetyRequested && req.userId ? await isAdminUser(req.userId) : false;
+    if (env === "production" && !overrideSafety) {
+      const scanResult = scanContent(
+        files.map((f) => ({
+          path: f.path,
+          content: f.content ?? "",
+          mimeType: f.mimeType ?? undefined,
+        })),
+      );
+      if (!scanResult.ok) {
+        req.log.warn(
+          { projectId, violations: scanResult.violations },
+          "Content safety scan blocked publish",
+        );
+        res.status(422).json({
+          error: `Publish blocked: content safety scan found ${scanResult.violations.filter((v) => v.severity === "block").length} violation(s). Review it or report a false positive at /help?mode=report.`,
+          code: "content_safety_violation",
+          violations: scanResult.violations
+            .filter((v) => v.severity === "block")
+            .map((v) => ({
+              pattern: v.pattern,
+              context: v.context,
+            })),
+        });
+        return;
+      }
+      // Log warnings but don't block
+      const warnViolations = scanResult.violations.filter((v) => v.severity === "warn");
+      if (warnViolations.length > 0) {
+        req.log.warn(
+          { projectId, warnViolations },
+          "Content safety scan found warnings (not blocking)",
+        );
+      }
+    }
+
+    // Generate slug on first publish; preserve existing slug on republish.
+    const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
+    const deploymentType = project.deploymentType ?? "static";
+    const productionArtifactProvider: ProductionArtifactPromotingTenantRuntimeProvider | null =
+      supportsProductionArtifactPromotion(tenantRuntimeProvider) ? tenantRuntimeProvider : null;
+    const productionDatabaseProvider: ProductionDatabaseCapabilityTenantRuntimeProvider | null =
+      supportsProductionDatabaseCapability(tenantRuntimeProvider) ? tenantRuntimeProvider : null;
+    const artifactNativeDeployment =
+      deploymentType !== "static" && productionArtifactProvider !== null;
+    const artifactNativeProduction = env === "production" && artifactNativeDeployment;
+    if (
+      artifactNativeProduction &&
+      (approvedVersionId === null || approvedSealedRelease === null)
+    ) {
       res.status(422).json({
         error:
-          "The current source has no matching accepted sealed release. Rebuild it through the trusted kitchen before publishing to staging.",
+          "The approved project version has no accepted sealed release. Rebuild it through the trusted kitchen before publishing.",
         code: "sealed_release_required",
+        versionId: approvedVersionId,
       });
       return;
     }
-  }
+    let deploymentSealedRelease = approvedSealedRelease;
+    let stagingReleaseSourceVersionId: number | null = null;
+    if (env === "staging" && artifactNativeDeployment) {
+      const sealedVersions = await db
+        .select({
+          id: projectVersionsTable.id,
+          filesSnapshot: projectVersionsTable.filesSnapshot,
+          sealedRelease: projectVersionsTable.sealedRelease,
+        })
+        .from(projectVersionsTable)
+        .where(
+          and(
+            eq(projectVersionsTable.projectId, projectId),
+            isNotNull(projectVersionsTable.sealedRelease),
+          ),
+        )
+        .orderBy(desc(projectVersionsTable.createdAt))
+        .limit(SEALED_RELEASE_CANDIDATE_LIMIT);
+      try {
+        const selected = selectAcceptedSealedReleaseForSnapshot({
+          targetSnapshot: files,
+          candidates: sealedVersions.map((version) => ({
+            id: version.id,
+            filesSnapshot: version.filesSnapshot as FileSnapshotEntry[] | null,
+            sealedRelease: version.sealedRelease,
+          })),
+        });
+        deploymentSealedRelease = selected.release;
+        stagingReleaseSourceVersionId = selected.sourceVersionId;
+      } catch (error) {
+        if (!(error instanceof SealedTestingCandidateError)) throw error;
+        res.status(422).json({
+          error:
+            "The current source has no matching accepted sealed release. Rebuild it through the trusted kitchen before publishing to staging.",
+          code: "sealed_release_required",
+        });
+        return;
+      }
+    }
 
-  const publishedAt = new Date().toISOString();
-  const isRepublish = project.publicSlug !== null;
-  const envLabel = env === "staging" ? "Staged" : isRepublish ? "Republished" : "Published";
-  const deploymentLabel = `${envLabel} — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
+    const publishedAt = new Date().toISOString();
+    const isRepublish = project.publicSlug !== null;
+    const envLabel = env === "staging" ? "Staged" : isRepublish ? "Republished" : "Published";
+    const deploymentLabel = `${envLabel} — ${new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}`;
 
-  // Generate OG image at publish time and store as a base64 data URL so the
-  // frozen snapshot always carries its own social preview card — no separate
-  // on-demand route required.
-  const ogSvg = generateOgSvg({
-    name: project.name,
-    description: project.description,
-    themeColor: project.themeColor ?? null,
-    kind: project.kind,
-  });
-  const ogImageUrl = `data:image/svg+xml;base64,${Buffer.from(ogSvg).toString("base64")}`;
-
-  // Snapshot the files into a version record (this is the frozen copy).
-  const [deploymentVersion] = await db
-    .insert(projectVersionsTable)
-    .values({
-      projectId,
-      label: deploymentLabel,
-      note: `${env === "staging" ? "Staging" : "Deployment"} snapshot. ${files.length} file(s). Actor: ${req.userId ?? "unknown"}. Published: ${publishedAt}`,
-      ogImageUrl,
-      environment: env,
-      filesSnapshot: files.map((f) => ({
-        path: f.path,
-        content: f.content,
-        mimeType: f.mimeType,
-      })),
-      sealedRelease: artifactNativeDeployment ? (deploymentSealedRelease ?? undefined) : undefined,
-    })
-    .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
-  if (!deploymentVersion) {
-    res.status(500).json({
-      error: "Deployment snapshot could not be persisted.",
-      code: "deployment_snapshot_persistence_failed",
+    // Generate OG image at publish time and store as a base64 data URL so the
+    // frozen snapshot always carries its own social preview card — no separate
+    // on-demand route required.
+    const ogSvg = generateOgSvg({
+      name: project.name,
+      description: project.description,
+      themeColor: project.themeColor ?? null,
+      kind: project.kind,
     });
-    return;
-  }
+    const ogImageUrl = `data:image/svg+xml;base64,${Buffer.from(ogSvg).toString("base64")}`;
 
-  let productionSnapshotCommitted = false;
-  let productionSnapshotNeedsReconciliation = false;
-  // Prettier would reindent the entire legacy route body for this guard.
-  // prettier-ignore
-  try {
+    // Snapshot the files into a version record (this is the frozen copy).
+    if (!(await lifecycleSession.assertActive())) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    const [deploymentVersion] = await db
+      .insert(projectVersionsTable)
+      .values({
+        projectId,
+        label: deploymentLabel,
+        note: `${env === "staging" ? "Staging" : "Deployment"} snapshot. ${files.length} file(s). Actor: ${req.userId ?? "unknown"}. Published: ${publishedAt}`,
+        ogImageUrl,
+        environment: env,
+        filesSnapshot: files.map((f) => ({
+          path: f.path,
+          content: f.content,
+          mimeType: f.mimeType,
+        })),
+        sealedRelease: artifactNativeDeployment
+          ? (deploymentSealedRelease ?? undefined)
+          : undefined,
+      })
+      .returning({ id: projectVersionsTable.id, label: projectVersionsTable.label });
+    if (!deploymentVersion) {
+      res.status(500).json({
+        error: "Deployment snapshot could not be persisted.",
+        code: "deployment_snapshot_persistence_failed",
+      });
+      return;
+    }
+
+    let productionSnapshotCommitted = false;
+    let productionSnapshotNeedsReconciliation = false;
+    // Prettier would reindent the entire legacy route body for this guard.
+    // prettier-ignore
+    try {
   if (env === "staging") {
     // ── Staging publish ───────────────────────────────────────────────────────
     const stagingUrl = `https://${slug}-staging.${PLATFORM_DOMAIN}/`;
 
+    if (!(await lifecycleSession.assertActive())) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
     await db
       .update(projectsTable)
       .set({
@@ -654,9 +680,10 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       //   3. Purge CF edge cache async/best-effort (stale HTML is served briefly
       //      if this fails; hashed assets are immutable and don't need purging).
       const maintenanceFile = files.find((f) => f.path === "maintenance.html");
-      void uploadMaintenancePage(projectId, maintenanceFile?.content).catch(() => {
-        /* best-effort — doesn't affect routing */
-      });
+      const maintenanceUploaded = await uploadMaintenancePage(projectId, maintenanceFile?.content);
+      if (r2Enabled() && !maintenanceUploaded) {
+        req.log.warn({ projectId }, "Maintenance page upload failed for staging publish");
+      }
       const r2Ok = await uploadSnapshotToR2(projectId, deploymentVersion.id, snapshotFiles);
       if (r2Enabled() && !r2Ok) {
         req.log.warn(
@@ -665,8 +692,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         );
       } else {
         try {
-          await Promise.race([
-            syncAllHostnamesKV({
+          await syncAllHostnamesKV({
               projectId,
               publicSlug: `${slug}-staging`,
               versionId: deploymentVersion.id,
@@ -674,9 +700,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
               preferredRegion: project.preferredRegion ?? null,
               errorPage404: project.errorPage404 ?? null,
               errorPage500: project.errorPage500 ?? null,
-            }),
-            new Promise<void>((resolve) => setTimeout(resolve, 5000)),
-          ]);
+            });
         } catch (err) {
           req.log.warn(
             { err, projectId },
@@ -772,6 +796,10 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     (artifactNativeProduction || (!!project.containerId && hasContainerLayerCredentials()));
 
   if (shouldDeployContainer) {
+    if (!(await lifecycleSession.assertActive())) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
     req.log.info({ projectId }, "Project has dev container — deploying production container");
     try {
       if (artifactNativeProduction) {
@@ -866,6 +894,10 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   // Must be awaited (not setImmediate) so downstream consumers — including the
   // post-publish health check — observe the updated row.
   try {
+    if (!(await lifecycleSession.assertActive())) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
     if (productionRelease !== null) {
       await db
         .update(projectVersionsTable)
@@ -956,9 +988,10 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
     //   2. Update KV routing (awaited, 5 s bound, explicit failure logging).
     //   3. Purge CF edge cache async/best-effort after routing is live.
     const maintenanceFile = files.find((f) => f.path === "maintenance.html");
-    void uploadMaintenancePage(projectId, maintenanceFile?.content).catch(() => {
-      /* best-effort — doesn't affect routing */
-    });
+    const maintenanceUploaded = await uploadMaintenancePage(projectId, maintenanceFile?.content);
+    if (r2Enabled() && !maintenanceUploaded) {
+      req.log.warn({ projectId }, "Maintenance page upload failed for production publish");
+    }
     const r2Ok = await uploadSnapshotToR2(projectId, snapshotId, snapshotFiles);
     if (r2Enabled() && !r2Ok) {
       req.log.warn(
@@ -967,8 +1000,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       );
     } else {
       try {
-        await Promise.race([
-          syncAllHostnamesKV({
+        await syncAllHostnamesKV({
             projectId,
             publicSlug: slug,
             versionId: snapshotId,
@@ -976,9 +1008,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
             preferredRegion: project.preferredRegion ?? null,
             errorPage404: project.errorPage404 ?? null,
             errorPage500: project.errorPage500 ?? null,
-          }),
-          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
-        ]);
+          });
       } catch (err) {
         req.log.warn(
           { err, projectId },
@@ -986,11 +1016,7 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
         );
       }
       // Purge after KV is updated so CDN cache is cleared only when routing is live.
-      setImmediate(() => {
-        void purgeCacheForProject({ publicSlug: slug, customDomains }).catch(() => {
-          /* best-effort */
-        });
-      });
+      await purgeCacheForProject({ publicSlug: slug, customDomains });
     }
   }
 
@@ -1065,23 +1091,24 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
   });
 
   // Task #543: edge CDN push (no-op when CDN_PROVIDER is unset).
-  // Runs in the background — never blocks publish. On success, stamps
+  // The provider mutation is awaited inside the lifecycle session. On success, stamps
   // cdnLastPushedAt so the Publishing tab can show "Edge cache: just now".
   // Note: cdnPushQueued reflects that we *kicked off* a background push, not
   // that bytes are live on the edge. cdnLastPushedAt (stamped below on
   // success) is the source of truth for actual propagation.
   let cdnPushQueued = false;
   if (project.cdnEnabled && cdnConfigured()) {
-    cdnPushQueued = true;
-    setImmediate(() => {
-      void (async () => {
-        try {
+    try {
           const result = await pushSnapshotToCdn(
             projectId,
             slug,
             files.map((f) => ({ path: f.path, content: f.content, mimeType: f.mimeType })),
           );
           if (result) {
+            if (!(await lifecycleSession.assertActive())) {
+              res.status(404).json({ error: "Project not found" });
+              return;
+            }
             await db
               .update(projectsTable)
               .set({ cdnLastPushedAt: new Date() })
@@ -1090,20 +1117,18 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
               { projectId, slug, files: result.filesUploaded, provider: result.provider },
               "CDN push complete",
             );
+            cdnPushQueued = true;
           }
-        } catch (err) {
-          req.log.warn({ err, projectId }, "CDN push failed (non-fatal)");
-        }
-      })();
-    });
+    } catch (err) {
+      req.log.warn({ err, projectId }, "CDN push failed (non-fatal)");
+    }
   }
 
-  // Post-publish health check — Task #511. Runs in the background so the
-  // publish response returns immediately. Writes a Knowledge Vault entry on
-  // failure and persists the outcome to prod_health_checks for the banner.
+  // Post-publish health checking remains asynchronous, but it independently
+  // re-enters the lifecycle fence before it can persist an observation.
   setImmediate(() => {
-    void (async () => {
-      try {
+    void withActiveProjectLifecycle(projectId, async (session) => {
+      if (!(await session.assertActive())) return;
         const routes = await getDeclaredRoutes(projectId);
         const result = await runPostPublishHealthCheck({
           projectId,
@@ -1135,10 +1160,9 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
             userId: req.userId,
           });
         }
-      } catch (err) {
-        req.log.warn({ err, projectId }, "Post-publish health check failed (non-fatal)");
-      }
-    })();
+    }).catch((err: unknown) => {
+      req.log.warn({ err, projectId }, "Post-publish health check failed (non-fatal)");
+    });
   });
 
   res.json({
@@ -1212,324 +1236,431 @@ router.post("/projects/:id/publish", requireProjectOwnership, async (req, res): 
       }
     }
   }
-});
+  },
+);
 
 // ── POST /api/projects/:id/promote ───────────────────────────────────────────
 // Atomically copies stagingPublishedSnapshotId → publishedSnapshotId (production).
 // Runs publish-readiness checks first.
-router.post("/projects/:id/promote", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
+router.post(
+  "/projects/:id/promote",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const lifecycleSession = responseProjectLifecycleSession(res);
 
-  const [project] = await db
-    .select()
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-  if (!project) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
+    const [project] = await db
+      .select()
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
 
-  if (!project.stagingPublishedSnapshotId) {
-    res.status(422).json({
-      error: "No staging snapshot found. Publish to staging first before promoting.",
-    });
-    return;
-  }
-
-  // ── Staging promotion security gate ───────────────────────────────────────
-  // Require: testingStatus=passed, testedSnapshotId===stagingPublishedSnapshotId,
-  // and the staging version must have testingApprovedAt.
-  // This closes the path where a draft is published to staging and promoted
-  // directly to production without passing the test + approval gate.
-  const [stagingVersionForPromotion] = await db
-    .select({
-      id: projectVersionsTable.id,
-      testingApprovedAt: projectVersionsTable.testingApprovedAt,
-      sealedRelease: projectVersionsTable.sealedRelease,
-    })
-    .from(projectVersionsTable)
-    .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
-  const promotionGateResult = evaluatePromotionGate(
-    {
-      testingStatus: project.testingStatus ?? "idle",
-      testedSnapshotId: project.testedSnapshotId ?? null,
-      stagingPublishedSnapshotId: project.stagingPublishedSnapshotId,
-    },
-    stagingVersionForPromotion ?? null,
-  );
-  if (!promotionGateResult.ok) {
-    res.status(promotionGateResult.status).json({
-      error: promotionGateResult.error,
-      code: promotionGateResult.code,
-      ...promotionGateResult.extra,
-    });
-    return;
-  }
-
-  // ── Production readiness gate ─────────────────────────────────────────────
-  // Minimum checks before promoting to production:
-  //   1. Project must have at least one file.
-  //   2. If blockPublishOnCritical is enabled, no unresolved critical findings.
-  const [filesRow] = await db
-    .select({ c: sql`count(*)` })
-    .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId));
-
-  if (Number(filesRow?.c ?? 0) === 0) {
-    res.status(422).json({
-      error: "Cannot promote: project has no generated files. Build the app first.",
-      code: "no_files",
-    });
-    return;
-  }
-
-  if (project.blockPublishOnCritical) {
-    const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
-    const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
-    if (criticalFindings.length > 0) {
+    if (!project.stagingPublishedSnapshotId) {
       res.status(422).json({
-        error: `Promote blocked by ${criticalFindings.length} critical security finding${criticalFindings.length !== 1 ? "s" : ""}. Resolve or dismiss them in the Quality tab before promoting.`,
-        code: "critical_findings",
-        findings: criticalFindings.slice(0, 10).map(({ checkName, finding }) => ({
-          checkName,
-          file: finding.file,
-          line: finding.line,
-          message: finding.message,
-        })),
+        error: "No staging snapshot found. Publish to staging first before promoting.",
       });
       return;
     }
-  }
 
-  // Capture current production snapshot before promoting (needed for rollback)
-  const prevProductionSnapshotId = project.publishedSnapshotId ?? null;
-
-  // Fetch staging snapshot details for the confirmation payload
-  const [stagingVersion] = await db
-    .select({
-      id: projectVersionsTable.id,
-      label: projectVersionsTable.label,
-      createdAt: projectVersionsTable.createdAt,
-    })
-    .from(projectVersionsTable)
-    .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
-
-  const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
-  const publicUrl = `https://${slug}.${PLATFORM_DOMAIN}/`;
-  const promotedAt = new Date().toISOString();
-
-  const promotionArtifactProvider = supportsProductionArtifactPromotion(tenantRuntimeProvider)
-    ? tenantRuntimeProvider
-    : null;
-  const promotionDatabaseProvider = supportsProductionDatabaseCapability(tenantRuntimeProvider)
-    ? tenantRuntimeProvider
-    : null;
-  const artifactNativePromotion =
-    (project.deploymentType ?? "static") !== "static" && promotionArtifactProvider !== null;
-  let artifactPromotion: ArtifactPromotionResult | null = null;
-  if (artifactNativePromotion) {
-    const parsedRelease = acceptedSealedReleaseSchema.safeParse(
-      stagingVersionForPromotion?.sealedRelease,
-    );
-    if (!parsedRelease.success || !stagingVersionForPromotion) {
-      res.status(422).json({
-        error:
-          "The approved staging snapshot has no accepted sealed release. Re-publish the exact trusted build to staging before promoting.",
-        code: "sealed_release_required",
-        versionId: project.stagingPublishedSnapshotId,
-      });
-      return;
-    }
-    try {
-      artifactPromotion = await promoteAcceptedArtifact({
-        provider: promotionArtifactProvider,
-        databaseProvider: promotionDatabaseProvider,
-        projectId,
-        sourceVersionId: stagingVersionForPromotion.id,
-        acceptedRelease: parsedRelease.data,
-        publishedSnapshotId: project.publishedSnapshotId,
-        currentRuntimeId: project.prodContainerId,
-        hostname: `${slug}.${PLATFORM_DOMAIN}`,
-      });
-    } catch (error) {
-      req.log.error({ error, projectId }, "Staged artifact promotion failed");
-      if (error instanceof ProductionDatabasePublishUnavailableError) {
-        res.status(503).json({ error: error.message, code: error.code });
-        return;
-      }
-      if (error instanceof CloudflareRuntimeControlError) {
-        res.status(error.status).json({ error: error.message, code: error.code });
-        return;
-      }
-      res.status(500).json({
-        error: "Production artifact promotion failed before activation completed",
-        code: "artifact_promotion_internal_error",
-      });
-      return;
-    }
-  }
-
-  try {
-    await db
-      .update(projectVersionsTable)
-      .set({
-        environment: "production",
-        ...(artifactPromotion === null ? {} : { productionRelease: artifactPromotion.release }),
+    // ── Staging promotion security gate ───────────────────────────────────────
+    // Require: testingStatus=passed, testedSnapshotId===stagingPublishedSnapshotId,
+    // and the staging version must have testingApprovedAt.
+    // This closes the path where a draft is published to staging and promoted
+    // directly to production without passing the test + approval gate.
+    const [stagingVersionForPromotion] = await db
+      .select({
+        id: projectVersionsTable.id,
+        testingApprovedAt: projectVersionsTable.testingApprovedAt,
+        sealedRelease: projectVersionsTable.sealedRelease,
       })
+      .from(projectVersionsTable)
       .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
-    await db
-      .update(projectsTable)
-      .set({
-        status: "published",
-        publishedSnapshotId: project.stagingPublishedSnapshotId,
-        publicSlug: slug,
-        ...(artifactPromotion === null
-          ? {}
-          : {
-              prodContainerId: artifactPromotion.runtimeId,
-              prodContainerUrl: publicUrl,
-              prodContainerStatus: artifactPromotion.runtimeStatus,
-            }),
-        updatedAt: new Date(),
-      })
-      .where(eq(projectsTable.id, projectId));
-  } catch (error) {
-    if (artifactPromotion !== null && promotionArtifactProvider !== null) {
-      try {
-        await promotionArtifactProvider.rollbackProductionArtifactActivation({
-          activatedRelease: artifactPromotion.release,
-          previousRelease: artifactPromotion.previousRelease,
-        });
-        await db
-          .update(projectVersionsTable)
-          .set({
-            productionRelease: {
-              ...artifactPromotion.release,
-              state: "promoted",
-              activatedAt: null,
-            },
-          })
-          .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
-      } catch (rollbackError) {
-        req.log.error(
-          { error, rollbackError, projectId },
-          "Staged promotion persistence and route rollback both failed",
-        );
-        res.status(503).json({
-          error:
-            "Production activation could not be reconciled after promotion persistence failed.",
-          code: "production_promotion_rollback_failed",
-        });
-        return;
-      }
-      res.status(503).json({
-        error: "Production activation was rolled back because promotion state could not persist.",
-        code: "production_promotion_persistence_failed",
+    const promotionGateResult = evaluatePromotionGate(
+      {
+        testingStatus: project.testingStatus ?? "idle",
+        testedSnapshotId: project.testedSnapshotId ?? null,
+        stagingPublishedSnapshotId: project.stagingPublishedSnapshotId,
+      },
+      stagingVersionForPromotion ?? null,
+    );
+    if (!promotionGateResult.ok) {
+      res.status(promotionGateResult.status).json({
+        error: promotionGateResult.error,
+        code: promotionGateResult.code,
+        ...promotionGateResult.extra,
       });
       return;
     }
-    throw error;
-  }
 
-  // ── Edge CDN: sync KV + purge cache for promoted version ──────────────────
-  setImmediate(() => {
-    void (async () => {
-      try {
-        const customDomainRows = await db
-          .select({ hostname: projectDomainsTable.hostname })
-          .from(projectDomainsTable)
-          .where(
-            and(
-              eq(projectDomainsTable.projectId, projectId),
-              eq(projectDomainsTable.verificationStatus, "verified"),
-            ),
-          );
-        const customDomains = customDomainRows.map((r) => r.hostname);
-        await syncAllHostnamesKV({
-          projectId,
-          publicSlug: slug,
-          versionId: project.stagingPublishedSnapshotId!,
-          customDomains,
-          preferredRegion: project.preferredRegion ?? null,
-          errorPage404: project.errorPage404 ?? null,
-          errorPage500: project.errorPage500 ?? null,
-        });
-        await purgeCacheForProject({ publicSlug: slug, customDomains });
-      } catch {
-        /* best-effort */
-      }
-    })();
-  });
+    // ── Production readiness gate ─────────────────────────────────────────────
+    // Minimum checks before promoting to production:
+    //   1. Project must have at least one file.
+    //   2. If blockPublishOnCritical is enabled, no unresolved critical findings.
+    const [filesRow] = await db
+      .select({ c: sql`count(*)` })
+      .from(projectFilesTable)
+      .where(eq(projectFilesTable.projectId, projectId));
 
-  void writeKnowledge({
-    title: `Promoted: project ${projectId}`,
-    content: `Staging snapshot ${project.stagingPublishedSnapshotId} promoted to production for project ${projectId} by ${req.userId ?? "unknown"}. Slug: ${slug}.`,
-    type: "publish",
-    category: "event",
-    severity: "info",
-    projectId,
-    userId: req.userId,
-  });
-
-  // Audit log for rollback: status="promote", snapshotVersionId=OLD production snapshot,
-  // so rollback can restore publishedSnapshotId = snapshotVersionId.
-  setImmediate(() => {
-    void db
-      .insert(deploymentLogsTable)
-      .values({
-        projectId,
-        userId: req.userId ?? "unknown",
-        env: "production",
-        status: "promote",
-        publicSlug: slug,
-        publicUrl,
-        snapshotVersionId: prevProductionSnapshotId,
-        note: JSON.stringify({
-          action: "promote",
-          newSnapshotId: project.stagingPublishedSnapshotId,
-          prevSnapshotId: prevProductionSnapshotId,
-        }),
-      })
-      .catch(() => {
-        /* best-effort */
+    if (Number(filesRow?.c ?? 0) === 0) {
+      res.status(422).json({
+        error: "Cannot promote: project has no generated files. Build the app first.",
+        code: "no_files",
       });
-  });
+      return;
+    }
 
-  res.json({
-    ok: true,
-    projectId,
-    env: "production",
-    status: "published",
-    publicSlug: slug,
-    publicUrl,
-    promotedAt,
-    snapshotVersionId: project.stagingPublishedSnapshotId,
-    prevProductionSnapshotId,
-    containerDeployed: artifactPromotion !== null,
-    productionPromotionIdentity: artifactPromotion?.release.promotionIdentity,
-    sourceSealedArtifactSha256: artifactPromotion?.release.sourceSealedArtifactSha256,
-    stagingSnapshotLabel: stagingVersion?.label ?? null,
-    stagingSnapshotCreatedAt: stagingVersion?.createdAt ?? null,
-    note: "Staging snapshot is now live in production.",
-  });
-});
+    if (project.blockPublishOnCritical) {
+      const dismissed = (project.dismissedFindingHashes as string[] | null) ?? [];
+      const criticalFindings = await getUnresolvedCriticalFindings(projectId, dismissed);
+      if (criticalFindings.length > 0) {
+        res.status(422).json({
+          error: `Promote blocked by ${criticalFindings.length} critical security finding${criticalFindings.length !== 1 ? "s" : ""}. Resolve or dismiss them in the Quality tab before promoting.`,
+          code: "critical_findings",
+          findings: criticalFindings.slice(0, 10).map(({ checkName, finding }) => ({
+            checkName,
+            file: finding.file,
+            line: finding.line,
+            message: finding.message,
+          })),
+        });
+        return;
+      }
+    }
+
+    // Capture current production snapshot before promoting (needed for rollback)
+    const prevProductionSnapshotId = project.publishedSnapshotId ?? null;
+
+    // Fetch staging snapshot details for the confirmation payload
+    const [stagingVersion] = await db
+      .select({
+        id: projectVersionsTable.id,
+        label: projectVersionsTable.label,
+        createdAt: projectVersionsTable.createdAt,
+      })
+      .from(projectVersionsTable)
+      .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
+
+    const slug: string = project.publicSlug ?? generatePublicSlug(project.name);
+    const publicUrl = `https://${slug}.${PLATFORM_DOMAIN}/`;
+    const promotedAt = new Date().toISOString();
+
+    const promotionArtifactProvider = supportsProductionArtifactPromotion(tenantRuntimeProvider)
+      ? tenantRuntimeProvider
+      : null;
+    const promotionDatabaseProvider = supportsProductionDatabaseCapability(tenantRuntimeProvider)
+      ? tenantRuntimeProvider
+      : null;
+    const artifactNativePromotion =
+      (project.deploymentType ?? "static") !== "static" && promotionArtifactProvider !== null;
+    let artifactPromotion: ArtifactPromotionResult | null = null;
+    if (artifactNativePromotion) {
+      const parsedRelease = acceptedSealedReleaseSchema.safeParse(
+        stagingVersionForPromotion?.sealedRelease,
+      );
+      if (!parsedRelease.success || !stagingVersionForPromotion) {
+        res.status(422).json({
+          error:
+            "The approved staging snapshot has no accepted sealed release. Re-publish the exact trusted build to staging before promoting.",
+          code: "sealed_release_required",
+          versionId: project.stagingPublishedSnapshotId,
+        });
+        return;
+      }
+      try {
+        if (!(await lifecycleSession.assertActive())) {
+          res.status(404).json({ error: "Project not found" });
+          return;
+        }
+        artifactPromotion = await promoteAcceptedArtifact({
+          provider: promotionArtifactProvider,
+          databaseProvider: promotionDatabaseProvider,
+          projectId,
+          sourceVersionId: stagingVersionForPromotion.id,
+          acceptedRelease: parsedRelease.data,
+          publishedSnapshotId: project.publishedSnapshotId,
+          currentRuntimeId: project.prodContainerId,
+          hostname: `${slug}.${PLATFORM_DOMAIN}`,
+        });
+      } catch (error) {
+        req.log.error({ error, projectId }, "Staged artifact promotion failed");
+        if (error instanceof ProductionDatabasePublishUnavailableError) {
+          res.status(503).json({ error: error.message, code: error.code });
+          return;
+        }
+        if (error instanceof CloudflareRuntimeControlError) {
+          res.status(error.status).json({ error: error.message, code: error.code });
+          return;
+        }
+        res.status(500).json({
+          error: "Production artifact promotion failed before activation completed",
+          code: "artifact_promotion_internal_error",
+        });
+        return;
+      }
+    }
+
+    try {
+      if (!(await lifecycleSession.assertActive())) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      await db
+        .update(projectVersionsTable)
+        .set({
+          environment: "production",
+          ...(artifactPromotion === null ? {} : { productionRelease: artifactPromotion.release }),
+        })
+        .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
+      await db
+        .update(projectsTable)
+        .set({
+          status: "published",
+          publishedSnapshotId: project.stagingPublishedSnapshotId,
+          publicSlug: slug,
+          ...(artifactPromotion === null
+            ? {}
+            : {
+                prodContainerId: artifactPromotion.runtimeId,
+                prodContainerUrl: publicUrl,
+                prodContainerStatus: artifactPromotion.runtimeStatus,
+              }),
+          updatedAt: new Date(),
+        })
+        .where(eq(projectsTable.id, projectId));
+    } catch (error) {
+      if (artifactPromotion !== null && promotionArtifactProvider !== null) {
+        try {
+          await promotionArtifactProvider.rollbackProductionArtifactActivation({
+            activatedRelease: artifactPromotion.release,
+            previousRelease: artifactPromotion.previousRelease,
+          });
+          await db
+            .update(projectVersionsTable)
+            .set({
+              productionRelease: {
+                ...artifactPromotion.release,
+                state: "promoted",
+                activatedAt: null,
+              },
+            })
+            .where(eq(projectVersionsTable.id, project.stagingPublishedSnapshotId));
+        } catch (rollbackError) {
+          req.log.error(
+            { error, rollbackError, projectId },
+            "Staged promotion persistence and route rollback both failed",
+          );
+          res.status(503).json({
+            error:
+              "Production activation could not be reconciled after promotion persistence failed.",
+            code: "production_promotion_rollback_failed",
+          });
+          return;
+        }
+        res.status(503).json({
+          error: "Production activation was rolled back because promotion state could not persist.",
+          code: "production_promotion_persistence_failed",
+        });
+        return;
+      }
+      throw error;
+    }
+
+    // ── Edge CDN: sync KV + purge cache for promoted version ──────────────────
+    // Promotion is not complete until its route points at the promoted artifact.
+    try {
+      const customDomainRows = await db
+        .select({ hostname: projectDomainsTable.hostname })
+        .from(projectDomainsTable)
+        .where(
+          and(
+            eq(projectDomainsTable.projectId, projectId),
+            eq(projectDomainsTable.verificationStatus, "verified"),
+          ),
+        );
+      const customDomains = customDomainRows.map((r) => r.hostname);
+      await syncAllHostnamesKV({
+        projectId,
+        publicSlug: slug,
+        versionId: project.stagingPublishedSnapshotId!,
+        customDomains,
+        preferredRegion: project.preferredRegion ?? null,
+        errorPage404: project.errorPage404 ?? null,
+        errorPage500: project.errorPage500 ?? null,
+      });
+      await purgeCacheForProject({ publicSlug: slug, customDomains });
+    } catch (error) {
+      req.log.warn({ error, projectId }, "Promotion route synchronization failed");
+      res.status(503).json({
+        error: "The version was promoted, but its public route could not be confirmed.",
+        code: "production_promotion_route_sync_failed",
+      });
+      return;
+    }
+
+    void writeKnowledge({
+      title: `Promoted: project ${projectId}`,
+      content: `Staging snapshot ${project.stagingPublishedSnapshotId} promoted to production for project ${projectId} by ${req.userId ?? "unknown"}. Slug: ${slug}.`,
+      type: "publish",
+      category: "event",
+      severity: "info",
+      projectId,
+      userId: req.userId,
+    });
+
+    // Audit log for rollback: status="promote", snapshotVersionId=OLD production snapshot,
+    // so rollback can restore publishedSnapshotId = snapshotVersionId.
+    setImmediate(() => {
+      void db
+        .insert(deploymentLogsTable)
+        .values({
+          projectId,
+          userId: req.userId ?? "unknown",
+          env: "production",
+          status: "promote",
+          publicSlug: slug,
+          publicUrl,
+          snapshotVersionId: prevProductionSnapshotId,
+          note: JSON.stringify({
+            action: "promote",
+            newSnapshotId: project.stagingPublishedSnapshotId,
+            prevSnapshotId: prevProductionSnapshotId,
+          }),
+        })
+        .catch(() => {
+          /* best-effort */
+        });
+    });
+
+    res.json({
+      ok: true,
+      projectId,
+      env: "production",
+      status: "published",
+      publicSlug: slug,
+      publicUrl,
+      promotedAt,
+      snapshotVersionId: project.stagingPublishedSnapshotId,
+      prevProductionSnapshotId,
+      containerDeployed: artifactPromotion !== null,
+      productionPromotionIdentity: artifactPromotion?.release.promotionIdentity,
+      sourceSealedArtifactSha256: artifactPromotion?.release.sourceSealedArtifactSha256,
+      stagingSnapshotLabel: stagingVersion?.label ?? null,
+      stagingSnapshotCreatedAt: stagingVersion?.createdAt ?? null,
+      note: "Staging snapshot is now live in production.",
+    });
+  },
+);
 
 // ── POST /api/projects/:id/unpublish ─────────────────────────────────────────
-router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const env = (req.query.env as string | undefined) ?? "production";
+router.post(
+  "/projects/:id/unpublish",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const env = (req.query.env as string | undefined) ?? "production";
 
-  // Fetch current slug so we can include it in the response (slug is never cleared).
-  const [current] = await db
-    .select({ publicSlug: projectsTable.publicSlug })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+    // Fetch current slug so we can include it in the response (slug is never cleared).
+    const [current] = await db
+      .select({ publicSlug: projectsTable.publicSlug })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
-  if (env === "staging") {
+    if (env === "staging") {
+      const stagingSlug = current?.publicSlug ? `${current.publicSlug}-staging` : null;
+      try {
+        await syncAllHostnamesKV({
+          projectId,
+          publicSlug: stagingSlug,
+          versionId: null,
+          customDomains: [],
+        });
+        await purgeCacheForProject({ publicSlug: stagingSlug, customDomains: [] });
+      } catch (error) {
+        req.log.warn({ error, projectId }, "Staging unpublish route cleanup failed");
+        res.status(503).json({
+          error: "Staging could not be unpublished because its public route did not close.",
+          code: "staging_unpublish_route_cleanup_failed",
+        });
+        return;
+      }
+      await db
+        .update(projectsTable)
+        .set({ stagingPublishedSnapshotId: null, updatedAt: sql`now()` })
+        .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+      setImmediate(() => {
+        void db
+          .insert(deploymentLogsTable)
+          .values({
+            projectId,
+            userId: req.userId ?? "unknown",
+            env: "staging",
+            status: "unpublished",
+            note: "Staging unpublished by user.",
+          })
+          .catch(() => {
+            /* best-effort */
+          });
+      });
+
+      res.json({ ok: true, projectId, env: "staging", publicSlug: current?.publicSlug ?? null });
+      return;
+    }
+
+    try {
+      const [proj] = await db
+        .select({ prodContainerId: projectsTable.prodContainerId })
+        .from(projectsTable)
+        .where(eq(projectsTable.id, projectId));
+      if (proj?.prodContainerId) {
+        await destroyContainer(proj.prodContainerId, projectId);
+        await db
+          .update(projectsTable)
+          .set({ prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" })
+          .where(eq(projectsTable.id, projectId));
+      }
+
+      const slug = current?.publicSlug ?? null;
+      const customDomainRows = await db
+        .select({ hostname: projectDomainsTable.hostname })
+        .from(projectDomainsTable)
+        .where(
+          and(
+            eq(projectDomainsTable.projectId, projectId),
+            eq(projectDomainsTable.verificationStatus, "verified"),
+          ),
+        );
+      const customDomains = customDomainRows.map((r) => r.hostname);
+      await syncAllHostnamesKV({ projectId, publicSlug: slug, versionId: null, customDomains });
+      await purgeCacheForProject({ publicSlug: slug, customDomains });
+    } catch (error) {
+      req.log.warn({ error, projectId }, "Production unpublish provider cleanup failed");
+      res.status(503).json({
+        error: "Production could not be unpublished because its public resources did not close.",
+        code: "production_unpublish_provider_cleanup_failed",
+      });
+      return;
+    }
+
     await db
       .update(projectsTable)
-      .set({ stagingPublishedSnapshotId: null, updatedAt: sql`now()` })
+      .set({ status: "testing", publishedSnapshotId: null, updatedAt: sql`now()` })
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+    void writeKnowledge({
+      title: `Unpublished: project ${projectId}`,
+      content: `Project id:${projectId} unpublished by ${req.userId ?? "unknown"}. Public URL is now inactive. Slug preserved for next publish.`,
+      type: "publish",
+      category: "event",
+      severity: "info",
+      projectId,
+      userId: req.userId,
+    });
 
     setImmediate(() => {
       void db
@@ -1537,104 +1668,25 @@ router.post("/projects/:id/unpublish", requireProjectOwnership, async (req, res)
         .values({
           projectId,
           userId: req.userId ?? "unknown",
-          env: "staging",
+          env: "production",
           status: "unpublished",
-          note: "Staging unpublished by user.",
+          note: "Unpublished by user. Public URL disabled.",
         })
         .catch(() => {
           /* best-effort */
         });
     });
 
-    res.json({ ok: true, projectId, env: "staging", publicSlug: current?.publicSlug ?? null });
-    return;
-  }
-
-  // Stop the production container if one was deployed — best-effort, non-fatal.
-  void (async () => {
-    const [proj] = await db
-      .select({ prodContainerId: projectsTable.prodContainerId })
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId));
-    if (proj?.prodContainerId) {
-      await destroyContainer(proj.prodContainerId, projectId);
-      await db
-        .update(projectsTable)
-        .set({ prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" })
-        .where(eq(projectsTable.id, projectId));
-    }
-  })().catch((err: unknown) => {
-    req.log.warn({ err, projectId }, "Failed to stop production container on unpublish");
-  });
-
-  await db
-    .update(projectsTable)
-    .set({ status: "testing", publishedSnapshotId: null, updatedAt: sql`now()` })
-    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-
-  // ── Edge CDN: clear KV entries + purge cache on unpublish ─────────────────
-  setImmediate(() => {
-    void (async () => {
-      try {
-        const slug = current?.publicSlug ?? null;
-        const customDomainRows = await db
-          .select({ hostname: projectDomainsTable.hostname })
-          .from(projectDomainsTable)
-          .where(
-            and(
-              eq(projectDomainsTable.projectId, projectId),
-              eq(projectDomainsTable.verificationStatus, "verified"),
-            ),
-          );
-        const customDomains = customDomainRows.map((r) => r.hostname);
-        // Clear KV entries (pass versionId=null to trigger deletion)
-        await syncAllHostnamesKV({
-          projectId,
-          publicSlug: slug,
-          versionId: null,
-          customDomains,
-        });
-        await purgeCacheForProject({ publicSlug: slug, customDomains });
-      } catch {
-        /* best-effort */
-      }
-    })();
-  });
-
-  void writeKnowledge({
-    title: `Unpublished: project ${projectId}`,
-    content: `Project id:${projectId} unpublished by ${req.userId ?? "unknown"}. Public URL is now inactive. Slug preserved for next publish.`,
-    type: "publish",
-    category: "event",
-    severity: "info",
-    projectId,
-    userId: req.userId,
-  });
-
-  setImmediate(() => {
-    void db
-      .insert(deploymentLogsTable)
-      .values({
-        projectId,
-        userId: req.userId ?? "unknown",
-        env: "production",
-        status: "unpublished",
-        note: "Unpublished by user. Public URL disabled.",
-      })
-      .catch(() => {
-        /* best-effort */
-      });
-  });
-
-  res.json({
-    ok: true,
-    projectId,
-    env: "production",
-    status: "testing",
-    publicSlug: current?.publicSlug ?? null,
-    publicUrlDisabled: true,
-  });
-});
+    res.json({
+      ok: true,
+      projectId,
+      env: "production",
+      status: "testing",
+      publicSlug: current?.publicSlug ?? null,
+      publicUrlDisabled: true,
+    });
+  },
+);
 
 // ── POST /api/projects/:id/preview-link ──────────────────────────────────────
 // Creates a shareable, time-limited preview link from the current project files.
@@ -1740,6 +1792,7 @@ router.post(
 router.post(
   "/projects/:id/maintenance",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const { enabled } = req.body as { enabled?: unknown };
@@ -1777,12 +1830,23 @@ router.post(
       hostnames.push(`${project.publicSlug}.${PLATFORM_DOMAIN}`);
     }
 
-    // Update KV entries best-effort (no-op when CF_KV_NAMESPACE_ID is not set)
-    void setProjectMaintenanceMode(hostnames, enabled).catch(() => {
-      /* best-effort */
-    });
+    const outcome = await setProjectMaintenanceMode(hostnames, enabled);
+    if ((!outcome.configured && hostnames.length > 0) || outcome.failed.length > 0) {
+      res.status(503).json({
+        error: "Maintenance mode could not be confirmed on every public route.",
+        code: "maintenance_route_update_failed",
+        hostnamesUpdated: outcome.updated,
+        hostnamesFailed: outcome.failed.length,
+      });
+      return;
+    }
 
-    res.json({ ok: true, projectId, maintenanceEnabled: enabled, hostnamesUpdated: hostnames });
+    res.json({
+      ok: true,
+      projectId,
+      maintenanceEnabled: enabled,
+      hostnamesUpdated: outcome.updated,
+    });
   },
 );
 

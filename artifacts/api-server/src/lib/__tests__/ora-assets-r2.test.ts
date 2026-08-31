@@ -1,50 +1,43 @@
-import { describe, it, expect, afterAll, beforeEach, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq, inArray } from "drizzle-orm";
+import { accountAssetQuotaTable, assetsTable, db, oraAssetsTable } from "@workspace/db";
+import { AssetAdmissionError } from "../asset-registry";
+import { persistOraAssetStrict } from "../ora-assets";
+import * as assetR2 from "../asset-r2";
 
-// Mock the R2 layer so we can drive offload success/failure deterministically
-// without touching real object storage. r2Enabled() returns true so the offload
-// branch is exercised; r2PutObject is controlled per-test.
-vi.mock("../cloudflare", () => ({
-  r2Enabled: vi.fn(() => true),
-  r2PutObject: vi.fn(),
-  r2GetObject: vi.fn(),
+const objects = vi.hoisted(() => new Map<string, Buffer>());
+vi.mock("../asset-r2", () => ({
+  putAssetBuffer: vi.fn(async (input: { key: string; body: Buffer }) => {
+    objects.set(input.key, Buffer.from(input.body));
+  }),
+  readAssetBuffer: vi.fn(async (key: string) => objects.get(key) ?? null),
+  deleteAssetObject: vi.fn(async (key: string) => {
+    objects.delete(key);
+  }),
 }));
 
-import { eq } from "drizzle-orm";
-import { db, oraAssetsTable } from "@workspace/db";
-import { persistOraAsset } from "../ora-assets";
-import * as cloudflare from "../cloudflare";
-
-/**
- * Acceptance tests for R2 offload of Ora library assets (Phase 6 T005).
- *
- * Verifies the three guarantees that are hard to cover via the DB-only path:
- *   - R2 success → bytes live in R2 (data null, storageKey set)
- *   - R2 failure (returned false OR thrown) → DB fallback (data set, no key)
- *   - the DB enforces the data/storageKey XOR invariant
- */
-
 const HELLO_B64 = Buffer.from("hello").toString("base64");
-const USER = `test-ora-r2-${Date.now()}`;
+const USER = `test-ora-unified-${Date.now()}`;
 
 afterAll(async () => {
+  const links = await db
+    .select({ assetId: oraAssetsTable.assetId })
+    .from(oraAssetsTable)
+    .where(eq(oraAssetsTable.userId, USER));
   await db.delete(oraAssetsTable).where(eq(oraAssetsTable.userId, USER));
-  delete process.env.ORA_ASSETS_R2_ENABLED;
+  const ids = links.flatMap((row) => (row.assetId === null ? [] : [row.assetId]));
+  if (ids.length > 0) await db.delete(assetsTable).where(inArray(assetsTable.id, ids));
+  await db.delete(accountAssetQuotaTable).where(eq(accountAssetQuotaTable.userId, USER));
 });
 
 beforeEach(() => {
-  vi.mocked(cloudflare.r2PutObject).mockReset();
-  process.env.ORA_ASSETS_R2_ENABLED = "true";
+  objects.clear();
+  vi.clearAllMocks();
 });
 
-async function rowFor(id: number) {
-  const [row] = await db.select().from(oraAssetsTable).where(eq(oraAssetsTable.id, id));
-  return row;
-}
-
-describe("persistOraAsset R2 offload", () => {
-  it("offloads to R2 on success: data null, storageKey set", async () => {
-    vi.mocked(cloudflare.r2PutObject).mockResolvedValue(true);
-    const id = await persistOraAsset({
+describe("Ora unified asset persistence", () => {
+  it("admits once, writes one private object, and stores only metadata in ora_assets", async () => {
+    const id = await persistOraAssetStrict({
       userId: USER,
       kind: "image",
       fileName: "pic.png",
@@ -52,56 +45,53 @@ describe("persistOraAsset R2 offload", () => {
       format: "png",
       base64: HELLO_B64,
     });
-    expect(id).toBeTypeOf("number");
-    const row = await rowFor(id!);
+    const [row] = await db.select().from(oraAssetsTable).where(eq(oraAssetsTable.id, id));
+    expect(row.assetId).toBeTypeOf("number");
     expect(row.data).toBeNull();
-    expect(row.storageKey).toMatch(/^ora-assets\/.+\.png$/);
-    expect(cloudflare.r2PutObject).toHaveBeenCalledOnce();
+    expect(row.storageKey).toMatch(/^assets\//);
+    expect(assetR2.putAssetBuffer).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to DB when R2 returns false", async () => {
-    vi.mocked(cloudflare.r2PutObject).mockResolvedValue(false);
-    const id = await persistOraAsset({
+  it("links an already-ready unified asset without a duplicate R2 write", async () => {
+    const firstId = await persistOraAssetStrict({
       userId: USER,
       kind: "file",
-      fileName: "a.csv",
-      mimeType: "text/csv",
-      format: "csv",
-      base64: HELLO_B64,
-    });
-    const row = await rowFor(id!);
-    expect(row.data).toBe(HELLO_B64);
-    expect(row.storageKey).toBeNull();
-  });
-
-  it("falls back to DB when R2 throws", async () => {
-    vi.mocked(cloudflare.r2PutObject).mockRejectedValue(new Error("boom"));
-    const id = await persistOraAsset({
-      userId: USER,
-      kind: "file",
-      fileName: "b.csv",
-      mimeType: "text/csv",
-      format: "csv",
-      base64: HELLO_B64,
-    });
-    const row = await rowFor(id!);
-    expect(row.data).toBe(HELLO_B64);
-    expect(row.storageKey).toBeNull();
-  });
-
-  it("uses the DB path when the offload flag is off", async () => {
-    delete process.env.ORA_ASSETS_R2_ENABLED;
-    const id = await persistOraAsset({
-      userId: USER,
-      kind: "file",
-      fileName: "c.txt",
+      fileName: "one.txt",
       mimeType: "text/plain",
       base64: HELLO_B64,
     });
-    const row = await rowFor(id!);
-    expect(row.data).toBe(HELLO_B64);
-    expect(row.storageKey).toBeNull();
-    expect(cloudflare.r2PutObject).not.toHaveBeenCalled();
+    const [first] = await db.select().from(oraAssetsTable).where(eq(oraAssetsTable.id, firstId));
+    const linkedId = await persistOraAssetStrict({
+      userId: USER,
+      kind: "file",
+      fileName: "one.txt",
+      mimeType: "text/plain",
+      unifiedAssetId: first.assetId!,
+    });
+    expect(linkedId).toBe(firstId);
+    expect(assetR2.putAssetBuffer).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses at quota admission before writing provider bytes", async () => {
+    await db
+      .insert(accountAssetQuotaTable)
+      .values({ userId: USER, usedBytes: 500 * 1024 * 1024 })
+      .onConflictDoUpdate({
+        target: accountAssetQuotaTable.userId,
+        set: { usedBytes: 500 * 1024 * 1024, reservedBytes: 0 },
+      });
+    await expect(
+      persistOraAssetStrict({
+        userId: USER,
+        kind: "file",
+        fileName: "full.txt",
+        mimeType: "text/plain",
+        base64: HELLO_B64,
+      }),
+    ).rejects.toMatchObject({
+      code: "asset_quota_exceeded",
+    } satisfies Partial<AssetAdmissionError>);
+    expect(assetR2.putAssetBuffer).not.toHaveBeenCalled();
   });
 });
 
@@ -116,20 +106,6 @@ describe("ora_assets storage XOR constraint", () => {
         data: null,
         storageKey: null,
         sizeBytes: 0,
-      }),
-    ).rejects.toThrow();
-  });
-
-  it("rejects a row with both data and storageKey", async () => {
-    await expect(
-      db.insert(oraAssetsTable).values({
-        userId: USER,
-        kind: "file",
-        fileName: "bad2.txt",
-        mimeType: "text/plain",
-        data: HELLO_B64,
-        storageKey: "ora-assets/x/y.txt",
-        sizeBytes: 5,
       }),
     ).rejects.toThrow();
   });

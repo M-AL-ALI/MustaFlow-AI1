@@ -11,10 +11,14 @@ import {
 import { db, oraRepoSessionsTable, type OraRepoSessionRow } from "@workspace/db";
 import { logger } from "../logger";
 import {
-  persistOraAsset,
+  cancelOraGeneratedAsset,
+  completeOraGeneratedAsset,
   getNextVersionLineage,
   getNextVersionLineageFromAssetId,
+  reserveOraGeneratedAsset,
+  type OraGeneratedAssetReservation,
 } from "../ora-assets";
+import { AssetAdmissionError } from "../asset-registry";
 import { loadBrandKit } from "../brand-kit-loader";
 import { generateImage, isImageProviderConfigured } from "../image-provider";
 import { buildOraImageGenerationProfile } from "./image-quality";
@@ -405,101 +409,134 @@ async function executeFileGeneration(
     filePrompt += `\n\n[ACTIVE WORKING FILE — REVISION TARGET]\nThe user wants to revise ${activeAssetFileName}. Apply only the requested changes and preserve everything else.\n"""\n${activeAssetContextText}\n"""\n[END ACTIVE WORKING FILE]`;
   }
 
-  const { tryApplyLayoutPreservingFileEdit } = await import("./office-layout-edit");
-  const layoutEdit = await tryApplyLayoutPreservingFileEdit({
-    message: prompt,
-    format,
-    documentRefs,
-    sessionId: context.oraSessionId,
-    userId: context.userId,
-    subscriptionTier: context.tier,
-    preferredFileRef:
-      multiFilePlan?.targetFileRef ?? resolveNamedEditTarget(prompt, carriedFileMeta),
-    activeAssetBuffer,
-    activeAssetFileName,
-  });
-  const brandKit = context.userId
-    ? await loadBrandKit(context.userId, projectId).catch(() => null)
-    : null;
-  const hasSourceData = carriedDocs.length > 0 || activeAssetContextText.length > 0;
-  const result =
-    layoutEdit ??
-    (await generateFileFromPrompt(
-      filePrompt,
-      format,
-      context.history ?? [],
-      context.language,
-      hasSourceData,
-      context.tier,
-      brandKit,
-    ));
-  if (!layoutEdit && documentRefs.length > 0 && hasSourceData) {
-    result.editQuality = {
-      editMode: "redesigned",
-      changes: [],
-      outputFileName: result.fileName.slice(0, 300),
-      preservedLayout: false,
-      canRedesign: false,
-    };
-  }
-
-  let assetId: number | null = null;
-  if (context.userId) {
-    const lineage =
-      active && layoutEdit
-        ? await getNextVersionLineageFromAssetId(context.userId, active.assetId)
-        : result.editedFileRef
-          ? await getNextVersionLineage(context.userId, result.editedFileRef)
-          : null;
-    const isRevision = Boolean((active && layoutEdit) || result.editedFileRef);
-    assetId = await persistOraAsset({
-      userId: context.userId,
-      // Chained versions inherit their parent's project through lineage.
-      // Only a standalone v1 uses the project resolved from this voice turn.
-      oraProjectId: projectId,
-      kind: "file",
-      fileName: result.fileName,
-      mimeType: result.mimeType,
-      format,
-      prompt,
-      base64: result.fileData,
-      ...(lineage ?? {}),
-      sourceFileRef: result.editedFileRef ?? null,
-      editSummary: isRevision
-        ? (result.editQuality?.changes?.length
-            ? result.editQuality.changes.join("; ")
-            : `Revised: ${prompt}`
-          ).slice(0, 300)
-        : null,
-    });
-    if (assetId && result.editQuality) {
-      result.editQuality.versionId = assetId;
-    }
-    if (assetId && result.editedFileRef) {
-      relinkDurableFileContextBestEffort({
-        fileRef: result.editedFileRef,
-        sessionId: context.oraSessionId,
+  let reservation: OraGeneratedAssetReservation | null = null;
+  try {
+    if (context.userId) {
+      reservation = await reserveOraGeneratedAsset({
         userId: context.userId,
-        assetId,
+        oraProjectId: projectId,
+        kind: "file",
+        source: "ora-realtime-file-generation",
+        fileName: `ora-generated.${format}`,
+        mimeType: "application/octet-stream",
       });
     }
-  }
 
-  return toolSuccess(
-    `The ${format.toUpperCase()} file is ready. Briefly explain what was created or changed and tell the user it is in the chat.`,
-    {
-      content: result.reply,
-      ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
-      generatedFile: {
-        fileName: result.fileName,
-        fileData: result.fileData,
-        mimeType: result.mimeType,
+    const { tryApplyLayoutPreservingFileEdit } = await import("./office-layout-edit");
+    const layoutEdit = await tryApplyLayoutPreservingFileEdit({
+      message: prompt,
+      format,
+      documentRefs,
+      sessionId: context.oraSessionId,
+      userId: context.userId,
+      subscriptionTier: context.tier,
+      preferredFileRef:
+        multiFilePlan?.targetFileRef ?? resolveNamedEditTarget(prompt, carriedFileMeta),
+      activeAssetBuffer,
+      activeAssetFileName,
+    });
+    const brandKit = context.userId
+      ? await loadBrandKit(context.userId, projectId).catch(() => null)
+      : null;
+    const hasSourceData = carriedDocs.length > 0 || activeAssetContextText.length > 0;
+    const result =
+      layoutEdit ??
+      (await generateFileFromPrompt(
+        filePrompt,
         format,
-        ...(assetId ? { assetId } : {}),
-        ...(result.editQuality ? { editQuality: result.editQuality } : {}),
+        context.history ?? [],
+        context.language,
+        hasSourceData,
+        context.tier,
+        brandKit,
+      ));
+    if (!layoutEdit && documentRefs.length > 0 && hasSourceData) {
+      result.editQuality = {
+        editMode: "redesigned",
+        changes: [],
+        outputFileName: result.fileName.slice(0, 300),
+        preservedLayout: false,
+        canRedesign: false,
+      };
+    }
+
+    let assetId: number | null = null;
+    if (context.userId && reservation) {
+      const lineage =
+        active && layoutEdit
+          ? await getNextVersionLineageFromAssetId(context.userId, active.assetId)
+          : result.editedFileRef
+            ? await getNextVersionLineage(context.userId, result.editedFileRef)
+            : null;
+      const isRevision = Boolean((active && layoutEdit) || result.editedFileRef);
+      assetId = await completeOraGeneratedAsset({
+        reservation,
+        asset: {
+          userId: context.userId,
+          // Chained versions inherit their parent's project through lineage.
+          // Only a standalone v1 uses the project resolved from this voice turn.
+          oraProjectId: projectId,
+          kind: "file",
+          fileName: result.fileName,
+          mimeType: result.mimeType,
+          format,
+          prompt,
+          ...(lineage ?? {}),
+          sourceFileRef: result.editedFileRef ?? null,
+          editSummary: isRevision
+            ? (result.editQuality?.changes?.length
+                ? result.editQuality.changes.join("; ")
+                : `Revised: ${prompt}`
+              ).slice(0, 300)
+            : null,
+        },
+        base64: result.fileData,
+      });
+      reservation = null;
+      if (result.editQuality) {
+        result.editQuality.versionId = assetId;
+      }
+      if (result.editedFileRef) {
+        relinkDurableFileContextBestEffort({
+          fileRef: result.editedFileRef,
+          sessionId: context.oraSessionId,
+          userId: context.userId,
+          assetId,
+        });
+      }
+    }
+
+    return toolSuccess(
+      `The ${format.toUpperCase()} file is ready. Briefly explain what was created or changed and tell the user it is in the chat.`,
+      {
+        content: result.reply,
+        ...(multiFilePlan ? { usedFiles: multiFilePlan.usedFiles } : {}),
+        generatedFile: {
+          fileName: result.fileName,
+          fileData: result.fileData,
+          mimeType: result.mimeType,
+          format,
+          ...(assetId ? { assetId } : {}),
+          ...(result.editQuality ? { editQuality: result.editQuality } : {}),
+        },
       },
-    },
-  );
+    );
+  } catch (err) {
+    if (reservation && context.userId) {
+      await cancelOraGeneratedAsset(reservation, context.userId);
+    }
+    logger.warn(
+      { component: "ora-realtime-tool", errorClass: err instanceof Error ? err.name : "unknown" },
+      "Voice file generation or persistence failed",
+    );
+    if (err instanceof AssetAdmissionError && err.code === "asset_quota_exceeded") {
+      return toolFailure("quota_reached", err.message);
+    }
+    return toolFailure(
+      "temporarily_unavailable",
+      "Your file could not be completed. Please try again.",
+    );
+  }
 }
 
 async function executeImageGeneration(
@@ -521,59 +558,91 @@ async function executeImageGeneration(
     prompt,
     subscriptionTier: context.tier,
   });
-  const result = await generateImage({
-    prompt: profile.prompt,
-    quality: profile.quality,
-    aspectRatio: profile.aspectRatio,
-    style: profile.style,
-    subscriptionTier: context.tier,
-  });
-
-  let imageId: number | null = null;
+  const projectId = await resolveProjectId(context);
+  let reservation: OraGeneratedAssetReservation | null;
   try {
+    reservation = await reserveOraGeneratedAsset({
+      userId: context.userId,
+      oraProjectId: projectId,
+      kind: "generated",
+      source: "ora-realtime-image",
+      fileName: "ora-image.webp",
+      mimeType: "image/webp",
+    });
+  } catch (error) {
+    if (error instanceof AssetAdmissionError && error.code === "asset_quota_exceeded") {
+      return toolFailure("quota_reached", error.message);
+    }
+    return toolFailure(
+      "temporarily_unavailable",
+      "Your image could not be prepared for storage. Please try again.",
+    );
+  }
+
+  try {
+    const result = await generateImage({
+      prompt: profile.prompt,
+      quality: profile.quality,
+      aspectRatio: profile.aspectRatio,
+      style: profile.style,
+      subscriptionTier: context.tier,
+    });
     const parsed = result.openaiUrl.startsWith("data:")
       ? result.openaiUrl.match(/^data:([^;,]+);base64,(.+)$/s)
       : null;
     let mimeType = parsed?.[1] ?? "image/png";
-    let base64 = parsed?.[2] ?? "";
-    if (!base64) {
+    let bytes = parsed?.[2] ? Buffer.from(parsed[2], "base64") : null;
+    if (!bytes) {
       const response = await fetch(result.openaiUrl);
       if (response.ok) {
         mimeType = response.headers.get("content-type") ?? mimeType;
-        base64 = Buffer.from(await response.arrayBuffer()).toString("base64");
+        bytes = Buffer.from(await response.arrayBuffer());
       }
     }
-    if (base64) {
-      const ext = mimeType.split("/")[1]?.split("+")[0] ?? "png";
-      imageId = await persistOraAsset({
+    if (!bytes?.length) throw new Error("ora_realtime_image_bytes_unavailable");
+    const ext = mimeType.split("/")[1]?.split("+")[0] ?? "png";
+    const imageId = await completeOraGeneratedAsset({
+      reservation,
+      asset: {
         userId: context.userId,
-        oraProjectId: await resolveProjectId(context),
+        oraProjectId: projectId,
         kind: "image",
-        fileName: `ora-image-${Date.now()}.${ext}`,
+        fileName: `ora-image-${reservation.id}.${ext}`,
         mimeType,
         format: ext,
         prompt: profile.originalPrompt,
-        base64,
-      });
-    }
-  } catch (err) {
-    logger.warn({ component: "ora-realtime-tool", err }, "Voice image persistence failed");
-  }
-
-  return toolSuccess(
-    "The image is ready in the chat. Briefly describe it without reading any URL.",
-    {
-      content: "Here is the image you created with Ora.",
-      imageUrl: result.openaiUrl,
-      ...(imageId ? { imageId } : {}),
-      imageMeta: {
-        kind: profile.kind,
-        aspectRatio: profile.aspectRatio,
-        style: profile.style,
-        quality: profile.quality,
       },
-    },
-  );
+      base64: bytes.toString("base64"),
+    });
+    reservation = null;
+
+    return toolSuccess(
+      "The image is ready in the chat. Briefly describe it without reading any URL.",
+      {
+        content: "Here is the image you created with Ora.",
+        imageUrl: `/api/ora/assets/${imageId}/download`,
+        imageId,
+        imageMeta: {
+          kind: profile.kind,
+          aspectRatio: profile.aspectRatio,
+          style: profile.style,
+          quality: profile.quality,
+        },
+      },
+    );
+  } catch (err) {
+    if (reservation) {
+      await cancelOraGeneratedAsset(reservation, context.userId);
+    }
+    logger.warn(
+      { component: "ora-realtime-tool", errorClass: err instanceof Error ? err.name : "unknown" },
+      "Voice image generation or persistence failed",
+    );
+    return toolFailure(
+      "temporarily_unavailable",
+      "Your image could not be completed. Please try again.",
+    );
+  }
 }
 
 const DEFAULT_EXECUTORS: OraRealtimeToolExecutors = {

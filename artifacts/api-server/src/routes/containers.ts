@@ -19,7 +19,6 @@ import {
   getContainerStatus,
   execInContainer,
   destroyContainer,
-  ensureContainerLogTailer,
   recordContainerLog,
   tenantRuntimeProvider,
 } from "../lib/tenant-runtime";
@@ -36,6 +35,10 @@ import {
   resolveZeroGenerationTarget,
 } from "../lib/zero-sealed-generation";
 import { CloudflareRuntimeControlError } from "../lib/cloudflare-runtime-provider";
+import {
+  requireActiveProjectLifecycleSession,
+  withActiveProjectLifecycle,
+} from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -116,6 +119,7 @@ router.get(
 router.post(
   "/projects/:id/container/start",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const project = await loadProject(projectId);
@@ -237,7 +241,13 @@ router.post(
 
     // Provision asynchronously (don't await — client will poll /status)
     setImmediate(() => {
-      provisionContainer(projectId, files, envVars).catch((err: unknown) => {
+      void withActiveProjectLifecycle(projectId, async (session) => {
+        if (!(await session.assertActive())) return;
+        await provisionContainer(projectId, files, envVars);
+        if (!(await session.assertActive())) {
+          logger.warn({ projectId }, "Container provisioning finished after project retirement");
+        }
+      }).catch((err: unknown) => {
         logger.error({ err, projectId }, "Container provisioning failed");
       });
     });
@@ -248,6 +258,7 @@ router.post(
 router.post(
   "/projects/:id/container/stop",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const project = await loadProject(projectId);
@@ -257,6 +268,16 @@ router.post(
     }
 
     await hibernateContainer(projectId);
+    if (project.containerId) {
+      const observed = await getContainerStatus(project.containerId);
+      if (observed === "running" || observed === "starting") {
+        res.status(503).json({
+          error: "The preview could not be stopped yet. Please try again.",
+          code: "preview_hibernate_unconfirmed",
+        });
+        return;
+      }
+    }
     res.json({ containerStatus: "hibernated" });
   },
 );
@@ -292,8 +313,8 @@ router.get(
 //   2. Replay the last N persisted log rows so the client has context.
 //   3. Flush any buffered live lines that arrived after the replay snapshot.
 //   4. Stream future lines until the client disconnects.
-// Lazily starts the Fly log tailer for this project so subscribing alone is
-// enough to get a feed going — no admin call required.
+// Observation only: subscribing never starts provider work. Runtime creation
+// and boot recovery own log-tailer startup behind their mutation boundaries.
 router.get(
   "/projects/:id/container/logs/stream",
   requireProjectOwnership,
@@ -363,12 +384,9 @@ router.get(
       write(payload);
     }
 
-    // Lazy-start the tailer. Idempotent — already-running tailers are a
-    // no-op. If the project has no container yet, surface a system line
-    // explaining why so the user isn't staring at an empty pane.
-    if (project.containerId) {
-      ensureContainerLogTailer(projectId, project.containerId);
-    } else {
+    // If the project has no container yet, surface a system line explaining
+    // why so the user isn't staring at an empty pane.
+    if (!project.containerId) {
       const msg =
         project.builderMode === "agentic"
           ? "Container is still provisioning — logs will appear once the machine is up."
@@ -479,6 +497,7 @@ router.post("/projects/:id/container/publish", requireProjectOwnership, (_req, r
 router.post(
   "/projects/:id/container/unpublish",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const project = await loadProject(projectId);
@@ -488,7 +507,14 @@ router.post(
     }
 
     if (project.prodContainerId) {
-      await destroyContainer(project.prodContainerId, projectId);
+      const destroyed = await destroyContainer(project.prodContainerId, projectId);
+      if (!destroyed) {
+        res.status(503).json({
+          error: "The production container could not be removed yet. Please try again.",
+          code: "production_container_destroy_unconfirmed",
+        });
+        return;
+      }
       await db
         .update(projectsTable)
         .set({ prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" })
@@ -503,6 +529,7 @@ router.post(
 router.delete(
   "/projects/:id/container",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const project = await loadProject(projectId);
@@ -512,7 +539,14 @@ router.delete(
     }
 
     if (project.containerId) {
-      await destroyContainer(project.containerId, projectId);
+      const destroyed = await destroyContainer(project.containerId, projectId);
+      if (!destroyed) {
+        res.status(503).json({
+          error: "The preview container could not be removed yet. Please try again.",
+          code: "preview_container_destroy_unconfirmed",
+        });
+        return;
+      }
     }
 
     await db

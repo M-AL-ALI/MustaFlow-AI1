@@ -35,6 +35,7 @@ import { getAuth } from "@clerk/express";
 import { guessMime, runRefinePipeline, type BuilderFile } from "../lib/builder";
 import { injectBridge, MOCK_FLAG_SCRIPT } from "../lib/consoleBridge";
 import { isBinaryMime } from "../lib/binary-mime";
+import { resolveProjectFileBytes } from "../lib/project-file-asset-reference";
 import { writeKnowledge } from "../lib/knowledge";
 import { logger } from "../lib/logger";
 import { graduateCanvasVariantAtomically } from "../lib/canvas-variant-graduation";
@@ -505,7 +506,9 @@ router.get(
     const mime = file.mimeType || guessMime(file.path);
     res.setHeader("Cache-Control", "no-store, must-revalidate");
     if (isBinaryMime(mime)) {
-      res.type(mime).send(Buffer.from(file.content, "base64"));
+      res
+        .type(mime)
+        .send(await resolveProjectFileBytes({ projectId, content: file.content, mimeType: mime }));
       return;
     }
     if (mime === "text/html") {
@@ -890,7 +893,13 @@ router.get("/canvas/share/:token/{*splat}", async (req, res): Promise<void> => {
   const mime = file.mimeType || guessMime(file.path);
   res.setHeader("Cache-Control", "no-store");
   if (isBinaryMime(mime)) {
-    res.type(mime).send(Buffer.from(file.content, "base64"));
+    res.type(mime).send(
+      await resolveProjectFileBytes({
+        projectId: row.projectId,
+        content: file.content,
+        mimeType: mime,
+      }),
+    );
     return;
   }
   if (mime === "text/html") {
@@ -1323,7 +1332,13 @@ router.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<void> => {
   const mime = file.mimeType || guessMime(file.path);
   res.setHeader("Cache-Control", "no-store");
   if (isBinaryMime(mime)) {
-    res.type(mime).send(Buffer.from(file.content, "base64"));
+    res.type(mime).send(
+      await resolveProjectFileBytes({
+        projectId: test.projectId,
+        content: file.content,
+        mimeType: mime,
+      }),
+    );
     return;
   }
   if (mime === "text/html") {
@@ -1389,7 +1404,13 @@ publicCanvasRouter.get("/canvas/share/:token/{*splat}", async (req, res): Promis
   const mime = file.mimeType || guessMime(file.path);
   res.setHeader("Cache-Control", "no-store");
   if (isBinaryMime(mime)) {
-    res.type(mime).send(Buffer.from(file.content, "base64"));
+    res.type(mime).send(
+      await resolveProjectFileBytes({
+        projectId: row.projectId,
+        content: file.content,
+        mimeType: mime,
+      }),
+    );
     return;
   }
   if (mime === "text/html") {
@@ -1482,7 +1503,13 @@ publicCanvasRouter.get("/canvas/ab/:testId/{*splat}", async (req, res): Promise<
   const mime = file.mimeType || guessMime(file.path);
   res.setHeader("Cache-Control", "no-store");
   if (isBinaryMime(mime)) {
-    res.type(mime).send(Buffer.from(file.content, "base64"));
+    res.type(mime).send(
+      await resolveProjectFileBytes({
+        projectId: test.projectId,
+        content: file.content,
+        mimeType: mime,
+      }),
+    );
     return;
   }
   if (mime === "text/html") {

@@ -5,6 +5,7 @@ import {
   PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS,
   PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS,
 } from "./project-file-writer";
+import { reconcileProjectFileAssetUsage } from "./project-file-asset-usage";
 
 export class CanvasVariantGraduationError extends Error {
   readonly code = "canvas_variant_graduation_failed";
@@ -80,6 +81,12 @@ export async function graduateCanvasVariantAtomically(
           });
           inserted += 1;
         }
+        await reconcileProjectFileAssetUsage(tx, {
+          projectId: input.projectId,
+          artifactId: existing?.artifactId ?? null,
+          filePath: file.path,
+          nextContent: file.content,
+        });
       }
 
       return { inserted, updated };

@@ -1,5 +1,5 @@
-import { ContainerProxy as SandboxContainerProxy, Sandbox, getSandbox } from "@cloudflare/sandbox";
-import { createHash } from "node:crypto";
+import { ContainerProxy as SandboxContainerProxy, Sandbox } from "@cloudflare/sandbox";
+import { createHash, randomBytes } from "node:crypto";
 import {
   CAPABILITY_DOORMAN_HOST,
   RUNTIME_RECONCILIATION_MAX_AMBIGUOUS_OBSERVATIONS,
@@ -27,12 +27,15 @@ import { dependencyLayerChunkKey, layeredArtifactAppChunkKey } from "./artifact-
 import { StagingArtifactCommitOwnerLossError } from "./artifact-commit-recovery";
 import {
   RUNTIME_MATERIALIZER_SOURCE,
+  RUNTIME_MATERIALIZATION_PREPARER_SOURCE,
+  RUNTIME_RELEASE_RETENTION_COUNT,
   RUNTIME_RELEASE_ROOT,
   type RuntimeMaterializationFile,
   type RuntimeMaterializationManifest,
   type RuntimeMaterializationPayload,
   type RuntimeMaterializationRequest,
   runtimeMaterializationPayloadPath,
+  runtimeMaterializationLeasePath,
   runtimeMaterializationStageRoot,
   sealRuntimeMaterializationManifest,
   verifyRuntimeMaterializationRequest,
@@ -266,14 +269,25 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
     }
   }
 
-  async prepareRuntimeMaterialization(sealedArtifactSha256: string): Promise<{ ok: true }> {
+  async prepareRuntimeMaterialization(
+    sealedArtifactSha256: string,
+    stageLeaseId: string,
+  ): Promise<{ ok: true }> {
     const stageRoot = runtimeMaterializationStageRoot(sealedArtifactSha256);
     const scope = new RuntimeMaterializationRpcScope();
     try {
       await consumeRuntimeMaterializationRpcResult(
         scope,
         this.exec(
-          argvToCommandString(["sh", "-c", 'rm -rf -- "$1" && mkdir -p -- "$1"', "sh", stageRoot]),
+          argvToCommandString([
+            "node",
+            "--input-type=module",
+            "-e",
+            RUNTIME_MATERIALIZATION_PREPARER_SOURCE,
+            stageRoot,
+            RUNTIME_RELEASE_ROOT,
+            stageLeaseId,
+          ]),
           { cwd: "/workspace", timeout: 30_000 },
         ),
         (result) => {
@@ -286,10 +300,18 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
     }
   }
 
-  async materializeRuntimeAggregate(
-    request: RuntimeMaterializationRequest,
-  ): Promise<{ ok: true; filesWritten: number; bytesWritten: number }> {
+  async materializeRuntimeAggregate(request: RuntimeMaterializationRequest): Promise<{
+    ok: true;
+    filesWritten: number;
+    bytesWritten: number;
+    releasesRetained: number;
+    releasesRemoved: number;
+    leftoversRemoved: number;
+  }> {
     const manifest = await verifyRuntimeMaterializationRequest(request);
+    if (request.stageLeaseId === undefined) {
+      throw new Error("Runtime materialization stage lease is unavailable");
+    }
     const stageRoot = runtimeMaterializationStageRoot(manifest.sealedArtifactSha256);
     const releaseRoot = `${RUNTIME_RELEASE_ROOT}/${manifest.sealedArtifactSha256}`;
     const manifestPath = `${stageRoot}/manifest.json`;
@@ -330,6 +352,11 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
             stageRoot,
             releaseRoot,
             String(request.stagingAbortAfterFiles ?? 0),
+            request.rollbackReleaseSha256 ?? "",
+            request.stagingAbortReleaseCleanup === true ? "1" : "0",
+            request.stagingAbortBeforeReleaseSwap === true ? "1" : "0",
+            request.stageLeaseId,
+            String(request.stagingHoldLockMs ?? 0),
           ]),
           {
             cwd: "/workspace",
@@ -351,7 +378,15 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
         (output as { ok?: unknown }).ok !== true ||
         !Number.isSafeInteger((output as { filesWritten?: unknown }).filesWritten) ||
         !Number.isSafeInteger((output as { bytesWritten?: unknown }).bytesWritten) ||
-        (output as { filesWritten: number }).filesWritten !== manifest.files.length
+        !Number.isSafeInteger((output as { releasesRetained?: unknown }).releasesRetained) ||
+        !Number.isSafeInteger((output as { releasesRemoved?: unknown }).releasesRemoved) ||
+        !Number.isSafeInteger((output as { leftoversRemoved?: unknown }).leftoversRemoved) ||
+        (output as { filesWritten: number }).filesWritten !== manifest.files.length ||
+        (output as { releasesRetained: number }).releasesRetained < 1 ||
+        (output as { releasesRetained: number }).releasesRetained >
+          RUNTIME_RELEASE_RETENTION_COUNT ||
+        (output as { releasesRemoved: number }).releasesRemoved < 0 ||
+        (output as { leftoversRemoved: number }).leftoversRemoved < 0
       ) {
         throw new Error("Runtime materializer returned invalid evidence");
       }
@@ -362,6 +397,9 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
           sealedArtifactSha256: manifest.sealedArtifactSha256,
           filesWritten: manifest.files.length,
           bytesWritten: (output as { bytesWritten: number }).bytesWritten,
+          releasesRetained: (output as { releasesRetained: number }).releasesRetained,
+          releasesRemoved: (output as { releasesRemoved: number }).releasesRemoved,
+          leftoversRemoved: (output as { leftoversRemoved: number }).leftoversRemoved,
           durationMs: Date.now() - startedAt,
         }),
       );
@@ -369,15 +407,26 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
         ok: true,
         filesWritten: manifest.files.length,
         bytesWritten: (output as { bytesWritten: number }).bytesWritten,
+        releasesRetained: (output as { releasesRetained: number }).releasesRetained,
+        releasesRemoved: (output as { releasesRemoved: number }).releasesRemoved,
+        leftoversRemoved: (output as { leftoversRemoved: number }).leftoversRemoved,
       };
     } finally {
       try {
         await consumeRuntimeMaterializationRpcResult(
           scope,
-          this.exec(argvToCommandString(["rm", "-rf", "--", stageRoot]), {
-            cwd: "/workspace",
-            timeout: 30_000,
-          }),
+          this.exec(
+            argvToCommandString([
+              "rm",
+              "-f",
+              "--",
+              runtimeMaterializationLeasePath(manifest.sealedArtifactSha256, request.stageLeaseId),
+            ]),
+            {
+              cwd: "/workspace",
+              timeout: 30_000,
+            },
+          ),
           () => undefined,
         );
       } catch (error) {
@@ -454,17 +503,27 @@ export type RuntimeReconciliationObservationSink = (
 
 export interface RuntimeMaterializationTicket {
   payloadContentSha256s: string[];
+  /** Present on real Sandbox tickets; optional only for legacy in-memory test doubles. */
+  stageLeaseId?: string;
 }
 
 export interface RuntimeMaterializationOptions {
   /** Staging-only live owner-loss probe; production callers never set it. */
   stagingAbortAfterFiles?: number;
+  /** Unit/staging-only post-rename cleanup failure probe. */
+  stagingAbortReleaseCleanup?: boolean;
+  /** Unit/staging-only same-release swap-boundary failure probe. */
+  stagingAbortBeforeReleaseSwap?: boolean;
+  /** Unit-only lock contention probe; production callers never set it. */
+  stagingHoldLockMs?: number;
 }
 
 export interface RuntimeBackend {
   start(runtime: StoredRuntime): Promise<BackendStartResult>;
   stop(runtime: StoredRuntime): Promise<void>;
   destroy(runtime: StoredRuntime): Promise<void>;
+  /** Governed route mutations are the only callers allowed to persist this policy. */
+  setKeepAlive(identity: string, keepAlive: boolean): Promise<void>;
   status(runtime: StoredRuntime): Promise<BackendStatusResult>;
   availability(runtime: StoredRuntime): Promise<BackendAvailabilityResult>;
   reconcile(
@@ -613,9 +672,12 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
   ) {}
 
   async start(runtime: StoredRuntime): Promise<BackendStartResult> {
-    const sandbox = this.sandbox(runtime.descriptor.identity, true);
+    // A start is a bounded control-plane operation, not proof that the slot owns
+    // a published route. The configured activity window keeps a candidate alive
+    // through cutover without turning an abandoned candidate into a permanent bill.
+    const keepAlive = false;
+    const sandbox = await this.configuredSandbox(runtime.descriptor.identity, keepAlive);
     await sandbox.setOutboundByHost(DOORMAN_HOST, "capabilityDoorman");
-    await sandbox.setKeepAlive(true);
     await sandbox.killAllProcesses();
     if (runtime.artifactSha256 === null) throw new Error("A committed artifact is required");
     const process = await sandbox.startProcess(argvToCommandString(runtime.manifest.startCommand), {
@@ -641,14 +703,21 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
   }
 
   async stop(runtime: StoredRuntime): Promise<void> {
-    const sandbox = this.sandbox(runtime.descriptor.identity, false);
+    const sandbox = await this.configuredSandbox(runtime.descriptor.identity, false);
     await sandbox.killAllProcesses();
-    await sandbox.setKeepAlive(false);
     await sandbox.stop();
   }
 
   async destroy(runtime: StoredRuntime): Promise<void> {
-    await this.sandbox(runtime.descriptor.identity, false).destroy();
+    const sandbox = await this.configuredSandbox(runtime.descriptor.identity, false);
+    await sandbox.destroy();
+  }
+
+  async setKeepAlive(identity: string, keepAlive: boolean): Promise<void> {
+    const sandbox = await this.configuredSandbox(identity);
+    // Policy ownership remains one explicit, awaited mutation. Raw stub acquisition
+    // cannot queue an SDK configure call that later resurrects an older value.
+    await sandbox.setKeepAlive(keepAlive);
   }
 
   async status(runtime: StoredRuntime): Promise<BackendStatusResult> {
@@ -656,10 +725,7 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       return { running: false, lastError: null, cause: "process_missing" };
     }
     try {
-      const process = await this.sandbox(
-        runtime.descriptor.identity,
-        runtimeReadKeepsContainerAlive(runtime.descriptor.status),
-      ).getProcess(runtime.processId);
+      const process = await this.sandbox(runtime.descriptor.identity).getProcess(runtime.processId);
       if (process === null) {
         return {
           running: false,
@@ -705,7 +771,7 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     }
 
     try {
-      return await this.sandbox(runtime.descriptor.identity, true).probeRuntimeHealth({
+      return await this.sandbox(runtime.descriptor.identity).probeRuntimeHealth({
         servicePort: runtime.manifest.servicePort,
         healthPath: runtime.manifest.healthPath,
         timeoutMs: RUNTIME_AVAILABILITY_TIMEOUT_MS,
@@ -768,7 +834,7 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
 
   async exec(runtime: StoredRuntime, request: ExecRuntimeRequest): Promise<BackendExecResult> {
     try {
-      const result = await this.sandbox(runtime.descriptor.identity, true).exec(
+      const result = await this.sandbox(runtime.descriptor.identity).exec(
         argvToCommandString(request.argv),
         { cwd: request.cwd, timeout: request.timeoutMs },
       );
@@ -794,8 +860,7 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
   async logs(runtime: StoredRuntime): Promise<{ stdout: string; stderr: string }> {
     if (runtime.processId === null) return { stdout: "", stderr: "" };
     try {
-      const keepAlive = runtimeReadKeepsContainerAlive(runtime.descriptor.status);
-      const logs = await this.sandbox(runtime.descriptor.identity, keepAlive).getProcessLogs(
+      const logs = await this.sandbox(runtime.descriptor.identity).getProcessLogs(
         runtime.processId,
       );
       return { stdout: logs.stdout, stderr: logs.stderr };
@@ -960,16 +1025,12 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     sources: RuntimeAggregateSource[],
   ): Promise<RuntimeMaterializationTicket> {
     const scope = new RuntimeMaterializationRpcScope();
-    const sandbox = scope.track(this.sandbox(runtime.descriptor.identity, true));
+    const sandbox = scope.track(await this.configuredSandbox(runtime.descriptor.identity, false));
+    const stageLeaseId = randomBytes(16).toString("hex");
     try {
       await consumeRuntimeMaterializationRpcResult(
         scope,
-        sandbox.killAllProcesses(),
-        () => undefined,
-      );
-      await consumeRuntimeMaterializationRpcResult(
-        scope,
-        sandbox.prepareRuntimeMaterialization(sealedArtifactSha256),
+        sandbox.prepareRuntimeMaterialization(sealedArtifactSha256, stageLeaseId),
         () => undefined,
       );
       const payloads: RuntimeMaterializationPayload[] = [];
@@ -979,12 +1040,25 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
             scope,
             sandbox,
             sealedArtifactSha256,
+            stageLeaseId,
             index,
             sources[index],
           ),
         );
       }
-      return { payloadContentSha256s: payloads.map((payload) => payload.contentSha256) };
+      return {
+        payloadContentSha256s: payloads.map((payload) => payload.contentSha256),
+        stageLeaseId,
+      };
+    } catch (error) {
+      await this.cleanupRuntimeMaterializationAttempt(
+        scope,
+        sandbox,
+        sealedArtifactSha256,
+        stageLeaseId,
+        sources.length,
+      );
+      throw error;
     } finally {
       scope.close();
     }
@@ -1002,6 +1076,9 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     if (ticket.payloadContentSha256s.length !== sources.length) {
       throw new Error("Runtime materialization ticket does not match its payloads");
     }
+    if (ticket.stageLeaseId === undefined || !/^[0-9a-f]{32}$/u.test(ticket.stageLeaseId)) {
+      throw new Error("Runtime materialization ticket has no valid stage lease");
+    }
     const payloads = sources.map((source, index) => {
       const contentSha256 = ticket.payloadContentSha256s[index];
       if (
@@ -1014,7 +1091,7 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       return { index, contentSha256, size: source.bytes };
     });
     const scope = new RuntimeMaterializationRpcScope();
-    const sandbox = scope.track(this.sandbox(runtime.descriptor.identity, true));
+    const sandbox = scope.track(await this.configuredSandbox(runtime.descriptor.identity, false));
     try {
       const files: RuntimeMaterializationFile[] = sources
         .flatMap((source, payloadIndex) => source.files.map((file) => ({ ...file, payloadIndex })))
@@ -1029,7 +1106,32 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       if (options?.stagingAbortAfterFiles !== undefined) {
         request.stagingAbortAfterFiles = options.stagingAbortAfterFiles;
       }
-      let result: { ok: true; filesWritten: number; bytesWritten: number };
+      if (options?.stagingAbortReleaseCleanup !== undefined) {
+        request.stagingAbortReleaseCleanup = options.stagingAbortReleaseCleanup;
+      }
+      if (options?.stagingAbortBeforeReleaseSwap !== undefined) {
+        request.stagingAbortBeforeReleaseSwap = options.stagingAbortBeforeReleaseSwap;
+      }
+      if (options?.stagingHoldLockMs !== undefined) {
+        request.stagingHoldLockMs = options.stagingHoldLockMs;
+      }
+      request.stageLeaseId = ticket.stageLeaseId;
+      if (runtime.artifactSha256 !== null) {
+        if (!/^[0-9a-f]{64}$/u.test(runtime.artifactSha256)) {
+          throw new Error("Runtime rollback release identity is invalid");
+        }
+        if (runtime.artifactSha256 !== sealedArtifactSha256) {
+          request.rollbackReleaseSha256 = runtime.artifactSha256;
+        }
+      }
+      let result: {
+        ok: true;
+        filesWritten: number;
+        bytesWritten: number;
+        releasesRetained: number;
+        releasesRemoved: number;
+        leftoversRemoved: number;
+      };
       try {
         result = await consumeRuntimeMaterializationRpcResult(
           scope,
@@ -1044,6 +1146,13 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
       }
       return { filesWritten: result.filesWritten, layersMaterialized };
     } finally {
+      await this.cleanupRuntimeMaterializationAttempt(
+        scope,
+        sandbox,
+        sealedArtifactSha256,
+        ticket.stageLeaseId,
+        sources.length,
+      );
       scope.close();
     }
   }
@@ -1052,12 +1161,13 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     scope: RuntimeMaterializationRpcScope,
     sandbox: NabuflowSandbox,
     sealedArtifactSha256: string,
+    stageLeaseId: string,
     index: number,
     source: RuntimeAggregateSource,
   ): Promise<RuntimeMaterializationPayload> {
     const transfer = verifiedRuntimePayloadStream(this.env.NABUFLOW_RUNTIME_ARTIFACTS, source);
     const stageRoot = runtimeMaterializationStageRoot(sealedArtifactSha256);
-    const pendingPath = `${stageRoot}/${String(index).padStart(2, "0")}.pending`;
+    const pendingPath = `${stageRoot}/${String(index).padStart(2, "0")}.${stageLeaseId}.pending`;
     await consumeRuntimeMaterializationRpcResult(
       scope,
       sandbox.writeFile(pendingPath, transfer.stream),
@@ -1090,12 +1200,55 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
     return payload;
   }
 
-  private sandbox(identity: string, keepAlive: boolean): NabuflowSandbox {
-    return getSandbox(
-      this.env.NABUFLOW_SANDBOX,
-      identity,
-      runtimeSandboxOptions(keepAlive, this.env.NABUFLOW_RUNTIME_SLEEP_AFTER),
-    ) as NabuflowSandbox;
+  private async cleanupRuntimeMaterializationAttempt(
+    scope: RuntimeMaterializationRpcScope,
+    sandbox: NabuflowSandbox,
+    sealedArtifactSha256: string,
+    stageLeaseId: string,
+    payloadCount: number,
+  ): Promise<void> {
+    const stageRoot = runtimeMaterializationStageRoot(sealedArtifactSha256);
+    const paths = [
+      runtimeMaterializationLeasePath(sealedArtifactSha256, stageLeaseId),
+      ...Array.from(
+        { length: payloadCount },
+        (_, index) => `${stageRoot}/${String(index).padStart(2, "0")}.${stageLeaseId}.pending`,
+      ),
+    ];
+    try {
+      await consumeRuntimeMaterializationRpcResult(
+        scope,
+        sandbox.exec(argvToCommandString(["rm", "-f", "--", ...paths]), {
+          cwd: "/workspace",
+          timeout: 30_000,
+        }),
+        () => undefined,
+      );
+    } catch (error) {
+      // eslint-disable-next-line no-console -- an exact-path cleanup failure must remain observable
+      console.error(
+        JSON.stringify({
+          event: "runtime.materialization.attempt_cleanup_failed",
+          sealedArtifactSha256,
+          error: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+    }
+  }
+
+  private sandbox(identity: string): NabuflowSandbox {
+    return runtimeSandboxStub(this.env, identity);
+  }
+
+  private async configuredSandbox(identity: string, keepAlive?: boolean): Promise<NabuflowSandbox> {
+    const sandbox = this.sandbox(identity);
+    await sandbox.configure(
+      runtimeSandboxConfiguration(identity, this.env.NABUFLOW_RUNTIME_SLEEP_AFTER),
+    );
+    if (keepAlive !== undefined) {
+      await sandbox.setKeepAlive(keepAlive);
+    }
+    return sandbox;
   }
 }
 
@@ -1232,21 +1385,38 @@ function verifiedRuntimePayloadStream(
   };
 }
 
-export function runtimeSandboxOptions(keepAlive: boolean, sleepAfter: string) {
+export function runtimeSandboxConfiguration(identity: string, sleepAfter: string) {
   return {
-    keepAlive,
+    sandboxName: { name: identity },
     sleepAfter,
-    enableDefaultSession: true,
     // Artifact materialization uses streamed writeFile. The Sandbox SDK defaults to HTTP,
     // whose file client rejects streams; RPC is required to carry the stream into the DO.
     transport: "rpc" as const,
   };
 }
 
-export function runtimeReadKeepsContainerAlive(
-  status: StoredRuntime["descriptor"]["status"],
-): boolean {
-  return status === "running" || status === "starting";
+/**
+ * Acquire the named tenant Sandbox Durable Object without the SDK's implicit configure call.
+ * This helper is safe for metadata, probe, fetch, exec, and log reads: idFromName/get are
+ * address resolution only and persist no sandbox policy.
+ */
+export function runtimeSandboxStub(env: WorkerBindings, identity: string): NabuflowSandbox {
+  const durableObjectId = env.NABUFLOW_SANDBOX.idFromName(identity);
+  return env.NABUFLOW_SANDBOX.get(durableObjectId) as unknown as NabuflowSandbox;
+}
+
+/** Preserve the Sandbox SDK's WebSocket port-routing behavior without invoking getSandbox. */
+export function runtimeSandboxWebSocketConnect(
+  sandbox: Pick<NabuflowSandbox, "fetch">,
+  request: Request,
+  port: number,
+): Promise<Response> {
+  if (!Number.isInteger(port) || port < 1024 || port > 65_535 || port === 3_000) {
+    throw new Error("The runtime WebSocket port is invalid");
+  }
+  const headers = new Headers(request.headers);
+  headers.set("cf-container-target-port", String(port));
+  return sandbox.fetch(new Request(request, { headers }));
 }
 
 function releaseRootFor(sealedArtifactSha256: string): string {

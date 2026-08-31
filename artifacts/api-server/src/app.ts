@@ -19,6 +19,8 @@ import {
   startDurableQueue,
   stopDurableQueue,
   registerGdprErasureWorker,
+  registerRequiredWorker,
+  QUEUE_PROJECT_RETIREMENT,
 } from "./lib/durable-queue";
 import { runJob, registerJobWorkers } from "./lib/jobs";
 import { runGdprErasure } from "./lib/gdpr-erasure-worker";
@@ -28,6 +30,7 @@ import { startStuckRunScheduler } from "./lib/stuck-run-scheduler";
 import { generalLimiter } from "./lib/rateLimit";
 import { clerkSignupAdmissionLimiter } from "./lib/signup-admission";
 import { registerAssetAltTextWorker } from "./lib/asset-alt-text-analysis";
+import { runProjectRetirementOperation } from "./lib/project-retirement";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -44,16 +47,58 @@ startCfScheduler();
 // Sweeps due schedules every minute + runs synthetic uptime probes every 5 min.
 startDeploymentScheduler();
 
-// Start durable job queue (pg-boss). No-ops when DATABASE_URL is missing or
-// DURABLE_QUEUE_ENABLED=false. Falls back to in-memory enqueueJob silently.
-// After the queue starts, register workers for EAS build, app-testing, and CVE.
-void startDurableQueue(async (payload) => {
+// Start the durable queue and legacy workers. The project-retirement worker is
+// deliberately excluded here: app.ts is evaluated before startup migrations,
+// so registering it here could consume a receipt before its schema exists.
+export const durableQueueWorkerStartup = startDurableQueue(async (payload) => {
   await runJob(payload as unknown as Parameters<typeof runJob>[0]);
-}).then(async () => {
-  await registerJobWorkers();
-  void registerGdprErasureWorker(runGdprErasure);
-  void registerAssetAltTextWorker();
-});
+})
+  .then(async () => {
+    await registerJobWorkers();
+    await registerGdprErasureWorker(runGdprErasure);
+    await registerAssetAltTextWorker();
+  })
+  .catch((error: unknown) => {
+    logger.error(
+      { error },
+      "Durable worker startup failed; queue-backed mutations remain fail closed",
+    );
+  });
+
+let projectRetirementWorkerStartup: ReturnType<typeof registerRequiredWorker> | null = null;
+
+/**
+ * Register the destructive-cleanup worker only after startup migrations report
+ * a complete pass. Until then its readiness remains not_registered and every
+ * Trash admission fails closed.
+ */
+export function startProjectRetirementWorkerAfterMigrations(): ReturnType<
+  typeof registerRequiredWorker
+> {
+  projectRetirementWorkerStartup ??= durableQueueWorkerStartup.then(async () => {
+    const receipt = await registerRequiredWorker(
+      QUEUE_PROJECT_RETIREMENT,
+      async (payload) => {
+        const operationId = typeof payload.operationId === "string" ? payload.operationId : "";
+        if (!operationId) throw new Error("project_retirement_operation_id_missing");
+        await runProjectRetirementOperation(operationId);
+      },
+      {
+        retryLimit: 3,
+        retryDelay: 30,
+        retryBackoff: true,
+        queuePolicy: "exclusive",
+        registrationAttempts: 3,
+        registrationDelayMs: 250,
+      },
+    );
+    if (receipt.status !== "ready") {
+      logger.error(receipt, "Project retirement worker is unavailable; Trash writes fail closed");
+    }
+    return receipt;
+  });
+  return projectRetirementWorkerStartup;
+}
 
 // Kick off the domain renewal scheduler (Task #559).
 // Daily sweep: expiry warnings at 60/30/7/1 days + auto-renew for domains ≤ 30 days out.

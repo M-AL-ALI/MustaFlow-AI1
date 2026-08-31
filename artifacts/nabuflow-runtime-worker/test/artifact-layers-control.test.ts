@@ -180,6 +180,7 @@ describe("additive layered artifact control plane", () => {
         "runtime-reconciliation-v2",
         "runtime-reconciliation-v3",
         "runtime-reconciliation-v4",
+        "published-route-inventory-v1",
       ],
     });
     const identity = await deriveRuntimeIdentity({

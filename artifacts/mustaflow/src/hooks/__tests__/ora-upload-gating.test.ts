@@ -17,8 +17,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * signed-in users were being blocked by the anonymous per-session counters.
  * The per-session image/file COUNT caps must apply ONLY to anonymous visitors
  * (`!isSignedIn`) — signed-in users are metered by the backend daily quota,
- * not the in-browser session counter. The file SIZE cap still applies to
- * everyone.
+ * not the in-browser session counter. The legacy file-size cap protects only
+ * anonymous multipart uploads; signed-in users stream through the aggregate
+ * account-storage admission boundary.
  */
 describe("use-ora-chat uploadFile gating", () => {
   const src = readFileSync(path.join(__dirname, "../use-ora-chat.ts"), "utf8");
@@ -46,9 +47,19 @@ describe("use-ora-chat uploadFile gating", () => {
     expect(guard).toContain("!isSignedIn");
   });
 
-  it("still enforces the file size cap for everyone (not gated on auth)", () => {
-    const guard = extractIfStatementByCondition(uploadFn, "file.size > MAX_FILE_SIZE", "tsx");
+  it("keeps the legacy file-size cap on anonymous multipart uploads only", () => {
+    const guard = extractIfStatementByCondition(
+      uploadFn,
+      "!isSignedIn && file.size > MAX_FILE_SIZE",
+      "tsx",
+    );
     expect(guard).toContain("file.size > MAX_FILE_SIZE");
-    expect(guard).not.toContain("isSignedIn");
+    expect(guard).toContain("!isSignedIn");
+  });
+
+  it("streams signed-in uploads through the governed account asset boundary", () => {
+    expect(uploadFn).toContain("if (isSignedIn)");
+    expect(uploadFn).toContain("await uploadAccountAsset");
+    expect(uploadFn).toContain('source: "picker"');
   });
 });

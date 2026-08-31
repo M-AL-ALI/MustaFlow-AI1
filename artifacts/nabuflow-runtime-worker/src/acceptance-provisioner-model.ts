@@ -72,6 +72,12 @@ export interface StoredAcceptanceLease {
   material: AcceptanceEncryptedMaterial | null;
   capabilityRevision: string | null;
   terminalCode: string | null;
+  cleanupDispatchGeneration?: number;
+  cleanupDispatchState?: "pending" | "registered" | "terminal";
+  cleanupDispatchAttempts?: number;
+  cleanupDispatchNextAttemptAtMs?: number;
+  cleanupDispatchDeadlineMs?: number;
+  cleanupDispatchJobKey?: string;
 }
 
 export interface AcceptanceLeaseAuditRecord {
@@ -105,6 +111,7 @@ export interface AcceptanceVault {
   getLeaseForJanitor(leaseId: string): Promise<StoredAcceptanceLease | null>;
   listExpired(nowMs: number, limit: number): Promise<StoredAcceptanceLease[]>;
   listLeases(limit: number): Promise<StoredAcceptanceLease[]>;
+  runCleanup(nowMs: number): Promise<void>;
   storeProviderResult(input: {
     leaseId: string;
     ownerSubjectHash: string;
@@ -132,17 +139,25 @@ export interface AcceptanceVault {
   markDestroying(input: {
     leaseId: string;
     ownerSubjectHash: string | null;
+    cleanupGeneration?: number;
     nowMs: number;
   }): Promise<StoredAcceptanceLease | null>;
   markDestroyed(input: {
     leaseId: string;
     ownerSubjectHash: string | null;
+    cleanupGeneration?: number;
     nowMs: number;
   }): Promise<StoredAcceptanceLease | null>;
   markFailed(input: {
     leaseId: string;
     ownerSubjectHash: string | null;
     code: string;
+    nowMs: number;
+  }): Promise<StoredAcceptanceLease | null>;
+  markCleanupFailed(input: {
+    leaseId: string;
+    ownerSubjectHash: string | null;
+    cleanupGeneration?: number;
     nowMs: number;
   }): Promise<StoredAcceptanceLease | null>;
   recordAudit(record: Omit<AcceptanceLeaseAuditRecord, "sequence">): Promise<void>;

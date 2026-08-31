@@ -105,9 +105,70 @@ export interface DurableOperationQueueMessage {
   runtimeIdentity: string;
   subjectKey: string;
   kind: DurableOperationKind;
+  /**
+   * Coordinator-issued successor generation for deployment-version deferrals.
+   * Missing means the original/legacy delivery (generation zero).
+   */
+  deploymentDeferralCount?: number;
 }
 
 export type ArtifactCommitQueueMessage = DurableOperationQueueMessage;
+
+export const DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP = 12;
+export const DURABLE_OPERATION_DEPLOYMENT_RETRY_DELAY_SECONDS = 5;
+
+export const ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP = 5;
+export const ROUTE_POLICY_RECONCILIATION_DEADLINE_MS = 2 * 60 * 1_000;
+export const ROUTE_POLICY_RECONCILIATION_RETRY_MS = 5_000;
+export const ROUTE_POLICY_RECONCILIATION_LEASE_MS = 5_000;
+
+export interface RoutePolicyMutation {
+  identities: string[];
+  nowMs: number;
+}
+
+export interface RoutePolicyTerminalEvidence {
+  schemaVersion: 1;
+  code: "route_policy_reconciliation_exhausted";
+  cause: "attempt_cap" | "deadline" | "provider_write_failed";
+  attempts: number;
+  maxAttempts: number;
+  remainingWrites: number;
+  terminalAt: string;
+}
+
+export interface StoredRoutePolicyReconciliation {
+  schemaVersion: 1;
+  hostname: string;
+  generation: number;
+  fingerprint: string;
+  identities: string[];
+  state: "pending" | "completed" | "failed";
+  completedIdentities: string[];
+  attempt: number;
+  ownerId: string | null;
+  leaseUntilMs: number | null;
+  deadlineMs: number;
+  nextAttemptAtMs: number;
+  terminal: RoutePolicyTerminalEvidence | null;
+  createdAtMs: number;
+  updatedAtMs: number;
+}
+
+export type RoutePolicyReconciliationClaim =
+  | { state: "not_found" }
+  | { state: "completed" }
+  | { state: "terminal" }
+  | { state: "not_due" }
+  | { state: "busy" }
+  | {
+      state: "claimed";
+      hostname: string;
+      generation: number;
+      attempt: number;
+      ownerId: string;
+      writes: Array<{ identity: string; keepAlive: boolean }>;
+    };
 
 interface StoredDurableOperationJobBase {
   jobKey: string;
@@ -128,6 +189,12 @@ interface StoredDurableOperationJobBase {
   leaseUntilMs: number | null;
   abandonAtMs: number | null;
   deadlineMs: number;
+  /** Added with bounded deployment deferrals; legacy jobs normalize to zero. */
+  deploymentDeferralCount?: number;
+  /** Last deferral generation handed to the queue by the coordinator alarm. */
+  deploymentDeferralEnqueuedCount?: number;
+  /** Coordinator-alarm time for the next deployment successor. */
+  deploymentDeferralReadyAtMs?: number;
   response?: StoredHttpResponse;
   /** Added after the first durable-job rollout; legacy jobs derive this from their deadline. */
   createdAtMs?: number;
@@ -155,6 +222,8 @@ export interface StoredRuntimeManifestRestartJob extends StoredDurableOperationJ
   checkpoint: RuntimeManifestRestartCheckpoint;
   request: UpdateRuntimeManifestRequest;
   runtimeWasRunning?: boolean;
+  /** Release selected before the manifest restart mutates the runtime record. */
+  rollbackReleaseSha256?: string | null;
 }
 
 export interface StoredAcceptanceLeaseJob extends StoredDurableOperationJobBase {
@@ -313,6 +382,7 @@ export interface ControlCoordinator {
     jobKey: string,
     deploymentVersion: string,
     nowMs: number,
+    deliveredDeferralCount?: number,
   ): Promise<"matched" | "deferred" | "not_found" | "terminal">;
   renewDurableOperation(
     jobKey: string,
@@ -327,6 +397,7 @@ export interface ControlCoordinator {
     checkpoint: DurableOperationCheckpoint;
     payloadContentSha256s?: string[];
     runtimeWasRunning?: boolean;
+    rollbackReleaseSha256?: string | null;
     nowMs: number;
   }): Promise<StoredDurableOperationJob>;
   completeDurableOperation(
@@ -416,15 +487,52 @@ export interface ControlCoordinator {
   getContainerBinding(containerId: string): Promise<string | null>;
   unbindContainer(containerId: string, expectedIdentity: string): Promise<boolean>;
   getRoute(hostname: string): Promise<RouteRecord | null>;
+  listRoutesByProject(input: { projectId: number; cursor?: string; scanLimit: number }): Promise<{
+    routes: RouteRecord[];
+    nextCursor: string | null;
+    complete: boolean;
+  }>;
+  hasRouteForSandboxIdentity(identity: string): Promise<boolean>;
   activateRoute(
     route: RouteRecord,
     expectedPreviousManifestRevision: string | null,
-  ): Promise<"activated" | "conflict">;
+    policy: RoutePolicyMutation,
+  ): Promise<"activated" | "replay" | "conflict">;
   deactivateRoute(
     hostname: string,
     expectedManifestRevision: string,
     expectedSandboxIdentity: string,
+    policy: RoutePolicyMutation,
   ): Promise<"deactivated" | "not_found" | "conflict">;
+  claimRoutePolicyReconciliation(
+    hostname: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<RoutePolicyReconciliationClaim>;
+  recordRoutePolicyWrite(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    identity: string;
+    nowMs: number;
+  }): Promise<"recorded" | "superseded">;
+  failRoutePolicyReconciliation(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    nowMs: number;
+  }): Promise<"pending" | "terminal" | "superseded">;
+  completeRoutePolicyReconciliation(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    nowMs: number;
+  }): Promise<"completed" | "superseded">;
+  getRoutePolicyReconciliation(hostname: string): Promise<StoredRoutePolicyReconciliation | null>;
+  listRoutePolicyReconciliations(): Promise<StoredRoutePolicyReconciliation[]>;
   appendSystemLog(identity: string, message: string): Promise<void>;
   mergeProcessLogs(identity: string, stdout: string, stderr: string): Promise<void>;
   listRuntimeLogs(

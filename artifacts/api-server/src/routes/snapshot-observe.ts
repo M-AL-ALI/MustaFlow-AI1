@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   agentTasksTable,
   assetAnalysisEventsTable,
+  assetUsageTable,
   chatMessagesTable,
   db,
   projectFilesTable,
@@ -29,7 +30,12 @@ import {
   responseSucceededTerminal,
 } from "@workspace/ora-contracts";
 import { persistZeroTerminal, zeroTerminalRef } from "../lib/zero-terminal-persistence";
-import { completeAsset, rejectReservedAsset, reserveAsset } from "../lib/asset-registry";
+import {
+  beginAssetUpload,
+  completeAsset,
+  rejectReservedAsset,
+  reserveAsset,
+} from "../lib/asset-registry";
 import { deleteAssetObject, putAssetBuffer } from "../lib/asset-r2";
 import { nabuflowGateHttpError } from "../lib/nabuflow-billing";
 
@@ -511,6 +517,8 @@ async function completeSnapshotObservation(
     },
   });
   try {
+    const claim = await beginAssetUpload({ assetId: asset.id, actorUserId: input.actorUserId });
+    if (!claim) throw new Error("snapshot_reservation_unavailable");
     await putAssetBuffer({ key: asset.storageKey, body: png, contentType: "image/png" });
     await completeAsset({
       assetId: asset.id,
@@ -594,19 +602,32 @@ async function completeSnapshotObservation(
     confidence: null,
     reasonCode: "snapshot_request",
   });
-  const [userMessage] = await db
-    .insert(chatMessagesTable)
-    .values({
-      projectId: input.project.id,
-      role: "user",
-      content: observationPrompt,
-      agentMode: input.project.agentMode,
-      planMode: false,
-      origin: "snapshot_control",
-      intentReceiptId: receipt.receiptId,
-      attachments: [persistedAttachment],
-    })
-    .returning();
+  const userMessage = await db.transaction(async (tx) => {
+    const [message] = await tx
+      .insert(chatMessagesTable)
+      .values({
+        projectId: input.project.id,
+        role: "user",
+        content: observationPrompt,
+        agentMode: input.project.agentMode,
+        planMode: false,
+        origin: "snapshot_control",
+        intentReceiptId: receipt.receiptId,
+        attachments: [persistedAttachment],
+      })
+      .returning();
+    if (!message) throw new Error("snapshot observation message unavailable");
+    await tx
+      .insert(assetUsageTable)
+      .values({
+        assetId: asset.id,
+        projectId: input.project.id,
+        versionId: input.project.versionId,
+        consumer: `chat-message:${message.id}`,
+      })
+      .onConflictDoNothing();
+    return message;
+  });
   if (!userMessage) throw new Error("snapshot observation message unavailable");
   await intentReceiptStore.linkMessage(receipt.receiptId, userMessage.id);
 

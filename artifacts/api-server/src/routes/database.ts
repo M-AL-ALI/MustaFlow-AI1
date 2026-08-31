@@ -32,6 +32,7 @@ import {
   downloadSnapshotBlob,
   deleteSnapshotBlob,
 } from "../lib/snapshot-storage";
+import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -150,16 +151,18 @@ async function provisionNeonDatabase(
   return { connectionString, neonProjectId };
 }
 
-async function deleteNeonDatabase(neonProjectId: string): Promise<void> {
+async function deleteNeonDatabase(neonProjectId: string): Promise<boolean> {
   const apiKey = process.env.NEON_API_KEY;
-  if (!apiKey) return;
+  if (!apiKey) return false;
   try {
-    await fetch(`https://console.neon.tech/api/v2/projects/${neonProjectId}`, {
+    const response = await fetch(`https://console.neon.tech/api/v2/projects/${neonProjectId}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${apiKey}` },
     });
+    return response.ok || response.status === 404;
   } catch (err) {
     logger.warn({ err, neonProjectId }, "Failed to delete Neon project");
+    return false;
   }
 }
 
@@ -306,6 +309,7 @@ async function captureSQLiteSnapshot(machineId: string, projectId: number): Prom
 router.post(
   "/projects/:id/database/provision",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const { provider } = req.body as { provider?: string };
@@ -421,6 +425,7 @@ router.get("/projects/:id/database", requireProjectOwnership, async (req, res): 
 router.delete(
   "/projects/:id/database",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const project = await loadProject(projectId);
@@ -432,7 +437,14 @@ router.delete(
     if (project.dbProvider === "postgres" && project.dbConnectionId) {
       const looksLikeNeon = !project.dbConnectionId.startsWith("local-");
       if (looksLikeNeon) {
-        await deleteNeonDatabase(project.dbConnectionId);
+        const deleted = await deleteNeonDatabase(project.dbConnectionId);
+        if (!deleted) {
+          res.status(503).json({
+            error: "The database could not be removed because provider deletion was not confirmed.",
+            code: "database_provider_cleanup_unconfirmed",
+          });
+          return;
+        }
       }
     }
 
@@ -645,6 +657,7 @@ router.get(
 router.post(
   "/projects/:id/database/snapshots",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const { label, versionId: bodyVersionId } = req.body as {
@@ -779,6 +792,7 @@ router.get(
 router.post(
   "/projects/:id/database/snapshots/:sid/restore",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const snapshotId = Number(req.params.sid);
@@ -869,6 +883,7 @@ router.post(
 router.delete(
   "/projects/:id/database/snapshots/:sid",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const snapshotId = Number(req.params.sid);
@@ -888,12 +903,18 @@ router.delete(
       return;
     }
 
+    const blobDeleted = await deleteSnapshotBlob(toDelete.objectKey);
+    if (!blobDeleted) {
+      res.status(503).json({
+        error: "The snapshot could not be removed because storage deletion was not confirmed.",
+        code: "database_snapshot_storage_cleanup_unconfirmed",
+      });
+      return;
+    }
+
     await db
       .delete(dbSnapshotsTable)
       .where(and(eq(dbSnapshotsTable.id, snapshotId), eq(dbSnapshotsTable.projectId, projectId)));
-
-    // Best-effort GCS cleanup (non-fatal)
-    void deleteSnapshotBlob(toDelete.objectKey);
 
     res.json({ ok: true });
   },

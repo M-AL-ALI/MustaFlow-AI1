@@ -5,6 +5,7 @@ import {
   sha256Hex,
   signControlRequest,
 } from "@workspace/tenant-runtime-contracts";
+import { ROUTE_POLICY_RECONCILIATION_RETRY_MS } from "../src/model";
 import type { StoredRuntime, StoredRuntimeArtifact } from "../src/model";
 import { handleControlRequest, handleWorkerRequest } from "../src/worker";
 import {
@@ -92,6 +93,67 @@ describe("authenticated staging control plane", () => {
     );
     expect(invalid.status).toBe(400);
     await expect(invalid.json()).resolves.toMatchObject({ code: "invalid_discovery_window" });
+  });
+
+  it("reads and inventories project-scoped routes without mutating the registry", async () => {
+    const coordinator = new MemoryCoordinator();
+    const projectId = 51;
+    const identity = await deriveRuntimeIdentity({
+      namespace: "production",
+      projectId,
+      role: "production",
+      slot: "blue",
+    });
+    const route = {
+      hostname: "inventory.apps.mustaflow.com",
+      projectId,
+      role: "production" as const,
+      activeSlot: "blue" as const,
+      manifestRevision: "manifest-inventory-1",
+      servicePort: 8080,
+      sandboxIdentity: identity,
+    };
+    await coordinator.activateRoute(route, null, {
+      identities: [identity],
+      nowMs: TEST_NOW_MS,
+    });
+    const env = {
+      ...fakeEnv(),
+      CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "production",
+    };
+    const dependencies = { coordinator, backend: new MockBackend(), nowMs: TEST_NOW_MS };
+
+    const readPath = `/_nabuflow/control/v1/routes/${route.hostname}`;
+    const read = await handleControlRequest(
+      await signedRequest({ path: readPath, nonce: "nonce-route-read-00000001" }),
+      env,
+      dependencies,
+    );
+    expect(read.status).toBe(200);
+    await expect(read.json()).resolves.toEqual({ ok: true, route });
+
+    const inventoryPath = `/_nabuflow/control/v1/projects/${projectId}/routes?scanLimit=10`;
+    const inventory = await handleControlRequest(
+      await signedRequest({ path: inventoryPath, nonce: "nonce-route-inventory-0001" }),
+      env,
+      dependencies,
+    );
+    expect(inventory.status).toBe(200);
+    await expect(inventory.json()).resolves.toEqual({
+      ok: true,
+      projectId,
+      routes: [route],
+      nextCursor: null,
+      complete: true,
+    });
+    await expect(coordinator.getRoute(route.hostname)).resolves.toEqual(route);
+
+    const unsigned = await handleControlRequest(
+      new Request(`https://runtime.example${inventoryPath}`),
+      env,
+      dependencies,
+    );
+    expect(unsigned.status).toBe(401);
   });
 
   it("is byte-compatible with the slice 2b-i fixed HMAC vector", async () => {
@@ -514,6 +576,7 @@ describe("authenticated staging control plane", () => {
     expect(activated.status).toBe(200);
     await expect(activated.json()).resolves.toMatchObject({ ok: true, route: { hostname } });
     expect((await coordinator.getRoute(hostname))?.sandboxIdentity).toBe(identity);
+    expect(backend.keepAliveByIdentity.get(identity)).toBe(true);
     const replayed = await handleControlRequest(replay, env, dependencies);
     expect(replayed.status).toBe(409);
     await expect(replayed.json()).resolves.toMatchObject({ code: "replay_detected" });
@@ -597,6 +660,37 @@ describe("authenticated staging control plane", () => {
       cause: "ready",
       status: 200,
     };
+    let failBlueRelease = true;
+    backend.beforeKeepAliveChange = async (targetIdentity, keepAlive) => {
+      if (failBlueRelease && targetIdentity === identity && keepAlive === false) {
+        failBlueRelease = false;
+        throw new Error("simulated blue keepalive release failure");
+      }
+    };
+    const greenReleaseFailed = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-green-release-fail",
+        idempotencyKey: "route-activate-green-release-fail",
+        body: greenBody,
+      }),
+      env,
+      dependencies,
+    );
+    expect(greenReleaseFailed.status).toBe(200);
+    await expect(coordinator.getRoute(hostname)).resolves.toMatchObject({
+      activeSlot: "green",
+      sandboxIdentity: greenIdentity,
+    });
+    await expect(coordinator.getRoutePolicyReconciliation(hostname)).resolves.toMatchObject({
+      state: "pending",
+      attempt: 1,
+      terminal: null,
+    });
+    backend.beforeKeepAliveChange = undefined;
+    dependencies.nowMs += ROUTE_POLICY_RECONCILIATION_RETRY_MS;
+
     const greenActivated = await handleControlRequest(
       await signedRequest({
         path,
@@ -616,6 +710,8 @@ describe("authenticated staging control plane", () => {
       activeSlot: "green",
       sandboxIdentity: greenIdentity,
     });
+    expect(backend.keepAliveByIdentity.get(identity)).toBe(false);
+    expect(backend.keepAliveByIdentity.get(greenIdentity)).toBe(true);
     backend.availabilityResult = {
       ready: false,
       stage: "process",
@@ -669,6 +765,40 @@ describe("authenticated staging control plane", () => {
       status: 200,
     };
 
+    let failGreenRelease = true;
+    backend.beforeKeepAliveChange = async (targetIdentity, keepAlive) => {
+      if (failGreenRelease && targetIdentity === greenIdentity && keepAlive === false) {
+        failGreenRelease = false;
+        throw new Error("simulated green keepalive release failure");
+      }
+    };
+    const blueReleaseFailed = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-blue-release-fail1",
+        idempotencyKey: "route-reactivate-blue-release-fail",
+        body: {
+          ...body,
+          expectedPreviousManifestRevision: greenManifestRevision,
+        },
+      }),
+      env,
+      dependencies,
+    );
+    expect(blueReleaseFailed.status).toBe(200);
+    await expect(coordinator.getRoute(hostname)).resolves.toMatchObject({
+      activeSlot: "blue",
+      sandboxIdentity: identity,
+    });
+    await expect(coordinator.getRoutePolicyReconciliation(hostname)).resolves.toMatchObject({
+      state: "pending",
+      attempt: 1,
+      terminal: null,
+    });
+    backend.beforeKeepAliveChange = undefined;
+    dependencies.nowMs += ROUTE_POLICY_RECONCILIATION_RETRY_MS;
+
     const blueReactivated = await handleControlRequest(
       await signedRequest({
         path,
@@ -691,6 +821,8 @@ describe("authenticated staging control plane", () => {
       activeSlot: "blue",
       sandboxIdentity: identity,
     });
+    expect(backend.keepAliveByIdentity.get(identity)).toBe(true);
+    expect(backend.keepAliveByIdentity.get(greenIdentity)).toBe(false);
     expect(backend.availabilityChecks).toEqual([
       identity,
       greenIdentity,
@@ -698,6 +830,82 @@ describe("authenticated staging control plane", () => {
       identity,
       identity,
     ]);
+
+    const replayKeepAliveChangeCount = backend.keepAliveChanges.length;
+    const reapplyBlue = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-blue-replay-001",
+        idempotencyKey: "route-reactivate-blue-replay",
+        body: {
+          ...body,
+          expectedPreviousManifestRevision: greenManifestRevision,
+        },
+      }),
+      env,
+      dependencies,
+    );
+    expect(reapplyBlue.status).toBe(200);
+    expect(backend.keepAliveByIdentity.get(identity)).toBe(true);
+    expect(backend.keepAliveByIdentity.get(greenIdentity)).toBe(false);
+    expect(backend.keepAliveChanges).toHaveLength(replayKeepAliveChangeCount);
+    expect(backend.availabilityChecks).toHaveLength(5);
+
+    let releaseStaleGreenWrite: () => void = () => {};
+    let reportStaleGreenWrite: () => void = () => {};
+    const staleGreenWriteReached = new Promise<void>((resolve) => {
+      reportStaleGreenWrite = resolve;
+    });
+    const staleGreenWriteReleased = new Promise<void>((resolve) => {
+      releaseStaleGreenWrite = resolve;
+    });
+    let intercepted = false;
+    backend.beforeKeepAliveChange = async (targetIdentity, keepAlive) => {
+      if (!intercepted && targetIdentity === identity && keepAlive === false) {
+        intercepted = true;
+        reportStaleGreenWrite();
+        await staleGreenWriteReleased;
+      }
+    };
+
+    const concurrentGreenPromise = handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-green-race-001",
+        idempotencyKey: "route-activate-green-race",
+        body: greenBody,
+      }),
+      env,
+      dependencies,
+    );
+    await staleGreenWriteReached;
+    const concurrentBlue = await handleControlRequest(
+      await signedRequest({
+        path,
+        method: "POST",
+        nonce: "nonce-route-blue-race-0001",
+        idempotencyKey: "route-activate-blue-race",
+        body: {
+          ...body,
+          expectedPreviousManifestRevision: greenManifestRevision,
+        },
+      }),
+      env,
+      dependencies,
+    );
+    expect(concurrentBlue.status).toBe(200);
+    releaseStaleGreenWrite();
+    const concurrentGreen = await concurrentGreenPromise;
+    expect(concurrentGreen.status).toBe(200);
+    backend.beforeKeepAliveChange = undefined;
+    await expect(coordinator.getRoute(hostname)).resolves.toMatchObject({
+      activeSlot: "blue",
+      sandboxIdentity: identity,
+    });
+    expect(backend.keepAliveByIdentity.get(identity)).toBe(true);
+    expect(backend.keepAliveByIdentity.get(greenIdentity)).toBe(false);
 
     const deletePath = `/_nabuflow/control/v1/routes/${hostname}`;
     const deleted = await handleControlRequest(
@@ -718,6 +926,29 @@ describe("authenticated staging control plane", () => {
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toEqual({ ok: true, hostname });
     expect(await coordinator.getRoute(hostname)).toBeNull();
+    expect(backend.keepAliveByIdentity.get(identity)).toBe(false);
+    expect(backend.keepAliveByIdentity.get(greenIdentity)).toBe(false);
+
+    const deleteReplay = await handleControlRequest(
+      await signedRequest({
+        path: deletePath,
+        method: "DELETE",
+        nonce: "nonce-route-delete-replay-1",
+        idempotencyKey: "route-delete-replay",
+        body: {
+          hostname,
+          expectedManifestRevision: blueManifestRevision,
+          expectedSandboxIdentity: identity,
+        },
+      }),
+      env,
+      dependencies,
+    );
+    expect(deleteReplay.status).toBe(200);
+    expect(backend.keepAliveByIdentity.get(identity)).toBe(false);
+    expect(new Set(backend.keepAliveChanges.map((change) => change.identity))).toEqual(
+      new Set([identity, greenIdentity]),
+    );
 
     backend.availabilityResult = {
       ready: false,
@@ -747,7 +978,182 @@ describe("authenticated staging control plane", () => {
       processId: "published-service",
       descriptor: { status: "running", readyAt: new Date(TEST_NOW_MS).toISOString() },
     });
-    expect(backend.availabilityChecks).toHaveLength(5);
+    expect(backend.availabilityChecks).toHaveLength(7);
+  });
+
+  it("restores active-route keepalive after recovery while inactive candidates remain sleepable", async () => {
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const env = fakeEnv();
+    const projectId = 51;
+    const hostname = "platform-canary.apps.mustaflow.com";
+    const identities = {
+      blue: await deriveRuntimeIdentity({
+        namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+        projectId,
+        role: "production",
+        slot: "blue",
+      }),
+      green: await deriveRuntimeIdentity({
+        namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+        projectId,
+        role: "production",
+        slot: "green",
+      }),
+    };
+
+    const prepareRuntime = async (slot: "blue" | "green") => {
+      const identity = identities[slot];
+      const manifestRevision = `recovery-manifest-${slot}`;
+      const artifactRevision = `recovery-artifact-${slot}`;
+      const artifactSha256 = (slot === "blue" ? "a" : "b").repeat(64);
+      await coordinator.putRuntime(identity, {
+        descriptor: {
+          identity,
+          projectId,
+          role: "production",
+          slot,
+          status: "error",
+          servicePort: 8080,
+          manifestRevision,
+          deploymentVersion: env.CF_VERSION_METADATA.id,
+          endpoint: null,
+          readyAt: null,
+          lastError: "captured recovery fixture",
+        },
+        manifest: {
+          revision: manifestRevision,
+          runtime: "node",
+          buildCommand: ["npm", "run", "build"],
+          startCommand: ["npm", "start"],
+          servicePort: 8080,
+          healthPath: "/healthz",
+          resourceProfile: "standard",
+          public: true,
+        },
+        artifactRevision,
+        artifactSha256,
+        artifactKind: "v1",
+        processId: null,
+        stdoutLength: 0,
+        stderrLength: 0,
+        nextLogSequence: 0,
+        logs: [],
+      });
+      coordinator.artifacts.set(`${identity}:${artifactSha256}`, {
+        runtimeIdentity: identity,
+        state: "committed",
+        receivedChunks: [],
+        expiresAtMs: null,
+        envelope: {
+          content: {
+            format: "nabu-artifact/v1",
+            payloadBytes: 0,
+            chunkBytes: 1024 * 1024,
+            chunks: [],
+            files: [],
+          },
+          contentSha256: (slot === "blue" ? "c" : "d").repeat(64),
+          sealedArtifactSha256: artifactSha256,
+          targetRuntimeIdentity: identity,
+          manifestRevision,
+          artifactRevision,
+          sourceRevision: `captured-project-51-${slot}-recovery`,
+          scan: { policyVersion: "nabu-secret-scan/v1", zeroMatches: true },
+        },
+      } satisfies StoredRuntimeArtifact);
+      return { identity, manifestRevision, artifactRevision, artifactSha256 };
+    };
+
+    const blue = await prepareRuntime("blue");
+    const green = await prepareRuntime("green");
+    coordinator.routes.set(hostname, {
+      hostname,
+      projectId,
+      role: "production",
+      activeSlot: "blue",
+      manifestRevision: blue.manifestRevision,
+      servicePort: 8080,
+      sandboxIdentity: blue.identity,
+    });
+
+    for (const [slot, prepared] of [
+      ["blue", blue],
+      ["green", green],
+    ] as const) {
+      const response = await mutationAndDrain({
+        path: `/_nabuflow/control/v1/runtimes/${projectId}/production/${slot}/start`,
+        idempotencyKey: `project-51-${slot}-recovery-start`,
+        nonce: `nonce-project-51-${slot}-recovery-start`,
+        body: {
+          locator: { projectId, role: "production", slot },
+          expectedDeploymentVersion: env.CF_VERSION_METADATA.id,
+          artifactRevision: prepared.artifactRevision,
+          artifactSha256: prepared.artifactSha256,
+        },
+        env,
+        coordinator,
+        backend,
+        nowMs: TEST_NOW_MS,
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(backend.keepAliveByIdentity.get(blue.identity)).toBe(true);
+    expect(backend.keepAliveByIdentity.get(green.identity)).toBe(false);
+    expect(backend.keepAliveChanges).toEqual([
+      { identity: blue.identity, keepAlive: true },
+      { identity: green.identity, keepAlive: false },
+    ]);
+
+    const replayChangeCount = backend.keepAliveChanges.length;
+    const replayedBlue = await mutationAndDrain({
+      path: `/_nabuflow/control/v1/runtimes/${projectId}/production/blue/start`,
+      idempotencyKey: "project-51-blue-recovery-start",
+      nonce: "nonce-project-51-blue-recovery-replay",
+      body: {
+        locator: { projectId, role: "production", slot: "blue" },
+        expectedDeploymentVersion: env.CF_VERSION_METADATA.id,
+        artifactRevision: blue.artifactRevision,
+        artifactSha256: blue.artifactSha256,
+      },
+      env,
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS + 1,
+    });
+    expect(replayedBlue.status).toBe(200);
+    expect(backend.keepAliveChanges).toHaveLength(replayChangeCount);
+
+    let routeRemoved = false;
+    backend.beforeKeepAliveChange = async (identity, keepAlive) => {
+      if (!routeRemoved && identity === blue.identity && keepAlive) {
+        routeRemoved = true;
+        coordinator.routes.delete(hostname);
+      }
+    };
+    const racedBlue = await mutationAndDrain({
+      path: `/_nabuflow/control/v1/runtimes/${projectId}/production/blue/start`,
+      idempotencyKey: "project-51-blue-recovery-route-race",
+      nonce: "nonce-project-51-blue-recovery-route-race",
+      body: {
+        locator: { projectId, role: "production", slot: "blue" },
+        expectedDeploymentVersion: env.CF_VERSION_METADATA.id,
+        artifactRevision: blue.artifactRevision,
+        artifactSha256: blue.artifactSha256,
+      },
+      env,
+      coordinator,
+      backend,
+      nowMs: TEST_NOW_MS + 2,
+    });
+    expect(racedBlue.status).toBe(200);
+    expect(routeRemoved).toBe(true);
+    expect(backend.keepAliveChanges.slice(-2)).toEqual([
+      { identity: blue.identity, keepAlive: true },
+      { identity: blue.identity, keepAlive: false },
+    ]);
+    expect(backend.keepAliveByIdentity.get(blue.identity)).toBe(false);
   });
 
   it("keeps repeated signed status reads metadata-only across transport-failure stubs", async () => {

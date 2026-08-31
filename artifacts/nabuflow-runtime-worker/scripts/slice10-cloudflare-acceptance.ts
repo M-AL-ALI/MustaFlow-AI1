@@ -1,7 +1,7 @@
 import { createHash, createHmac, generateKeyPairSync, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 const CONTROL_URL = "https://nabuflow-runtime-staging.mustafa-alali74.workers.dev";
 const PROVISIONER_URL =
@@ -13,18 +13,11 @@ const WORKLOAD_AUDIENCE = "nabuflow-acceptance-provisioner-staging";
 const WORKLOAD_SUBJECT = `codex-zero-cloudflare-acceptance-${Date.now()}`;
 const NEON_ORGANIZATION_ID = "org-young-poetry-18075521";
 const STRIPE_SANDBOX_ID = "acct_1U1r21DoZmlNFmDX";
-const FLY_ORGANIZATION_SLUG = "nabuflow-acceptance-staging";
-const FLY_IMAGE_REF =
-  "docker.io/library/alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce";
-const MAX_COST_MINOR_UNITS = "100";
 const DEPLOYMENT_NAMESPACE = "staging";
 const RUN_ID = new Date().toISOString().replaceAll(/[:.]/gu, "");
 const workerRoot = resolve(import.meta.dirname, "..");
 const repoRoot = resolve(workerRoot, "..", "..");
 const outputRoot = resolve(repoRoot, "tmp", "gateway-doorman-2b-ix-b10");
-// Wrangler resolves a relative `main` from the config directory. Keep the ephemeral config beside
-// the inert source config so opening the temporary route cannot change entry-point resolution.
-const openConfigPath = resolve(workerRoot, `wrangler.acceptance.open-${RUN_ID}.jsonc`);
 const evidencePath = resolve(outputRoot, `gateway-doorman-2b-ix-b10-${RUN_ID}-gateway-final.json`);
 const launcherEvidencePath = resolve(
   outputRoot,
@@ -118,85 +111,6 @@ function runProcess(
   });
 }
 
-function replaceJsonString(source: string, property: string, value: string): string {
-  const pattern = new RegExp(
-    `("${property.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}"\\s*:\\s*)"(?:[^"\\\\]|\\\\.)*"`,
-    "u",
-  );
-  assertCondition(pattern.test(source), `Provisioner config is missing ${property}`);
-  return source.replace(pattern, `$1${JSON.stringify(value)}`);
-}
-
-function buildProvisionerConfig(publicKey: string, open: boolean): string {
-  let config = readFileSync(resolve(workerRoot, "wrangler.acceptance.jsonc"), "utf8");
-  config = config.replace(/"workers_dev"\s*:\s*false/u, `"workers_dev": ${String(open)}`);
-  config = replaceJsonString(config, "ACCEPTANCE_STAGING_ENABLED", open ? "true" : "false");
-  config = replaceJsonString(
-    config,
-    "ACCEPTANCE_WORKLOAD_PUBLIC_KEYS",
-    JSON.stringify({ [WORKLOAD_KEY_ID]: publicKey }),
-  );
-  config = replaceJsonString(config, "ACCEPTANCE_WORKLOAD_ISSUER", WORKLOAD_ISSUER);
-  config = replaceJsonString(config, "ACCEPTANCE_WORKLOAD_AUDIENCE", WORKLOAD_AUDIENCE);
-  config = replaceJsonString(
-    config,
-    "ACCEPTANCE_WORKLOAD_SUBJECTS",
-    JSON.stringify([WORKLOAD_SUBJECT]),
-  );
-  config = replaceJsonString(config, "ACCEPTANCE_NEON_ORGANIZATION_ID", NEON_ORGANIZATION_ID);
-  config = replaceJsonString(config, "ACCEPTANCE_STRIPE_SANDBOX_ID", STRIPE_SANDBOX_ID);
-  config = replaceJsonString(config, "ACCEPTANCE_FLY_ORGANIZATION_SLUG", FLY_ORGANIZATION_SLUG);
-  config = replaceJsonString(config, "ACCEPTANCE_FLY_IMAGE_REF", FLY_IMAGE_REF);
-  config = replaceJsonString(
-    config,
-    "ACCEPTANCE_PROVIDER_MAX_COST_MINOR_UNITS",
-    MAX_COST_MINOR_UNITS,
-  );
-  return config;
-}
-
-function deploymentVersion(output: string): string | null {
-  const matches = [...output.matchAll(/(?:Version ID|Current Version ID):\s+([0-9a-f-]{36})/giu)];
-  return matches.at(-1)?.[1] ?? null;
-}
-
-async function deployProvisioner(configPath: string, message: string): Promise<string> {
-  let result = await runProcess(
-    process.execPath,
-    [wranglerCli, "deploy", "--config", configPath, "--message", message],
-    { timeoutMs: 180_000 },
-  );
-  if (result.code === 3221226505) {
-    const relativeConfig = relative(workerRoot, configPath);
-    assertCondition(
-      !/[\s"']/u.test(relativeConfig) && !/[\s"']/u.test(message),
-      "Provisioner wrapper fallback received an unsafe argument",
-    );
-    record("provisioner.deploy.wrapper-fallback", "native_abort", {
-      primaryExitCode: result.code,
-      stderrBytes: Buffer.byteLength(result.stderr),
-      stdoutBytes: Buffer.byteLength(result.stdout),
-    });
-    result = await runProcess(
-      process.env.ComSpec ?? "cmd.exe",
-      [
-        "/d",
-        "/s",
-        "/c",
-        `node_modules\\.bin\\wrangler.cmd deploy --config ${relativeConfig} --message ${message}`,
-      ],
-      { timeoutMs: 180_000 },
-    );
-  }
-  assertCondition(
-    result.code === 0,
-    `Provisioner deployment failed (${String(result.code)}; stdoutBytes=${String(Buffer.byteLength(result.stdout))}; stderrBytes=${String(Buffer.byteLength(result.stderr))})`,
-  );
-  const version = deploymentVersion(`${result.stdout}\n${result.stderr}`);
-  assertCondition(version !== null, "Provisioner deployment returned no version ID");
-  return version;
-}
-
 async function waitForReadyz(expectedKek: "valid", boundMs = 120_000): Promise<void> {
   const started = Date.now();
   let attempt = 0;
@@ -222,17 +136,6 @@ async function waitForReadyz(expectedKek: "valid", boundMs = 120_000): Promise<v
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000));
   }
   throw new Error("Provisioner readiness did not converge within its bound");
-}
-
-async function verifyClosed(): Promise<void> {
-  const response = await fetch(`${PROVISIONER_URL}/_nabuflow/acceptance/v1/readyz`, {
-    redirect: "manual",
-  });
-  assertCondition(
-    response.status === 404,
-    `Temporary Provisioner surface remained open (${String(response.status)})`,
-  );
-  record("provisioner.surface.closed", 404);
 }
 
 async function writeEvidence(passed: boolean, failure: string | null): Promise<void> {
@@ -364,7 +267,6 @@ let vaultKek = reuseSessionRotation ? "" : secret();
 let previewPrivateKey: string;
 let workloadPrivateKey: string;
 let failure: string | null = null;
-let surfaceOpened = false;
 
 try {
   let previewPublicKey = "";
@@ -428,15 +330,10 @@ try {
   }
   await captureRealZeroBuildDiagnostic();
 
-  writeFileSync(openConfigPath, buildProvisionerConfig(workloadPair.publicKey, true), {
-    mode: 0o600,
+  record("provisioner.deployment.externally-managed", 200, {
+    canonicalGuardedDeployRequired: true,
+    generatedConfigForbidden: true,
   });
-  const openedVersion = await deployProvisioner(
-    openConfigPath,
-    `slice10-${RUN_ID}-temporary-proof-surface`,
-  );
-  surfaceOpened = true;
-  record("provisioner.surface.opened", 200, { openedVersion });
   await waitForReadyz("valid");
 
   const smoke = await runProcess(
@@ -481,21 +378,6 @@ try {
     controlToken === "" && vaultKek === "" && previewPrivateKey === "" && workloadPrivateKey === "",
     "Ephemeral launcher values were not scrubbed",
   );
-  if (surfaceOpened) {
-    try {
-      const closedVersion = await deployProvisioner(
-        resolve(workerRoot, "wrangler.acceptance.jsonc"),
-        `slice10-${RUN_ID}-close-proof-surface`,
-      );
-      record("provisioner.surface.close-deployed", 200, { closedVersion });
-      await verifyClosed();
-    } catch (error) {
-      const closeFailure =
-        error instanceof Error ? error.message : "Unknown surface closure failure";
-      failure = failure === null ? closeFailure : `${failure}; closure: ${closeFailure}`;
-    }
-  }
-  rmSync(openConfigPath, { force: true });
   await writeEvidence(failure === null, failure);
 }
 

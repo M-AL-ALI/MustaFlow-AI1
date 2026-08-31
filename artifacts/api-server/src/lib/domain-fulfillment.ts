@@ -16,6 +16,7 @@ import { publishDomainEvent } from "./event-bus";
 import { logger } from "./logger";
 import { randomBytes } from "crypto";
 import { SUPPORT_EMAIL_ADDRESS } from "./support-contact";
+import { withActiveProjectLifecycle } from "./project-lifecycle";
 
 function randomHex(): string {
   return randomBytes(12).toString("hex");
@@ -34,12 +35,17 @@ const DEFAULT_CONTACT: WhoisContact = {
 };
 
 // ── activateSslForDomain import (dynamic to avoid circular deps) ──────────────
-async function triggerSsl(domainRowId: number, hostname: string, projectId: number): Promise<void> {
+async function triggerSsl(
+  domainRowId: number,
+  hostname: string,
+  projectId: number,
+): Promise<boolean> {
   try {
     const { activateSslForDomain } = await import("../routes/ssl");
-    await activateSslForDomain(domainRowId, hostname, null, projectId, false);
+    const result = await activateSslForDomain(domainRowId, hostname, null, projectId, false);
+    return result.sslStatus !== "failed";
   } catch {
-    /* best-effort */
+    return false;
   }
 }
 
@@ -141,7 +147,7 @@ export async function fulfillDomainPurchase(
       namecheapOrderId: namecheapOrderId ?? null,
       stripePaymentIntentId: stripePaymentIntentId ?? null,
       stripeCustomerId,
-      projectId: projectId ?? null,
+      projectId: null,
       pricePaidUsd,
       renewalPriceUsd,
       whoisFirstName: resolvedContact.firstName,
@@ -162,50 +168,63 @@ export async function fulfillDomainPurchase(
 
   // Auto-attach to project (if provided and valid)
   if (projectId) {
+    const targetProjectId = projectId;
     try {
-      const [project] = await db
-        .select({ id: projectsTable.id })
-        .from(projectsTable)
-        .where(
-          and(
-            eq(projectsTable.id, projectId),
-            eq(projectsTable.ownerId, userId),
-            isNull(projectsTable.deletedAt),
-          ),
-        );
+      const lifecycle = await withActiveProjectLifecycle(targetProjectId, async (session) => {
+        const [project] = await db
+          .select({ id: projectsTable.id })
+          .from(projectsTable)
+          .where(
+            and(
+              eq(projectsTable.id, targetProjectId),
+              eq(projectsTable.ownerId, userId),
+              isNull(projectsTable.deletedAt),
+            ),
+          );
 
-      if (project) {
-        const token = `mustaflow-verify=${randomHex()}`;
-        const labels = hostname.split(".");
-        const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
-        const inserted = await db
-          .insert(projectDomainsTable)
-          .values({
-            projectId,
-            hostname,
-            isPrimary: false,
-            recordType,
-            verificationToken: token,
-            verificationStatus: "verified",
-            sslStatus: "pending",
-            environment: "production",
-          })
-          .onConflictDoNothing()
-          .returning({ id: projectDomainsTable.id });
+        if (project) {
+          const token = `mustaflow-verify=${randomHex()}`;
+          const labels = hostname.split(".");
+          const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
+          const inserted = await db
+            .insert(projectDomainsTable)
+            .values({
+              projectId: targetProjectId,
+              hostname,
+              isPrimary: false,
+              recordType,
+              verificationToken: token,
+              verificationStatus: "verified",
+              sslStatus: "pending",
+              environment: "production",
+            })
+            .onConflictDoNothing()
+            .returning({ id: projectDomainsTable.id });
 
-        publishDomainEvent({ type: "added", hostname, projectId });
+          publishDomainEvent({ type: "added", hostname, projectId: targetProjectId });
 
-        const domainRowId = inserted[0]?.id;
-        if (domainRowId) {
-          setImmediate(() => {
-            void triggerSsl(domainRowId, hostname, projectId!);
-          });
+          const domainRowId = inserted[0]?.id;
+          if (domainRowId) {
+            const issued = await triggerSsl(domainRowId, hostname, targetProjectId);
+            if (!issued) {
+              await db.delete(projectDomainsTable).where(eq(projectDomainsTable.id, domainRowId));
+              projectId = undefined;
+            } else {
+              await db
+                .update(purchasedDomainsTable)
+                .set({ projectId: targetProjectId })
+                .where(eq(purchasedDomainsTable.id, newDomain.id));
+              newDomain.projectId = targetProjectId;
+            }
+            await session.assertActive();
+          }
+        } else {
+          // Project not found or not owned by user — clear projectId so it doesn't
+          // appear as attached in the response
+          projectId = undefined;
         }
-      } else {
-        // Project not found or not owned by user — clear projectId so it doesn't
-        // appear as attached in the response
-        projectId = undefined;
-      }
+      });
+      if (lifecycle.state === "inactive") projectId = undefined;
     } catch (err) {
       logger.warn({ err, hostname, projectId }, "Domain auto-attach to project failed (non-fatal)");
     }

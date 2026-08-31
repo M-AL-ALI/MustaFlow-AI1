@@ -30,11 +30,15 @@ import {
   servePreviewSnapshot,
   serveSnapshotByProjectEnv,
 } from "../lib/serveSnapshot";
-import { r2GetObject } from "../lib/cloudflare";
+import { cloudflareHostnameCacheTag, r2GetObject } from "../lib/cloudflare";
 import { logger } from "../lib/logger";
 import { subscribeDomainEvents } from "../lib/event-bus";
 import { recordHostnameSighting } from "../routes/domains";
 import { SUPPORT_EMAIL_ADDRESS } from "../lib/support-contact";
+import {
+  revalidateCustomDomainServingState,
+  type CachedCustomDomainServingState,
+} from "../lib/custom-domain-serving-state";
 
 const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
@@ -43,19 +47,7 @@ const SUSPENDED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-
 
 // ── In-memory routing table ──────────────────────────────────────────────────
 // Map from hostname to project row data.
-interface CachedProject {
-  id: number;
-  prodContainerUrl: string | null;
-  prodContainerStatus: string;
-  /** Environment slot this domain is wired to ('production' | 'staging'). */
-  environment: string;
-  /** When set, this domain is suspended and requests return 451. */
-  suspendedAt: Date | null;
-  /** Optional reason recorded for the suspension. */
-  suspensionReason: string | null;
-  /** Published snapshot ID used for R2 origin-tier serving when EDGE_SERVING_ENABLED=true. */
-  publishedSnapshotId: number | null;
-}
+type CachedProject = CachedCustomDomainServingState;
 
 let hostnameMap = new Map<string, CachedProject>();
 let loaded = false;
@@ -331,6 +323,7 @@ export async function customDomainMiddleware(
 
     const stagingSlug = extractStagingSlug(hostname);
     if (stagingSlug) {
+      res.setHeader("Cache-Tag", cloudflareHostnameCacheTag(hostname)!);
       await serveSnapshotForEnv(res, stagingSlug, rawPath, "staging");
       return;
     }
@@ -349,19 +342,46 @@ export async function customDomainMiddleware(
 
   await ensureLoaded();
 
-  const project = hostnameMap.get(hostname);
-  if (!project) {
+  const cachedProject = hostnameMap.get(hostname);
+  if (!cachedProject) {
     next();
+    return;
+  }
+  res.setHeader("Cache-Tag", cloudflareHostnameCacheTag(hostname)!);
+
+  // The routing table is cached for five minutes. Re-check the tombstone on
+  // every matched request so a retired project cannot continue through the R2
+  // fallback or a running container while that cache entry is stale.
+  const [activeProject] = await db
+    .select({
+      id: projectsTable.id,
+      status: projectsTable.status,
+      prodContainerUrl: projectsTable.prodContainerUrl,
+      prodContainerStatus: projectsTable.prodContainerStatus,
+      publishedSnapshotId: projectsTable.publishedSnapshotId,
+    })
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, cachedProject.id), isNull(projectsTable.deletedAt)))
+    .limit(1);
+  if (!activeProject) {
+    hostnameMap.delete(hostname);
+    res.status(404).type("text/plain").setHeader("Cache-Control", "no-store").send("Not found");
     return;
   }
 
   // ── Suspension check — return 451 immediately ─────────────────────────────
-  if (project.suspendedAt) {
+  if (cachedProject.suspendedAt) {
     res
       .status(451)
       .type("text/html")
-      .setHeader("X-Suspension-Reason", project.suspensionReason ?? "policy_violation")
+      .setHeader("X-Suspension-Reason", cachedProject.suspensionReason ?? "policy_violation")
       .send(SUSPENDED_HTML);
+    return;
+  }
+
+  const project = revalidateCustomDomainServingState(cachedProject, activeProject);
+  if (!project) {
+    res.status(404).type("text/plain").setHeader("Cache-Control", "no-store").send("Not found");
     return;
   }
 

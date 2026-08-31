@@ -42,7 +42,8 @@ describe("unified asset delivery contract", () => {
     expect(endpoint).toContain("await db.transaction(async (tx)");
     expect(endpoint).toMatch(/tx\s*\.insert\(projectFilesTable\)/);
     expect(endpoint).toMatch(/tx\s*\.insert\(assetUsageTable\)/);
-    expect(endpoint).toMatch(/tx\s*\.delete\(assetUsageTable\)/);
+    expect(endpoint).toContain("reconcileProjectFileAssetUsage(tx,");
+    expect(endpoint).not.toMatch(/tx\s*\.delete\(assetUsageTable\)/);
     expect(endpoint).not.toContain("await materializeProjectAsset(");
   });
 

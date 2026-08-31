@@ -572,7 +572,12 @@ describe("Retention audit", () => {
 
   it("generate-file result is not stored in temp files — assets go to durable ora_assets", () => {
     const src = readRoute("generate-file.ts");
-    expect(src).toContain("persistOraAsset");
+    expect(src).toContain("reserveOraGeneratedAsset");
+    expect(src).toContain("completeOraGeneratedAsset");
+    expect(src).toContain("cancelOraGeneratedAsset");
+    expect(src).not.toContain("persistOraAsset");
+    expect(src).not.toContain("tmpdir");
+    expect(src).not.toContain("mkdtemp");
     expect(src).not.toContain("fs.writeFile");
     expect(src).not.toContain("writeFileSync");
   });

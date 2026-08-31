@@ -173,6 +173,10 @@ vi.mock("../../lib/snapshot-storage", () => ({
   downloadSnapshotBlob: vi.fn(),
 }));
 
+vi.mock("../../lib/project-file-asset-usage", () => ({
+  reconcileProjectFileAssetUsage: vi.fn(async () => undefined),
+}));
+
 vi.mock("../../lib/logger", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));

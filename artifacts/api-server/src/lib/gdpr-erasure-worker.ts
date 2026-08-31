@@ -36,6 +36,7 @@ import {
   personalAccessTokensTable,
   oraTranscriptsTable,
   assetsTable,
+  assetStorageObjectsTable,
   accountAssetQuotaTable,
   storageAddonSubscriptionsTable,
 } from "@workspace/db";
@@ -45,7 +46,7 @@ import { evictTierCache } from "./public-ai/authed-user";
 import { destroyContainer, tenantRuntimeProvider } from "./tenant-runtime";
 import { releaseProductionDatabasesForHardDelete } from "./production-database-lifecycle";
 import { objectStorageClient } from "./objectStorage";
-import { deleteAssetObject } from "./asset-r2";
+import { deleteTrackedAssetStorageObjects } from "./asset-storage-cleanup";
 import { getUncachableStripeClient } from "./stripeClient";
 
 /**
@@ -97,10 +98,21 @@ export async function runGdprErasure(userId: string): Promise<void> {
   // ownership evidence. R2 deletion is blocking and idempotent: hard erasure
   // never claims completion while durable bytes still exist.
   const unifiedAssetRows = await db
-    .select({ storageKey: assetsTable.storageKey })
-    .from(assetsTable)
+    .select({
+      storageKey: assetStorageObjectsTable.storageKey,
+      storageBackend: assetStorageObjectsTable.storageBackend,
+    })
+    .from(assetStorageObjectsTable)
+    .innerJoin(assetsTable, eq(assetStorageObjectsTable.assetId, assetsTable.id))
     .where(eq(assetsTable.ownerUserId, userId));
-  const unifiedStorageKeys = [...new Set(unifiedAssetRows.map((row) => row.storageKey))];
+  const unifiedStorageObjects = [
+    ...new Map(
+      unifiedAssetRows.map((row) => [
+        `${row.storageBackend}\u0000${row.storageKey}`,
+        { storageBackend: row.storageBackend, storageKey: row.storageKey },
+      ]),
+    ).values(),
+  ];
 
   // Paid storage is a recurring provider obligation. Cancel it before rows
   // disappear; deleting only the local receipt could leave money burning.
@@ -127,13 +139,11 @@ export async function runGdprErasure(userId: string): Promise<void> {
     }
   }
 
-  for (const storageKey of unifiedStorageKeys) {
-    await deleteAssetObject(storageKey);
-  }
-  if (unifiedStorageKeys.length > 0) {
+  await deleteTrackedAssetStorageObjects(unifiedStorageObjects);
+  if (unifiedStorageObjects.length > 0) {
     logger.info(
-      { userId, count: unifiedStorageKeys.length },
-      "gdpr-erasure: unified R2 asset objects deleted",
+      { userId, count: unifiedStorageObjects.length },
+      "gdpr-erasure: unified asset storage objects deleted",
     );
   }
 

@@ -24,6 +24,7 @@
  */
 
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type {
   ChatCompletionMessageParam,
@@ -95,6 +96,18 @@ import {
   type SandboxShellSession,
 } from "./sandbox-shell";
 import { creativeChargeFields } from "./creative-charge-honesty";
+import {
+  beginAssetUpload,
+  cancelReservedAsset,
+  completeAsset,
+  rejectReservedAsset,
+  reserveAssetAgainstAvailableQuota,
+} from "./asset-registry";
+import { deleteAssetObject, putAssetBuffer } from "./asset-r2";
+import {
+  encodeProjectFileAssetReference,
+  resolveProjectFileBytes,
+} from "./project-file-asset-reference";
 import type { ZeroGenerationTarget } from "@workspace/tenant-runtime-contracts";
 import {
   isZeroSealedGenerationTarget,
@@ -123,6 +136,10 @@ export type AgentLoopEvent = (eventType: string, message: string) => Promise<voi
 export interface AgentLoopInput {
   mode: AgentLoopMode;
   projectId: number;
+  /** Account billed for durable project assets. */
+  ownerUserId?: string;
+  /** Human or system actor attributed to the asset operation. */
+  actorUserId?: string;
   projectName: string;
   projectKind: string;
   projectFormat: string | null;
@@ -4883,13 +4900,19 @@ async function ensureContainerProvisioned(ctx: ToolCtx): Promise<ContainerProvis
   if (ctx.containerState.id) return { ok: true };
   try {
     const { isContainerLayerConfigured, provisionContainer } = await import("./tenant-runtime");
+    const { withActiveProjectLifecycle } = await import("./project-lifecycle");
     const { getBuildSecretMap } = await import("./container-secrets");
     if (!(await isContainerLayerConfigured())) {
       return { ok: true, deferred: true, reason: CONTAINER_TOOL_DEFERRED_REASON };
     }
     const files = ctx.workspace.all().map((f) => ({ path: f.path, content: f.content }));
     const buildEnv = await getBuildSecretMap(ctx.input.projectId);
-    const info = await provisionContainer(ctx.input.projectId, files, buildEnv);
+    const lifecycle = await withActiveProjectLifecycle(ctx.input.projectId, async (session) => {
+      const info = await provisionContainer(ctx.input.projectId, files, buildEnv);
+      if (!(await session.assertActive())) return null;
+      return info;
+    });
+    const info = lifecycle.state === "active" ? lifecycle.value : null;
     if (!info?.containerId) {
       return { ok: false, reason: CONTAINER_PROVISIONING_FAILED_REASON };
     }
@@ -7232,7 +7255,8 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         .where(eq(projectVersionsTable.projectId, input.projectId))
         .orderBy(desc(projectVersionsTable.id))
         .limit(1);
-      const { reserveAsset, completeAsset, rejectReservedAsset } = await import("./asset-registry");
+      const { beginAssetUpload, reserveAsset, completeAsset, rejectReservedAsset } =
+        await import("./asset-registry");
       const { assetR2Configured, putAssetBuffer, deleteAssetObject } = await import("./asset-r2");
       if (!assetR2Configured()) {
         return { ok: false, observation: "ERROR: visual_evidence_storage_unavailable" };
@@ -7269,6 +7293,8 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         return { ok: false, observation: `ERROR: ${code}` };
       }
       try {
+        const claim = await beginAssetUpload({ assetId: reservation.id, actorUserId });
+        if (!claim) throw new Error("visual_evidence_reservation_unavailable");
         await putAssetBuffer({
           key: reservation.storageKey,
           body: screenshotBuffer,
@@ -7493,13 +7519,22 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
             observation: `ERROR: ${path} is not an image (mime=${mime})`,
           };
         }
-        // Workspace content is text-stored — if binary, the agent-loop encodes it
-        // as base64 string. Assume the bytes are already a base64 string when
-        // the mime is binary-image; otherwise utf-8 encode.
-        const isLikelyBase64 = /^[A-Za-z0-9+/=\s]+$/.test(f.content) && f.content.length > 100;
-        const b64 = isLikelyBase64
-          ? f.content.replace(/\s+/g, "")
-          : Buffer.from(f.content, "utf8").toString("base64");
+        let b64: string;
+        try {
+          b64 = (
+            await resolveProjectFileBytes({
+              projectId: input.projectId,
+              content: f.content,
+              mimeType: mime,
+              legacyEncoding: "base64",
+            })
+          ).toString("base64");
+        } catch {
+          return {
+            ok: false,
+            observation: `ERROR: image bytes are not available in this project: ${path}`,
+          };
+        }
         dataUri = `data:${mime};base64,${b64}`;
       } else if (url.startsWith("data:") || /^https?:\/\//i.test(url)) {
         dataUri = url;
@@ -8191,90 +8226,14 @@ async function executeCreativeTool(
       ? rawPath
       : `assets/${rawPath}`;
 
-  const { generateImageAsset, generateVideoAsset, generateAudioAsset, removeImageBackgroundAsset } =
-    await import("./agent-creative");
-
-  // Lazy budget decrement: only counted when we actually start the call.
-  ctx.creativeBudget.remaining -= 1;
-  await safeEvent(input.onEvent, tool, `${tool.replace(/_/g, " ")} → ${outPath}`);
-  const tool_ = tool; // capture for closure
-
-  let result: Awaited<ReturnType<typeof generateImageAsset>>;
-  let counterKey: "image" | "video" | "audio" | "bgRemoval";
-
-  switch (tool) {
-    case "generate_image": {
-      const prompt = typeof args.prompt === "string" ? args.prompt : "";
-      const size =
-        args.size === "256x256" || args.size === "512x512" || args.size === "1024x1024"
-          ? args.size
-          : "1024x1024";
-      result = await generateImageAsset({ prompt, size, signal: input.signal });
-      counterKey = "image";
-      break;
-    }
-    case "generate_video": {
-      const prompt = typeof args.prompt === "string" ? args.prompt : "";
-      const aspectRatio = args.aspect_ratio === "9:16" ? "9:16" : "16:9";
-      const durationSeconds = typeof args.duration_seconds === "number" ? args.duration_seconds : 6;
-      result = await generateVideoAsset({
-        prompt,
-        aspectRatio,
-        durationSeconds,
-        signal: input.signal,
-      });
-      counterKey = "video";
-      break;
-    }
-    case "generate_audio": {
-      const text = typeof args.text === "string" ? args.text : "";
-      const voice = typeof args.voice === "string" ? args.voice : undefined;
-      const format =
-        args.format === "wav" || args.format === "opus" || args.format === "mp3"
-          ? args.format
-          : "mp3";
-      result = await generateAudioAsset({ text, voice, format, signal: input.signal });
-      counterKey = "audio";
-      break;
-    }
-    case "remove_image_background": {
-      const source = workspace.read(outPath);
-      if (!source) {
-        return { ok: false, observation: `ERROR: source image not found: ${outPath}` };
-      }
-      const srcMime = source.mimeType ?? guessMime(outPath);
-      result = await removeImageBackgroundAsset({
-        imageBase64: source.content,
-        imageMimeType: srcMime,
-        filename: outPath.split("/").pop() ?? "input.png",
-        signal: input.signal,
-      });
-      counterKey = "bgRemoval";
-      break;
-    }
-  }
-
-  void tool_;
-  if (!result.ok) {
-    return {
-      ok: false,
-      observation: `ERROR: ${tool} failed: ${result.error}${result.notConfigured ? " (notConfigured)" : ""}`,
-    };
-  }
-
-  // Decide where to write. generate_image writes to args.path. generate_audio
-  // writes to args.path. remove_image_background writes to args.out_path (or
-  // a sibling `.no-bg.png` next to args.path when omitted — overwriting the
-  // source would mismatch the extension for .jpg/.webp inputs). generate_video
-  // args.path — but it always fails today.
+  // Determine the persisted output path before reserving capacity. Background
+  // removal reads args.path but writes args.out_path (or a safe sibling).
   let writePath = outPath;
   if (tool === "remove_image_background") {
     if (typeof args.out_path === "string") {
       const sanitized = sanitizePath(args.out_path);
       if (sanitized) writePath = sanitized;
     } else {
-      // Default to a sibling `<stem>.no-bg.png` so a .jpg/.webp source isn't
-      // overwritten with PNG bytes under the wrong extension.
       const dot = outPath.lastIndexOf(".");
       const slash = outPath.lastIndexOf("/");
       const stem = dot > slash ? outPath.slice(0, dot) : outPath;
@@ -8282,16 +8241,197 @@ async function executeCreativeTool(
     }
   }
 
-  workspace.write(writePath, result.base64, result.mimeType);
-  // NOTE: container sync intentionally skipped for binary creative writes.
-  // `writeFileToContainer` re-encodes its `content` argument via
-  // `Buffer.from(content, "utf8")`, which mangles non-UTF-8 bytes. Persistence
-  // for binary creative assets happens through the snapshot path
-  // (`serveSnapshot` decodes base64 when `isBinaryMime(mime)` is true), so the
-  // generated asset is still served correctly by the published preview — only
-  // the *live* container disk lacks the file until the next full sync. If a
-  // container-side binary write is needed in the future, add a dedicated
-  // `writeBinaryFileToContainer` helper rather than reusing the UTF-8 path.
+  let backgroundInput: { imageBase64: string; imageMimeType: string; filename: string } | undefined;
+  if (tool === "remove_image_background") {
+    const source = workspace.read(outPath);
+    if (!source) {
+      return { ok: false, observation: `ERROR: source image not found: ${outPath}` };
+    }
+    const imageMimeType = source.mimeType ?? guessMime(outPath);
+    try {
+      const bytes = await resolveProjectFileBytes({
+        projectId: input.projectId,
+        content: source.content,
+        mimeType: imageMimeType,
+        legacyEncoding: "base64",
+      });
+      backgroundInput = {
+        imageBase64: bytes.toString("base64"),
+        imageMimeType,
+        filename: outPath.split("/").pop() ?? "input.png",
+      };
+    } catch {
+      return {
+        ok: false,
+        observation: `ERROR: source image is not available in this project: ${outPath}`,
+      };
+    }
+  }
+
+  if (!input.ownerUserId || !input.actorUserId) {
+    return {
+      ok: false,
+      observation: "ERROR: creative asset ownership is unavailable for this task",
+    };
+  }
+
+  const { generateImageAsset, generateVideoAsset, generateAudioAsset, removeImageBackgroundAsset } =
+    await import("./agent-creative");
+
+  // Reserve the account's available aggregate storage BEFORE starting any
+  // billable provider call. The exact output size is reconciled at completion.
+  let reservation: Awaited<ReturnType<typeof reserveAssetAgainstAvailableQuota>>;
+  try {
+    reservation = await reserveAssetAgainstAvailableQuota({
+      ownerUserId: input.ownerUserId,
+      actorUserId: input.actorUserId,
+      projectId: input.projectId,
+      threadKey: null,
+      scope: "project",
+      kind: "generated",
+      source: `zero-${tool}`,
+      filename: writePath.split("/").pop() ?? "generated-asset",
+      mimeType: "application/octet-stream",
+      taskId: input.taskId ?? null,
+      context: { tool, projectPath: writePath },
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      observation: `ERROR: ${error instanceof Error ? error.message : "storage admission failed"}`,
+    };
+  }
+
+  // Lazy budget decrement: only counted after durable admission succeeds and
+  // immediately before the provider call begins.
+  ctx.creativeBudget.remaining -= 1;
+  await safeEvent(input.onEvent, tool, `${tool.replace(/_/g, " ")} → ${outPath}`);
+  const tool_ = tool; // capture for closure
+
+  let result: Awaited<ReturnType<typeof generateImageAsset>>;
+  let counterKey: "image" | "video" | "audio" | "bgRemoval";
+
+  try {
+    switch (tool) {
+      case "generate_image": {
+        const prompt = typeof args.prompt === "string" ? args.prompt : "";
+        const size =
+          args.size === "256x256" || args.size === "512x512" || args.size === "1024x1024"
+            ? args.size
+            : "1024x1024";
+        result = await generateImageAsset({ prompt, size, signal: input.signal });
+        counterKey = "image";
+        break;
+      }
+      case "generate_video": {
+        const prompt = typeof args.prompt === "string" ? args.prompt : "";
+        const aspectRatio = args.aspect_ratio === "9:16" ? "9:16" : "16:9";
+        const durationSeconds =
+          typeof args.duration_seconds === "number" ? args.duration_seconds : 6;
+        result = await generateVideoAsset({
+          prompt,
+          aspectRatio,
+          durationSeconds,
+          signal: input.signal,
+        });
+        counterKey = "video";
+        break;
+      }
+      case "generate_audio": {
+        const text = typeof args.text === "string" ? args.text : "";
+        const voice = typeof args.voice === "string" ? args.voice : undefined;
+        const format =
+          args.format === "wav" || args.format === "opus" || args.format === "mp3"
+            ? args.format
+            : "mp3";
+        result = await generateAudioAsset({ text, voice, format, signal: input.signal });
+        counterKey = "audio";
+        break;
+      }
+      case "remove_image_background": {
+        result = await removeImageBackgroundAsset({
+          ...backgroundInput!,
+          signal: input.signal,
+        });
+        counterKey = "bgRemoval";
+        break;
+      }
+    }
+  } catch (error) {
+    await cancelReservedAsset({ assetId: reservation.id, actorUserId: input.actorUserId }).catch(
+      () => undefined,
+    );
+    return {
+      ok: false,
+      observation: `ERROR: ${tool} failed: ${error instanceof Error ? error.message : "provider unavailable"}`,
+    };
+  }
+
+  void tool_;
+  if (!result.ok) {
+    await cancelReservedAsset({ assetId: reservation.id, actorUserId: input.actorUserId }).catch(
+      () => undefined,
+    );
+    return {
+      ok: false,
+      observation: `ERROR: ${tool} failed: ${result.error}${result.notConfigured ? " (notConfigured)" : ""}`,
+    };
+  }
+
+  let claimed = false;
+  try {
+    const bytes = Buffer.from(result.base64, "base64");
+    const claim = await beginAssetUpload({
+      assetId: reservation.id,
+      actorUserId: input.actorUserId,
+    });
+    if (!claim) throw new Error("asset_storage_unavailable");
+    claimed = true;
+    await putAssetBuffer({
+      key: reservation.storageKey,
+      body: bytes,
+      contentType: result.mimeType,
+      abortSignal: input.signal,
+    });
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    await completeAsset({
+      assetId: reservation.id,
+      ownerUserId: input.ownerUserId,
+      actorUserId: input.actorUserId,
+      sha256,
+      scanState: "not-required",
+      finalSizeBytes: bytes.length,
+      finalMimeType: result.mimeType,
+      projectFileHistoryProjectId: input.projectId,
+    });
+    workspace.write(
+      writePath,
+      encodeProjectFileAssetReference({
+        assetId: reservation.id,
+        sizeBytes: bytes.length,
+        sha256,
+      }),
+      result.mimeType,
+    );
+  } catch (error) {
+    if (claimed) {
+      await rejectReservedAsset({
+        assetId: reservation.id,
+        ownerUserId: input.ownerUserId,
+        actorUserId: input.actorUserId,
+        code: "asset_storage_unavailable",
+      }).catch(() => undefined);
+      await deleteAssetObject(reservation.storageKey).catch(() => undefined);
+    } else {
+      await cancelReservedAsset({ assetId: reservation.id, actorUserId: input.actorUserId }).catch(
+        () => undefined,
+      );
+    }
+    return {
+      ok: false,
+      observation: `ERROR: ${tool} output could not be saved safely: ${error instanceof Error ? error.message : "storage unavailable"}`,
+    };
+  }
 
   ctx.creativeCounts[counterKey] += 1;
   const credits = CREATIVE_CREDIT_COST[tool];
@@ -8359,10 +8499,16 @@ async function runCheckProfile(
   if (needsContainer && !effectiveContainerId && !input.signal.aborted) {
     try {
       const { provisionContainer } = await import("./tenant-runtime");
+      const { withActiveProjectLifecycle } = await import("./project-lifecycle");
       const { getBuildSecretMap } = await import("./container-secrets");
       const files = workspace.all().map((f) => ({ path: f.path, content: f.content }));
       const buildEnv = await getBuildSecretMap(input.projectId);
-      const info = await provisionContainer(input.projectId, files, buildEnv);
+      const lifecycle = await withActiveProjectLifecycle(input.projectId, async (session) => {
+        const info = await provisionContainer(input.projectId, files, buildEnv);
+        if (!(await session.assertActive())) return null;
+        return info;
+      });
+      const info = lifecycle.state === "active" ? lifecycle.value : null;
       if (info?.containerId) {
         effectiveContainerId = info.containerId;
         if (containerState) containerState.id = info.containerId;

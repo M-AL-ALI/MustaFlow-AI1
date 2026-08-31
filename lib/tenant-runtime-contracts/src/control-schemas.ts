@@ -480,6 +480,55 @@ export const deactivateRouteResponseSchema = z
   })
   .strict();
 
+export const PUBLISHED_ROUTE_INVENTORY_SCAN_LIMIT = 100;
+export const PUBLISHED_ROUTE_INVENTORY_MAX_PAGES = 50;
+
+export const routeInventoryRequestSchema = z
+  .object({
+    projectId: z.number().int().positive().safe(),
+    cursor: publishedHostnameSchema.optional(),
+    scanLimit: z
+      .number()
+      .int()
+      .min(1)
+      .max(PUBLISHED_ROUTE_INVENTORY_SCAN_LIMIT)
+      .default(PUBLISHED_ROUTE_INVENTORY_SCAN_LIMIT),
+  })
+  .strict();
+export const routeInventoryResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    projectId: z.number().int().positive().safe(),
+    routes: z.array(routeRecordSchema).max(PUBLISHED_ROUTE_INVENTORY_SCAN_LIMIT),
+    nextCursor: publishedHostnameSchema.nullable(),
+    complete: z.boolean(),
+  })
+  .strict()
+  .superRefine((response, context) => {
+    if (response.routes.some((route) => route.projectId !== response.projectId)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["routes"],
+        message: "Route inventory contains a route from another project",
+      });
+    }
+    if (!response.complete && response.nextCursor === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nextCursor"],
+        message: "Incomplete route inventory requires a continuation cursor",
+      });
+    }
+  });
+
+export const routeReadRequestSchema = z.object({ hostname: publishedHostnameSchema }).strict();
+export const routeReadResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    route: routeRecordSchema.nullable(),
+  })
+  .strict();
+
 /**
  * Single registry for Worker and API implementations. Each endpoint receives
  * already-combined path/query/body input so the same strict schema is applied
@@ -513,6 +562,11 @@ export const controlEndpointSchemas = {
     request: deactivateRouteRequestSchema,
     response: deactivateRouteResponseSchema,
   },
+  routeInventory: {
+    request: routeInventoryRequestSchema,
+    response: routeInventoryResponseSchema,
+  },
+  routeRead: { request: routeReadRequestSchema, response: routeReadResponseSchema },
 } as const;
 
 export const CONTROL_API_PREFIX = "/_nabuflow/control/v1" as const;
@@ -546,6 +600,11 @@ export const controlEndpointContracts = {
   },
   routeActivate: { method: "POST", path: `${CONTROL_API_PREFIX}/routes/:hostname/activate` },
   routeDeactivate: { method: "DELETE", path: `${CONTROL_API_PREFIX}/routes/:hostname` },
+  routeInventory: {
+    method: "GET",
+    path: `${CONTROL_API_PREFIX}/projects/:projectId/routes`,
+  },
+  routeRead: { method: "GET", path: `${CONTROL_API_PREFIX}/routes/:hostname` },
 } as const satisfies Record<keyof typeof controlEndpointSchemas, { method: string; path: string }>;
 
 export type EnsureRuntimeRequest = z.infer<typeof ensureRuntimeRequestSchema>;
@@ -569,6 +628,10 @@ export type RestoreRuntimeRequest = z.infer<typeof restoreRuntimeRequestSchema>;
 export type EnvironmentRuntimeRequest = z.infer<typeof environmentRuntimeRequestSchema>;
 export type ActivateRouteRequest = z.infer<typeof activateRouteRequestSchema>;
 export type DeactivateRouteRequest = z.infer<typeof deactivateRouteRequestSchema>;
+export type RouteInventoryRequest = z.infer<typeof routeInventoryRequestSchema>;
+export type RouteInventoryResponse = z.infer<typeof routeInventoryResponseSchema>;
+export type RouteReadRequest = z.infer<typeof routeReadRequestSchema>;
+export type RouteReadResponse = z.infer<typeof routeReadResponseSchema>;
 export type ControlErrorResponse = z.infer<typeof controlErrorResponseSchema>;
 export type VersionRequest = z.infer<typeof versionRequestSchema>;
 export type VersionResponse = z.infer<typeof versionResponseSchema>;

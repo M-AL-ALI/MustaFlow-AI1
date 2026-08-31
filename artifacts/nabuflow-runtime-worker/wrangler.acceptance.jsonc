@@ -15,10 +15,6 @@
     "ACCEPTANCE_WORKLOAD_ISSUER": "https://staging-identity.invalid",
     "ACCEPTANCE_WORKLOAD_AUDIENCE": "nabuflow-acceptance-provisioner-staging",
     "ACCEPTANCE_WORKLOAD_SUBJECTS": "[]",
-    "ACCEPTANCE_NEON_ORGANIZATION_ID": "UNCONFIGURED_DEDICATED_NEON_ORG",
-    "ACCEPTANCE_STRIPE_SANDBOX_ID": "UNCONFIGURED_NABUFLOW_TESTING_SANDBOX",
-    "ACCEPTANCE_FLY_ORGANIZATION_SLUG": "unconfigured-disposable-fly-org",
-    "ACCEPTANCE_FLY_IMAGE_REF": "UNCONFIGURED_PINNED_IMAGE",
     "ACCEPTANCE_PROVIDER_MAX_COST_MINOR_UNITS": "0",
   },
   "queues": {
@@ -35,9 +31,10 @@
     "consumers": [
       {
         "queue": "nabuflow-acceptance-operations-staging",
-        "max_batch_size": 5,
+        "max_batch_size": 1,
         "max_batch_timeout": 5,
         "max_retries": 3,
+        "max_concurrency": 1,
       },
     ],
   },

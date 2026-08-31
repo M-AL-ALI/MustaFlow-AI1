@@ -23,6 +23,8 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { randomUUID } from "crypto";
 import path from "path";
+import { withActiveProjectLifecycle } from "../lib/project-lifecycle";
+import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
 
 const execAsync = promisify(exec);
 
@@ -670,57 +672,82 @@ router.post("/security/cve/:id/apply-patch", requireAdmin, async (req, res): Pro
 
     const patchFiles = parsedPatch.files ?? [];
 
-    if (finding.projectId && patchFiles.length > 0) {
-      const existingFiles = await db
-        .select()
-        .from(projectFilesTable)
-        .where(eq(projectFilesTable.projectId, finding.projectId));
+    const markFindingApplied = async () => {
+      const [updated] = await db
+        .update(cveFindingsTable)
+        .set({
+          patchStatus: "applied" as CvePatchStatus,
+          status: "fixed" as CveStatus,
+          patchAppliedAt: new Date(),
+        })
+        .where(eq(cveFindingsTable.id, findingId))
+        .returning();
+      return updated;
+    };
 
-      const snapshotEntries = existingFiles.map((f) => ({
-        path: f.path,
-        content: f.content,
-        mimeType: f.mimeType,
-      }));
+    let updated: Awaited<ReturnType<typeof markFindingApplied>>;
+    if (finding.projectId) {
+      const lifecycle = await withActiveProjectLifecycle(finding.projectId, async (session) => {
+        if (patchFiles.length > 0) {
+          const existingFiles = await db
+            .select()
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, finding.projectId!));
 
-      await db.insert(projectVersionsTable).values({
-        projectId: finding.projectId,
-        label: `CVE patch: ${finding.packageName}${finding.cveId ? ` (${finding.cveId})` : ""}`,
-        filesSnapshot: snapshotEntries,
-        note: `Auto-protect patch applied by ${req.userId}`,
-      });
+          const snapshotEntries = existingFiles.map((f) => ({
+            path: f.path,
+            content: f.content,
+            mimeType: f.mimeType,
+          }));
 
-      for (const patchFile of patchFiles) {
-        const existing = existingFiles.find((f) => f.path === patchFile.path);
-        if (existing) {
-          await db
-            .update(projectFilesTable)
-            .set({ content: patchFile.content })
-            .where(
-              and(
-                eq(projectFilesTable.projectId, finding.projectId),
-                eq(projectFilesTable.path, patchFile.path),
-              ),
-            );
-        } else {
-          await db.insert(projectFilesTable).values({
-            projectId: finding.projectId,
-            path: patchFile.path,
-            content: patchFile.content,
-            mimeType: patchFile.path.endsWith(".json") ? "application/json" : "text/plain",
+          await db.transaction(async (tx) => {
+            await tx.insert(projectVersionsTable).values({
+              projectId: finding.projectId!,
+              label: `CVE patch: ${finding.packageName}${finding.cveId ? ` (${finding.cveId})` : ""}`,
+              filesSnapshot: snapshotEntries,
+              note: `Auto-protect patch applied by ${req.userId}`,
+            });
+
+            for (const patchFile of patchFiles) {
+              const existing = existingFiles.find((f) => f.path === patchFile.path);
+              if (existing) {
+                await tx
+                  .update(projectFilesTable)
+                  .set({ content: patchFile.content })
+                  .where(
+                    and(
+                      eq(projectFilesTable.projectId, finding.projectId!),
+                      eq(projectFilesTable.path, patchFile.path),
+                    ),
+                  );
+              } else {
+                await tx.insert(projectFilesTable).values({
+                  projectId: finding.projectId!,
+                  path: patchFile.path,
+                  content: patchFile.content,
+                  mimeType: patchFile.path.endsWith(".json") ? "application/json" : "text/plain",
+                });
+              }
+              await reconcileProjectFileAssetUsage(tx, {
+                projectId: finding.projectId!,
+                artifactId: null,
+                filePath: patchFile.path,
+                nextContent: patchFile.content,
+              });
+            }
           });
         }
+        if (!(await session.assertActive())) throw new Error("project_inactive");
+        return markFindingApplied();
+      });
+      if (lifecycle.state === "inactive") {
+        res.status(404).json({ error: "Project not found" });
+        return;
       }
+      updated = lifecycle.value;
+    } else {
+      updated = await markFindingApplied();
     }
-
-    const [updated] = await db
-      .update(cveFindingsTable)
-      .set({
-        patchStatus: "applied" as CvePatchStatus,
-        status: "fixed" as CveStatus,
-        patchAppliedAt: new Date(),
-      })
-      .where(eq(cveFindingsTable.id, findingId))
-      .returning();
 
     logger.info({ findingId, projectId: finding.projectId }, "CVE patch applied");
     res.json(updated);

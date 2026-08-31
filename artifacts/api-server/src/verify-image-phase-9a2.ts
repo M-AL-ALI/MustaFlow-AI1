@@ -18,6 +18,12 @@ import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { db, generatedImagesTable, pool, userCreditsTable } from "@workspace/db";
 import { validateImagePrompt } from "./lib/image-safety.js";
 import { storeUploadedImage } from "./lib/image-storage.js";
+import {
+  beginAssetUpload,
+  completeAsset,
+  rejectReservedAsset,
+  reserveAsset,
+} from "./lib/asset-registry.js";
 import { enqueueImageEditJob, getJob, type ImageJob } from "./lib/image-generation-jobs.js";
 import { isImageProviderConfigured } from "./lib/image-provider.js";
 
@@ -73,6 +79,58 @@ async function makeWebp(): Promise<Buffer> {
   })
     .webp({ quality: 85 })
     .toBuffer();
+}
+
+async function storeVerifiedUpload(webp: Buffer, raw: Buffer, imageId: number) {
+  const reservation = await reserveAsset({
+    ownerUserId: TEST_USER_ID,
+    actorUserId: TEST_USER_ID,
+    projectId: null,
+    threadKey: null,
+    scope: "account",
+    kind: "image",
+    source: "image-phase-verification",
+    filename: `verification-${imageId}.webp`,
+    mimeType: "image/webp",
+    sizeBytes: webp.length + raw.length,
+    context: { generatedImageId: imageId },
+  });
+  const claim = await beginAssetUpload({
+    assetId: reservation.id,
+    actorUserId: TEST_USER_ID,
+  });
+  if (!claim) throw new Error("verification_asset_claim_unavailable");
+  try {
+    const stored = await storeUploadedImage(webp, raw, imageId, {
+      assetId: reservation.id,
+      ownerUserId: TEST_USER_ID,
+      actorUserId: TEST_USER_ID,
+    });
+    await completeAsset({
+      assetId: reservation.id,
+      ownerUserId: TEST_USER_ID,
+      actorUserId: TEST_USER_ID,
+      sha256: stored.sha256,
+      scanState: "not-required",
+      finalSizeBytes:
+        stored.storageObjects.find((object) => object.role === "primary")?.sizeBytes ?? 0,
+      finalMimeType: "image/webp",
+      finalStorageKey: stored.storageKey ?? undefined,
+    });
+    await db
+      .update(generatedImagesTable)
+      .set({ assetId: reservation.id, updatedAt: sql`now()` })
+      .where(eq(generatedImagesTable.id, imageId));
+    return stored;
+  } catch (error) {
+    await rejectReservedAsset({
+      assetId: reservation.id,
+      ownerUserId: TEST_USER_ID,
+      actorUserId: TEST_USER_ID,
+      code: "asset_storage_unavailable",
+    });
+    throw error;
+  }
 }
 
 // ── Poll job until terminal state ─────────────────────────────────────────────
@@ -266,10 +324,16 @@ async function main() {
     .returning({ id: generatedImagesTable.id });
   const pngImageId = pngRow!.id;
 
-  const pngStorage = await storeUploadedImage(pngWebpBuffer, pngBuffer, pngImageId);
+  const pngStorage = await storeVerifiedUpload(pngWebpBuffer, pngBuffer, pngImageId);
   await db
     .update(generatedImagesTable)
-    .set({ status: "completed", ...pngStorage, updatedAt: sql`now()` })
+    .set({
+      status: "completed",
+      fileUrl: pngStorage.fileUrl,
+      thumbnailUrl: pngStorage.thumbnailUrl,
+      storageKey: pngStorage.storageKey,
+      updatedAt: sql`now()`,
+    })
     .where(eq(generatedImagesTable.id, pngImageId));
 
   // Verify DB row
@@ -339,10 +403,16 @@ async function main() {
     })
     .returning({ id: generatedImagesTable.id });
   const jpegImageId = jpegRow!.id;
-  const jpegStorage = await storeUploadedImage(jpegWebpBuffer, jpegBuffer, jpegImageId);
+  const jpegStorage = await storeVerifiedUpload(jpegWebpBuffer, jpegBuffer, jpegImageId);
   await db
     .update(generatedImagesTable)
-    .set({ status: "completed", ...jpegStorage, updatedAt: sql`now()` })
+    .set({
+      status: "completed",
+      fileUrl: jpegStorage.fileUrl,
+      thumbnailUrl: jpegStorage.thumbnailUrl,
+      storageKey: jpegStorage.storageKey,
+      updatedAt: sql`now()`,
+    })
     .where(eq(generatedImagesTable.id, jpegImageId));
 
   const [jpegDbRow] = await db
@@ -385,10 +455,16 @@ async function main() {
     })
     .returning({ id: generatedImagesTable.id });
   const webpImageId = webpRow!.id;
-  const webpStorage = await storeUploadedImage(webpWebpBuffer, webpBuffer, webpImageId);
+  const webpStorage = await storeVerifiedUpload(webpWebpBuffer, webpBuffer, webpImageId);
   await db
     .update(generatedImagesTable)
-    .set({ status: "completed", ...webpStorage, updatedAt: sql`now()` })
+    .set({
+      status: "completed",
+      fileUrl: webpStorage.fileUrl,
+      thumbnailUrl: webpStorage.thumbnailUrl,
+      storageKey: webpStorage.storageKey,
+      updatedAt: sql`now()`,
+    })
     .where(eq(generatedImagesTable.id, webpImageId));
 
   const [webpDbRow] = await db

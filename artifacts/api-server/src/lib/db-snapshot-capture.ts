@@ -10,8 +10,9 @@ import { db, dbSnapshotsTable, projectsTable, secretsTable } from "@workspace/db
 import { and, eq } from "drizzle-orm";
 import { execInContainer } from "./tenant-runtime";
 import { encryptionService } from "./encryption";
-import { uploadSnapshotBlob } from "./snapshot-storage";
+import { deleteSnapshotBlob, uploadSnapshotBlob } from "./snapshot-storage";
 import { logger } from "./logger";
+import { withActiveProjectLifecycle } from "./project-lifecycle";
 
 interface TableSnapshot {
   name: string;
@@ -152,67 +153,78 @@ export async function captureProjectDbSnapshot(
   versionId: number,
   label: string,
 ): Promise<number | null> {
-  try {
-    const [project] = await db
-      .select({
-        dbProvider: projectsTable.dbProvider,
-        dbStatus: projectsTable.dbStatus,
-        containerId: projectsTable.containerId,
-        containerStatus: projectsTable.containerStatus,
-      })
-      .from(projectsTable)
-      .where(eq(projectsTable.id, projectId));
-    if (!project || project.dbStatus !== "connected" || project.dbProvider === "none") {
+  const lifecycle = await withActiveProjectLifecycle(projectId, async (session) => {
+    let uploadedObjectKey: string | null = null;
+    try {
+      const [project] = await db
+        .select({
+          dbProvider: projectsTable.dbProvider,
+          dbStatus: projectsTable.dbStatus,
+          containerId: projectsTable.containerId,
+          containerStatus: projectsTable.containerStatus,
+        })
+        .from(projectsTable)
+        .where(eq(projectsTable.id, projectId));
+      if (!project || project.dbStatus !== "connected" || project.dbProvider === "none") {
+        return null;
+      }
+
+      let dumpContent: string | null = null;
+      if (project.dbProvider === "sqlite") {
+        if (!project.containerId || project.containerStatus !== "running") {
+          logger.info(
+            { projectId, versionId },
+            "captureProjectDbSnapshot: SQLite skipped — container not running",
+          );
+          return null;
+        }
+        dumpContent = await captureSQLiteSnapshot(project.containerId, projectId);
+      } else if (project.dbProvider === "postgres") {
+        const connectionString = await getDatabaseUrlSecret(projectId);
+        if (!connectionString || connectionString.includes("localhost:5432")) {
+          logger.info(
+            { projectId, versionId },
+            "captureProjectDbSnapshot: Postgres skipped — placeholder/missing DATABASE_URL",
+          );
+          return null;
+        }
+        dumpContent = await generatePostgresDump(connectionString);
+      }
+
+      if (!dumpContent) return null;
+      const sizeBytes = Buffer.byteLength(dumpContent, "utf8");
+      const objectKey = await uploadSnapshotBlob(projectId, dumpContent);
+      uploadedObjectKey = objectKey;
+      if (!(await session.assertActive())) {
+        if (objectKey) await deleteSnapshotBlob(objectKey);
+        return null;
+      }
+
+      const [snapshot] = await db
+        .insert(dbSnapshotsTable)
+        .values({
+          projectId,
+          versionId,
+          label,
+          provider: project.dbProvider,
+          dumpContent: objectKey ? null : dumpContent,
+          objectKey,
+          isPartial: false,
+          sizeBytes,
+        })
+        .returning({ id: dbSnapshotsTable.id });
+
+      logger.info(
+        { projectId, versionId, snapshotId: snapshot?.id, sizeBytes },
+        "captureProjectDbSnapshot: snapshot captured",
+      );
+      uploadedObjectKey = null;
+      return snapshot?.id ?? null;
+    } catch (err) {
+      if (uploadedObjectKey) await deleteSnapshotBlob(uploadedObjectKey);
+      logger.warn({ err, projectId, versionId }, "captureProjectDbSnapshot failed (non-fatal)");
       return null;
     }
-
-    let dumpContent: string | null = null;
-    if (project.dbProvider === "sqlite") {
-      if (!project.containerId || project.containerStatus !== "running") {
-        logger.info(
-          { projectId, versionId },
-          "captureProjectDbSnapshot: SQLite skipped — container not running",
-        );
-        return null;
-      }
-      dumpContent = await captureSQLiteSnapshot(project.containerId, projectId);
-    } else if (project.dbProvider === "postgres") {
-      const connectionString = await getDatabaseUrlSecret(projectId);
-      if (!connectionString || connectionString.includes("localhost:5432")) {
-        logger.info(
-          { projectId, versionId },
-          "captureProjectDbSnapshot: Postgres skipped — placeholder/missing DATABASE_URL",
-        );
-        return null;
-      }
-      dumpContent = await generatePostgresDump(connectionString);
-    }
-
-    if (!dumpContent) return null;
-    const sizeBytes = Buffer.byteLength(dumpContent, "utf8");
-    const objectKey = await uploadSnapshotBlob(projectId, dumpContent);
-
-    const [snapshot] = await db
-      .insert(dbSnapshotsTable)
-      .values({
-        projectId,
-        versionId,
-        label,
-        provider: project.dbProvider,
-        dumpContent: objectKey ? null : dumpContent,
-        objectKey,
-        isPartial: false,
-        sizeBytes,
-      })
-      .returning({ id: dbSnapshotsTable.id });
-
-    logger.info(
-      { projectId, versionId, snapshotId: snapshot?.id, sizeBytes },
-      "captureProjectDbSnapshot: snapshot captured",
-    );
-    return snapshot?.id ?? null;
-  } catch (err) {
-    logger.warn({ err, projectId, versionId }, "captureProjectDbSnapshot failed (non-fatal)");
-    return null;
-  }
+  });
+  return lifecycle.state === "active" ? lifecycle.value : null;
 }

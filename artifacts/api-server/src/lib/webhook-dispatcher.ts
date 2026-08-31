@@ -16,9 +16,25 @@ import { eq } from "drizzle-orm";
 import { db, projectWebhooksTable, webhookDeliveriesTable } from "@workspace/db";
 import type { WebhookEvent } from "@workspace/db";
 import { logger } from "./logger";
+import { acquireProjectLifecycleSession, registerProjectWorkController } from "./project-lifecycle";
 
 const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [0, 1_000, 4_000, 16_000];
+
+async function waitUnlessAborted(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 function sign(secret: string, body: string): string {
   return createHmac("sha256", secret).update(body).digest("hex");
@@ -32,6 +48,7 @@ async function deliverOnce(
   secret: string,
   payload: Record<string, unknown>,
   attempt: number,
+  signal: AbortSignal,
 ): Promise<void> {
   const body = JSON.stringify(payload);
   const sig = sign(secret, body);
@@ -52,7 +69,7 @@ async function deliverOnce(
         "User-Agent": "MustaflowWebhooks/1.0",
       },
       body,
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
     });
     statusCode = resp.status;
     responseBody = (await resp.text()).slice(0, 512);
@@ -96,12 +113,15 @@ async function deliverWithRetry(
   url: string,
   secret: string,
   payload: Record<string, unknown>,
+  signal: AbortSignal,
 ): Promise<void> {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (signal.aborted) return;
     const wait = BACKOFF_MS[attempt - 1] ?? 0;
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    await waitUnlessAborted(wait, signal);
+    if (signal.aborted) return;
     try {
-      await deliverOnce(webhookId, projectId, event, url, secret, payload, attempt);
+      await deliverOnce(webhookId, projectId, event, url, secret, payload, attempt, signal);
       return; // success
     } catch {
       if (attempt === MAX_ATTEMPTS) {
@@ -122,7 +142,14 @@ export function dispatchWebhookEvent(
 ): void {
   setImmediate(() => {
     void (async () => {
+      let lifecycleSession: Awaited<ReturnType<typeof acquireProjectLifecycleSession>> = null;
+      const controller = new AbortController();
+      let unregisterProjectWork: (() => void) | null = null;
       try {
+        unregisterProjectWork = registerProjectWorkController(projectId, controller);
+        lifecycleSession = await acquireProjectLifecycleSession(projectId);
+        if (!lifecycleSession || controller.signal.aborted) return;
+
         const hooks = await db
           .select()
           .from(projectWebhooksTable)
@@ -142,10 +169,15 @@ export function dispatchWebhookEvent(
         };
 
         await Promise.allSettled(
-          subscribed.map((h) => deliverWithRetry(h.id, projectId, event, h.url, h.secret, payload)),
+          subscribed.map((h) =>
+            deliverWithRetry(h.id, projectId, event, h.url, h.secret, payload, controller.signal),
+          ),
         );
       } catch (err) {
         logger.warn({ err, projectId, event }, "dispatchWebhookEvent outer error");
+      } finally {
+        unregisterProjectWork?.();
+        await lifecycleSession?.release();
       }
     })();
   });

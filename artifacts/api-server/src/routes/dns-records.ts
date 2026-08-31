@@ -27,6 +27,7 @@ import {
   type DnsRecordRow,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 import {
   cfEnabled,
   listDnsRecords,
@@ -254,6 +255,7 @@ router.get(
 router.post(
   "/projects/:id/domains/:domainId/dns",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -348,6 +350,7 @@ router.post(
 router.put(
   "/projects/:id/domains/:domainId/dns/:recordId",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -479,6 +482,7 @@ router.put(
 router.delete(
   "/projects/:id/domains/:domainId/dns/:recordId",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -602,6 +606,7 @@ router.get(
 router.post(
   "/projects/:id/domains/:domainId/dns/sync",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -697,6 +702,7 @@ router.post(
 router.post(
   "/projects/:id/domains/:domainId/dns/dry-run",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -786,6 +792,7 @@ router.get(
 router.post(
   "/projects/:id/domains/:domainId/dns/rollback",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -1138,6 +1145,7 @@ void dnsPromises;
 router.post(
   "/projects/:id/domains/:domainId/certificate",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -1358,6 +1366,7 @@ router.post(
 router.delete(
   "/projects/:id/domains/:domainId/certificate",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);

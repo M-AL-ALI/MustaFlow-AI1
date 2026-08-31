@@ -1,46 +1,37 @@
-import { randomUUID } from "node:crypto";
-import { db, oraAssetsTable, oraFileContextsTable, type OraAssetKind } from "@workspace/db";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { db, oraAssetsTable, oraFileContextsTable, pool, type OraAssetKind } from "@workspace/db";
+import { and, eq, isNull } from "drizzle-orm";
 import { logger } from "./logger";
-import { r2Enabled, r2GetObject, r2PutObject } from "./cloudflare";
+import { r2GetObject } from "./cloudflare";
+import { readAssetBuffer, putAssetBuffer } from "./asset-r2";
+import {
+  AssetAdmissionError,
+  beginAssetUpload,
+  completeAsset,
+  deleteReadyAsset,
+  getQuota,
+  recordAssetDeleted,
+  rejectReservedAsset,
+  reserveAsset,
+  reserveAssetAgainstAvailableQuota,
+  type AssetReservation,
+} from "./asset-registry";
+import { deleteTrackedAssetStorageObjects } from "./asset-storage-cleanup";
 
-/**
- * R2 offload is opt-in via `ORA_ASSETS_R2_ENABLED=true` AND configured R2
- * credentials (`r2Enabled()`). The flag is intentional: CF R2 credentials may
- * already be present for snapshot serving, but offloading Ora bytes is a
- * separate, additive decision. When the flag is off, bytes stay base64 in the
- * DB exactly as before — preserving prior behavior in dev and existing tests.
- */
+/** Compatibility export for the existing Library UI. The real limit is the
+ * unified account quota (base plus purchased storage), not an Ora-only cap. */
+export const PER_USER_STORAGE_BYTES = 500 * 1024 * 1024;
+
+/** Kept for old callers/tests. New Ora bytes always use the unified R2 path. */
 export function oraR2OffloadEnabled(): boolean {
-  return process.env.ORA_ASSETS_R2_ENABLED === "true" && r2Enabled();
+  return true;
 }
-
-/**
- * Largest asset we will persist to the durable Ora library. Generated files and
- * standard-quality images comfortably fit; anything larger is skipped (the
- * in-chat copy still works) rather than bloating the table.
- */
-const MAX_ASSET_BYTES = 100 * 1024 * 1024; // 100 MB of decoded bytes (matches the upload cap)
-
-/**
- * Per-user total storage cap for the durable Ora library. The base64 `data`
- * blobs live in Postgres, so an unbounded library would grow the table without
- * limit. When a user is at/over this cap we skip persisting (the in-chat copy
- * still works) and surface a clear reason via the returned result.
- */
-export const PER_USER_STORAGE_BYTES = 200 * 1024 * 1024; // 200 MB of decoded bytes per user
 
 /**
  * Sum the decoded bytes of a user's live (non-deleted) library assets.
  */
 export async function getUserStorageBytes(userId: string): Promise<number> {
-  const [row] = await db
-    .select({
-      total: sql<number>`COALESCE(SUM(${oraAssetsTable.sizeBytes}), 0)`,
-    })
-    .from(oraAssetsTable)
-    .where(and(eq(oraAssetsTable.userId, userId), isNull(oraAssetsTable.deletedAt)));
-  return Number(row?.total ?? 0);
+  return (await getQuota(userId)).usedBytes;
 }
 
 /**
@@ -50,15 +41,21 @@ export async function getUserStorageBytes(userId: string): Promise<number> {
  * when neither source yields bytes.
  */
 export async function resolveOraAssetRowBytes(row: {
+  assetId?: number | null;
   storageKey: string | null;
   data: string | null;
+  sizeBytes?: number;
 }): Promise<Buffer | null> {
+  if (row.data) return Buffer.from(row.data, "base64");
   let buf: Buffer | null = null;
-  if (row.storageKey) {
-    const obj = await r2GetObject(row.storageKey);
-    if (obj) buf = obj.body;
+  if (row.assetId && row.storageKey) {
+    const maxBytes = Math.max(1, Number(row.sizeBytes ?? PER_USER_STORAGE_BYTES));
+    buf = await readAssetBuffer(row.storageKey, maxBytes);
   }
-  if (!buf && row.data) buf = Buffer.from(row.data, "base64");
+  if (!buf && !row.assetId && row.storageKey) {
+    const legacy = await r2GetObject(row.storageKey);
+    if (legacy) buf = legacy.body;
+  }
   return buf;
 }
 
@@ -73,8 +70,10 @@ export async function getOraAssetBytes(assetId: number, userId: string): Promise
   try {
     const [row] = await db
       .select({
+        assetId: oraAssetsTable.assetId,
         storageKey: oraAssetsTable.storageKey,
         data: oraAssetsTable.data,
+        sizeBytes: oraAssetsTable.sizeBytes,
         deletedAt: oraAssetsTable.deletedAt,
       })
       .from(oraAssetsTable)
@@ -103,8 +102,14 @@ export interface PersistOraAssetInput {
   format?: string | null;
   /** The originating prompt / description, for the library list. Optional. */
   prompt?: string | null;
-  /** Raw base64 (NO `data:` prefix). */
-  base64: string;
+  /** Raw base64 (NO `data:` prefix). Required unless unifiedAssetId is set. */
+  base64?: string;
+  /**
+   * A ready account-wide asset that already owns these exact bytes. This is
+   * used by Ora image generation so Library metadata never uploads a duplicate
+   * physical object.
+   */
+  unifiedAssetId?: number;
   // ── File revision lineage (all optional; omitted = standalone v1) ────────
   /** The v1 root asset of this version chain (null/omitted for v1 itself). */
   rootAssetId?: number | null;
@@ -116,6 +121,67 @@ export interface PersistOraAssetInput {
   sourceFileRef?: string | null;
   /** Short human-readable description of what this version changed. */
   editSummary?: string | null;
+}
+
+export type OraGeneratedAssetReservation = AssetReservation;
+
+/**
+ * Claim the caller's entire currently-available account allowance before a
+ * paid generation call. This is deliberately not a per-file cap: the exact
+ * output size replaces the reservation at completion, and the only refusal is
+ * the account's real aggregate quota. Holding the available balance prevents a
+ * concurrent upload from turning an admitted generation into an unstoreable
+ * response after provider spend.
+ */
+export async function reserveOraGeneratedAsset(input: {
+  userId: string;
+  oraProjectId?: number | null;
+  kind: "file" | "image" | "generated";
+  source: string;
+  fileName: string;
+  mimeType: string;
+}): Promise<OraGeneratedAssetReservation> {
+  const reservation = await reserveAssetAgainstAvailableQuota({
+    ownerUserId: input.userId,
+    actorUserId: input.userId,
+    projectId: null,
+    threadKey: input.oraProjectId ? `ora-project:${input.oraProjectId}` : null,
+    scope: "account",
+    kind: input.kind,
+    source: input.source,
+    filename: input.fileName,
+    mimeType: input.mimeType,
+    context: { oraProjectId: input.oraProjectId ?? null },
+  });
+  try {
+    const claim = await beginAssetUpload({ assetId: reservation.id, actorUserId: input.userId });
+    if (!claim) throw new AssetAdmissionError("asset_storage_unavailable", 503);
+    return reservation;
+  } catch (error) {
+    await rejectReservedAsset({
+      assetId: reservation.id,
+      ownerUserId: input.userId,
+      actorUserId: input.userId,
+      code: "asset_storage_unavailable",
+    }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Release a pre-provider generation reservation after a provider/build failure. */
+export async function cancelOraGeneratedAsset(
+  reservation: OraGeneratedAssetReservation,
+  userId: string,
+): Promise<void> {
+  await rejectReservedAsset({
+    assetId: reservation.id,
+    ownerUserId: userId,
+    actorUserId: userId,
+    code: "asset_storage_unavailable",
+  }).catch(() => undefined);
+  await deleteTrackedAssetStorageObjects([
+    { storageBackend: "r2", storageKey: reservation.storageKey },
+  ]).catch(() => undefined);
 }
 
 /**
@@ -281,93 +347,331 @@ export function parseDataUri(src: string): { base64: string; mimeType?: string }
   return { base64: match[2] ?? "", mimeType: match[1] || undefined };
 }
 
-/**
- * Persist a generated asset to the durable Ora library. Best-effort: this never
- * throws into the request path — a failure to save to the library must not break
- * the user's in-chat generation. Returns the new asset id, or null on skip/fail.
- */
-export async function persistOraAsset(input: PersistOraAssetInput): Promise<number | null> {
+async function insertOraLibraryMetadata(
+  input: PersistOraAssetInput,
+  unifiedAssetId: number,
+): Promise<number> {
+  const client = await pool.connect();
   try {
-    const sizeBytes = Buffer.byteLength(input.base64, "base64");
-    if (sizeBytes === 0) return null;
-    if (sizeBytes > MAX_ASSET_BYTES) {
-      logger.warn(
-        { component: "ora-assets", sizeBytes, fileName: input.fileName },
-        "Skipping oversized Ora asset",
-      );
-      return null;
+    await client.query("BEGIN");
+    const asset = await client.query<{
+      id: number;
+      owner_user_id: string;
+      storage_key: string;
+      size_bytes: string;
+      state: string;
+    }>(
+      `SELECT id, owner_user_id, storage_key, size_bytes, state
+         FROM assets
+        WHERE id=$1 AND owner_user_id=$2 AND state='ready'
+        FOR SHARE`,
+      [unifiedAssetId, input.userId],
+    );
+    const ready = asset.rows[0];
+    if (!ready) throw new AssetAdmissionError("asset_not_found", 404);
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO ora_assets (
+         user_id, ora_project_id, kind, file_name, mime_type, format, prompt,
+         data, storage_key, asset_id, size_bytes, root_asset_id, parent_asset_id,
+         version_number, source_file_ref, edit_summary
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10,$11,$12,$13,$14,$15)
+       ON CONFLICT (asset_id) WHERE asset_id IS NOT NULL
+       DO UPDATE SET asset_id=EXCLUDED.asset_id
+       RETURNING id`,
+      [
+        input.userId,
+        input.oraProjectId ?? null,
+        input.kind,
+        input.fileName,
+        input.mimeType,
+        input.format ?? null,
+        input.prompt ?? null,
+        ready.storage_key,
+        unifiedAssetId,
+        Number(ready.size_bytes),
+        input.rootAssetId ?? null,
+        input.parentAssetId ?? null,
+        input.versionNumber ?? 1,
+        input.sourceFileRef ?? null,
+        input.editSummary ?? null,
+      ],
+    );
+    const oraAssetId = inserted.rows[0]!.id;
+    await client.query(
+      `INSERT INTO asset_usage (asset_id, consumer)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [unifiedAssetId, `ora-library:${oraAssetId}`],
+    );
+    await client.query("COMMIT");
+    return oraAssetId;
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the typed admission/storage failure.
     }
-    const usedBytes = await getUserStorageBytes(input.userId);
-    if (usedBytes + sizeBytes > PER_USER_STORAGE_BYTES) {
-      logger.warn(
-        {
-          component: "ora-assets",
-          userId: input.userId,
-          usedBytes,
-          sizeBytes,
-          capBytes: PER_USER_STORAGE_BYTES,
-        },
-        "Skipping Ora asset: per-user storage quota exceeded",
-      );
-      return null;
-    }
-    // R2 offload (opt-in). On success, bytes live in R2 and `data` is null. On
-    // any failure we fall back to the DB path so persistence never silently
-    // drops the asset.
-    let storageKey: string | null = null;
-    let data: string | null = input.base64;
-    if (oraR2OffloadEnabled()) {
-      // Guard the upload so a thrown r2PutObject can never drop the asset — any
-      // failure (returned false OR exception) leaves data=base64 (DB fallback).
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Commit bytes into a pre-provider reservation, reconcile it to exact size,
+ * and create the Ora Library metadata link without a second object write.
+ */
+export async function completeOraGeneratedAsset(input: {
+  reservation: OraGeneratedAssetReservation;
+  asset: Omit<PersistOraAssetInput, "base64" | "unifiedAssetId">;
+  base64: string;
+}): Promise<number> {
+  const bytes = Buffer.from(input.base64, "base64");
+  if (bytes.length === 0) {
+    await cancelOraGeneratedAsset(input.reservation, input.asset.userId);
+    throw new AssetAdmissionError("asset_empty", 400);
+  }
+  let completed = false;
+  try {
+    await putAssetBuffer({
+      key: input.reservation.storageKey,
+      body: bytes,
+      contentType: input.asset.mimeType,
+    });
+    await completeAsset({
+      assetId: input.reservation.id,
+      ownerUserId: input.asset.userId,
+      actorUserId: input.asset.userId,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      scanState: "not-required",
+      finalSizeBytes: bytes.length,
+      finalMimeType: input.asset.mimeType,
+    });
+    completed = true;
+    return await insertOraLibraryMetadata(input.asset, input.reservation.id);
+  } catch (error) {
+    if (completed) {
       try {
-        const ext = (input.format ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
-        const key = `ora-assets/${input.userId}/${randomUUID()}${ext ? `.${ext}` : ""}`;
-        const uploaded = await r2PutObject(
-          key,
-          Buffer.from(input.base64, "base64"),
-          input.mimeType,
-          "private, max-age=300",
-        );
-        if (uploaded) {
-          storageKey = key;
-          data = null;
-        } else {
-          logger.warn(
-            { component: "ora-assets", userId: input.userId, fileName: input.fileName },
-            "R2 offload failed; falling back to DB storage for Ora asset",
-          );
-        }
-      } catch (err) {
-        logger.warn(
-          { component: "ora-assets", err, userId: input.userId, fileName: input.fileName },
-          "R2 offload threw; falling back to DB storage for Ora asset",
+        const pending = await deleteReadyAsset({
+          assetId: input.reservation.id,
+          userId: input.asset.userId,
+        });
+        await deleteTrackedAssetStorageObjects(pending.storageObjects);
+        await recordAssetDeleted({
+          assetId: input.reservation.id,
+          userId: input.asset.userId,
+          sizeBytes: pending.sizeBytes,
+        });
+      } catch (cleanupError) {
+        logger.error(
+          {
+            component: "ora-assets",
+            errorClass: cleanupError instanceof Error ? cleanupError.name : "unknown",
+          },
+          "Generated Ora asset cleanup remains pending",
         );
       }
+    } else {
+      await cancelOraGeneratedAsset(input.reservation, input.asset.userId);
     }
+    throw error;
+  }
+}
 
-    const [row] = await db
-      .insert(oraAssetsTable)
-      .values({
-        userId: input.userId,
-        oraProjectId: input.oraProjectId ?? null,
-        kind: input.kind,
-        fileName: input.fileName,
-        mimeType: input.mimeType,
-        format: input.format ?? null,
-        prompt: input.prompt ?? null,
-        data,
-        storageKey,
-        sizeBytes,
-        rootAssetId: input.rootAssetId ?? null,
-        parentAssetId: input.parentAssetId ?? null,
-        versionNumber: input.versionNumber ?? 1,
-        sourceFileRef: input.sourceFileRef ?? null,
-        editSummary: input.editSummary ?? null,
-      })
-      .returning({ id: oraAssetsTable.id });
-    return row?.id ?? null;
+/**
+ * Strict Ora persistence used by request paths that must tell the truth about
+ * quota or storage failure. New bytes are admitted to the account-wide 500 MB
+ * registry before any R2 write. When a caller already owns a ready unified
+ * asset, this function creates only Ora Library metadata: zero duplicate R2
+ * writes and zero duplicate quota.
+ */
+export async function persistOraAssetStrict(input: PersistOraAssetInput): Promise<number> {
+  if (input.unifiedAssetId !== undefined) {
+    return insertOraLibraryMetadata(input, input.unifiedAssetId);
+  }
+  if (!input.base64) throw new AssetAdmissionError("asset_empty", 400);
+  const bytes = Buffer.from(input.base64, "base64");
+  if (bytes.length === 0) throw new AssetAdmissionError("asset_empty", 400);
+
+  const reservation = await reserveAsset({
+    ownerUserId: input.userId,
+    actorUserId: input.userId,
+    projectId: null,
+    threadKey: input.oraProjectId ? `ora-project:${input.oraProjectId}` : null,
+    scope: "account",
+    kind: input.kind,
+    source: "ora-library",
+    filename: input.fileName,
+    mimeType: input.mimeType,
+    sizeBytes: bytes.length,
+    context: { oraProjectId: input.oraProjectId ?? null },
+  });
+  let completed = false;
+  try {
+    const claim = await beginAssetUpload({ assetId: reservation.id, actorUserId: input.userId });
+    if (!claim) throw new AssetAdmissionError("asset_storage_unavailable", 503);
+    await putAssetBuffer({ key: reservation.storageKey, body: bytes, contentType: input.mimeType });
+    await completeAsset({
+      assetId: reservation.id,
+      ownerUserId: input.userId,
+      actorUserId: input.userId,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      scanState: "not-required",
+      finalSizeBytes: bytes.length,
+      finalMimeType: input.mimeType,
+    });
+    completed = true;
+    return await insertOraLibraryMetadata(input, reservation.id);
+  } catch (error) {
+    if (completed) {
+      try {
+        const pending = await deleteReadyAsset({ assetId: reservation.id, userId: input.userId });
+        await deleteTrackedAssetStorageObjects(pending.storageObjects);
+        await recordAssetDeleted({
+          assetId: reservation.id,
+          userId: input.userId,
+          sizeBytes: pending.sizeBytes,
+        });
+      } catch (cleanupError) {
+        logger.error(
+          {
+            component: "ora-assets",
+            errorClass: cleanupError instanceof Error ? cleanupError.name : "unknown",
+          },
+          "Ora metadata failure left a durable asset cleanup pending",
+        );
+      }
+    } else {
+      await rejectReservedAsset({
+        assetId: reservation.id,
+        ownerUserId: input.userId,
+        actorUserId: input.userId,
+        code: "asset_storage_unavailable",
+      }).catch(() => undefined);
+      await deleteTrackedAssetStorageObjects([
+        { storageBackend: "r2", storageKey: reservation.storageKey },
+      ]).catch(() => undefined);
+    }
+    throw error;
+  }
+}
+
+/** Best-effort compatibility wrapper for non-blocking generation surfaces. */
+export async function persistOraAsset(input: PersistOraAssetInput): Promise<number | null> {
+  try {
+    return await persistOraAssetStrict(input);
   } catch (err) {
-    logger.error({ component: "ora-assets", err }, "Failed to persist Ora asset");
+    logger.error(
+      { component: "ora-assets", errorClass: err instanceof Error ? err.name : "unknown" },
+      "Failed to persist Ora asset",
+    );
     return null;
+  }
+}
+
+export type DeleteOraAssetResult =
+  | "deleted"
+  | "retained"
+  | "cleanup-pending"
+  | "referenced"
+  | "not-found";
+
+/**
+ * Remove one Ora Library entry without hiding billed bytes. Direct Ora
+ * references block the delete; other registry references retain the physical
+ * object. Unreferenced objects enter the shared durable deletion state machine
+ * and release account quota only after provider deletion succeeds.
+ */
+export async function deleteOraAsset(input: {
+  oraAssetId: number;
+  userId: string;
+}): Promise<DeleteOraAssetResult> {
+  const client = await pool.connect();
+  let unifiedAssetId: number | null;
+  let legacyStorageKey: string | null;
+  try {
+    await client.query("BEGIN");
+    const selected = await client.query<{
+      asset_id: number | null;
+      storage_key: string | null;
+      referenced: boolean;
+    }>(
+      `SELECT ora.asset_id,
+              ora.storage_key,
+              (
+                EXISTS (
+                  SELECT 1 FROM ora_file_contexts ctx
+                   WHERE ctx.asset_id=ora.id AND ctx.deleted_at IS NULL
+                )
+                OR EXISTS (SELECT 1 FROM brand_kits kit WHERE kit.logo_asset_id=ora.id)
+                OR EXISTS (
+                   SELECT 1 FROM support_tickets ticket
+                    WHERE ticket.user_id=ora.user_id
+                      AND ticket.attachments::text LIKE
+                          '%/api/ora/assets/' || ora.id::text || '/download%'
+                )
+              ) AS referenced
+         FROM ora_assets ora
+        WHERE ora.id=$1 AND ora.user_id=$2 AND ora.deleted_at IS NULL
+        FOR UPDATE`,
+      [input.oraAssetId, input.userId],
+    );
+    const row = selected.rows[0];
+    if (!row) {
+      await client.query("ROLLBACK");
+      return "not-found";
+    }
+    if (row.referenced) {
+      await client.query("ROLLBACK");
+      return "referenced";
+    }
+    unifiedAssetId = row.asset_id;
+    legacyStorageKey = row.storage_key;
+    await client.query(`UPDATE ora_assets SET deleted_at=NOW() WHERE id=$1`, [input.oraAssetId]);
+    if (unifiedAssetId !== null) {
+      await client.query(`DELETE FROM asset_usage WHERE asset_id=$1 AND consumer=$2`, [
+        unifiedAssetId,
+        `ora-library:${input.oraAssetId}`,
+      ]);
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the original error.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (unifiedAssetId === null) {
+    if (legacyStorageKey) {
+      try {
+        await deleteTrackedAssetStorageObjects([
+          { storageBackend: "r2", storageKey: legacyStorageKey },
+        ]);
+      } catch {
+        return "cleanup-pending";
+      }
+    }
+    return "deleted";
+  }
+
+  try {
+    const pending = await deleteReadyAsset({ assetId: unifiedAssetId, userId: input.userId });
+    await deleteTrackedAssetStorageObjects(pending.storageObjects);
+    await recordAssetDeleted({
+      assetId: unifiedAssetId,
+      userId: input.userId,
+      sizeBytes: pending.sizeBytes,
+    });
+    return "deleted";
+  } catch (error) {
+    if (error instanceof AssetAdmissionError && error.code === "asset_referenced") {
+      return "retained";
+    }
+    return "cleanup-pending";
   }
 }

@@ -4,6 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, secretsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { isBinaryMime } from "../lib/binary-mime";
+import { resolveProjectFileBytes } from "../lib/project-file-asset-reference";
 import { generateSbom } from "../lib/sbom";
 
 const router: IRouter = Router();
@@ -199,7 +200,9 @@ router.get("/projects/:id/export", requireProjectOwnership, async (req, res): Pr
   for (const file of files) {
     const mime = file.mimeType ?? "";
     zipFiles[file.path] = isBinaryMime(mime)
-      ? new Uint8Array(Buffer.from(file.content, "base64"))
+      ? new Uint8Array(
+          await resolveProjectFileBytes({ projectId, content: file.content, mimeType: mime }),
+        )
       : strToU8(file.content);
   }
   zipFiles["README.md"] = strToU8(generateReadme(project, files));

@@ -23,6 +23,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { guessMime } from "./builder";
 import { logger } from "./logger";
+import { reconcileProjectFileAssetUsage } from "./project-file-asset-usage";
 
 export interface BlueprintSecretSpec {
   name: string;
@@ -153,33 +154,44 @@ export async function installBlueprint(
 
   // ── Write files (idempotent upsert into project_files) ───────────────────
   for (const file of manifest.files) {
-    // Upsert by (projectId, path).
-    const existing = await db
-      .select({ id: projectFilesTable.id })
-      .from(projectFilesTable)
-      .where(
-        and(eq(projectFilesTable.projectId, ctx.projectId), eq(projectFilesTable.path, file.path)),
-      )
-      .limit(1);
     const mime = file.mimeType ?? guessMime(file.path);
-    if (existing[0]) {
-      if (file.overwrite || ctx.overwrite) {
-        await db
+    const wroteFile = await db.transaction(async (tx) => {
+      const existing = await tx
+        .select({ id: projectFilesTable.id })
+        .from(projectFilesTable)
+        .where(
+          and(
+            eq(projectFilesTable.projectId, ctx.projectId),
+            eq(projectFilesTable.path, file.path),
+          ),
+        )
+        .limit(1);
+      if (existing[0] && !file.overwrite && !ctx.overwrite) return false;
+      if (existing[0]) {
+        await tx
           .update(projectFilesTable)
           .set({ content: file.content, mimeType: mime, updatedAt: new Date() })
           .where(eq(projectFilesTable.id, existing[0].id));
-        filesWritten.push(file.path);
       } else {
-        filesSkipped.push(file.path);
+        await tx.insert(projectFilesTable).values({
+          projectId: ctx.projectId,
+          path: file.path,
+          content: file.content,
+          mimeType: mime,
+        });
       }
-    } else {
-      await db.insert(projectFilesTable).values({
+      await reconcileProjectFileAssetUsage(tx, {
         projectId: ctx.projectId,
-        path: file.path,
-        content: file.content,
-        mimeType: mime,
+        artifactId: null,
+        filePath: file.path,
+        nextContent: file.content,
       });
+      return true;
+    });
+    if (wroteFile) {
       filesWritten.push(file.path);
+    } else {
+      filesSkipped.push(file.path);
     }
   }
 

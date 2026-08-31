@@ -9,6 +9,7 @@ import {
   resolveProjectWorkspaceId,
 } from "../lib/workspace-tenancy";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
 
 const router: IRouter = Router();
 
@@ -75,14 +76,25 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
   }
 
   if (files.length > 0) {
-    await db.insert(projectFilesTable).values(
-      files.map((f) => ({
-        projectId: newProject.id,
-        path: f.path,
-        content: f.content,
-        mimeType: f.mimeType,
-      })),
-    );
+    await db.transaction(async (tx) => {
+      await tx.insert(projectFilesTable).values(
+        files.map((f) => ({
+          projectId: newProject.id,
+          path: f.path,
+          content: f.content,
+          mimeType: f.mimeType,
+        })),
+      );
+      for (const file of files) {
+        await reconcileProjectFileAssetUsage(tx, {
+          projectId: newProject.id,
+          artifactId: null,
+          filePath: file.path,
+          nextContent: file.content,
+          referenceProjectId: original.id,
+        });
+      }
+    });
   }
 
   await db

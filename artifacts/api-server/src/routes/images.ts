@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
-import { assetsTable, assetUsageTable, db, projectsTable, projectFilesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { assetsTable, db, projectsTable } from "@workspace/db";
 import { generateImageBuffer } from "@workspace/integrations-openai-ai-server";
 import { requireProjectOwnership } from "../lib/auth";
 import { ObjectStorageService } from "../lib/objectStorage";
@@ -9,11 +9,12 @@ import { GenerateImageBody, GenerateImageResponse } from "@workspace/api-zod";
 import { deleteAssetObject, openAsset, putAssetBuffer } from "../lib/asset-r2";
 import {
   AssetAdmissionError,
+  beginAssetUpload,
   completeAsset,
   rejectReservedAsset,
-  reserveAsset,
+  reserveAssetAgainstAvailableQuota,
 } from "../lib/asset-registry";
-import { resolveArtifactId } from "../lib/artifacts";
+import { holdResponseProjectLifecycleSession } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -39,136 +40,94 @@ router.post(
       return;
     }
 
-    const { prompt, size, savePath } = parsed.data;
-    const requestedSize =
-      (size as "1024x1024" | "1536x1024" | "1024x1536" | undefined) ?? "1024x1024";
-    // generateImageBuffer types only allow square sizes today; cast to widen.
-    const buffer = await generateImageBuffer(prompt, requestedSize as "1024x1024").catch(
-      (err: unknown) => {
-        req.log.error({ err }, "Image generation failed");
-        throw err;
-      },
-    );
-
-    let reservation: Awaited<ReturnType<typeof reserveAsset>> | null = null;
+    const releaseLifecycleHold = holdResponseProjectLifecycleSession(res);
     try {
-      reservation = await reserveAsset({
-        ownerUserId: project.ownerId,
-        actorUserId: req.userId!,
-        projectId: project.id,
-        threadKey: null,
-        scope: "project",
-        kind: "generated",
-        source: "zero-composer",
-        filename: "generated.png",
-        mimeType: "image/png",
-        sizeBytes: buffer.length,
-        context: { altText: prompt, brandRole: "none" },
-      });
-      await putAssetBuffer({
-        key: reservation.storageKey,
-        body: buffer,
-        contentType: "image/png",
-      });
-      await completeAsset({
-        assetId: reservation.id,
-        ownerUserId: project.ownerId,
-        actorUserId: req.userId!,
-        sha256: createHash("sha256").update(buffer).digest("hex"),
-        scanState: "not-required",
-      });
-    } catch (error) {
-      if (reservation) {
-        await deleteAssetObject(reservation.storageKey).catch(() => undefined);
-        await rejectReservedAsset({
+      const { prompt, size } = parsed.data;
+      const requestedSize =
+        (size as "1024x1024" | "1536x1024" | "1024x1536" | undefined) ?? "1024x1024";
+      let reservation: Awaited<ReturnType<typeof reserveAssetAgainstAvailableQuota>> | null = null;
+      let buffer: Buffer;
+      try {
+        reservation = await reserveAssetAgainstAvailableQuota({
+          ownerUserId: project.ownerId,
+          actorUserId: req.userId!,
+          projectId: project.id,
+          threadKey: null,
+          scope: "project",
+          kind: "generated",
+          source: "zero-composer",
+          filename: "generated.png",
+          mimeType: "image/png",
+          context: { altText: prompt, brandRole: "none" },
+        });
+        const uploadClaim = await beginAssetUpload({
+          assetId: reservation.id,
+          actorUserId: req.userId!,
+        });
+        if (!uploadClaim) throw new Error("Generated asset reservation is unavailable");
+        // Quota is reserved before the provider call, so a full account spends no
+        // provider credits and creates no untracked bytes.
+        buffer = await generateImageBuffer(prompt, requestedSize as "1024x1024").catch(
+          (err: unknown) => {
+            req.log.error({ err }, "Image generation failed");
+            throw err;
+          },
+        );
+        await putAssetBuffer({
+          key: reservation.storageKey,
+          body: buffer,
+          contentType: "image/png",
+        });
+        await completeAsset({
           assetId: reservation.id,
           ownerUserId: project.ownerId,
           actorUserId: req.userId!,
-          code: "asset_storage_unavailable",
-        }).catch(() => undefined);
-      }
-      if (error instanceof AssetAdmissionError) {
-        res.status(error.status).json({ error: error.message, code: error.code });
-        return;
-      }
-      throw error;
-    }
-
-    // Also save into project files so generated apps can reference the asset.
-    const safeSavePath = (() => {
-      const candidate = (savePath ?? "").trim().replace(/^\/+/, "");
-      if (!candidate || candidate.includes("..")) {
-        return `assets/generated/${Date.now()}.png`;
-      }
-      return candidate;
-    })();
-
-    let savedPath: string | undefined;
-    try {
-      const artifactId = await resolveArtifactId(project.id, null);
-      if (artifactId === null) {
-        req.log.warn({ projectId: project.id }, "Generated image has no primary app to save into");
-      } else {
-        await db.transaction(async (tx) => {
-          const [existing] = await tx
-            .select({ id: projectFilesTable.id })
-            .from(projectFilesTable)
-            .where(
-              and(
-                eq(projectFilesTable.projectId, project.id),
-                eq(projectFilesTable.artifactId, artifactId),
-                eq(projectFilesTable.path, safeSavePath),
-              ),
-            );
-          if (existing) {
-            await tx
-              .update(projectFilesTable)
-              .set({
-                content: buffer.toString("base64"),
-                mimeType: "image/png",
-                updatedAt: new Date(),
-              })
-              .where(eq(projectFilesTable.id, existing.id));
-          } else {
-            await tx.insert(projectFilesTable).values({
-              projectId: project.id,
-              artifactId,
-              path: safeSavePath,
-              content: buffer.toString("base64"),
-              mimeType: "image/png",
-            });
-          }
-          await tx
-            .insert(assetUsageTable)
-            .values({
-              assetId: reservation.id,
-              projectId: project.id,
-              filePath: safeSavePath,
-              consumer: `project-file:${safeSavePath}`,
-            })
-            .onConflictDoNothing();
+          sha256: createHash("sha256").update(buffer).digest("hex"),
+          scanState: "not-required",
+          finalSizeBytes: buffer.length,
         });
-        savedPath = safeSavePath;
+      } catch (error) {
+        if (reservation) {
+          await deleteAssetObject(reservation.storageKey).catch((cleanupError: unknown) => {
+            req.log.warn(
+              {
+                assetId: reservation?.id,
+                errorClass: cleanupError instanceof Error ? cleanupError.name : "unknown",
+              },
+              "generated image object cleanup remains pending",
+            );
+          });
+          await rejectReservedAsset({
+            assetId: reservation.id,
+            ownerUserId: project.ownerId,
+            actorUserId: req.userId!,
+            code: "asset_storage_unavailable",
+          });
+        }
+        if (error instanceof AssetAdmissionError) {
+          res.status(error.status).json({ error: error.message, code: error.code });
+          return;
+        }
+        throw error;
       }
-    } catch (err) {
-      req.log.warn({ err }, "Failed to persist generated image as project file (non-fatal)");
-    }
 
-    const [w, h] = requestedSize.split("x").map((n) => Number(n));
-    res.json(
-      GenerateImageResponse.parse({
-        attachment: {
-          kind: "image",
-          assetId: reservation.id,
-          url: `/api/assets/${reservation.id}/content`,
-          alt: prompt,
-          width: w,
-          height: h,
-          generated: true,
-          ...(savedPath ? { savedPath } : {}),
-        },
-      }),
-    );
+      const [w, h] = requestedSize.split("x").map((n) => Number(n));
+      res.json(
+        GenerateImageResponse.parse({
+          attachment: {
+            kind: "image",
+            assetId: reservation.id,
+            url: `/api/assets/${reservation.id}/content`,
+            alt: prompt,
+            width: w,
+            height: h,
+            generated: true,
+          },
+        }),
+      );
+    } finally {
+      await releaseLifecycleHold();
+    }
   },
 );
 

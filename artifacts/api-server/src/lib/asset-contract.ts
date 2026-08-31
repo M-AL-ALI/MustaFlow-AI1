@@ -7,6 +7,8 @@ export const ASSET_ERROR_MESSAGES = {
   asset_format_unsupported: "This file type is not supported yet.",
   asset_content_mismatch: "This file's contents do not match its file type.",
   asset_quota_exceeded: "This upload would exceed your 500 MB storage allowance.",
+  asset_storage_reconciliation_required:
+    "Your storage total is still being verified. Please try again after storage reconciliation finishes.",
   asset_storage_unavailable: "Uploads are temporarily unavailable. Please try again shortly.",
   asset_not_found: "This upload could not be found.",
   asset_referenced: "This asset is still used by your project and cannot be deleted yet.",

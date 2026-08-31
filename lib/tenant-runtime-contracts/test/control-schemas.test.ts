@@ -111,6 +111,8 @@ function requestFixtures(): Record<keyof typeof controlEndpointSchemas, unknown>
       expectedManifestRevision: "manifest-42-v7",
       expectedSandboxIdentity: productionSandboxIdentity,
     },
+    routeInventory: { projectId: 42, scanLimit: 100 },
+    routeRead: { hostname: "project.apps.mustaflow.com" },
   };
 }
 
@@ -214,6 +216,35 @@ function responseFixtures(): Record<keyof typeof controlEndpointSchemas, unknown
       },
     },
     routeDeactivate: { ok: true, hostname: "project.apps.mustaflow.com" },
+    routeInventory: {
+      ok: true,
+      projectId: 42,
+      routes: [
+        {
+          hostname: "project.apps.mustaflow.com",
+          projectId: 42,
+          role: "production",
+          activeSlot: "blue",
+          manifestRevision: "manifest-42-v7",
+          servicePort: 8080,
+          sandboxIdentity: productionSandboxIdentity,
+        },
+      ],
+      nextCursor: null,
+      complete: true,
+    },
+    routeRead: {
+      ok: true,
+      route: {
+        hostname: "project.apps.mustaflow.com",
+        projectId: 42,
+        role: "production",
+        activeSlot: "blue",
+        manifestRevision: "manifest-42-v7",
+        servicePort: 8080,
+        sandboxIdentity: productionSandboxIdentity,
+      },
+    },
   };
 }
 
@@ -235,6 +266,8 @@ describe("control-plane schemas", () => {
       "environment",
       "routeActivate",
       "routeDeactivate",
+      "routeInventory",
+      "routeRead",
     ]);
     expect(Object.keys(controlEndpointContracts)).toEqual(Object.keys(controlEndpointSchemas));
     expect(CONTROL_API_PREFIX).toBe("/_nabuflow/control/v1");

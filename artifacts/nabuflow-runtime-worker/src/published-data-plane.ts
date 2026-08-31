@@ -1,4 +1,3 @@
-import { getSandbox } from "@cloudflare/sandbox";
 import {
   canonicalJson,
   PUBLISHED_RUNTIME_RECOVERY_MAX_FAILED_TERMINALS,
@@ -17,11 +16,12 @@ import type {
 } from "./model";
 import {
   CloudflareSandboxBackend,
-  NabuflowSandbox,
   PUBLISHED_RUNTIME_FORWARD_ORIGIN,
   PUBLISHED_RUNTIME_FORWARD_PORT_HEADER,
   PUBLISHED_RUNTIME_FORWARD_TIMEOUT_HEADER,
   readPublishedRuntimeForwardFailure,
+  runtimeSandboxStub,
+  runtimeSandboxWebSocketConnect,
   type BackendAvailabilityResult,
   type PublishedRuntimeForwardFailure,
   type RuntimeHealthProbeInput,
@@ -789,10 +789,11 @@ function publishedErrorResponse(error: PublishedHttpError, requestId: string): R
   );
 }
 
-function runtimeSandbox(env: WorkerBindings, identity: string): NabuflowSandbox {
-  return getSandbox(env.NABUFLOW_SANDBOX, identity, {
-    keepAlive: true,
-    sleepAfter: env.NABUFLOW_RUNTIME_SLEEP_AFTER,
-    enableDefaultSession: true,
-  }) as NabuflowSandbox;
+function runtimeSandbox(env: WorkerBindings, identity: string): PublishedSandbox {
+  const sandbox = runtimeSandboxStub(env, identity);
+  return {
+    fetch: (request) => sandbox.fetch(request),
+    probeRuntimeHealth: (input) => sandbox.probeRuntimeHealth(input),
+    wsConnect: (request, port) => runtimeSandboxWebSocketConnect(sandbox, request, port),
+  };
 }

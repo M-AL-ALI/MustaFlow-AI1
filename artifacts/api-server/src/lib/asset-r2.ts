@@ -2,6 +2,7 @@ import { Readable } from "node:stream";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -41,6 +42,7 @@ export async function putAssetStream(input: {
   body: Readable;
   contentLength: number;
   contentType: string;
+  abortSignal?: AbortSignal;
 }): Promise<void> {
   const { client, bucket } = requireConfig();
   await client.send(
@@ -53,6 +55,7 @@ export async function putAssetStream(input: {
       CacheControl: "private, no-store",
       ServerSideEncryption: "AES256",
     }),
+    { abortSignal: input.abortSignal },
   );
 }
 
@@ -60,12 +63,14 @@ export async function putAssetBuffer(input: {
   key: string;
   body: Buffer;
   contentType: string;
+  abortSignal?: AbortSignal;
 }): Promise<void> {
   await putAssetStream({
     key: input.key,
     body: Readable.from(input.body),
     contentLength: input.body.length,
     contentType: input.contentType,
+    abortSignal: input.abortSignal,
   });
 }
 
@@ -110,4 +115,22 @@ export async function readAssetBuffer(key: string, maxBytes: number): Promise<Bu
 export async function deleteAssetObject(key: string): Promise<void> {
   const { client, bucket } = requireConfig();
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/** Read provider metadata without downloading or exposing object bytes. */
+export async function headAssetObject(key: string): Promise<{ sizeBytes: number } | null> {
+  const { client, bucket } = requireConfig();
+  try {
+    const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    const sizeBytes = Number(response.ContentLength ?? 0);
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+      throw new Error("asset_storage_size_invalid");
+    }
+    return { sizeBytes };
+  } catch (error) {
+    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
+      return null;
+    }
+    throw error;
+  }
 }

@@ -84,8 +84,9 @@ describe("production Wrangler configurations", () => {
 
   it("pins scale-to-zero-compatible canary capacity and all service bindings", () => {
     expect(runtime.containers).toMatchObject([
-      { class_name: "NabuflowSandbox", instance_type: "standard-1", max_instances: 5 },
+      { class_name: "NabuflowSandbox", instance_type: "basic", max_instances: 5 },
     ]);
+    expect(runtime.vars.NABUFLOW_RUNTIME_SLEEP_AFTER).toBe("10m");
     expect(build.containers).toMatchObject([
       { class_name: "TrustedBuildSandbox", instance_type: "standard-1", max_instances: 2 },
     ]);

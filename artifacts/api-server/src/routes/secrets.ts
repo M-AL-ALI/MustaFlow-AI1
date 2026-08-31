@@ -32,6 +32,7 @@ import {
 import { logger } from "../lib/logger";
 import { publishTaskEvent, publishSecretEvent, subscribeSecretEvents } from "../lib/event-bus";
 import { isValidProjectSecretName, MASKED_SECRET_VALUE } from "../lib/project-secret-policy";
+import { withActiveProjectLifecycle } from "../lib/project-lifecycle";
 
 export {
   isValidProjectSecretName,
@@ -259,6 +260,21 @@ async function triggerMigrationsAfterDbSecretChange(
   }
 }
 
+function triggerGovernedSecretSideEffects(projectId: number, databaseSecretName?: string): void {
+  void withActiveProjectLifecycle(projectId, async (session) => {
+    if (!(await session.assertActive())) return;
+    await triggerContainerSecretRefresh(projectId);
+    if (databaseSecretName) {
+      await triggerMigrationsAfterDbSecretChange(projectId, databaseSecretName);
+    }
+  }).catch((error: unknown) => {
+    logger.warn(
+      { projectId, errorClass: error instanceof Error ? error.name : "UnknownError" },
+      "governed secret side effects failed",
+    );
+  });
+}
+
 // Environment mismatch: warn if a key labelled for one env is being used in another.
 // This is informational only — we surface a warning flag in the response so the UI can show it.
 function detectEnvMismatch(secretEnv: string, requestedEnv: string | undefined): string | null {
@@ -482,11 +498,10 @@ router.post("/projects/:id/secrets", requireProjectOwnership, async (req, res): 
   });
 
   // Restart container (if running) so the new secret is available immediately
-  void triggerContainerSecretRefresh(params.data.id);
-
-  // If this is a database URL secret and the project has Drizzle files + a running
-  // container, auto-run migrations so the new connection string takes effect immediately.
-  void triggerMigrationsAfterDbSecretChange(params.data.id, parsed.data.name);
+  // The request fence releases at response completion; detached provider work
+  // reacquires the same lifecycle lock so Trash either wins first or cleans the
+  // fully receipted refresh/migration result.
+  triggerGovernedSecretSideEffects(params.data.id, parsed.data.name);
 
   res.status(201).json(toEntry(row));
 });
@@ -537,7 +552,7 @@ router.delete(
     });
 
     // Restart container (if running) so the removed secret is no longer available
-    void triggerContainerSecretRefresh(projectId);
+    triggerGovernedSecretSideEffects(projectId);
 
     res.json({ deleted: true, id: secretId });
   },
@@ -649,13 +664,7 @@ router.patch(
     });
 
     // Restart container (if running) so the updated secret value is picked up
-    void triggerContainerSecretRefresh(projectId);
-
-    // If this is a database URL secret and the value changed, auto-run migrations
-    // so the new connection string takes effect immediately without a rebuild.
-    if (body.value) {
-      void triggerMigrationsAfterDbSecretChange(projectId, row.name);
-    }
+    triggerGovernedSecretSideEffects(projectId, body.value ? row.name : undefined);
 
     res.json(toEntry(row));
   },

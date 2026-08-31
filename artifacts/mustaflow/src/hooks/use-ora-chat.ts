@@ -24,6 +24,7 @@ import {
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
+import { uploadAccountAsset } from "@/lib/asset-upload";
 import { markOraActive } from "@/lib/ora-idle-reset";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { getReferenceSavedMemories, getReferenceChatHistory } from "@/lib/ora-memory-settings";
@@ -1736,8 +1737,9 @@ export function useOraChat(): UseOraChatReturn {
           return;
         }
       } else {
-        // File size cap applies to everyone (signed-in or not).
-        if (file.size > MAX_FILE_SIZE) {
+        // Anonymous uploads retain the bounded legacy-session envelope. Signed-in
+        // users are admitted only by their account's remaining aggregate storage.
+        if (!isSignedIn && file.size > MAX_FILE_SIZE) {
           setUploadState("error");
           setUploadError(
             `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 100 MB.`,
@@ -1758,12 +1760,13 @@ export function useOraChat(): UseOraChatReturn {
       setUploadError(null);
 
       try {
-        // Compress images client-side before upload so large phone photos (4-6 MB)
-        // are automatically resized to ≤ 1920 px and re-encoded at high quality.
-        const uploadBlob = isImg ? await compressImageForUpload(file) : file;
+        // The shared account-asset uploader performs signed-in image downscaling.
+        // Keep this compatibility compressor only for the anonymous multipart path.
+        const uploadBlob = isImg && !isSignedIn ? await compressImageForUpload(file) : file;
 
-        // Final size check after compression — catches truly enormous files
-        if (isImg && uploadBlob.size > MAX_IMAGE_SIZE) {
+        // The legacy anonymous path keeps its memory-safety envelope. Signed-in
+        // images use the streamed account-asset path and its aggregate allowance.
+        if (!isSignedIn && isImg && uploadBlob.size > MAX_IMAGE_SIZE) {
           setUploadState("error");
           setUploadError(
             `Image is too large even after compression (${(uploadBlob.size / 1024 / 1024).toFixed(1)} MB). Please crop it first.`,
@@ -1782,28 +1785,11 @@ export function useOraChat(): UseOraChatReturn {
           return file.name;
         })();
 
-        const formData = new FormData();
-        formData.append("file", uploadBlob, uploadName);
-        // File the upload under the current project space (signed-in only —
-        // the server ignores the field for anonymous sessions).
         const uploadProjectId = currentOraProjectId();
-        if (uploadProjectId != null) {
-          formData.append("oraProjectId", String(uploadProjectId));
-        }
-
-        const res = await safeAuthFetch(`${BASE}/api/public-ai/upload`, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error ?? `Upload failed (HTTP ${res.status})`);
-        }
-
-        const data = (await res.json()) as {
+        let data: {
           fileRef?: string;
           imageRef?: string;
+          assetId?: number;
           filename: string;
           fileType: string;
           charCount?: number;
@@ -1819,7 +1805,58 @@ export function useOraChat(): UseOraChatReturn {
           sizeBytes?: number;
           width?: number;
           height?: number;
+          analysisStatus?: "ready" | "unavailable";
+          analysisMessage?: string;
         };
+        if (isSignedIn) {
+          // Account assets use the governed two-stage stream: reserve the exact
+          // aggregate bytes, PUT the Blob directly to private R2, then attach
+          // only its asset id to Ora. No multipart body enters Node memory.
+          const streamedFile = new File([uploadBlob], uploadName, {
+            type: uploadBlob.type || file.type,
+          });
+          const uploaded = await uploadAccountAsset({
+            file: streamedFile,
+            source: "picker",
+          });
+          const attach = await safeAuthFetch(`${BASE}/api/public-ai/upload/attach`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              assetId: uploaded.assetId,
+              ...(uploadProjectId == null ? {} : { oraProjectId: uploadProjectId }),
+            }),
+          });
+          data = (await attach.json().catch(() => ({}))) as typeof data;
+          if (!attach.ok) {
+            throw new Error(
+              (data as { error?: string }).error ?? `Upload attach failed (HTTP ${attach.status})`,
+            );
+          }
+          if (data.analysisStatus === "unavailable") {
+            setUploadState("error");
+            setUploadError(
+              data.analysisMessage ??
+                "Your file is saved, but it could not be prepared for chat analysis right now.",
+            );
+            return;
+          }
+          if (data.fileType === "image" ? !data.imageRef : !data.fileRef) {
+            throw new Error("Your file is saved, but it could not be attached to chat right now.");
+          }
+        } else {
+          const formData = new FormData();
+          formData.append("file", uploadBlob, uploadName);
+          const response = await safeAuthFetch(`${BASE}/api/public-ai/upload`, {
+            method: "POST",
+            body: formData,
+          });
+          if (!response.ok) {
+            const failure = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(failure.error ?? `Upload failed (HTTP ${response.status})`);
+          }
+          data = (await response.json()) as typeof data;
+        }
 
         if (data.fileType === "image") {
           setAttachedFile({

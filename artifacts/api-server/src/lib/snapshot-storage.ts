@@ -96,16 +96,19 @@ export async function downloadSnapshotBlob(objectKey: string | null): Promise<st
 }
 
 /**
- * Delete a snapshot blob from GCS (non-fatal).
+ * Delete a snapshot blob from GCS and report whether absence was confirmed.
  */
-export async function deleteSnapshotBlob(objectKey: string | null): Promise<void> {
-  if (!objectKey || !isConfigured()) return;
+export async function deleteSnapshotBlob(objectKey: string | null): Promise<boolean> {
+  if (!objectKey) return true;
+  if (!isConfigured()) return false;
 
   try {
     const bucketId = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID!;
     const storage = getClient();
     await storage.bucket(bucketId).file(objectKey).delete({ ignoreNotFound: true });
+    return true;
   } catch (err) {
-    logger.warn({ err, objectKey }, "Snapshot GCS delete failed (non-fatal)");
+    logger.warn({ err, objectKey }, "Snapshot GCS delete could not be confirmed");
+    return false;
   }
 }

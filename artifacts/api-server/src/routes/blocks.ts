@@ -6,6 +6,7 @@ import { extractPageMap } from "../lib/page-map";
 import { writeFileToContainer } from "../lib/tenant-runtime";
 import { logger } from "../lib/logger";
 import { parseBlocks, reorderBlocks, removeBlock, insertBlock } from "../lib/blocks";
+import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
 
 const router: IRouter = Router();
 
@@ -118,10 +119,18 @@ router.post(
       res.json({ changed: false, fileId: row.id });
       return;
     }
-    await db
-      .update(projectFilesTable)
-      .set({ content: next, updatedAt: new Date() })
-      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(projectFilesTable)
+        .set({ content: next, updatedAt: new Date() })
+        .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: row.artifactId,
+        filePath: row.path,
+        nextContent: next,
+      });
+    });
     req.log.info({ projectId, fileId }, "Block reorder saved");
     fireSideEffects(projectId, row.path, next);
     const { blocks, parseOk } = parseBlocks(next);
@@ -223,6 +232,18 @@ router.post(
       if (dstUpdate.length !== 1) {
         throw new Error("Target file changed or was removed during move");
       }
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: src.row.artifactId,
+        filePath: src.row.path,
+        nextContent: srcAfter,
+      });
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: dst.row.artifactId,
+        filePath: dst.row.path,
+        nextContent: dstAfter,
+      });
     });
     req.log.info({ projectId, sourceFileId, targetFileId, blockId }, "Cross-file block move saved");
     fireSideEffects(projectId, src.row.path, srcAfter);

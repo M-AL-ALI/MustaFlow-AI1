@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "deploy:acceptance": "tsx scripts/deploy-acceptance.ts",
     "deploy:staging": "wrangler deploy",
     "lint": "eslint src/ test/ scripts/ --max-warnings 0",
     "smoke:staging": "tsx scripts/staging-smoke.ts",

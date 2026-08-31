@@ -261,7 +261,7 @@ function currentRepositoryInventory(): Map<string, string> {
 
 describe("non-test export reachability", () => {
   it("marks every registered dormant export at its definition", () => {
-    expect(dormantExports).toHaveLength(7);
+    expect(dormantExports).toHaveLength(10);
     expect(
       new Set(dormantExports.map(({ path: filePath, symbol }) => `${filePath}#${symbol}`)).size,
     ).toBe(dormantExports.length);

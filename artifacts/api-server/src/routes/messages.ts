@@ -100,6 +100,11 @@ import {
 import { getSharedAccountProfile } from "../lib/clerk-users";
 import { supportProposalReadyTemplate } from "../lib/emailTemplates";
 import { deliverSupportConsequence, supportProductUrl } from "../lib/support-user-delivery";
+import {
+  registerProjectWorkController,
+  requireActiveProjectLifecycleSession,
+  responseProjectLifecycleSession,
+} from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -332,6 +337,7 @@ router.get("/projects/:id/messages", requireProjectOwnership, async (req, res): 
 router.post(
   "/projects/:id/messages",
   requireProjectOwnerOrApprovedSupportOperator,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const params = SendMessageParams.safeParse(req.params);
     if (!params.success) {
@@ -347,7 +353,7 @@ router.post(
     const [project] = await db
       .select()
       .from(projectsTable)
-      .where(eq(projectsTable.id, params.data.id));
+      .where(and(eq(projectsTable.id, params.data.id), isNull(projectsTable.deletedAt)));
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
@@ -1047,6 +1053,7 @@ router.post(
 
       const planOutcome = await runCancellablePlanTask({
         taskId,
+        projectId: project.id,
         run: async (signal) => {
           if (
             supportProposal &&
@@ -1937,6 +1944,7 @@ router.get(
 router.post(
   "/projects/:id/messages/stream",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const params = SendMessageParams.safeParse(req.params);
     if (!params.success) {
@@ -1952,7 +1960,7 @@ router.post(
     const [project] = await db
       .select()
       .from(projectsTable)
-      .where(eq(projectsTable.id, params.data.id));
+      .where(and(eq(projectsTable.id, params.data.id), isNull(projectsTable.deletedAt)));
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
@@ -2150,6 +2158,10 @@ router.post(
       return;
     }
 
+    // Route middleware holds this session through the provider stream and the
+    // final terminal/database receipt. Do not release it at task creation.
+    responseProjectLifecycleSession(res);
+
     const converseOwner = req.userId ?? project.ownerId;
     if (converseOwner) {
       const deduction = await deductCreditsAtomic(converseOwner, 1, {
@@ -2173,6 +2185,9 @@ router.post(
     res.flushHeaders();
 
     const abortController = new AbortController();
+    const unregisterProjectWork = registerProjectWorkController(project.id, abortController);
+    res.once("close", unregisterProjectWork);
+    res.once("finish", unregisterProjectWork);
     req.on("close", () => {
       abortController.abort();
     });

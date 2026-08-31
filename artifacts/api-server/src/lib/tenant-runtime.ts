@@ -19,6 +19,7 @@ import type {
   RuntimeServiceOptions,
   TenantRuntimeProvider,
 } from "./tenant-runtime-provider";
+import { resolveProjectRuntimeFiles } from "./project-file-asset-reference";
 
 export function createTenantRuntimeProvider(
   environment: Record<string, string | undefined> = process.env,
@@ -122,12 +123,18 @@ export const writeFileToContainer = (
   projectId: number,
 ) => tenantRuntimeProvider.writeFile(runtimeId, path, content, projectId);
 
-export const syncFilesToContainer = (
+export const syncFilesToContainer = async (
   runtimeId: string,
   projectId: number,
   files: RuntimeFile[],
   throwIfUnconfigured?: boolean,
-) => tenantRuntimeProvider.syncFiles(runtimeId, projectId, files, throwIfUnconfigured);
+) =>
+  tenantRuntimeProvider.syncFiles(
+    runtimeId,
+    projectId,
+    await resolveProjectRuntimeFiles(projectId, files),
+    throwIfUnconfigured,
+  );
 
 export const updateContainerEnv = (
   runtimeId: string,
@@ -158,7 +165,12 @@ export async function provisionContainer(
   environment?: Record<string, string>,
   options?: RuntimeServiceOptions,
 ) {
-  const result = await tenantRuntimeProvider.provision(projectId, files, environment, options);
+  const result = await tenantRuntimeProvider.provision(
+    projectId,
+    await resolveProjectRuntimeFiles(projectId, files),
+    environment,
+    options,
+  );
   if (!result) return null;
   return {
     containerId: result.runtimeId,
@@ -201,7 +213,7 @@ export async function deployProductionContainer(
   const result = await tenantRuntimeProvider.deployProduction(
     projectId,
     previousRuntimeId,
-    files,
+    await resolveProjectRuntimeFiles(projectId, files),
     environment,
     options,
   );

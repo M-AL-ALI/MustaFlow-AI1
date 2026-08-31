@@ -900,7 +900,7 @@ export async function npmInstallInBackground(
 export async function writeFileToContainer(
   machineId: string,
   filePath: string,
-  content: string,
+  content: string | Uint8Array,
   projectId: number,
 ): Promise<boolean> {
   if (!isConfigured()) {
@@ -910,7 +910,8 @@ export async function writeFileToContainer(
     );
   }
   try {
-    const b64 = Buffer.from(content, "utf8").toString("base64");
+    const bytes = typeof content === "string" ? Buffer.from(content, "utf8") : Buffer.from(content);
+    const b64 = bytes.toString("base64");
     const dir = filePath.includes("/")
       ? `/app/${filePath.split("/").slice(0, -1).join("/")}`
       : "/app";
@@ -938,7 +939,7 @@ export async function writeFileToContainer(
 export async function syncFilesToContainer(
   machineId: string,
   projectId: number,
-  files: Array<{ path: string; content: string }>,
+  files: Array<{ path: string; content: string | Uint8Array }>,
   throwIfUnconfigured = false,
 ): Promise<void> {
   if (!isConfigured()) {
@@ -1189,7 +1190,7 @@ export function mapFlyErrorToMessage(raw: string): string {
  */
 export async function provisionContainer(
   projectId: number,
-  files: Array<{ path: string; content: string }>,
+  files: Array<{ path: string; content: string | Uint8Array }>,
   extraEnv?: Record<string, string>,
   options?: { servicePort?: number | null },
 ): Promise<ContainerInfo | null> {
@@ -1530,7 +1531,7 @@ async function waitForContainerHealthy(
 export async function deployProductionContainer(
   projectId: number,
   oldProdMachineId: string | null,
-  files: Array<{ path: string; content: string }>,
+  files: Array<{ path: string; content: string | Uint8Array }>,
   envVars: Record<string, string>,
   options?: { servicePort?: number | null },
 ): Promise<ProdContainerInfo | null> {

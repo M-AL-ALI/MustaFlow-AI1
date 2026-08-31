@@ -30,6 +30,7 @@ import { requireProjectOwnership } from "../lib/auth";
 import { cdnConfigured, cdnProvider } from "../lib/cdn";
 import { computeNextRunAt, runUptimeProbeForProject } from "../lib/deployment-scheduler";
 import { parseCron } from "../lib/cron-eval";
+import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -123,6 +124,7 @@ router.get(
 router.patch(
   "/projects/:id/deployment-config",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -226,49 +228,55 @@ router.get("/projects/:id/schedules", requireProjectOwnership, async (req, res):
 });
 
 // ── POST /api/projects/:id/schedules ─────────────────────────────────────────
-router.post("/projects/:id/schedules", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const body = (req.body ?? {}) as Record<string, unknown>;
+router.post(
+  "/projects/:id/schedules",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const body = (req.body ?? {}) as Record<string, unknown>;
 
-  const cronExpr = typeof body.cronExpr === "string" ? body.cronExpr.trim() : "";
-  if (!cronExpr) {
-    res.status(400).json({ error: "cronExpr is required" });
-    return;
-  }
-  try {
-    parseCron(cronExpr);
-  } catch (err) {
-    res.status(400).json({
-      error: `invalid cron expression: ${err instanceof Error ? err.message : String(err)}`,
-    });
-    return;
-  }
+    const cronExpr = typeof body.cronExpr === "string" ? body.cronExpr.trim() : "";
+    if (!cronExpr) {
+      res.status(400).json({ error: "cronExpr is required" });
+      return;
+    }
+    try {
+      parseCron(cronExpr);
+    } catch (err) {
+      res.status(400).json({
+        error: `invalid cron expression: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return;
+    }
 
-  const kind: ScheduleKind = isScheduleKind(body.kind) ? body.kind : "task_run";
-  const note = typeof body.note === "string" ? body.note.slice(0, 500) : null;
-  const enabled = body.enabled === undefined ? true : !!body.enabled;
-  const nextRunAt = computeNextRunAt(cronExpr);
+    const kind: ScheduleKind = isScheduleKind(body.kind) ? body.kind : "task_run";
+    const note = typeof body.note === "string" ? body.note.slice(0, 500) : null;
+    const enabled = body.enabled === undefined ? true : !!body.enabled;
+    const nextRunAt = computeNextRunAt(cronExpr);
 
-  const [row] = await db
-    .insert(deploymentSchedulesTable)
-    .values({
-      projectId,
-      kind,
-      cronExpr,
-      enabled,
-      note,
-      nextRunAt,
-      createdBy: req.userId ?? null,
-    })
-    .returning();
+    const [row] = await db
+      .insert(deploymentSchedulesTable)
+      .values({
+        projectId,
+        kind,
+        cronExpr,
+        enabled,
+        note,
+        nextRunAt,
+        createdBy: req.userId ?? null,
+      })
+      .returning();
 
-  res.status(201).json({ schedule: row });
-});
+    res.status(201).json({ schedule: row });
+  },
+);
 
 // ── PATCH /api/projects/:id/schedules/:sid ───────────────────────────────────
 router.patch(
   "/projects/:id/schedules/:sid",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const sid = Number(req.params.sid);
@@ -333,6 +341,7 @@ router.patch(
 router.delete(
   "/projects/:id/schedules/:sid",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const sid = Number(req.params.sid);

@@ -17,6 +17,30 @@ export type DomainRecordType = (typeof DOMAIN_RECORD_TYPES)[number];
 export const DOMAIN_VERIFICATION_STATUSES = ["pending", "verified", "failed"] as const;
 export type DomainVerificationStatus = (typeof DOMAIN_VERIFICATION_STATUSES)[number];
 
+/**
+ * Provider resources created for a domain's zone-scoped security policy.
+ *
+ * These receipts deliberately live in the existing security_config JSONB
+ * document: retirement and detach must know the exact provider identities,
+ * while adding a second provider-specific table would make the lifecycle
+ * boundary easier to split accidentally.
+ */
+export type CloudflareSecurityResourceKind =
+  | "ruleset_rule"
+  | "firewall_rule"
+  | "firewall_filter"
+  | "rate_limit"
+  | "mtls_certificate";
+
+export interface CloudflareSecurityResourceReceipt {
+  kind: CloudflareSecurityResourceKind;
+  id: string;
+  /** Required for ruleset_rule deletion and authoritative reconciliation. */
+  rulesetId?: string;
+  /** Stable tenant-scoped identity used to reconcile an ambiguous create. */
+  ref: string;
+}
+
 export const projectDomainsTable = pgTable(
   "project_domains",
   {
@@ -79,6 +103,8 @@ export interface DomainSecurityConfig {
   mtlsCaCert?: string;
   wafEnabled?: boolean;
   botManagement?: boolean;
+  /** Platform-owned provider receipts; request bodies must never overwrite it. */
+  cloudflareResources?: CloudflareSecurityResourceReceipt[];
 }
 
 export type ProjectDomain = typeof projectDomainsTable.$inferSelect;

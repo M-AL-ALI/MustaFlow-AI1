@@ -14,6 +14,7 @@ import { db, deploymentLogsTable, secretsTable, projectFilesTable } from "@works
 import { requireProjectOwnership } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
 import { logger } from "../lib/logger";
+import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -274,6 +275,7 @@ function easStatusToLogStatus(easStatus: string): "started" | "passed" | "failed
 router.post(
   "/projects/:id/eas/validate-token",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) {
@@ -334,6 +336,7 @@ router.post(
 router.post(
   "/projects/:id/eas/trigger",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) {
@@ -500,6 +503,7 @@ router.get("/projects/:id/eas/builds", requireProjectOwnership, async (req, res)
 router.post(
   "/projects/:id/eas/builds",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isFinite(projectId)) {
@@ -574,6 +578,7 @@ router.post(
 router.patch(
   "/projects/:id/eas/builds/:logId",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const logId = Number(req.params.logId);

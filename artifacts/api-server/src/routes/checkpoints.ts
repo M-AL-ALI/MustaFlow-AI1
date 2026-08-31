@@ -31,6 +31,7 @@ import { downloadSnapshotBlob } from "../lib/snapshot-storage";
 import { captureProjectDbSnapshot } from "../lib/db-snapshot-capture";
 import { publishProjectFilesChanged } from "../lib/preview-events";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
+import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
 
 const router: IRouter = Router();
 
@@ -283,6 +284,10 @@ router.post(
     let restoredCheckpointId: number | null = null;
     try {
       await db.transaction(async (tx) => {
+        const priorFiles = await tx
+          .select({ path: projectFilesTable.path })
+          .from(projectFilesTable)
+          .where(eq(projectFilesTable.projectId, projectId));
         await tx.delete(projectFilesTable).where(eq(projectFilesTable.projectId, projectId));
         if (targetSnapshot.length > 0) {
           await tx.insert(projectFilesTable).values(
@@ -293,6 +298,19 @@ router.post(
               mimeType: f.mimeType,
             })),
           );
+        }
+        const nextContentByPath = new Map(targetSnapshot.map((file) => [file.path, file.content]));
+        const reconciledPaths = new Set([
+          ...priorFiles.map((file) => file.path),
+          ...nextContentByPath.keys(),
+        ]);
+        for (const filePath of reconciledPaths) {
+          await reconcileProjectFileAssetUsage(tx, {
+            projectId,
+            artifactId: null,
+            filePath,
+            nextContent: nextContentByPath.get(filePath) ?? null,
+          });
         }
 
         const [restored] = await tx

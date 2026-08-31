@@ -14,6 +14,7 @@ import {
   signOAuthState,
   verifyOAuthState,
 } from "../lib/githubOAuth";
+import { acquireProjectLifecycleSession } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -328,6 +329,18 @@ router.get("/projects/:id/github/oauth/callback", async (req, res): Promise<void
     return;
   }
 
+  // OAuth callbacks are mutating GETs whose project identity comes from the
+  // signed state. Hold the lifecycle fence across token exchange and the final
+  // connection receipt so Trash cannot race a late callback.
+  const lifecycleSession = await acquireProjectLifecycleSession(projectId);
+  if (!lifecycleSession) {
+    res.redirect(
+      302,
+      frontendReturnUrl(req, projectId, { github: "error", reason: "Project not found" }),
+    );
+    return;
+  }
+
   try {
     const redirectUri = buildCallbackUrl({
       protocol: (req.get("x-forwarded-proto") ?? req.protocol) || "https",
@@ -394,6 +407,8 @@ router.get("/projects/:id/github/oauth/callback", async (req, res): Promise<void
         reason: githubProviderErrorMessage(err),
       }),
     );
+  } finally {
+    await lifecycleSession.release();
   }
 });
 

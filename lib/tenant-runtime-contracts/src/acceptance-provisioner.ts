@@ -122,9 +122,11 @@ export const ACCEPTANCE_ERROR_CODES = [
   "acceptance_live_target_forbidden",
   "acceptance_operation_pending",
   "acceptance_operation_timeout",
+  "acceptance_deployment_version_unavailable",
   "acceptance_provider_unavailable",
   "acceptance_provider_rejected",
   "acceptance_cleanup_incomplete",
+  "acceptance_cleanup_disabled",
   "acceptance_internal_error",
 ] as const;
 
@@ -199,6 +201,7 @@ export const acceptanceLeaseJobRequestSchema = z
       .regex(/^nal_[A-Za-z0-9_-]{22,80}$/u)
       .optional(),
     revision: z.string().min(1).max(200).optional(),
+    cleanupGeneration: z.number().int().positive().optional(),
     stripePolicy: acceptanceProvisionCapabilityRequestSchema.shape.stripePolicy,
   })
   .strict();

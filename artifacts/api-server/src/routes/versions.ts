@@ -22,6 +22,7 @@ import {
 import { requireProjectAccess } from "../lib/auth";
 import { guessMime } from "../lib/builder";
 import { isBinaryMime } from "../lib/binary-mime";
+import { resolveProjectFileBytes } from "../lib/project-file-asset-reference";
 import { injectBridge } from "../lib/consoleBridge";
 import { logger } from "../lib/logger";
 import { deployProductionContainer, hasContainerLayerCredentials } from "../lib/tenant-runtime";
@@ -43,6 +44,7 @@ import {
   persistZeroTerminal,
   zeroTerminalRef,
 } from "../lib/zero-terminal-persistence";
+import { withActiveProjectLifecycle } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -282,7 +284,7 @@ router.get(
     const isHtml = mime === "text/html" || file.path.endsWith(".html");
     res.type(mime).setHeader("Cache-Control", "no-store, must-revalidate");
     if (isBinaryMime(mime)) {
-      res.end(Buffer.from(file.content, "base64"));
+      res.end(await resolveProjectFileBytes({ projectId, content: file.content, mimeType: mime }));
     } else {
       res.send(isHtml ? injectBridge(file.content) : file.content);
     }
@@ -614,8 +616,9 @@ router.post(
       hasContainerLayerCredentials()
     ) {
       setImmediate(() => {
-        void (async () => {
+        void withActiveProjectLifecycle(projectId, async (lifecycleSession) => {
           try {
+            if (!(await lifecycleSession.assertActive())) return;
             const servicePort = resolveProjectRuntimeManifest({
               runtimePort: currentProject.runtimePort,
               stack: currentProject.stack,
@@ -638,6 +641,7 @@ router.post(
             );
 
             if (result) {
+              if (!(await lifecycleSession.assertActive())) return;
               await db
                 .update(projectsTable)
                 .set({
@@ -654,7 +658,9 @@ router.post(
           } catch (err) {
             logger.error({ err, projectId }, "Prod container rollback redeploy failed — non-fatal");
           }
-        })();
+        }).catch((err: unknown) => {
+          logger.error({ err, projectId }, "Rollback redeploy lifecycle admission failed");
+        });
       });
     }
 

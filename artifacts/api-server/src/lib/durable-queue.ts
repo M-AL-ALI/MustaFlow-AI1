@@ -17,7 +17,13 @@
  *  - DURABLE_QUEUE_ENABLED=false disables pg-boss entirely for local dev.
  */
 
-import { PgBoss, type Job, type ConstructorOptions as PgBossConstructorOptions } from "pg-boss";
+import { createHash } from "node:crypto";
+import {
+  PgBoss,
+  type Job,
+  type ConstructorOptions as PgBossConstructorOptions,
+  type QueuePolicy,
+} from "pg-boss";
 import { logger } from "./logger";
 import { jobQueueDepth, jobsTotal } from "./metrics";
 
@@ -27,6 +33,7 @@ export const QUEUE_EAS_BUILD = "mustaflow.eas-build";
 export const QUEUE_APP_TESTING = "mustaflow.app-testing";
 export const QUEUE_CVE_AUTOPROTECT = "mustaflow.cve-autoprotect";
 export const QUEUE_GDPR_ERASURE = "mustaflow.gdpr-erasure";
+export const QUEUE_PROJECT_RETIREMENT = "mustaflow.project-retirement";
 
 const RETRY_LIMIT = 2;
 const RETRY_DELAY_SECONDS = 30;
@@ -40,6 +47,74 @@ const SECONDARY_RETRY_DELAY_SECONDS = 15;
 let boss: PgBoss | null = null;
 let _ready = false;
 let _failed = false;
+
+export type DurableWorkerRegistrationReceipt =
+  | {
+      queue: string;
+      status: "not_registered";
+      code: "durable_worker_not_registered";
+      attempts: 0;
+    }
+  | {
+      queue: string;
+      status: "unavailable";
+      code: "durable_queue_unavailable";
+      attempts: 0;
+    }
+  | {
+      queue: string;
+      status: "registering";
+      code: "durable_worker_registration_in_progress";
+      attempts: number;
+    }
+  | {
+      queue: string;
+      status: "ready";
+      code: "durable_worker_ready";
+      attempts: number;
+    }
+  | {
+      queue: string;
+      status: "failed";
+      code: "durable_worker_registration_failed" | "durable_worker_queue_policy_mismatch";
+      attempts: number;
+    };
+
+const durableWorkerReadiness = new Map<string, DurableWorkerRegistrationReceipt>();
+
+export function getDurableWorkerReadiness(queue: string): DurableWorkerRegistrationReceipt {
+  if (!isDurableQueueReady()) {
+    return {
+      queue,
+      status: "unavailable",
+      code: "durable_queue_unavailable",
+      attempts: 0,
+    };
+  }
+  return (
+    durableWorkerReadiness.get(queue) ?? {
+      queue,
+      status: "not_registered",
+      code: "durable_worker_not_registered",
+      attempts: 0,
+    }
+  );
+}
+
+export function isDurableWorkerReady(queue: string): boolean {
+  return getDurableWorkerReadiness(queue).status === "ready";
+}
+
+function markRegisteredWorkersUnavailable(): void {
+  for (const queue of durableWorkerReadiness.keys()) {
+    durableWorkerReadiness.set(queue, {
+      queue,
+      status: "unavailable",
+      code: "durable_queue_unavailable",
+      attempts: 0,
+    });
+  }
+}
 
 /**
  * True when the durable queue is initialised and accepting jobs.
@@ -95,7 +170,11 @@ export async function startDurableQueue(
     boss = new PgBoss(pgBossOpts);
 
     boss.on("error", (err: Error) => {
-      logger.error({ err }, "pg-boss internal error");
+      // pg-boss emits transient transport errors while retaining its workers and
+      // reconnecting internally. One ambiguous event must not permanently flip
+      // readiness or force every later caller into an in-memory duplicate path;
+      // each enqueue still reports its own typed failure if the outage persists.
+      logger.error({ err }, "pg-boss internal transport error");
     });
 
     await boss.start();
@@ -150,6 +229,7 @@ export async function startDurableQueue(
     logger.info("Durable job queue (pg-boss) started and workers registered");
   } catch (err) {
     _failed = true;
+    markRegisteredWorkersUnavailable();
     logger.error({ err }, "Failed to start durable queue — falling back to in-memory");
   }
 }
@@ -198,6 +278,134 @@ export async function registerWorker(
   }
 }
 
+export type RequiredWorkerRegistrationOptions = {
+  retryLimit: number;
+  retryDelay: number;
+  retryBackoff?: boolean;
+  queuePolicy: QueuePolicy;
+  registrationAttempts?: number;
+  registrationDelayMs?: number;
+};
+
+export type DurableRawEnqueueReceipt =
+  | { status: "enqueued"; code: "durable_queue_enqueued"; jobId: string }
+  | { status: "duplicate"; code: "durable_queue_duplicate_suppressed"; jobId: null }
+  | { status: "unavailable"; code: "durable_queue_unavailable"; jobId: null }
+  | { status: "failed"; code: "durable_queue_enqueue_failed"; jobId: null };
+
+export type DurableRawEnqueueOptions = {
+  retryLimit: number;
+  retryDelay: number;
+  retryBackoff?: boolean;
+  /**
+   * `canonical` maps the key to a stable job UUID and suppresses repeats while
+   * that pg-boss row is retained. Permanent entity identity belongs in the
+   * caller's own durable receipt table, as project retirement does.
+   * `active` relies on an exclusive queue and permits a new recovery job after
+   * an earlier pg-boss row reaches a terminal state.
+   */
+  dedupeMode?: "canonical" | "active";
+};
+
+/** Stable UUID accepted by pg-boss/Postgres; queue is part of the namespace. */
+export function durableQueueJobId(queue: string, key: string): string {
+  const digest = createHash("sha256").update(queue).update("\0").update(key).digest("hex");
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
+}
+
+/**
+ * Register a worker whose consumer is part of an API mutation's safety contract.
+ *
+ * Unlike the legacy optional registrations above, this function always returns
+ * a typed receipt, retries a bounded number of times, verifies the persisted
+ * queue policy, and leaves readiness observable to the route that admits work.
+ */
+export async function registerRequiredWorker(
+  queue: string,
+  handler: (payload: Record<string, unknown>) => Promise<void>,
+  options: RequiredWorkerRegistrationOptions,
+): Promise<DurableWorkerRegistrationReceipt> {
+  if (!isDurableQueueReady() || !boss) {
+    const unavailable: DurableWorkerRegistrationReceipt = {
+      queue,
+      status: "unavailable",
+      code: "durable_queue_unavailable",
+      attempts: 0,
+    };
+    durableWorkerReadiness.set(queue, unavailable);
+    return unavailable;
+  }
+
+  const maxAttempts = Math.max(1, Math.min(options.registrationAttempts ?? 3, 5));
+  const delayMs = Math.max(0, Math.min(options.registrationDelayMs ?? 250, 5_000));
+  let failureCode: Extract<DurableWorkerRegistrationReceipt, { status: "failed" }>["code"] =
+    "durable_worker_registration_failed";
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    durableWorkerReadiness.set(queue, {
+      queue,
+      status: "registering",
+      code: "durable_worker_registration_in_progress",
+      attempts: attempt,
+    });
+    try {
+      await boss.createQueue(queue, {
+        retryLimit: options.retryLimit,
+        retryDelay: options.retryDelay,
+        retryBackoff: options.retryBackoff ?? true,
+        policy: options.queuePolicy,
+      });
+      const persistedQueue = await boss.getQueue(queue);
+      if (!persistedQueue || persistedQueue.policy !== options.queuePolicy) {
+        failureCode = "durable_worker_queue_policy_mismatch";
+        throw new Error("durable_worker_queue_policy_mismatch");
+      }
+      await boss.work(
+        queue,
+        { batchSize: 1, pollingIntervalSeconds: 2 },
+        async (jobs: Job<Record<string, unknown>>[]) => {
+          const job = jobs[0];
+          if (!job) return;
+          try {
+            await handler(job.data);
+            logger.info({ queue, jobId: job.id }, "Required durable worker job completed");
+          } catch (err) {
+            logger.error({ err, queue, jobId: job.id }, "Required durable worker job failed");
+            throw err;
+          }
+        },
+      );
+      const ready: DurableWorkerRegistrationReceipt = {
+        queue,
+        status: "ready",
+        code: "durable_worker_ready",
+        attempts: attempt,
+      };
+      durableWorkerReadiness.set(queue, ready);
+      logger.info(ready, "Required durable worker registered");
+      return ready;
+    } catch (err) {
+      logger.warn(
+        { err, queue, attempt, maxAttempts, code: failureCode },
+        "Required durable worker registration attempt failed",
+      );
+      if (attempt < maxAttempts && delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  const failed: DurableWorkerRegistrationReceipt = {
+    queue,
+    status: "failed",
+    code: failureCode,
+    attempts: maxAttempts,
+  };
+  durableWorkerReadiness.set(queue, failed);
+  logger.error(failed, "Required durable worker unavailable after bounded registration attempts");
+  return failed;
+}
+
 /**
  * Enqueue a job payload into the durable queue.
  * Returns the pg-boss job ID or null if the queue is unavailable.
@@ -226,38 +434,69 @@ export async function durableEnqueue(
 }
 
 /**
- * Enqueue a payload into any named queue with an optional idempotency key.
+ * Enqueue a payload into any named queue with an optional canonical key. A key
+ * becomes both pg-boss `singletonKey` and a stable queue-scoped job UUID, so a
+ * repeated canonical event is suppressed on legacy `standard` queues while the
+ * pg-boss row remains retained. The
+ * required retirement queue additionally verifies `exclusive` before readiness.
  * Used for EAS builds, app-testing, and CVE auto-protect jobs.
  * Returns the pg-boss job ID or null if the queue is unavailable.
  */
-export async function durableEnqueueRaw(
+export async function durableEnqueueRawResult(
   queue: string,
   payload: Record<string, unknown>,
   key?: string,
-  retryConfig: { retryLimit: number; retryDelay: number; retryBackoff?: boolean } = {
+  retryConfig: DurableRawEnqueueOptions = {
     retryLimit: queue === QUEUE_EAS_BUILD ? EAS_RETRY_LIMIT : SECONDARY_RETRY_LIMIT,
     retryDelay: queue === QUEUE_EAS_BUILD ? EAS_RETRY_DELAY_SECONDS : SECONDARY_RETRY_DELAY_SECONDS,
     retryBackoff: true,
   },
-): Promise<string | null> {
-  if (!isDurableQueueReady() || !boss) return null;
+): Promise<DurableRawEnqueueReceipt> {
+  if (!isDurableQueueReady() || !boss) {
+    return { status: "unavailable", code: "durable_queue_unavailable", jobId: null };
+  }
 
   try {
+    const dedupeMode = retryConfig.dedupeMode ?? "canonical";
     const id = await boss.send(queue, payload, {
       retryLimit: retryConfig.retryLimit,
       retryDelay: retryConfig.retryDelay,
       retryBackoff: retryConfig.retryBackoff ?? true,
-      ...(key ? { key } : {}),
+      ...(key
+        ? {
+            singletonKey: key,
+            ...(dedupeMode === "canonical" ? { id: durableQueueJobId(queue, key) } : {}),
+          }
+        : {}),
     });
+    if (!id) {
+      logger.info({ queue, key }, "Duplicate durable queue job suppressed by durable identity");
+      return { status: "duplicate", code: "durable_queue_duplicate_suppressed", jobId: null };
+    }
     logger.info({ queue, jobId: id, key }, "Job enqueued in durable queue (raw)");
-    return id ?? null;
+    return { status: "enqueued", code: "durable_queue_enqueued", jobId: id };
   } catch (err) {
     logger.error(
       { err, queue, key },
       "Failed to enqueue job in durable queue (raw) — will fall back",
     );
-    return null;
+    return { status: "failed", code: "durable_queue_enqueue_failed", jobId: null };
   }
+}
+
+/** Backwards-compatible ID/null wrapper. Prefer the typed result when fallback matters. */
+export async function durableEnqueueRaw(
+  queue: string,
+  payload: Record<string, unknown>,
+  key?: string,
+  retryConfig: DurableRawEnqueueOptions = {
+    retryLimit: queue === QUEUE_EAS_BUILD ? EAS_RETRY_LIMIT : SECONDARY_RETRY_LIMIT,
+    retryDelay: queue === QUEUE_EAS_BUILD ? EAS_RETRY_DELAY_SECONDS : SECONDARY_RETRY_DELAY_SECONDS,
+    retryBackoff: true,
+  },
+): Promise<string | null> {
+  const result = await durableEnqueueRawResult(queue, payload, key, retryConfig);
+  return result.status === "enqueued" ? result.jobId : null;
 }
 
 export type QueueStat = {
@@ -447,4 +686,8 @@ export async function stopDurableQueue(): Promise<void> {
       logger.warn({ err }, "Error stopping durable queue");
     }
   }
+  _ready = false;
+  _failed = false;
+  markRegisteredWorkersUnavailable();
+  boss = null;
 }

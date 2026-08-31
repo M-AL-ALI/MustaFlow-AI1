@@ -3,6 +3,7 @@ import { and, asc, eq, or, like } from "drizzle-orm";
 import { db, projectFilesTable } from "@workspace/db";
 import { guessMime } from "./builder";
 import { isBinaryMime } from "./binary-mime";
+import { resolveProjectFileBytes } from "./project-file-asset-reference";
 import { injectBridge, MOCK_FLAG_SCRIPT } from "./consoleBridge";
 import { VISUAL_EDIT_SCRIPT } from "./visualEditScript";
 
@@ -88,7 +89,9 @@ export async function serveProjectFilesPreview(
   res.type(mime).setHeader("Cache-Control", "no-store, must-revalidate");
 
   if (isBinaryMime(mime)) {
-    res.end(Buffer.from(selectedRow.content, "base64"));
+    res.end(
+      await resolveProjectFileBytes({ projectId, content: selectedRow.content, mimeType: mime }),
+    );
     return;
   }
   if (!isHtml) {

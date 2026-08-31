@@ -50,42 +50,44 @@ export interface PersistFileContextInput {
  * best-effort and fire-and-forget: failures are logged and swallowed so an
  * upload never fails because the durable mirror is unavailable.
  */
+export async function persistFileContext(input: PersistFileContextInput): Promise<void> {
+  await db
+    .insert(oraFileContextsTable)
+    .values({
+      userId: input.userId,
+      oraProjectId: input.oraProjectId ?? null,
+      fileRef: input.fileRef,
+      sessionId: input.sessionId,
+      assetId: input.assetId ?? null,
+      filename: input.filename,
+      mimeType: input.mimeType,
+      fileType: input.fileType,
+      extractedText: input.extractedText,
+      charCount: input.charCount,
+      datasetSummary: input.datasetSummary ?? null,
+    })
+    .onConflictDoUpdate({
+      target: [oraFileContextsTable.userId, oraFileContextsTable.fileRef],
+      set: {
+        // The original project binding is immutable across retries.
+        sessionId: input.sessionId,
+        assetId: input.assetId ?? null,
+        filename: input.filename,
+        mimeType: input.mimeType,
+        fileType: input.fileType,
+        extractedText: input.extractedText,
+        charCount: input.charCount,
+        datasetSummary: input.datasetSummary ?? null,
+        updatedAt: new Date(),
+        deletedAt: null,
+      },
+    });
+}
+
 export function persistFileContextBestEffort(input: PersistFileContextInput): void {
   void (async () => {
     try {
-      await db
-        .insert(oraFileContextsTable)
-        .values({
-          userId: input.userId,
-          oraProjectId: input.oraProjectId ?? null,
-          fileRef: input.fileRef,
-          sessionId: input.sessionId,
-          assetId: input.assetId ?? null,
-          filename: input.filename,
-          mimeType: input.mimeType,
-          fileType: input.fileType,
-          extractedText: input.extractedText,
-          charCount: input.charCount,
-          datasetSummary: input.datasetSummary ?? null,
-        })
-        .onConflictDoUpdate({
-          target: [oraFileContextsTable.userId, oraFileContextsTable.fileRef],
-          set: {
-            // NOTE: oraProjectId is intentionally NOT updated on conflict — the
-            // upload keeps the project it was originally attached to. Re-sent
-            // documentRefs on later turns must never silently re-scope a file.
-            sessionId: input.sessionId,
-            assetId: input.assetId ?? null,
-            filename: input.filename,
-            mimeType: input.mimeType,
-            fileType: input.fileType,
-            extractedText: input.extractedText,
-            charCount: input.charCount,
-            datasetSummary: input.datasetSummary ?? null,
-            updatedAt: new Date(),
-            deletedAt: null,
-          },
-        });
+      await persistFileContext(input);
     } catch (err) {
       logger.error({ component: "ora-file-context", err }, "Failed to persist Ora file context");
     }

@@ -18,6 +18,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
 import { execInContainer } from "./tenant-runtime";
 import { logger } from "./logger";
+import { acquireProjectLifecycleSession, registerProjectWorkController } from "./project-lifecycle";
 
 export interface TerminalServer {
   wss: WebSocketServer;
@@ -111,6 +112,7 @@ export function createTerminalServer(): TerminalServer {
 
     // Input buffer — accumulate keystrokes into a command line
     let lineBuffer = "";
+    const activeCommandControllers = new Set<AbortController>();
 
     ws.on("message", async (data: Buffer | ArrayBuffer | Buffer[]) => {
       const input = data.toString("utf8");
@@ -128,8 +130,46 @@ export function createTerminalServer(): TerminalServer {
 
         // Execute via Fly exec API
         sendControl(ws, { type: "status", status: "running", command: cmd });
+        let lifecycleSession: Awaited<ReturnType<typeof acquireProjectLifecycleSession>> = null;
+        const controller = new AbortController();
+        let unregisterProjectWork: (() => void) | null = null;
+        activeCommandControllers.add(controller);
         try {
-          const result = await execInContainer(machineId, ["/bin/sh", "-c", cmd], projectId);
+          unregisterProjectWork = registerProjectWorkController(projectId, controller);
+          lifecycleSession = await acquireProjectLifecycleSession(projectId);
+          if (!lifecycleSession) {
+            sendControl(ws, { type: "error", message: "Project not found" });
+            ws.close(4004, "Project not found");
+            return;
+          }
+          if (controller.signal.aborted || ws.readyState !== WebSocket.OPEN) return;
+
+          const [currentProject] = await db
+            .select({
+              ownerId: projectsTable.ownerId,
+              containerId: projectsTable.containerId,
+              containerStatus: projectsTable.containerStatus,
+            })
+            .from(projectsTable)
+            .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+          if (
+            !currentProject ||
+            currentProject.ownerId !== userId ||
+            !currentProject.containerId ||
+            currentProject.containerStatus !== "running"
+          ) {
+            sendControl(ws, { type: "error", message: "Project container is not available" });
+            ws.close(4002, "Container not running");
+            return;
+          }
+          if (controller.signal.aborted || ws.readyState !== WebSocket.OPEN) return;
+
+          const result = await execInContainer(
+            currentProject.containerId,
+            ["/bin/sh", "-c", cmd],
+            projectId,
+          );
+          if (controller.signal.aborted) return;
           if (result.output) {
             sendText(ws, result.output.replace(/\n/g, "\r\n"));
           }
@@ -140,6 +180,10 @@ export function createTerminalServer(): TerminalServer {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           sendText(ws, `\r\n\x1b[31mError: ${msg}\x1b[0m\r\n$ `);
+        } finally {
+          unregisterProjectWork?.();
+          await lifecycleSession?.release();
+          activeCommandControllers.delete(controller);
         }
       } else if (input === "\x7f" || input === "\b") {
         // Backspace
@@ -159,6 +203,8 @@ export function createTerminalServer(): TerminalServer {
     });
 
     ws.on("close", () => {
+      for (const controller of activeCommandControllers) controller.abort();
+      activeCommandControllers.clear();
       logger.info({ projectId, machineId }, "Terminal session closed");
     });
 

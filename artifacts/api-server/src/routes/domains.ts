@@ -32,10 +32,12 @@ import type { DomainSecurityConfig } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { activateSslForDomain, activateSslForProject } from "./ssl";
 import {
-  deleteCustomHostname,
+  applyDefaultWafRules,
   applySecurityConfig,
-  enableMtls,
-  deleteHostnameKV,
+  purgeCacheForHostnames,
+  retireCloudflareSecurityResources,
+  retireCustomHostname,
+  retireHostnameKV,
   syncHostnameKVAfterPublish,
 } from "../lib/cloudflare";
 import { createLimiterForDomainVerify } from "../lib/rateLimit";
@@ -44,6 +46,7 @@ import { enqueueJob, DOMAIN_REWRITE_SENTINEL } from "../lib/jobs";
 import { writeKnowledge } from "../lib/knowledge";
 import { logger } from "../lib/logger";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
+import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
 
@@ -282,8 +285,9 @@ async function enqueueDomainRewriteJob(
       intentReceiptId: admission.receiptId,
     });
 
-    // Write a Knowledge Vault entry so future builds know the project's domain
-    void writeKnowledge({
+    // Keep the Knowledge receipt inside the same lifecycle boundary as the
+    // domain mutation. Trash must never be followed by a late background write.
+    await writeKnowledge({
       projectId,
       userId,
       title: `Primary domain: ${newDomain}`,
@@ -437,76 +441,80 @@ router.get("/projects/:id/domains", requireProjectOwnership, async (req, res): P
 });
 
 // ── POST /api/projects/:id/domains ────────────────────────────────────────────
-router.post("/projects/:id/domains", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const userId = (req as { userId?: string }).userId ?? "unknown";
-  const { hostname: rawHostname } = req.body as { hostname?: string };
+router.post(
+  "/projects/:id/domains",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const userId = (req as { userId?: string }).userId ?? "unknown";
+    const { hostname: rawHostname } = req.body as { hostname?: string };
 
-  if (!rawHostname) {
-    res.status(400).json({ error: "hostname is required." });
-    return;
-  }
+    if (!rawHostname) {
+      res.status(400).json({ error: "hostname is required." });
+      return;
+    }
 
-  const hostname = normaliseHostname(rawHostname);
-  if (!hostname) {
-    res.status(400).json({
-      error:
-        "Invalid domain. Use a bare hostname like app.example.com or münchen.de — no protocol, no trailing slash, no path.",
-    });
-    return;
-  }
+    const hostname = normaliseHostname(rawHostname);
+    if (!hostname) {
+      res.status(400).json({
+        error:
+          "Invalid domain. Use a bare hostname like app.example.com or münchen.de — no protocol, no trailing slash, no path.",
+      });
+      return;
+    }
 
-  // Check reserved labels (only relevant when the user is trying to use a platform subdomain)
-  if (hostname.endsWith("." + PLATFORM_DOMAIN) && isReservedPlatformLabel(hostname)) {
-    res.status(400).json({
-      error: `The subdomain label "${hostname.split(".")[0]}" is reserved and cannot be used.`,
-    });
-    return;
-  }
+    // Check reserved labels (only relevant when the user is trying to use a platform subdomain)
+    if (hostname.endsWith("." + PLATFORM_DOMAIN) && isReservedPlatformLabel(hostname)) {
+      res.status(400).json({
+        error: `The subdomain label "${hostname.split(".")[0]}" is reserved and cannot be used.`,
+      });
+      return;
+    }
 
-  // Determine record type: apex domains (2 labels, e.g. "example.com") use A records;
-  // subdomains use CNAME.
-  const labels = hostname.split(".");
-  const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
+    // Determine record type: apex domains (2 labels, e.g. "example.com") use A records;
+    // subdomains use CNAME.
+    const labels = hostname.split(".");
+    const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
 
-  const token = generateVerificationToken();
+    const token = generateVerificationToken();
 
-  // Count existing domains to determine if this should be primary
-  const existing = await db
-    .select({ id: projectDomainsTable.id })
-    .from(projectDomainsTable)
-    .where(eq(projectDomainsTable.projectId, projectId));
+    // Count existing domains to determine if this should be primary
+    const existing = await db
+      .select({ id: projectDomainsTable.id })
+      .from(projectDomainsTable)
+      .where(eq(projectDomainsTable.projectId, projectId));
 
-  const isPrimary = existing.length === 0;
+    const isPrimary = existing.length === 0;
 
-  try {
-    const [newDomain] = await db
-      .insert(projectDomainsTable)
-      .values({
+    try {
+      const [newDomain] = await db
+        .insert(projectDomainsTable)
+        .values({
+          projectId,
+          hostname,
+          isPrimary,
+          recordType,
+          verificationToken: token,
+          verificationStatus: "pending",
+          sslStatus: "pending",
+        })
+        .returning();
+
+      // Emit event to hot-reload routing table
+      publishDomainEvent({ type: "added", hostname, projectId });
+
+      await writeDomainAudit({
         projectId,
+        userId,
+        action: "domain_attached",
         hostname,
-        isPrimary,
-        recordType,
-        verificationToken: token,
-        verificationStatus: "pending",
-        sslStatus: "pending",
-      })
-      .returning();
+        after: { recordType, isPrimary },
+      });
 
-    // Emit event to hot-reload routing table
-    publishDomainEvent({ type: "added", hostname, projectId });
-
-    await writeDomainAudit({
-      projectId,
-      userId,
-      action: "domain_attached",
-      hostname,
-      after: { recordType, isPrimary },
-    });
-
-    // Audit log for rollback — status="attach" so rollback can inverse to detach
-    setImmediate(() => {
-      void db
+      // Audit log for rollback — status="attach" so rollback can inverse to detach.
+      // Await even this best-effort write so it cannot outlive the lifecycle lock.
+      await db
         .insert(deploymentLogsTable)
         .values({
           projectId,
@@ -524,44 +532,52 @@ router.post("/projects/:id/domains", requireProjectOwnership, async (req, res): 
         .catch(() => {
           /* best-effort */
         });
-    });
 
-    // Keep legacy projects.customDomain in sync with primary domain
-    if (isPrimary) {
-      await db
-        .update(projectsTable)
-        .set({
-          customDomain: hostname,
-          domainStatus: "pending_verification",
-          verificationToken: token,
-          updatedAt: new Date(),
-        })
-        .where(eq(projectsTable.id, projectId));
+      // Keep legacy projects.customDomain in sync with primary domain
+      if (isPrimary) {
+        await db
+          .update(projectsTable)
+          .set({
+            customDomain: hostname,
+            domainStatus: "pending_verification",
+            verificationToken: token,
+            updatedAt: new Date(),
+          })
+          .where(eq(projectsTable.id, projectId));
 
-      // Fire-and-forget URL rewrite job: updates canonical/OG/sitemap/Stripe/OAuth URLs
-      const project = await getProjectOrNull(projectId);
-      void enqueueDomainRewriteJob(projectId, hostname, null, project?.publicSlug ?? null, userId);
+        // The rewrite task is part of this mutation receipt. Await it so Trash
+        // cannot cancel the task set and then receive a late queued task.
+        const project = await getProjectOrNull(projectId);
+        await enqueueDomainRewriteJob(
+          projectId,
+          hostname,
+          null,
+          project?.publicSlug ?? null,
+          userId,
+        );
+      }
+
+      res.status(201).json({
+        domain: newDomain,
+        cnameTarget: CNAME_TARGET,
+        txtName: `_mustaflow.${hostname}`,
+        txtValue: token,
+      });
+    } catch (err) {
+      if (isDuplicateKeyError(err)) {
+        res.status(409).json({ error: "This domain is already attached to a project." });
+        return;
+      }
+      throw err;
     }
-
-    res.status(201).json({
-      domain: newDomain,
-      cnameTarget: CNAME_TARGET,
-      txtName: `_mustaflow.${hostname}`,
-      txtValue: token,
-    });
-  } catch (err) {
-    if (isDuplicateKeyError(err)) {
-      res.status(409).json({ error: "This domain is already attached to a project." });
-      return;
-    }
-    throw err;
-  }
-});
+  },
+);
 
 // ── DELETE /api/projects/:id/domains/:domainId ────────────────────────────────
 router.delete(
   "/projects/:id/domains/:domainId",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -592,19 +608,46 @@ router.delete(
       environment: (domain as { environment?: string }).environment ?? "production",
     };
 
-    await db.delete(projectDomainsTable).where(eq(projectDomainsTable.id, domainId));
-
-    // Delete the Cloudflare custom hostname so the cert is released (best-effort).
-    if (domain.cfHostnameId) {
-      void deleteCustomHostname(domain.cfHostnameId).catch(() => {
-        /* non-fatal — the daily dangling sweep will clean it up if this fails */
+    const security = await retireCloudflareSecurityResources(
+      domain.securityConfig?.cloudflareResources ?? [],
+    );
+    if (security.state !== "absent") {
+      res.status(503).json({
+        error: "The domain could not be detached because its security resources are still active.",
+        code: "domain_security_cleanup_unconfirmed",
       });
+      return;
     }
 
-    // ── Edge CDN: remove this hostname from Worker KV ─────────────────────────
-    void deleteHostnameKV(domain.hostname).catch(() => {
-      /* best-effort */
-    });
+    if (domain.cfHostnameId) {
+      const customHostname = await retireCustomHostname(domain.cfHostnameId);
+      if (customHostname.state !== "absent") {
+        res.status(503).json({
+          error: "The domain could not be detached because its certificate is still active.",
+          code: "domain_custom_hostname_cleanup_unconfirmed",
+        });
+        return;
+      }
+    }
+
+    const route = await retireHostnameKV(domain.hostname, projectId);
+    if (route.state !== "absent") {
+      res.status(503).json({
+        error: "The domain could not be detached because its public route is still active.",
+        code: "domain_route_cleanup_unconfirmed",
+      });
+      return;
+    }
+
+    if (!(await purgeCacheForHostnames([domain.hostname]))) {
+      res.status(503).json({
+        error: "The domain could not be detached because its edge cache cleanup was unconfirmed.",
+        code: "domain_cache_cleanup_unconfirmed",
+      });
+      return;
+    }
+
+    await db.delete(projectDomainsTable).where(eq(projectDomainsTable.id, domainId));
 
     // Emit event to hot-reload routing table
     publishDomainEvent({ type: "removed", hostname: domain.hostname, projectId });
@@ -617,21 +660,20 @@ router.delete(
       before: { isPrimary: domain.isPrimary, verificationStatus: domain.verificationStatus },
     });
 
-    // Audit log for rollback — status="detach" so rollback can inverse to re-attach
-    setImmediate(() => {
-      void db
-        .insert(deploymentLogsTable)
-        .values({
-          projectId,
-          userId,
-          env: "production",
-          status: "detach",
-          note: JSON.stringify(detachedSnapshot),
-        })
-        .catch(() => {
-          /* best-effort */
-        });
-    });
+    // Audit log for rollback — status="detach" so rollback can inverse to re-attach.
+    // Await it to keep every mutation write inside the lifecycle boundary.
+    await db
+      .insert(deploymentLogsTable)
+      .values({
+        projectId,
+        userId,
+        env: "production",
+        status: "detach",
+        note: JSON.stringify(detachedSnapshot),
+      })
+      .catch(() => {
+        /* best-effort */
+      });
 
     // If this was the primary domain, promote the next domain (if any)
     if (domain.isPrimary) {
@@ -730,32 +772,32 @@ router.patch(
       hostname: domain.hostname,
     });
 
-    // Audit log for rollback — status="set-primary" with before/after hostnames
-    setImmediate(() => {
-      void db
-        .insert(deploymentLogsTable)
-        .values({
-          projectId,
-          userId,
-          env: "production",
-          status: "set-primary",
-          note: JSON.stringify({
-            action: "set-primary",
-            newPrimaryHostname: domain.hostname,
-            newPrimaryDomainId: domainId,
-            prevPrimaryHostname: previousPrimary?.hostname ?? null,
-            prevPrimaryDomainId: previousPrimary?.id ?? null,
-          }),
-        })
-        .catch(() => {
-          /* best-effort */
-        });
-    });
+    // Audit log for rollback — status="set-primary" with before/after hostnames.
+    // Await it to keep every mutation write inside the lifecycle boundary.
+    await db
+      .insert(deploymentLogsTable)
+      .values({
+        projectId,
+        userId,
+        env: "production",
+        status: "set-primary",
+        note: JSON.stringify({
+          action: "set-primary",
+          newPrimaryHostname: domain.hostname,
+          newPrimaryDomainId: domainId,
+          prevPrimaryHostname: previousPrimary?.hostname ?? null,
+          prevPrimaryDomainId: previousPrimary?.id ?? null,
+        }),
+      })
+      .catch(() => {
+        /* best-effort */
+      });
 
-    // Fire-and-forget URL rewrite job when the primary domain changes
+    // The rewrite task is part of this mutation receipt and must finish
+    // scheduling before the lifecycle lock is released.
     if (domain.hostname !== oldPrimaryHostname) {
       const project = await getProjectOrNull(projectId);
-      void enqueueDomainRewriteJob(
+      await enqueueDomainRewriteJob(
         projectId,
         domain.hostname,
         oldPrimaryHostname,
@@ -816,6 +858,7 @@ router.patch(
 router.post(
   "/projects/:id/domains/:domainId/verify",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   domainVerifyLimiter,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
@@ -923,44 +966,34 @@ router.post(
             })
             .where(eq(projectsTable.id, projectId));
 
-          // Auto-trigger SSL via the per-domain path (best-effort, non-fatal).
-          void activateSslForDomain(
+          // The lifecycle fence remains held until the provider acknowledges SSL setup.
+          await activateSslForDomain(
             domainId,
             hostname,
             domain.cfHostnameId ?? null,
             projectId,
             domain.isPrimary,
-          ).catch(() => {
-            /* best-effort */
-          });
+          );
         }
 
         publishDomainEvent({ type: "verified", hostname, projectId });
 
         // ── Edge CDN: sync this hostname into the Worker KV ───────────────────
         // Look up the project's current published snapshot to populate KV.
-        setImmediate(() => {
-          void (async () => {
-            try {
-              const [proj] = await db
-                .select({
-                  publishedSnapshotId: projectsTable.publishedSnapshotId,
-                })
-                .from(projectsTable)
-                .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-              if (proj?.publishedSnapshotId) {
-                await syncHostnameKVAfterPublish({
-                  hostname,
-                  projectId,
-                  versionId: proj.publishedSnapshotId,
-                  preferredRegion: null,
-                });
-              }
-            } catch {
-              /* best-effort */
-            }
-          })();
-        });
+        const [proj] = await db
+          .select({
+            publishedSnapshotId: projectsTable.publishedSnapshotId,
+          })
+          .from(projectsTable)
+          .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+        if (proj?.publishedSnapshotId) {
+          await syncHostnameKVAfterPublish({
+            hostname,
+            projectId,
+            versionId: proj.publishedSnapshotId,
+            preferredRegion: null,
+          });
+        }
 
         await writeDomainAudit({
           projectId,
@@ -1410,109 +1443,181 @@ router.get("/projects/:id/domain", requireProjectOwnership, async (req, res): Pr
 });
 
 // ── PATCH /api/projects/:id/domain ───────────────────────────────────────────
-router.patch("/projects/:id/domain", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const userId = (req as { userId?: string }).userId ?? "unknown";
-  const { customDomain } = req.body as { customDomain?: string | null };
+router.patch(
+  "/projects/:id/domain",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const userId = (req as { userId?: string }).userId ?? "unknown";
+    const { customDomain } = req.body as { customDomain?: string | null };
 
-  if (customDomain !== undefined && customDomain !== null) {
-    const hostname = normaliseHostname(String(customDomain));
+    if (customDomain !== undefined && customDomain !== null) {
+      const hostname = normaliseHostname(String(customDomain));
 
-    if (!hostname) {
-      res.status(400).json({
-        error:
-          "Invalid domain format. Use a bare hostname like app.example.com — no protocol, no trailing slash.",
+      if (!hostname) {
+        res.status(400).json({
+          error:
+            "Invalid domain format. Use a bare hostname like app.example.com — no protocol, no trailing slash.",
+        });
+        return;
+      }
+
+      // Fetch existing token so we preserve it on re-save of the same domain
+      const [existing] = await db
+        .select({
+          verificationToken: projectsTable.verificationToken,
+          customDomain: projectsTable.customDomain,
+        })
+        .from(projectsTable)
+        .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+
+      const token =
+        existing?.customDomain === hostname && existing.verificationToken
+          ? existing.verificationToken
+          : generateVerificationToken();
+
+      try {
+        await db
+          .update(projectsTable)
+          .set({
+            customDomain: hostname,
+            domainStatus: "pending_verification",
+            sslStatus: "pending",
+            verificationToken: token,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+      } catch (err) {
+        if (isDuplicateKeyError(err)) {
+          res.status(409).json({ error: "This domain is already connected to another project." });
+          return;
+        }
+        throw err;
+      }
+
+      // Upsert into project_domains for consistency
+      const existingDomains = await db
+        .select({ id: projectDomainsTable.id })
+        .from(projectDomainsTable)
+        .where(
+          and(
+            eq(projectDomainsTable.projectId, projectId),
+            eq(projectDomainsTable.hostname, hostname),
+          ),
+        );
+
+      if (existingDomains.length === 0) {
+        const labels = hostname.split(".");
+        const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
+        try {
+          await db.insert(projectDomainsTable).values({
+            projectId,
+            hostname,
+            isPrimary: true,
+            recordType,
+            verificationToken: token,
+            verificationStatus: "pending",
+            sslStatus: "pending",
+          });
+          publishDomainEvent({ type: "added", hostname, projectId });
+        } catch {
+          /* ignore — may already exist */
+        }
+      }
+
+      await writeDomainAudit({ projectId, userId, action: "domain_set_legacy", hostname });
+
+      res.json({
+        customDomain: hostname,
+        domainStatus: "pending_verification",
+        sslStatus: "pending",
+        cnameTarget: CNAME_TARGET,
+        verificationToken: token,
+        txtName: `_mustaflow.${hostname}`,
+        txtValue: token,
       });
-      return;
-    }
+    } else {
+      // Clear the custom domain (legacy: only clears primary from projects table)
+      const [proj] = await db
+        .select({ customDomain: projectsTable.customDomain })
+        .from(projectsTable)
+        .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
-    // Fetch existing token so we preserve it on re-save of the same domain
-    const [existing] = await db
-      .select({
-        verificationToken: projectsTable.verificationToken,
-        customDomain: projectsTable.customDomain,
-      })
-      .from(projectsTable)
-      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+      if (proj?.customDomain) {
+        publishDomainEvent({ type: "removed", hostname: proj.customDomain, projectId });
+        await writeDomainAudit({
+          projectId,
+          userId,
+          action: "domain_cleared_legacy",
+          hostname: proj.customDomain,
+        });
+      }
 
-    const token =
-      existing?.customDomain === hostname && existing.verificationToken
-        ? existing.verificationToken
-        : generateVerificationToken();
-
-    try {
       await db
         .update(projectsTable)
         .set({
-          customDomain: hostname,
-          domainStatus: "pending_verification",
+          customDomain: null,
+          domainStatus: "unconfigured",
           sslStatus: "pending",
-          verificationToken: token,
+          verificationToken: null,
           updatedAt: new Date(),
         })
         .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-    } catch (err) {
-      if (isDuplicateKeyError(err)) {
-        res.status(409).json({ error: "This domain is already connected to another project." });
-        return;
-      }
-      throw err;
+
+      res.json({ customDomain: null, domainStatus: "unconfigured" });
     }
+  },
+);
 
-    // Upsert into project_domains for consistency
-    const existingDomains = await db
-      .select({ id: projectDomainsTable.id })
-      .from(projectDomainsTable)
-      .where(
-        and(
-          eq(projectDomainsTable.projectId, projectId),
-          eq(projectDomainsTable.hostname, hostname),
-        ),
-      );
+// ── DELETE /api/projects/:id/domain ──────────────────────────────────────────
+router.delete(
+  "/projects/:id/domain",
+  requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
+  async (req, res): Promise<void> => {
+    const projectId = Number(req.params.id);
+    const userId = (req as { userId?: string }).userId ?? "unknown";
 
-    if (existingDomains.length === 0) {
-      const labels = hostname.split(".");
-      const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
-      try {
-        await db.insert(projectDomainsTable).values({
-          projectId,
-          hostname,
-          isPrimary: true,
-          recordType,
-          verificationToken: token,
-          verificationStatus: "pending",
-          sslStatus: "pending",
-        });
-        publishDomainEvent({ type: "added", hostname, projectId });
-      } catch {
-        /* ignore — may already exist */
-      }
-    }
-
-    await writeDomainAudit({ projectId, userId, action: "domain_set_legacy", hostname });
-
-    res.json({
-      customDomain: hostname,
-      domainStatus: "pending_verification",
-      sslStatus: "pending",
-      cnameTarget: CNAME_TARGET,
-      verificationToken: token,
-      txtName: `_mustaflow.${hostname}`,
-      txtValue: token,
-    });
-  } else {
-    // Clear the custom domain (legacy: only clears primary from projects table)
     const [proj] = await db
       .select({ customDomain: projectsTable.customDomain })
       .from(projectsTable)
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
     if (proj?.customDomain) {
+      const [domain] = await db
+        .select({ cfHostnameId: projectDomainsTable.cfHostnameId })
+        .from(projectDomainsTable)
+        .where(
+          and(
+            eq(projectDomainsTable.projectId, projectId),
+            eq(projectDomainsTable.hostname, proj.customDomain),
+          ),
+        )
+        .limit(1);
+      if (domain?.cfHostnameId) {
+        const customHostname = await retireCustomHostname(domain.cfHostnameId);
+        if (customHostname.state !== "absent") {
+          res.status(503).json({
+            error: "The domain could not be removed because its certificate is still active.",
+            code: "legacy_domain_custom_hostname_cleanup_unconfirmed",
+          });
+          return;
+        }
+      }
+      const route = await retireHostnameKV(proj.customDomain, projectId);
+      if (route.state !== "absent") {
+        res.status(503).json({
+          error: "The domain could not be removed because its public route is still active.",
+          code: "legacy_domain_route_cleanup_unconfirmed",
+        });
+        return;
+      }
       publishDomainEvent({ type: "removed", hostname: proj.customDomain, projectId });
       await writeDomainAudit({
         projectId,
         userId,
-        action: "domain_cleared_legacy",
+        action: "domain_deleted_legacy",
         hostname: proj.customDomain,
       });
     }
@@ -1529,47 +1634,14 @@ router.patch("/projects/:id/domain", requireProjectOwnership, async (req, res): 
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
     res.json({ customDomain: null, domainStatus: "unconfigured" });
-  }
-});
-
-// ── DELETE /api/projects/:id/domain ──────────────────────────────────────────
-router.delete("/projects/:id/domain", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-  const userId = (req as { userId?: string }).userId ?? "unknown";
-
-  const [proj] = await db
-    .select({ customDomain: projectsTable.customDomain })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-
-  if (proj?.customDomain) {
-    publishDomainEvent({ type: "removed", hostname: proj.customDomain, projectId });
-    await writeDomainAudit({
-      projectId,
-      userId,
-      action: "domain_deleted_legacy",
-      hostname: proj.customDomain,
-    });
-  }
-
-  await db
-    .update(projectsTable)
-    .set({
-      customDomain: null,
-      domainStatus: "unconfigured",
-      sslStatus: "pending",
-      verificationToken: null,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
-
-  res.json({ customDomain: null, domainStatus: "unconfigured" });
-});
+  },
+);
 
 // ── POST /api/projects/:id/domain/verify ─────────────────────────────────────
 router.post(
   "/projects/:id/domain/verify",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   domainVerifyLimiter,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
@@ -1640,9 +1712,10 @@ router.post(
           .from(projectsTable)
           .where(eq(projectsTable.id, projectId));
 
-        void activateSslForProject(projectId, domain, projectForSsl?.cfHostnameId).catch(() => {
-          /* best-effort */
-        });
+        // Cloudflare hostname creation must complete while this request still
+        // holds the lifecycle lock; a detached promise could recreate a public
+        // hostname after governed Trash finished its cleanup.
+        await activateSslForProject(projectId, domain, projectForSsl?.cfHostnameId);
 
         publishDomainEvent({ type: "verified", hostname: domain, projectId });
         await writeDomainAudit({
@@ -1892,6 +1965,7 @@ router.post(
 router.patch(
   "/projects/:id/domains/:domainId/security",
   requireProjectOwnership,
+  requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
     const domainId = Number(req.params.domainId);
@@ -1935,21 +2009,40 @@ router.patch(
       ...(body.mtlsCaCert !== undefined ? { mtlsCaCert: body.mtlsCaCert } : {}),
     };
 
+    const priorResources = domain.securityConfig?.cloudflareResources ?? [];
+    const cleanup = await retireCloudflareSecurityResources(priorResources);
+    if (cleanup.state !== "absent") {
+      res.status(503).json({
+        error: "The previous Cloudflare security policy could not be removed safely.",
+        code: "domain_security_cleanup_unconfirmed",
+      });
+      return;
+    }
+
+    const defaults = domain.cfHostnameId
+      ? await applyDefaultWafRules(domain.hostname, domain.cfHostnameId, [])
+      : { state: "applied" as const, resources: [] };
+    const applied = await applySecurityConfig(
+      domain.hostname,
+      { ...merged, cloudflareResources: defaults.resources },
+      domain.cfHostnameId ?? domain.hostname,
+    );
+    const persistedConfig: DomainSecurityConfig = {
+      ...(applied.state === "applied" ? merged : (domain.securityConfig ?? {})),
+      cloudflareResources: applied.resources,
+    };
+
     await db
       .update(projectDomainsTable)
-      .set({ securityConfig: merged, updatedAt: new Date() })
+      .set({ securityConfig: persistedConfig, updatedAt: new Date() })
       .where(eq(projectDomainsTable.id, domainId));
 
-    // Push config to Cloudflare best-effort (non-fatal)
-    void applySecurityConfig(domain.hostname, merged).catch(() => {
-      /* non-fatal */
-    });
-
-    // If mTLS is being enabled and a CA cert is provided, activate it
-    if (merged.mtlsEnabled && merged.mtlsCaCert) {
-      void enableMtls(domain.hostname, merged.mtlsCaCert).catch(() => {
-        /* non-fatal */
+    if (defaults.state !== "applied" || applied.state !== "applied") {
+      res.status(503).json({
+        error: "Cloudflare security policy creation could not be reconciled.",
+        code: "domain_security_apply_unconfirmed",
       });
+      return;
     }
 
     await writeDomainAudit({
@@ -1957,14 +2050,14 @@ router.patch(
       userId,
       action: "domain_security_updated",
       hostname: domain.hostname,
-      after: { securityConfig: merged },
+      after: { securityConfig: persistedConfig },
     });
 
     res.json({
       ok: true,
       domainId,
       hostname: domain.hostname,
-      securityConfig: merged,
+      securityConfig: persistedConfig,
     });
   },
 );

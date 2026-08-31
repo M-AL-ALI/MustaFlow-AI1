@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
 vi.mock("drizzle-orm", () => ({
   and: vi.fn(() => ({ kind: "and" })),
   eq: vi.fn(() => ({ kind: "eq" })),
+  isNull: vi.fn(() => ({ kind: "isNull" })),
 }));
 
 vi.mock("@workspace/db", () => ({
@@ -25,6 +26,7 @@ vi.mock("@workspace/db", () => ({
   },
   projectsTable: {
     id: "id",
+    deletedAt: "deletedAt",
     ownerId: "ownerId",
     organizationId: "organizationId",
     status: "status",

@@ -1255,8 +1255,22 @@ async function rescueClaimedFileDelivery(params: {
     "Conversational reply claimed a file delivery with no file attached — generating it for real",
   );
   params.activity?.start("file-generation");
+  let reservation: import("../../lib/ora-assets").OraGeneratedAssetReservation | null = null;
+  let libraryProjectId: number | null = null;
   try {
     const { generateFileFromPrompt } = await import("../../lib/public-ai/file-builder");
+    if (params.authed) {
+      const { reserveOraGeneratedAsset } = await import("../../lib/ora-assets");
+      libraryProjectId = await resolveAssetProjectId(params.authed.userId, params.oraProjectId);
+      reservation = await reserveOraGeneratedAsset({
+        userId: params.authed.userId,
+        oraProjectId: libraryProjectId,
+        kind: "file",
+        source: "ora-file-delivery-rescue",
+        fileName: `ora-generated.${claimedFormat}`,
+        mimeType: "application/octet-stream",
+      });
+    }
     const filePrompt = params.carriedDocs
       ? `${params.message}\n\n${params.carriedDocs}`
       : params.message;
@@ -1269,25 +1283,22 @@ async function rescueClaimedFileDelivery(params: {
       params.authed?.tier ?? null,
     );
     let assetId: number | null = null;
-    if (params.authed && result.fileData) {
-      try {
-        const { persistOraAsset } = await import("../../lib/ora-assets");
-        assetId = await persistOraAsset({
+    if (params.authed && reservation && result.fileData) {
+      const { completeOraGeneratedAsset } = await import("../../lib/ora-assets");
+      assetId = await completeOraGeneratedAsset({
+        reservation,
+        asset: {
           userId: params.authed.userId,
-          oraProjectId: await resolveAssetProjectId(params.authed.userId, params.oraProjectId),
+          oraProjectId: libraryProjectId,
           kind: "file",
           fileName: result.fileName,
           mimeType: result.mimeType,
           format: claimedFormat,
           prompt: params.message,
-          base64: result.fileData,
-        });
-      } catch (persistErr) {
-        logger.error(
-          { component: params.logComponent, err: persistErr },
-          "Failed to persist rescued file to asset library",
-        );
-      }
+        },
+        base64: result.fileData,
+      });
+      reservation = null;
     }
     params.activity?.ok("file-generation");
     return {
@@ -1298,15 +1309,22 @@ async function rescueClaimedFileDelivery(params: {
       assetId,
     };
   } catch (err) {
+    if (reservation && params.authed) {
+      const { cancelOraGeneratedAsset } = await import("../../lib/ora-assets");
+      await cancelOraGeneratedAsset(reservation, params.authed.userId);
+    }
     params.activity?.fail("file-generation");
     logger.error(
       { component: params.logComponent, claimedFormat, err },
       "False-delivery rescue generation failed — replacing claim with honest correction",
     );
+    const { AssetAdmissionError } = await import("../../lib/asset-registry");
     return {
       reply:
-        "I wasn't able to attach that file — my earlier message was wrong to say it was ready. " +
-        `Please ask me again (for example, "create it as a ${claimedFormat.toUpperCase()}") and I'll generate it for you.`,
+        err instanceof AssetAdmissionError
+          ? err.message
+          : "I wasn't able to attach that file — my earlier message was wrong to say it was ready. " +
+            `Please ask me again (for example, "create it as a ${claimedFormat.toUpperCase()}") and I'll generate it for you.`,
     };
   }
 }
@@ -1743,7 +1761,21 @@ router.post("/public-ai/chat", async (req, res) => {
 
     const { generateFileFromPrompt, FileGenerationError } =
       await import("../../lib/public-ai/file-builder");
+    let fileReservation: import("../../lib/ora-assets").OraGeneratedAssetReservation | null = null;
+    let libraryProjectId: number | null = null;
     try {
+      if (authed) {
+        const { reserveOraGeneratedAsset } = await import("../../lib/ora-assets");
+        libraryProjectId = await resolveAssetProjectId(authed.userId, oraProjectId);
+        fileReservation = await reserveOraGeneratedAsset({
+          userId: authed.userId,
+          oraProjectId: libraryProjectId,
+          kind: "file",
+          source: "ora-chat-file-generation",
+          fileName: `ora-generated.${detectedFormat}`,
+          mimeType: "application/octet-stream",
+        });
+      }
       const { tryApplyLayoutPreservingFileEdit } =
         await import("../../lib/public-ai/office-layout-edit");
       const layoutEditResult = await tryApplyLayoutPreservingFileEdit({
@@ -1791,75 +1823,60 @@ router.post("/public-ai/chat", async (req, res) => {
           canRedesign: false,
         };
       }
-      const { token, payload } = chargeSession(session, streamFallbackToken);
-      setSessionCookie(res, token);
-      const usage = await oraUsageResponse(authed, payload.msgCount);
-      // Persist to the durable asset library BEFORE responding so the returned
-      // asset id can ride on the download card (keeping it usable after reload
-      // and on other devices). Best-effort — a library failure must never break
-      // the in-chat generation. Only for signed-in users.
+      // Complete the pre-provider reservation before earning a delivery claim.
       let assetId: number | null = null;
-      if (authed && result.fileData) {
-        try {
-          const { persistOraAsset, getNextVersionLineage, getNextVersionLineageFromAssetId } =
-            await import("../../lib/ora-assets");
-          // Version lineage: Phase 10 active-asset revisions chain off the
-          // activeAssetId directly. Uploaded-file in-place edits chain via the
-          // editedFileRef session-store key. Plain generation is standalone v1.
-          const lineage =
-            activeAssetId && layoutEditResult
-              ? await getNextVersionLineageFromAssetId(authed.userId, activeAssetId)
-              : result.editedFileRef
-                ? await getNextVersionLineage(authed.userId, result.editedFileRef)
-                : null;
-          const isRevision = activeAssetId && layoutEditResult;
-          const editSummary =
-            isRevision || result.editedFileRef
-              ? (result.editQuality?.changes?.length
-                  ? result.editQuality.changes.join("; ")
-                  : `Revised: ${message}`
-                ).slice(0, 300)
+      if (authed && fileReservation && result.fileData) {
+        const {
+          completeOraGeneratedAsset,
+          getNextVersionLineage,
+          getNextVersionLineageFromAssetId,
+        } = await import("../../lib/ora-assets");
+        const lineage =
+          activeAssetId && layoutEditResult
+            ? await getNextVersionLineageFromAssetId(authed.userId, activeAssetId)
+            : result.editedFileRef
+              ? await getNextVersionLineage(authed.userId, result.editedFileRef)
               : null;
-          assetId = await persistOraAsset({
+        const isRevision = activeAssetId && layoutEditResult;
+        const editSummary =
+          isRevision || result.editedFileRef
+            ? (result.editQuality?.changes?.length
+                ? result.editQuality.changes.join("; ")
+                : `Revised: ${message}`
+              ).slice(0, 300)
+            : null;
+        assetId = await completeOraGeneratedAsset({
+          reservation: fileReservation,
+          asset: {
             userId: authed.userId,
-            // Chained versions inherit the parent's project via the lineage
-            // spread below; only a standalone v1 uses this turn's project.
-            oraProjectId: await resolveAssetProjectId(authed.userId, oraProjectId),
+            oraProjectId: libraryProjectId,
             kind: "file",
             fileName: result.fileName,
             mimeType: result.mimeType,
             format: detectedFormat,
             prompt: message,
-            base64: result.fileData,
             ...(lineage ?? {}),
             sourceFileRef: result.editedFileRef ?? null,
             editSummary,
+          },
+          base64: result.fileData,
+        });
+        fileReservation = null;
+        if (result.editQuality) result.editQuality.versionId = assetId;
+        if (result.editedFileRef) {
+          const { relinkDurableFileContextBestEffort } =
+            await import("../../lib/public-ai/file-context-store");
+          relinkDurableFileContextBestEffort({
+            fileRef: result.editedFileRef,
+            sessionId: session.sessionId,
+            userId: authed.userId,
+            assetId,
           });
-          // Surface the persisted version on the quality card so clients can
-          // open revision history directly from it.
-          if (assetId != null && result.editQuality) {
-            result.editQuality.versionId = assetId;
-          }
-          // In-place Office edit: repoint the durable file-context mirror at
-          // the edited asset so revisions after a restart/rotated session
-          // compound instead of reverting to the original upload.
-          if (assetId != null && result.editedFileRef) {
-            const { relinkDurableFileContextBestEffort } =
-              await import("../../lib/public-ai/file-context-store");
-            relinkDurableFileContextBestEffort({
-              fileRef: result.editedFileRef,
-              sessionId: session.sessionId,
-              userId: authed.userId,
-              assetId,
-            });
-          }
-        } catch (persistErr) {
-          logger.error(
-            { component: "ora-chat-file", err: persistErr },
-            "Failed to persist generated file to asset library",
-          );
         }
       }
+      const { token, payload } = chargeSession(session, streamFallbackToken);
+      setSessionCookie(res, token);
+      const usage = await oraUsageResponse(authed, payload.msgCount);
       const fileAgentPreview = buildFileAgentPreview({
         format: detectedFormat,
         fileName: result.fileName,
@@ -1884,6 +1901,10 @@ router.post("/public-ai/chat", async (req, res) => {
         serverDiag: routeDiag,
       });
     } catch (err) {
+      if (fileReservation && authed) {
+        const { cancelOraGeneratedAsset } = await import("../../lib/ora-assets");
+        await cancelOraGeneratedAsset(fileReservation, authed.userId);
+      }
       await refundOraQuotaFor(authed, quotaKind);
       logger.error(
         { component: "ora-chat-file", format: detectedFormat, err },
@@ -1892,7 +1913,10 @@ router.post("/public-ai/chat", async (req, res) => {
       const failActivity = [oraActivityStep("file-generation", "fail")];
       // A FileGenerationError carries a user-safe message (e.g. the model lost
       // the attached data) — surface it instead of the generic 500 fallback.
-      if (err instanceof FileGenerationError) {
+      const { AssetAdmissionError } = await import("../../lib/asset-registry");
+      if (err instanceof AssetAdmissionError) {
+        res.status(err.status).json({ error: err.message, code: err.code, activity: failActivity });
+      } else if (err instanceof FileGenerationError) {
         res.status(422).json({ error: err.message, activity: failActivity });
       } else {
         res
@@ -1937,11 +1961,54 @@ router.post("/public-ai/chat", async (req, res) => {
       });
       return;
     }
+    let pendingEditableImageId: number | undefined;
+    let pendingEditableAsset: Awaited<
+      ReturnType<typeof import("../../lib/asset-registry").reserveAsset>
+    > | null = null;
+    let pendingEditableObjects: import("../../lib/image-storage").StoredImageObject[] = [];
+    let pendingEditableFileUrl: string | undefined;
+    let editableCompletionCommitted = false;
     try {
       const imageProfile = buildOraImageGenerationProfile({
         prompt: imagePrompt,
         subscriptionTier: authed?.tier ?? null,
       });
+      let editableImageId: number | undefined;
+      if (authed) {
+        // Establish the durable owner and quota boundary before spending on the
+        // image provider. A full account therefore incurs no provider call.
+        const { db, generatedImagesTable } = await import("@workspace/db");
+        const [imageRow] = await db
+          .insert(generatedImagesTable)
+          .values({
+            userId: authed.userId,
+            prompt: imageProfile.originalPrompt,
+            quality: imageProfile.quality,
+            aspectRatio: imageProfile.aspectRatio,
+            style: imageProfile.style,
+            providerName: "openai",
+            status: "pending",
+            safetyStatus: "passed",
+            creditCost: 0,
+            sourceType: "generated",
+          })
+          .returning({ id: generatedImagesTable.id });
+        if (!imageRow) throw new Error("ora_image_receipt_unavailable");
+        editableImageId = imageRow.id;
+        pendingEditableImageId = imageRow.id;
+        const { reserveOraGeneratedAsset } = await import("../../lib/ora-assets");
+        pendingEditableAsset = await reserveOraGeneratedAsset({
+          userId: authed.userId,
+          kind: "generated",
+          source: "ora-image-generation",
+          fileName: `ora-image-${imageRow.id}.webp`,
+          mimeType: "image/webp",
+        });
+        await db
+          .update(generatedImagesTable)
+          .set({ assetId: pendingEditableAsset.id, updatedAt: sql`now()` })
+          .where(eq(generatedImagesTable.id, imageRow.id));
+      }
       const result = await generateImage({
         prompt: imageProfile.prompt,
         quality: imageProfile.quality,
@@ -1949,8 +2016,7 @@ router.post("/public-ai/chat", async (req, res) => {
         style: imageProfile.style,
         subscriptionTier: authed?.tier ?? null,
       });
-      let editableImageId: number | undefined;
-      if (authed) {
+      if (authed && editableImageId !== undefined && pendingEditableAsset) {
         // Persist the image into generated_images so it carries an editable id.
         // This is what powers inline editing: the existing /images/:id/edit
         // pipeline keys off a generated_images row (parent fileUrl + ownership).
@@ -1958,45 +2024,88 @@ router.post("/public-ai/chat", async (req, res) => {
         // NOT the Builder credit wallet, so this record is creditCost:0.
         try {
           const { storeGeneratedImage } = await import("../../lib/image-storage");
-          const { db, generatedImagesTable } = await import("@workspace/db");
-          const [imageRow] = await db
-            .insert(generatedImagesTable)
-            .values({
-              userId: authed.userId,
-              prompt: imageProfile.originalPrompt,
-              quality: result.quality,
-              aspectRatio: imageProfile.aspectRatio,
-              style: imageProfile.style,
+          const { completeAsset } = await import("../../lib/asset-registry");
+          const stored = await storeGeneratedImage(result.openaiUrl, editableImageId, {
+            assetId: pendingEditableAsset.id,
+            ownerUserId: authed.userId,
+            actorUserId: authed.userId,
+          });
+          pendingEditableObjects = stored.storageObjects;
+          pendingEditableFileUrl = stored.fileUrl;
+          await completeAsset({
+            assetId: pendingEditableAsset.id,
+            ownerUserId: authed.userId,
+            actorUserId: authed.userId,
+            sha256: stored.sha256,
+            scanState: "not-required",
+            finalSizeBytes:
+              stored.storageObjects.find((object) => object.role === "primary")?.sizeBytes ?? 0,
+            finalMimeType: "image/webp",
+            finalStorageKey: stored.storageKey ?? undefined,
+            generatedImage: {
+              imageId: editableImageId,
+              fileUrl: stored.fileUrl,
+              thumbnailUrl: stored.thumbnailUrl,
+              storageKey: stored.storageKey!,
               providerName: result.providerName,
               modelName: result.modelName,
-              status: "pending",
-              safetyStatus: "passed",
-              creditCost: 0,
-              sourceType: "generated",
-            })
-            .returning({ id: generatedImagesTable.id });
-          if (imageRow) {
-            const stored = await storeGeneratedImage(result.openaiUrl, imageRow.id);
-            await db
-              .update(generatedImagesTable)
-              .set({
-                status: "completed",
-                fileUrl: stored.fileUrl,
-                thumbnailUrl: stored.thumbnailUrl,
-                storageKey: stored.storageKey,
-                revisedPrompt: result.revisedPrompt,
-                updatedAt: sql`now()`,
-              })
-              .where(eq(generatedImagesTable.id, imageRow.id));
-            editableImageId = imageRow.id;
-          }
+              revisedPrompt: result.revisedPrompt,
+            },
+          });
+          editableCompletionCommitted = true;
         } catch (storeErr) {
-          // Non-fatal: the user still sees the inline image; it just won't be
-          // editable. The durable Library copy (ora_assets) is handled below.
+          // Terminal for signed-in generation: do not expose provider bytes
+          // until the private asset and editable-image receipt commit together.
           logger.error(
             { component: "ora-chat-image", err: storeErr },
             "Failed to create editable generated_images record for Ora image",
           );
+          if (!editableCompletionCommitted) {
+            const { deleteStoredImageObjects } = await import("../../lib/image-storage");
+            const { rejectReservedAsset } = await import("../../lib/asset-registry");
+            const { db, generatedImagesTable } = await import("@workspace/db");
+            await deleteStoredImageObjects(pendingEditableObjects).catch(() => undefined);
+            await rejectReservedAsset({
+              assetId: pendingEditableAsset.id,
+              ownerUserId: authed.userId,
+              actorUserId: authed.userId,
+              code: "asset_storage_unavailable",
+            }).catch(() => undefined);
+            await db
+              .update(generatedImagesTable)
+              .set({ status: "failed", errorMessage: "Storage unavailable", updatedAt: sql`now()` })
+              .where(eq(generatedImagesTable.id, editableImageId));
+            editableImageId = undefined;
+            pendingEditableAsset = null;
+            pendingEditableObjects = [];
+            pendingEditableFileUrl = undefined;
+          }
+          throw storeErr;
+        }
+      }
+      let libraryWarning: string | undefined;
+      if (authed && editableImageId !== undefined && pendingEditableAsset) {
+        try {
+          const { persistOraAssetStrict } = await import("../../lib/ora-assets");
+          await persistOraAssetStrict({
+            userId: authed.userId,
+            oraProjectId: await resolveAssetProjectId(authed.userId, oraProjectId),
+            kind: "image",
+            fileName: `ora-image-${editableImageId}.webp`,
+            mimeType: "image/webp",
+            format: "webp",
+            prompt: imageProfile.originalPrompt,
+            unifiedAssetId: pendingEditableAsset.id,
+          });
+        } catch (persistErr) {
+          logger.error(
+            {
+              component: "ora-chat-image",
+              errorClass: persistErr instanceof Error ? persistErr.name : "unknown",
+            },
+            "Failed to link Ora image into Library",
+          );
+          libraryWarning = "The image was created, but it could not be added to your Library.";
         }
       }
       const { token, payload } = chargeSession(session, streamFallbackToken);
@@ -2004,7 +2113,7 @@ router.post("/public-ai/chat", async (req, res) => {
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
         reply: "Here's the image you asked for. Tap Edit to refine it with an instruction.",
-        imageUrl: result.openaiUrl,
+        imageUrl: pendingEditableFileUrl ?? result.openaiUrl,
         ...(editableImageId ? { imageId: editableImageId } : {}),
         imageMeta: {
           kind: imageProfile.kind,
@@ -2013,53 +2122,50 @@ router.post("/public-ai/chat", async (req, res) => {
           quality: imageProfile.quality,
         },
         activity: [oraActivityStep("image-generation", "ok")],
+        ...(libraryWarning ? { libraryWarning } : {}),
         ...usage,
         serverDiag: routeDiag,
       });
-      // Persist to the durable asset library (best-effort, after the response so
-      // the remote-URL fetch never adds latency) so the image survives chat
-      // resets, reloads, and other devices (the OpenAI CDN URL expires).
-      if (authed) {
-        void (async () => {
-          try {
-            const { persistOraAsset, parseDataUri } = await import("../../lib/ora-assets");
-            const parsed = parseDataUri(result.openaiUrl);
-            let base64: string | null = parsed?.base64 ?? null;
-            let mimeType = parsed?.mimeType ?? "image/png";
-            if (!base64) {
-              const imgRes = await fetch(result.openaiUrl);
-              if (imgRes.ok) {
-                const buf = Buffer.from(await imgRes.arrayBuffer());
-                base64 = buf.toString("base64");
-                mimeType = imgRes.headers.get("content-type") ?? mimeType;
-              }
-            }
-            if (base64) {
-              const ext = mimeType.split("/")[1]?.split("+")[0] ?? "png";
-              await persistOraAsset({
-                userId: authed.userId,
-                oraProjectId: await resolveAssetProjectId(authed.userId, oraProjectId),
-                kind: "image",
-                fileName: `ora-image-${Date.now()}.${ext}`,
-                mimeType,
-                format: ext,
-                prompt: imageProfile.originalPrompt,
-                base64,
-              });
-            }
-          } catch (persistErr) {
-            logger.error(
-              { component: "ora-chat-image", err: persistErr },
-              "Failed to persist Ora image to library",
-            );
-          }
-        })();
-      }
     } catch (err) {
-      await refundOraQuotaFor(authed, quotaKind);
+      if (authed && !editableCompletionCommitted) {
+        const { db, generatedImagesTable } = await import("@workspace/db");
+        if (pendingEditableAsset) {
+          const { deleteStoredImageObjects } = await import("../../lib/image-storage");
+          const { rejectReservedAsset } = await import("../../lib/asset-registry");
+          await deleteStoredImageObjects(pendingEditableObjects).catch(() => undefined);
+          await rejectReservedAsset({
+            assetId: pendingEditableAsset.id,
+            ownerUserId: authed.userId,
+            actorUserId: authed.userId,
+            code: "asset_storage_unavailable",
+          }).catch(() => undefined);
+        }
+        if (pendingEditableImageId !== undefined) {
+          await db
+            .update(generatedImagesTable)
+            .set({
+              status: "failed",
+              errorMessage: "Image generation failed",
+              updatedAt: sql`now()`,
+            })
+            .where(eq(generatedImagesTable.id, pendingEditableImageId));
+        }
+      }
+      if (!editableCompletionCommitted) {
+        await refundOraQuotaFor(authed, quotaKind);
+      }
       logger.error({ component: "ora-chat-image", err }, "Inline image generation failed");
-      res.status(500).json({
-        error: "Failed to generate the image. Please try again.",
+      const admission = err as { status?: unknown; code?: unknown; message?: unknown };
+      const status =
+        typeof admission.status === "number" && admission.status >= 400 && admission.status < 500
+          ? admission.status
+          : 500;
+      res.status(status).json({
+        error:
+          status !== 500 && typeof admission.message === "string"
+            ? admission.message
+            : "Failed to generate the image. Please try again.",
+        ...(typeof admission.code === "string" ? { code: admission.code } : {}),
         activity: [oraActivityStep("image-generation", "fail")],
       });
     }

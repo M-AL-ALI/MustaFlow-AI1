@@ -62,6 +62,12 @@ vi.mock("./logger", () => ({
   logger: { info: vi.fn() },
 }));
 
+// Provider selection is a pure contract test. Asset resolution has its own
+// focused suite and must not pull the database into this boundary.
+vi.mock("./project-file-asset-reference", () => ({
+  resolveProjectRuntimeFiles: vi.fn(async (_projectId: number, files: unknown[]) => files),
+}));
+
 import { FlyRuntimeProvider } from "./fly-runtime-provider";
 import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { PartialConfigRuntimeProvider } from "./partial-config-runtime-provider";

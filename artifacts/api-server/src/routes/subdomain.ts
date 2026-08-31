@@ -12,6 +12,10 @@ import { Router, type IRouter } from "express";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { db, projectsTable } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
+import { purgeCacheForHostnames, retireHostnameKV } from "../lib/cloudflare";
+import { responseProjectLifecycleSession } from "../lib/project-lifecycle";
+import { tenantRuntimeProvider } from "../lib/tenant-runtime";
+import { supportsProductionRouteInventory } from "../lib/tenant-runtime-provider";
 
 const router: IRouter = Router();
 
@@ -64,32 +68,72 @@ router.post("/projects/:id/subdomain", requireProjectOwnership, async (req, res)
     return;
   }
 
-  // Check uniqueness (exclude this project itself)
-  const [taken] = await db
-    .select({ id: projectsTable.id })
-    .from(projectsTable)
-    .where(
-      and(
-        eq(projectsTable.publicSlug, rawSlug),
-        ne(projectsTable.id, projectId),
-        isNull(projectsTable.deletedAt),
-      ),
-    );
+  const session = responseProjectLifecycleSession(res);
+  const result = await (async () => {
+    const [project] = await db
+      .select({ publicSlug: projectsTable.publicSlug })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)))
+      .limit(1);
+    if (!project) return { state: "not_found" as const };
 
-  if (taken) {
+    const [taken] = await db
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(
+        and(
+          eq(projectsTable.publicSlug, rawSlug),
+          ne(projectsTable.id, projectId),
+          isNull(projectsTable.deletedAt),
+        ),
+      );
+    if (taken) return { state: "taken" as const };
+
+    if (project.publicSlug && project.publicSlug !== rawSlug) {
+      const oldHostnames = [
+        `${project.publicSlug}.${PLATFORM_DOMAIN}`,
+        `${project.publicSlug}-staging.${PLATFORM_DOMAIN}`,
+      ];
+      for (const hostname of oldHostnames) {
+        const retired = await retireHostnameKV(hostname, projectId);
+        if (retired.state !== "absent") return { state: "cleanup_unconfirmed" as const };
+      }
+      if (supportsProductionRouteInventory(tenantRuntimeProvider)) {
+        for (const hostname of oldHostnames) {
+          const observed = await tenantRuntimeProvider.readProductionRoute(hostname);
+          if (!observed) continue;
+          if (observed.projectId !== projectId) {
+            return { state: "cleanup_unconfirmed" as const };
+          }
+          const retired = await tenantRuntimeProvider.retireObservedProductionRoute(observed);
+          if (retired.state !== "absent") return { state: "cleanup_unconfirmed" as const };
+        }
+      }
+      if (!(await purgeCacheForHostnames(oldHostnames))) {
+        return { state: "cleanup_unconfirmed" as const };
+      }
+    }
+    if (!(await session.assertActive())) return { state: "not_found" as const };
+    const [updated] = await db
+      .update(projectsTable)
+      .set({ publicSlug: rawSlug, updatedAt: sql`now()` })
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)))
+      .returning({ publicSlug: projectsTable.publicSlug, status: projectsTable.status });
+    return updated ? { state: "updated" as const, updated } : { state: "not_found" as const };
+  })();
+  if (result.state === "not_found") {
+    res.status(404).json({ error: "Project not found." });
+    return;
+  }
+  if (result.state === "taken") {
     res.status(409).json({ error: "This subdomain is already taken. Please choose another." });
     return;
   }
-
-  // Update the project's publicSlug
-  const [updated] = await db
-    .update(projectsTable)
-    .set({ publicSlug: rawSlug, updatedAt: sql`now()` })
-    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)))
-    .returning({ publicSlug: projectsTable.publicSlug, status: projectsTable.status });
-
-  if (!updated) {
-    res.status(404).json({ error: "Project not found." });
+  if (result.state === "cleanup_unconfirmed") {
+    res.status(503).json({
+      error: "The previous subdomain could not be retired safely. Please retry.",
+      code: "subdomain_cleanup_unconfirmed",
+    });
     return;
   }
 

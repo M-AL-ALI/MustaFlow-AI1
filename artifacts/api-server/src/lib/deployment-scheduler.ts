@@ -37,6 +37,7 @@ import { parseCron, nextCronTick } from "./cron-eval";
 import { enqueueJob } from "./jobs";
 import { resolveDefaultSender } from "./support-contact";
 import { governIntentAdmission } from "./zero-intent-admission";
+import { acquireProjectLifecycleSession } from "./project-lifecycle";
 
 const SWEEP_INTERVAL_MS = 60_000;
 const UPTIME_INTERVAL_MS = 5 * 60_000;
@@ -54,142 +55,161 @@ export function computeNextRunAt(cronExpr: string, from = new Date()): Date | nu
   }
 }
 
+/** Shared transaction-compatible statement used by governed Trash acceptance. */
+export function disableProjectDeploymentSchedulesStatement(projectId: number) {
+  return sql`UPDATE deployment_schedules
+                SET enabled = false,
+                    next_run_at = NULL,
+                    last_run_status = 'disabled',
+                    last_run_message = 'Project moved to Trash',
+                    updated_at = now()
+              WHERE project_id = ${projectId}`;
+}
+
 async function fireSchedule(scheduleId: number): Promise<void> {
   const [row] = await db
     .select()
     .from(deploymentSchedulesTable)
     .where(eq(deploymentSchedulesTable.id, scheduleId));
   if (!row || !row.enabled) return;
-
-  let status: "ran" | "skipped" | "error" = "ran";
-  // eslint-disable-next-line no-useless-assignment
-  let message = "";
-
-  try {
-    switch (row.kind) {
-      case "task_run": {
-        const scheduleLabel = (row.note ?? "").trim() || `Schedule #${row.id} (${row.cronExpr})`;
-        const prompt = (row.note ?? "").trim() || `Scheduled task (cron ${row.cronExpr})`;
-        const [task] = await db
-          .insert(agentTasksTable)
-          .values({
-            projectId: row.projectId,
-            title: `Scheduled: ${scheduleLabel}`.slice(0, 200),
-            kind: "refine",
-            status: "queued",
-            prompt,
-            agentIdentity: "task",
-          })
-          .returning({ id: agentTasksTable.id });
-        if (task) {
-          const admission = await governIntentAdmission({
-            phase: "creator",
-            projectId: row.projectId,
-            taskId: task.id,
-            requestId: `schedule:${row.id}:${task.id}`,
-            mutationCapable: true,
-            source: "scheduled_action",
-          });
-          enqueueJob({
-            taskId: task.id,
-            projectId: row.projectId,
-            kind: "refine",
-            userPrompt: prompt,
-            agentMode: "eco",
-            agentIdentity: "task",
-            runMode: "background",
-            intentReceiptId: admission.receiptId,
-          });
-          message = `enqueued task #${task.id}`;
-        } else {
-          status = "error";
-          message = "failed to insert agent_tasks row";
-        }
-        break;
-      }
-      case "health_probe":
-        await runUptimeProbeForProject(row.projectId);
-        message = "health probe fired";
-        break;
-      case "redeploy": {
-        // Snapshot current project_files into a new project_versions row and
-        // point publishedSnapshotId at it. This is the same core that
-        // routes/publish.ts does on republish, minus container/CDN side
-        // effects (those run on the next manual publish). Always-safe: only
-        // touches already-published projects.
-        const [proj] = await db
-          .select({
-            id: projectsTable.id,
-            name: projectsTable.name,
-            status: projectsTable.status,
-            publicSlug: projectsTable.publicSlug,
-          })
-          .from(projectsTable)
-          .where(eq(projectsTable.id, row.projectId));
-        if (!proj || proj.status !== "published" || !proj.publicSlug) {
-          status = "skipped";
-          message = "project is not currently published";
-          break;
-        }
-        const files = await db
-          .select({
-            path: projectFilesTable.path,
-            content: projectFilesTable.content,
-            mimeType: projectFilesTable.mimeType,
-          })
-          .from(projectFilesTable)
-          .where(eq(projectFilesTable.projectId, row.projectId));
-        if (files.length === 0) {
-          status = "skipped";
-          message = "no files to snapshot";
-          break;
-        }
-        const stamp = new Date().toLocaleString("en-US", {
-          dateStyle: "medium",
-          timeStyle: "short",
-        });
-        const [snap] = await db
-          .insert(projectVersionsTable)
-          .values({
-            projectId: row.projectId,
-            label: `Scheduled redeploy — ${stamp}`,
-            note: `Cron: ${row.cronExpr}. Schedule #${row.id}. ${files.length} file(s).`,
-            environment: "production",
-            filesSnapshot: files,
-          })
-          .returning({ id: projectVersionsTable.id });
-        if (snap) {
-          await db
-            .update(projectsTable)
-            .set({ publishedSnapshotId: snap.id, updatedAt: new Date() })
-            .where(eq(projectsTable.id, row.projectId));
-          message = `republished snapshot #${snap.id} (${files.length} files)`;
-        } else {
-          status = "error";
-          message = "failed to insert snapshot row";
-        }
-        break;
-      }
-      default:
-        message = `unknown kind: ${row.kind}`;
-        status = "skipped";
-    }
-  } catch (err) {
-    status = "error";
-    message = err instanceof Error ? err.message : String(err);
+  const lifecycleSession = await acquireProjectLifecycleSession(row.projectId);
+  if (!lifecycleSession) {
+    await db.execute(disableProjectDeploymentSchedulesStatement(row.projectId));
+    return;
   }
 
-  const nextRunAt = computeNextRunAt(row.cronExpr);
-  await db
-    .update(deploymentSchedulesTable)
-    .set({
-      lastRunAt: new Date(),
-      lastRunStatus: status,
-      lastRunMessage: message.slice(0, 500),
-      nextRunAt,
-      updatedAt: new Date(),
-    })
-    .where(eq(deploymentSchedulesTable.id, scheduleId));
+  try {
+    let status: "ran" | "skipped" | "error" = "ran";
+    let message: string;
+
+    try {
+      switch (row.kind) {
+        case "task_run": {
+          const scheduleLabel = (row.note ?? "").trim() || `Schedule #${row.id} (${row.cronExpr})`;
+          const prompt = (row.note ?? "").trim() || `Scheduled task (cron ${row.cronExpr})`;
+          const [task] = await db
+            .insert(agentTasksTable)
+            .values({
+              projectId: row.projectId,
+              title: `Scheduled: ${scheduleLabel}`.slice(0, 200),
+              kind: "refine",
+              status: "queued",
+              prompt,
+              agentIdentity: "task",
+            })
+            .returning({ id: agentTasksTable.id });
+          if (task) {
+            const admission = await governIntentAdmission({
+              phase: "creator",
+              projectId: row.projectId,
+              taskId: task.id,
+              requestId: `schedule:${row.id}:${task.id}`,
+              mutationCapable: true,
+              source: "scheduled_action",
+            });
+            enqueueJob({
+              taskId: task.id,
+              projectId: row.projectId,
+              kind: "refine",
+              userPrompt: prompt,
+              agentMode: "eco",
+              agentIdentity: "task",
+              runMode: "background",
+              intentReceiptId: admission.receiptId,
+            });
+            message = `enqueued task #${task.id}`;
+          } else {
+            status = "error";
+            message = "failed to insert agent_tasks row";
+          }
+          break;
+        }
+        case "health_probe":
+          await runUptimeProbeForActiveProject(row.projectId);
+          message = "health probe fired";
+          break;
+        case "redeploy": {
+          // Snapshot current project_files into a new project_versions row and
+          // point publishedSnapshotId at it. This is the same core that
+          // routes/publish.ts does on republish, minus container/CDN side
+          // effects (those run on the next manual publish). Always-safe: only
+          // touches already-published projects.
+          const [proj] = await db
+            .select({
+              id: projectsTable.id,
+              name: projectsTable.name,
+              status: projectsTable.status,
+              publicSlug: projectsTable.publicSlug,
+            })
+            .from(projectsTable)
+            .where(and(eq(projectsTable.id, row.projectId), isNull(projectsTable.deletedAt)));
+          if (!proj || proj.status !== "published" || !proj.publicSlug) {
+            status = "skipped";
+            message = "project is not currently published";
+            break;
+          }
+          const files = await db
+            .select({
+              path: projectFilesTable.path,
+              content: projectFilesTable.content,
+              mimeType: projectFilesTable.mimeType,
+            })
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, row.projectId));
+          if (files.length === 0) {
+            status = "skipped";
+            message = "no files to snapshot";
+            break;
+          }
+          const stamp = new Date().toLocaleString("en-US", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          });
+          const [snap] = await db
+            .insert(projectVersionsTable)
+            .values({
+              projectId: row.projectId,
+              label: `Scheduled redeploy — ${stamp}`,
+              note: `Cron: ${row.cronExpr}. Schedule #${row.id}. ${files.length} file(s).`,
+              environment: "production",
+              filesSnapshot: files,
+            })
+            .returning({ id: projectVersionsTable.id });
+          if (snap) {
+            await db
+              .update(projectsTable)
+              .set({ publishedSnapshotId: snap.id, updatedAt: new Date() })
+              .where(eq(projectsTable.id, row.projectId));
+            message = `republished snapshot #${snap.id} (${files.length} files)`;
+          } else {
+            status = "error";
+            message = "failed to insert snapshot row";
+          }
+          break;
+        }
+        default:
+          message = `unknown kind: ${row.kind}`;
+          status = "skipped";
+      }
+    } catch (err) {
+      status = "error";
+      message = err instanceof Error ? err.message : String(err);
+    }
+
+    const nextRunAt = computeNextRunAt(row.cronExpr);
+    await db
+      .update(deploymentSchedulesTable)
+      .set({
+        lastRunAt: new Date(),
+        lastRunStatus: status,
+        lastRunMessage: message.slice(0, 500),
+        nextRunAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(deploymentSchedulesTable.id, scheduleId));
+  } finally {
+    await lifecycleSession.release();
+  }
 }
 
 async function sweepSchedules(): Promise<void> {
@@ -198,9 +218,11 @@ async function sweepSchedules(): Promise<void> {
     const due = await db
       .select({ id: deploymentSchedulesTable.id })
       .from(deploymentSchedulesTable)
+      .innerJoin(projectsTable, eq(projectsTable.id, deploymentSchedulesTable.projectId))
       .where(
         and(
           eq(deploymentSchedulesTable.enabled, true),
+          isNull(projectsTable.deletedAt),
           or(
             isNull(deploymentSchedulesTable.nextRunAt),
             lte(deploymentSchedulesTable.nextRunAt, now),
@@ -226,7 +248,7 @@ async function sweepSchedules(): Promise<void> {
  * and record the outcome. Used by both the periodic uptime loop and ad-hoc
  * `health_probe` schedules.
  */
-export async function runUptimeProbeForProject(projectId: number): Promise<void> {
+async function runUptimeProbeForActiveProject(projectId: number): Promise<void> {
   const [project] = await db
     .select({
       id: projectsTable.id,
@@ -313,6 +335,16 @@ export async function runUptimeProbeForProject(projectId: number): Promise<void>
     }).catch((err) => {
       logger.debug({ err, projectId }, "uptime alert send failed");
     });
+  }
+}
+
+export async function runUptimeProbeForProject(projectId: number): Promise<void> {
+  const lifecycleSession = await acquireProjectLifecycleSession(projectId);
+  if (!lifecycleSession) return;
+  try {
+    await runUptimeProbeForActiveProject(projectId);
+  } finally {
+    await lifecycleSession.release();
   }
 }
 

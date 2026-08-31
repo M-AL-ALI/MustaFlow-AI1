@@ -14,12 +14,13 @@
  * All routes require authentication (mounted after the auth wall in index.ts).
  * ISOLATION: this file MUST NOT import from builder.ts or any pipeline module.
  */
-import { Router, type IRouter } from "express";
+import { createHash } from "node:crypto";
+import { Router, type IRouter, type Response } from "express";
 import multer from "multer";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import sharp from "sharp";
-import { db, generatedImagesTable } from "@workspace/db";
+import { assetStorageObjectsTable, assetUsageTable, db, generatedImagesTable } from "@workspace/db";
 import { EnqueueImageGenerationBody } from "@workspace/api-zod";
 import { isImageProviderConfigured } from "../lib/image-provider";
 import {
@@ -28,13 +29,29 @@ import {
   preflightImageJobs,
   enqueueImageEditJob,
 } from "../lib/image-generation-jobs";
-import { storeUploadedImage, getImageBuffer } from "../lib/image-storage";
+import {
+  deleteStoredImageObjects,
+  getImageBuffer,
+  storeUploadedImage,
+  type StoredImageObject,
+} from "../lib/image-storage";
 import { IMAGE_CREDIT_COSTS } from "./image-credits";
 import { logger } from "../lib/logger";
 import { presentPrivateImage } from "../lib/image-presentation";
 import { checkProjectAccess } from "../lib/auth";
 import { resolveTierForUser } from "../lib/public-ai/authed-user";
 import { consumeOraQuota, refundOraQuota } from "../lib/public-ai/ora-usage";
+import { requireActiveProjectLifecycleFor } from "../lib/project-lifecycle";
+import {
+  AssetAdmissionError,
+  beginAssetUpload,
+  completeAsset,
+  deleteReadyAsset,
+  recordAssetDeleted,
+  rejectReservedAsset,
+  reserveAsset,
+} from "../lib/asset-registry";
+import { deleteTrackedAssetStorageObjects } from "../lib/asset-storage-cleanup";
 
 const router: IRouter = Router();
 
@@ -43,6 +60,18 @@ const router: IRouter = Router();
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_DIMENSION_PX = 4096;
+
+async function admitGeneratedImageProjectLifecycle(
+  projectId: number | null,
+  res: Response,
+): Promise<boolean> {
+  if (projectId === null) return true;
+  let admitted = false;
+  await requireActiveProjectLifecycleFor(projectId, res, () => {
+    admitted = true;
+  });
+  return admitted;
+}
 
 const uploadMiddleware = multer({
   storage: multer.memoryStorage(),
@@ -92,6 +121,13 @@ router.post("/images/generate", async (req, res): Promise<void> => {
   ) {
     res.status(404).json({ error: "Project not found" });
     return;
+  }
+  if (typeof projectId === "number") {
+    let admitted = false;
+    await requireActiveProjectLifecycleFor(projectId, res, () => {
+      admitted = true;
+    });
+    if (!admitted) return;
   }
 
   if (!isImageProviderConfigured()) {
@@ -221,6 +257,10 @@ router.post(
       return;
     }
 
+    let imageId: number | null = null;
+    let reservation: Awaited<ReturnType<typeof reserveAsset>> | null = null;
+    let storedObjects: StoredImageObject[] = [];
+    let completionCommitted = false;
     try {
       // Validate dimensions using sharp (also strips EXIF automatically on re-encode)
       let metadata: sharp.Metadata;
@@ -267,39 +307,104 @@ router.post(
         return;
       }
 
-      const imageId = imageRow.id;
+      imageId = imageRow.id;
+
+      reservation = await reserveAsset({
+        ownerUserId: userId,
+        actorUserId: userId,
+        projectId: null,
+        threadKey: null,
+        scope: "account",
+        kind: "image",
+        source: "image-studio-upload",
+        filename: file.originalname || `uploaded-${imageId}.webp`,
+        mimeType: "image/webp",
+        sizeBytes: webpBuffer.length + Math.min(file.buffer.length, 512 * 1024),
+        context: { generatedImageId: imageId },
+      });
+      const claim = await beginAssetUpload({ assetId: reservation.id, actorUserId: userId });
+      if (!claim) throw new Error("Image upload reservation is unavailable");
 
       // Store to R2 (or dev tmpdir)
-      const { fileUrl, thumbnailUrl, storageKey } = await storeUploadedImage(
+      const { fileUrl, thumbnailUrl, storageKey, storageObjects } = await storeUploadedImage(
         webpBuffer,
         file.buffer,
         imageId,
+        { assetId: reservation.id, ownerUserId: userId, actorUserId: userId },
       );
-
-      // Update DB to completed
-      const [updated] = await db
-        .update(generatedImagesTable)
-        .set({
-          status: "completed",
+      storedObjects = storageObjects;
+      if (!storageKey) throw new Error("Image upload storage was not durable");
+      await completeAsset({
+        assetId: reservation.id,
+        ownerUserId: userId,
+        actorUserId: userId,
+        sha256: createHash("sha256").update(webpBuffer).digest("hex"),
+        scanState: "not-required",
+        finalSizeBytes: webpBuffer.length,
+        finalMimeType: "image/webp",
+        finalStorageKey: storageKey,
+        generatedImage: {
+          imageId,
           fileUrl,
           thumbnailUrl,
           storageKey,
-          updatedAt: sql`now()`,
-        })
-        .where(eq(generatedImagesTable.id, imageId))
-        .returning();
+        },
+      });
+      completionCommitted = true;
+
+      const [updated] = await db
+        .select()
+        .from(generatedImagesTable)
+        .where(eq(generatedImagesTable.id, imageId));
 
       logger.info({ imageId, userId }, "image-gen: upload stored");
 
       res.status(201).json({
         imageId,
         fileUrl: `/api/images/${imageId}/file`,
-        thumbnailUrl: `/api/images/${imageId}/file`,
+        thumbnailUrl: `/api/images/${imageId}/file?role=thumbnail`,
         creditCost: 0,
         image: presentPrivateImage(updated),
       });
     } catch (err) {
+      if (!completionCommitted && storedObjects.length > 0) {
+        await deleteStoredImageObjects(storedObjects).catch((cleanupError: unknown) => {
+          logger.warn(
+            {
+              imageId,
+              errorClass: cleanupError instanceof Error ? cleanupError.name : "unknown",
+            },
+            "image-gen: uploaded image cleanup remains pending",
+          );
+        });
+      }
+      if (!completionCommitted && reservation) {
+        await rejectReservedAsset({
+          assetId: reservation.id,
+          ownerUserId: userId,
+          actorUserId: userId,
+          code: "asset_storage_unavailable",
+        }).catch((cleanupError: unknown) => {
+          logger.error(
+            {
+              imageId,
+              errorClass: cleanupError instanceof Error ? cleanupError.name : "unknown",
+            },
+            "image-gen: upload reservation cleanup failed",
+          );
+        });
+      }
+      if (!completionCommitted && imageId !== null) {
+        await db
+          .update(generatedImagesTable)
+          .set({ status: "failed", errorMessage: "Upload failed", updatedAt: sql`now()` })
+          .where(eq(generatedImagesTable.id, imageId));
+      }
       logger.warn({ err }, "image-gen: unexpected error in /images/upload");
+      if (err instanceof AssetAdmissionError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
       res.status(500).json({ error: "Upload failed. Please try again." });
     }
   },
@@ -335,7 +440,8 @@ router.get("/images/status/:jobId", async (req, res): Promise<void> => {
     imageId: job.imageId,
     status: job.status,
     fileUrl: job.status === "completed" ? `/api/images/${job.imageId}/file` : null,
-    thumbnailUrl: job.status === "completed" ? `/api/images/${job.imageId}/file` : null,
+    thumbnailUrl:
+      job.status === "completed" ? `/api/images/${job.imageId}/file?role=thumbnail` : null,
     error: job.status === "failed" ? (job.error ?? null) : null,
   });
 });
@@ -457,6 +563,7 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
   const [row] = await db
     .select({
       id: generatedImagesTable.id,
+      assetId: generatedImagesTable.assetId,
       storageKey: generatedImagesTable.storageKey,
       fileUrl: generatedImagesTable.fileUrl,
       status: generatedImagesTable.status,
@@ -475,7 +582,23 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
     return;
   }
 
-  const storageKey = row.storageKey;
+  const requestedRole = req.query.role === "thumbnail" ? "thumbnail" : "primary";
+  const [trackedObject] =
+    row.assetId === null
+      ? []
+      : await db
+          .select({ storageKey: assetStorageObjectsTable.storageKey })
+          .from(assetStorageObjectsTable)
+          .where(
+            and(
+              eq(assetStorageObjectsTable.assetId, row.assetId),
+              eq(assetStorageObjectsTable.role, requestedRole),
+              eq(assetStorageObjectsTable.state, "ready"),
+            ),
+          )
+          .limit(1);
+  const storageKey =
+    trackedObject?.storageKey ?? (requestedRole === "primary" ? row.storageKey : null);
   const fileUrl = row.fileUrl;
   if (!storageKey && !fileUrl) {
     res.status(404).json({ error: "Image file not available" });
@@ -491,7 +614,7 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
     // that an <img src> cannot load).
     const buffer = await getImageBuffer(storageKey, fileUrl ?? "");
     res.set("Content-Type", "image/webp");
-    res.set("Cache-Control", "private, max-age=3600");
+    res.set("Cache-Control", "private, no-store");
     res.send(buffer);
   } catch (err) {
     logger.warn({ err, imageId, storageKey }, "image-gen: /file read failed");
@@ -543,6 +666,13 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Project not found" });
     return;
   }
+  if (typeof projectId === "number") {
+    let admitted = false;
+    await requireActiveProjectLifecycleFor(projectId, res, () => {
+      admitted = true;
+    });
+    if (!admitted) return;
+  }
 
   if (!isImageProviderConfigured()) {
     res.status(503).json({
@@ -587,6 +717,11 @@ router.post("/images/:id/edit", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Image not found" });
     return;
   }
+
+  // Ownership is proven before consulting lifecycle state. A foreign image
+  // therefore remains indistinguishable from a missing one and cannot trigger
+  // project/provider work.
+  if (!(await admitGeneratedImageProjectLifecycle(parent.projectId, res))) return;
 
   if (parent.status !== "completed") {
     res.status(422).json({ error: "Cannot edit an image that is not completed." });
@@ -708,7 +843,11 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
   }
 
   const [existing] = await db
-    .select({ id: generatedImagesTable.id })
+    .select({
+      id: generatedImagesTable.id,
+      assetId: generatedImagesTable.assetId,
+      projectId: generatedImagesTable.projectId,
+    })
     .from(generatedImagesTable)
     .where(
       and(
@@ -723,12 +862,72 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  await db
-    .update(generatedImagesTable)
-    .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(eq(generatedImagesTable.id, imageId));
+  if (!(await admitGeneratedImageProjectLifecycle(existing.projectId, res))) return;
 
-  res.json({ success: true });
+  const softDeleteGeneratedImage = async (): Promise<void> => {
+    await db.transaction(async (tx) => {
+      const removed = await tx
+        .update(generatedImagesTable)
+        .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(generatedImagesTable.id, imageId),
+            eq(generatedImagesTable.userId, userId),
+            isNull(generatedImagesTable.deletedAt),
+          ),
+        )
+        .returning({ id: generatedImagesTable.id });
+      if (removed.length !== 1) throw new Error("image_delete_claim_lost");
+      await tx
+        .delete(assetUsageTable)
+        .where(eq(assetUsageTable.consumer, `generated-image:${imageId}`));
+    });
+  };
+
+  if (existing.assetId !== null) {
+    try {
+      // Claim the logical asset first. If this step fails, the gallery row is
+      // untouched and the exact same delete remains retryable.
+      const pending = await deleteReadyAsset({
+        assetId: existing.assetId,
+        userId,
+        generatedImageIdBeingDeleted: imageId,
+      });
+      await softDeleteGeneratedImage();
+      try {
+        await deleteTrackedAssetStorageObjects(pending.storageObjects);
+      } catch (error) {
+        logger.warn(
+          {
+            imageId,
+            assetId: existing.assetId,
+            errorClass: error instanceof Error ? error.name : "unknown",
+          },
+          "image-gen: deleted image storage cleanup remains pending",
+        );
+        res.status(202).json({ success: true, storageCleanup: "pending" });
+        return;
+      }
+      await recordAssetDeleted({
+        assetId: existing.assetId,
+        userId,
+        sizeBytes: pending.sizeBytes,
+      });
+    } catch (error) {
+      if (!(error instanceof AssetAdmissionError) || error.code !== "asset_referenced") {
+        throw error;
+      }
+      // The image disappeared from the library, but another durable project or
+      // history receipt still owns its bytes.  Keeping those bytes is required.
+      await softDeleteGeneratedImage();
+      res.json({ success: true, storageCleanup: "retained-while-referenced" });
+      return;
+    }
+  } else {
+    await softDeleteGeneratedImage();
+  }
+
+  res.json({ success: true, storageCleanup: "complete" });
 });
 
 export default router;

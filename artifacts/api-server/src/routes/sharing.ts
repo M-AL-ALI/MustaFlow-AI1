@@ -1,6 +1,12 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq } from "drizzle-orm";
-import { db, shareLinksTable, projectFilesTable, projectVersionsTable } from "@workspace/db";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import {
+  db,
+  shareLinksTable,
+  projectFilesTable,
+  projectsTable,
+  projectVersionsTable,
+} from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { z } from "zod";
 import { randomBytes } from "crypto";
@@ -105,38 +111,43 @@ router.delete(
 // ── Public share link viewer (no auth required) — mounted on publicShareRouter ─
 publicShareRouter.get("/share/:token", async (req, res): Promise<void> => {
   const { token } = req.params;
-  const [link] = await db.select().from(shareLinksTable).where(eq(shareLinksTable.token, token));
+  const [link] = await db
+    .select({ link: shareLinksTable })
+    .from(shareLinksTable)
+    .innerJoin(projectsTable, eq(shareLinksTable.projectId, projectsTable.id))
+    .where(and(eq(shareLinksTable.token, token), isNull(projectsTable.deletedAt)));
 
   if (!link) {
     res.status(404).json({ error: "Share link not found" });
     return;
   }
-  if (link.revoked) {
+  const shareLink = link.link;
+  if (shareLink.revoked) {
     res.status(410).json({ error: "This share link has been revoked" });
     return;
   }
-  if (link.expiresAt && link.expiresAt < new Date()) {
+  if (shareLink.expiresAt && shareLink.expiresAt < new Date()) {
     res.status(410).json({ error: "This share link has expired" });
     return;
   }
 
   // Bump view count (best-effort, non-fatal)
   db.update(shareLinksTable)
-    .set({ viewCount: link.viewCount + 1, lastViewedAt: new Date() })
-    .where(eq(shareLinksTable.id, link.id))
+    .set({ viewCount: shareLink.viewCount + 1, lastViewedAt: new Date() })
+    .where(eq(shareLinksTable.id, shareLink.id))
     .catch(() => {});
 
   // For snapshot scope, return files from the frozen snapshot
-  if (link.scope === "snapshot" && link.snapshotVersionId != null) {
+  if (shareLink.scope === "snapshot" && shareLink.snapshotVersionId != null) {
     const [version] = await db
       .select({ filesSnapshot: projectVersionsTable.filesSnapshot })
       .from(projectVersionsTable)
-      .where(eq(projectVersionsTable.id, link.snapshotVersionId));
+      .where(eq(projectVersionsTable.id, shareLink.snapshotVersionId));
     const files = (version?.filesSnapshot as { path: string; mimeType: string }[] | null) ?? [];
     res.json({
-      projectId: link.projectId,
-      scope: link.scope,
-      label: link.label,
+      projectId: shareLink.projectId,
+      scope: shareLink.scope,
+      label: shareLink.label,
       files: files.map((f) => ({ path: f.path, mimeType: f.mimeType })),
     });
     return;
@@ -146,12 +157,12 @@ publicShareRouter.get("/share/:token", async (req, res): Promise<void> => {
   const files = await db
     .select({ path: projectFilesTable.path, mimeType: projectFilesTable.mimeType })
     .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, link.projectId));
+    .where(eq(projectFilesTable.projectId, shareLink.projectId));
 
   res.json({
-    projectId: link.projectId,
-    scope: link.scope,
-    label: link.label,
+    projectId: shareLink.projectId,
+    scope: shareLink.scope,
+    label: shareLink.label,
     files,
   });
 });

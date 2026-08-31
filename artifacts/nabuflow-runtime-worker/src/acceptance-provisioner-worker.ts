@@ -435,9 +435,6 @@ export class AcceptanceProvisionerService {
       message,
       deploymentVersion: this.env.CF_VERSION_METADATA.id,
       nowMs: Date.now(),
-      requeue: async (deferredMessage, delaySeconds) => {
-        await this.env.ACCEPTANCE_OPERATION_QUEUE.send(deferredMessage, { delaySeconds });
-      },
     });
     if (deploymentDisposition !== "continue") return;
     const ownerId = crypto.randomUUID();
@@ -470,14 +467,24 @@ export class AcceptanceProvisionerService {
           requestId: crypto.randomUUID(),
         },
       };
-      await vault(this.env)
-        .markFailed({
-          leaseId: job.request.leaseId,
-          ownerSubjectHash: job.request.ownerSubjectHash,
-          code: typed.code,
-          nowMs: Date.now(),
-        })
-        .catch(() => null);
+      const failedLease = await (
+        job.request.operation === "destroy"
+          ? vault(this.env).markCleanupFailed({
+              leaseId: job.request.leaseId,
+              ownerSubjectHash: job.request.ownerSubjectHash,
+              cleanupGeneration: job.request.cleanupGeneration,
+              nowMs: Date.now(),
+            })
+          : vault(this.env).markFailed({
+              leaseId: job.request.leaseId,
+              ownerSubjectHash: job.request.ownerSubjectHash,
+              code: typed.code,
+              nowMs: Date.now(),
+            })
+      ).catch(() => null);
+      if (failedLease !== null) {
+        await this.audit(failedLease, job.request.operation, `failed:${typed.code}`);
+      }
       await control
         .failDurableOperation(job.jobKey, ownerId, job.attempt, stored, Date.now())
         .catch(() => undefined);
@@ -487,9 +494,12 @@ export class AcceptanceProvisionerService {
   }
 
   async handleJanitorSignal(leaseId: string, nowMs = Date.now()): Promise<void> {
-    const lease = await vault(this.env).getLeaseForJanitor(leaseId);
+    const store = vault(this.env);
+    const lease = await store.getLeaseForJanitor(leaseId);
     if (lease !== null && lease.expiresAtMs <= nowMs && lease.state !== "destroyed") {
-      await registerJanitorDestroy(this.env, lease);
+      // Legacy queue signals also enter through the vault staging transaction. Registering from
+      // the signal directly would bypass generation assignment for old lease records.
+      await store.runCleanup(nowMs);
     }
   }
 
@@ -522,10 +532,16 @@ export class AcceptanceProvisionerService {
     assertScope(lease.scope, this.env);
     await checkpoint("scope-verified");
 
+    if (this.env.ACCEPTANCE_STAGING_ENABLED !== "true" && job.request.operation !== "destroy") {
+      throw new AcceptanceHttpError(503, "acceptance_cleanup_disabled", false);
+    }
+
     if (job.request.operation === "create") {
       const activeLease = lease;
       const result = await withProviderRetry(() => this.providers.create(activeLease));
-      await checkpoint("provider-complete");
+      // Persist the provider locator before consulting the coordinator again. If policy disabled
+      // or the driver lost ownership while create was in flight, the vault fences the result into
+      // a fresh cleanup generation instead of losing the only handle to the new resource.
       lease = await vault(this.env).storeProviderResult({
         leaseId: lease.leaseId,
         ownerSubjectHash: lease.ownerSubjectHash,
@@ -535,6 +551,10 @@ export class AcceptanceProvisionerService {
         nowMs: Date.now(),
       });
       if (lease === null) throw new AcceptanceHttpError(403, "acceptance_scope_mismatch", false);
+      await checkpoint("provider-complete");
+      if (lease.state !== "active") {
+        throw new AcceptanceHttpError(503, "acceptance_cleanup_disabled", false);
+      }
       await checkpoint("vault-complete");
       await checkpoint("verified-gone");
       await checkpoint("finalized");
@@ -652,8 +672,12 @@ export class AcceptanceProvisionerService {
         (await vault(this.env).markDestroying({
           leaseId: lease.leaseId,
           ownerSubjectHash: lease.ownerSubjectHash,
+          cleanupGeneration: job.request.cleanupGeneration,
           nowMs: Date.now(),
-        })) ?? lease;
+        })) ?? null;
+      if (lease === null) {
+        throw new AcceptanceHttpError(503, "acceptance_cleanup_incomplete", true);
+      }
       if (lease.capabilityRevision !== null) {
         const target = capabilityVault(this.env, lease.projectId);
         if (lease.scope.provider === "neon") {
@@ -679,6 +703,7 @@ export class AcceptanceProvisionerService {
       lease = await vault(this.env).markDestroyed({
         leaseId: lease.leaseId,
         ownerSubjectHash: lease.ownerSubjectHash,
+        cleanupGeneration: job.request.cleanupGeneration,
         nowMs: Date.now(),
       });
       if (lease === null) throw new AcceptanceHttpError(403, "acceptance_scope_mismatch", false);
@@ -770,19 +795,28 @@ function translateOperationError(error: unknown): AcceptanceHttpError {
   return new AcceptanceHttpError(500, "acceptance_internal_error", false);
 }
 
-async function registerJanitorDestroy(
+export async function registerJanitorDestroy(
   env: AcceptanceProvisionerBindings,
   lease: StoredAcceptanceLease,
-): Promise<void> {
+): Promise<{ jobKey: string }> {
   const control = coordinator(env);
-  const body = { schemaVersion: 1, expiredAt: lease.expiresAtMs };
+  const cleanupGeneration = lease.cleanupDispatchGeneration;
+  if (
+    cleanupGeneration === undefined ||
+    lease.cleanupDispatchState !== "pending" ||
+    !Number.isSafeInteger(cleanupGeneration) ||
+    cleanupGeneration < 1
+  ) {
+    throw new Error("Acceptance cleanup registration requires a staged generation");
+  }
+  const body = { schemaVersion: 1, expiredAt: lease.expiresAtMs, cleanupGeneration };
   const fingerprint = await acceptanceOperationIdentity({
     leaseId: lease.leaseId,
     operation: "destroy",
     body,
   });
   const claim = (await control.registerDurableOperation({
-    key: `acceptance-janitor:${lease.leaseId}:${lease.expiresAtMs}`,
+    key: `acceptance-janitor:${lease.leaseId}:${lease.expiresAtMs}:${cleanupGeneration}`,
     fingerprint,
     kind: "acceptance-lease",
     runtimeIdentity: `acceptance:${lease.leaseId}`,
@@ -791,29 +825,50 @@ async function registerJanitorDestroy(
       leaseId: lease.leaseId,
       operation: "destroy",
       ownerSubjectHash: lease.ownerSubjectHash,
+      cleanupGeneration,
     },
     expectedDeploymentVersion: env.CF_VERSION_METADATA.id,
     nowMs: Date.now(),
   })) as DurableOperationClaim;
-  if (claim.state === "new" || claim.state === "pending") {
-    const job = claim.job;
-    if (job !== undefined) {
-      await env.ACCEPTANCE_OPERATION_QUEUE.send({
-        schemaVersion: 1,
-        jobKey: job.jobKey,
-        runtimeIdentity: job.runtimeIdentity,
-        subjectKey: job.subjectKey,
-        kind: job.kind,
-      });
-    }
-  }
+  if (claim.state === "conflict") throw new Error("Acceptance janitor registration conflicted");
+  if ("job" in claim && claim.job !== undefined) return { jobKey: claim.job.jobKey };
+  const existing = await (control as unknown as ControlCoordinator).getLatestDurableOperation(
+    "acceptance-lease",
+    `acceptance:${lease.leaseId}`,
+    "destroy",
+  );
+  if (existing === null) throw new Error("Acceptance janitor registration was not durable");
+  return { jobKey: existing.jobKey };
 }
 
 export async function handleAcceptanceQueue(
   batch: MessageBatch<AcceptanceQueueMessage>,
   env: AcceptanceProvisionerBindings,
+  service = new AcceptanceProvisionerService(env),
 ): Promise<void> {
-  const service = new AcceptanceProvisionerService(env);
+  if (env.ACCEPTANCE_STAGING_ENABLED !== "true") {
+    const control = coordinator(env);
+    for (const message of batch.messages) {
+      try {
+        if (message.body.kind === "acceptance-janitor") {
+          await service.handleJanitorSignal(message.body.leaseId);
+        } else {
+          const job = await (control as unknown as ControlCoordinator).getDurableOperation(
+            message.body.jobKey,
+          );
+          if (job?.kind === "acceptance-lease" && job.request.operation === "destroy") {
+            await service.handleQueue(message.body);
+          } else {
+            await control.terminalizeDisabledAcceptanceOperation(message.body.jobKey, Date.now());
+          }
+        }
+        message.ack();
+      } catch {
+        message.retry();
+      }
+    }
+    return;
+  }
   for (const message of batch.messages) {
     try {
       if (message.body.kind === "acceptance-janitor") {
@@ -828,11 +883,17 @@ export async function handleAcceptanceQueue(
   }
 }
 
-export async function handleAcceptanceScheduled(env: AcceptanceProvisionerBindings): Promise<void> {
-  if (env.ACCEPTANCE_STAGING_ENABLED !== "true") return;
+export async function handleAcceptanceScheduled(
+  env: AcceptanceProvisionerBindings,
+  providers: AcceptanceProviderAdapters = new NativeAcceptanceProviderAdapters(env),
+): Promise<void> {
   const store = vault(env);
-  const due = await store.listExpired(Date.now(), ACCEPTANCE_JANITOR_BATCH_LIMIT);
-  for (const lease of due) await registerJanitorDestroy(env, lease);
+  const nowMs = Date.now();
+  // Both enabled and cleanup-only deployments must stage the cleanup generation in the vault
+  // before a coordinator job is registered. Direct registration would invent generation 1 and
+  // could never satisfy the vault's generation fence for a legacy lease.
+  await store.runCleanup(nowMs);
+  if (env.ACCEPTANCE_STAGING_ENABLED !== "true") return;
   const leases = await store.listLeases(ACCEPTANCE_JANITOR_BATCH_LIMIT);
-  await new NativeAcceptanceProviderAdapters(env).reconcile(leases, Date.now());
+  await providers.reconcile(leases, nowMs);
 }

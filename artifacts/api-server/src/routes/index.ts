@@ -127,6 +127,7 @@ import assetsRouter from "./assets";
 import { attachUser } from "../lib/auth";
 import { requireBuilderAccess } from "../lib/builder-access";
 import { readApprovedSupportMutation } from "../lib/support-access";
+import { requireActiveProjectMutationLifecycleSession } from "../lib/project-lifecycle";
 import {
   aiBuilderLimiter,
   publishLimiter,
@@ -330,6 +331,12 @@ router.get("/projects/:id/export", exportLimiter);
 router.post("/projects/:id/attachments/upload-url", exportLimiter);
 router.post("/billing/checkout", exportLimiter);
 
+// Every ordinary authenticated project mutation shares one lifecycle admission
+// fence. Route-local fences remain valid and reuse this exact session rather
+// than acquiring a second advisory lock. Trash and restore are excluded by the
+// boundary because they are the lifecycle transitions themselves.
+router.use(requireActiveProjectMutationLifecycleSession);
+
 // ── Builder handoff exchange (auth-gated) ─────────────────────────────────────
 router.post("/builder/handoff/exchange", oraHandoffLimiter);
 router.use(builderHandoffRouter);
@@ -443,7 +450,7 @@ router.use(oraAccountConsistencyRouter); // GET /ora/account-consistency (cross-
 router.use(oraxRouter); // ORAX coding-agent foundation
 router.use(oraxDesktopRouter); // Orax Desktop host registration, pairing, heartbeat
 router.use(oraxProjectsRouter); // Orax Project Workspace — Phase 2G
-router.use(developerModeRouter); // GET /projects/:id/developer-mode/runtime-status
+router.use(developerModeRouter); // metadata GET + explicit lifecycle-fenced runtime wake
 router.use(zeroPromptQueueRouter); // Owner-only Zero prompt queue API
 
 // JSON 404 fallback for authenticated users hitting unmatched routes

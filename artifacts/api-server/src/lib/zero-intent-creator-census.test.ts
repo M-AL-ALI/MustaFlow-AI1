@@ -54,10 +54,11 @@ describe("zero intent creator census", () => {
     expect(messages.match(/mutationCapable: true/gu)).toHaveLength(1);
   });
 
-  it("admits again at runJob and preserves the receipt through serialization and both drains", () => {
+  it("admits at runJob and retirement, preserving receipts through serialization and drains", () => {
     const jobs = source("./jobs.ts");
-    expect(jobs.match(/phase: "creator"/gu)).toHaveLength(3);
+    expect(jobs.match(/phase: "creator"/gu)).toHaveLength(4);
     expect(jobs.match(/intentReceiptId: admission\.receiptId/gu)).toHaveLength(3);
+    expect(jobs).toContain("project-retirement:${projectId}:task:${task.id}");
     expect(jobs).toContain('phase: "execution"');
     expect(jobs).toContain("persistIntentReceiptAdmissionRejected(taskId, code)");
     expect(jobs).toContain("Intent receipt admission rejected task");

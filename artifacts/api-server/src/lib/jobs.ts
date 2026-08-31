@@ -157,6 +157,14 @@ import {
   zeroTerminalRef,
 } from "./zero-terminal-persistence";
 import { recordSupportGrantEvent, supportMutationStillAuthorized } from "./support-access";
+import {
+  abortLocalProjectWork,
+  readProjectLifecycleAdmission,
+  registerProjectWorkController,
+  withActiveProjectLifecycle,
+} from "./project-lifecycle";
+
+const readProjectJobAdmission = readProjectLifecycleAdmission;
 
 import {
   buildPreviewRepairObservation,
@@ -760,6 +768,134 @@ const activeProjectJobs = new Set<number>();
  */
 const activeJobControllers = new Map<number, AbortController>();
 
+/** Project binding for each live controller, used by governed retirement. */
+const activeJobProjects = new Map<number, number>();
+
+/**
+ * Stop work held only by this API process. Durable/cross-replica deliveries are
+ * independently denied by readProjectJobAdmission() at run and claim time.
+ */
+export function cancelLocalProjectJobs(projectId: number): {
+  abortedTaskIds: number[];
+  evictedPendingTaskIds: number[];
+  abortedAuxiliaryWorkCount: number;
+} {
+  const abortedTaskIds: number[] = [];
+  for (const [taskId, boundProjectId] of activeJobProjects) {
+    if (boundProjectId !== projectId) continue;
+    if (cancelActiveJob(taskId)) abortedTaskIds.push(taskId);
+  }
+
+  const evictedPendingTaskIds: number[] = [];
+  for (let index = _pendingJobs.length - 1; index >= 0; index -= 1) {
+    const pending = _pendingJobs[index];
+    if (pending?.projectId !== projectId) continue;
+    evictedPendingTaskIds.push(pending.taskId);
+    _pendingJobs.splice(index, 1);
+  }
+
+  return {
+    abortedTaskIds: abortedTaskIds.sort((left, right) => left - right),
+    evictedPendingTaskIds: evictedPendingTaskIds.sort((left, right) => left - right),
+    abortedAuxiliaryWorkCount: abortLocalProjectWork(projectId),
+  };
+}
+
+export type ProjectTaskRetirementReceipt = {
+  selected: number;
+  terminalized: number;
+  creditsRefunded: number;
+  telemetryFlushed: number;
+};
+
+/**
+ * Give every active task an earned terminal before retirement cleanup advances.
+ * Refunds identify the original charge with the stable task settlement key;
+ * refundCredits derives a distinct refund receipt and is awaited before
+ * creditsReserved is cleared. The normal abort handler may race this path;
+ * terminal CAS plus the stable identities make that race idempotent.
+ */
+export async function retireProjectTasks(
+  projectId: number,
+  allowedStatuses: readonly string[],
+): Promise<ProjectTaskRetirementReceipt> {
+  const local = cancelLocalProjectJobs(projectId);
+  logger.info({ projectId, local }, "Project task retirement canceled local work");
+
+  const [project] = await db
+    .select({ ownerId: projectsTable.ownerId })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, projectId))
+    .limit(1);
+  const tasks = await db
+    .select({
+      id: agentTasksTable.id,
+      intentReceiptId: agentTasksTable.intentReceiptId,
+      creditsReserved: agentTasksTable.creditsReserved,
+    })
+    .from(agentTasksTable)
+    .where(
+      and(
+        eq(agentTasksTable.projectId, projectId),
+        inArray(agentTasksTable.status, [...allowedStatuses]),
+      ),
+    );
+
+  let terminalized = 0;
+  let creditsRefunded = 0;
+  let telemetryFlushed = 0;
+  for (const task of tasks) {
+    const receiptId =
+      task.intentReceiptId ??
+      (
+        await governIntentAdmission({
+          phase: "creator",
+          projectId,
+          taskId: task.id,
+          requestId: `project-retirement:${projectId}:task:${task.id}`,
+          mutationCapable: true,
+          source: "system_action",
+        })
+      ).receiptId;
+    if (!Number.isSafeInteger(receiptId) || Number(receiptId) < 1) {
+      throw new Error("project_retirement_intent_receipt_unavailable");
+    }
+
+    const { flushBuildTokenTelemetry } = await import("./ai-providers");
+    await flushBuildTokenTelemetry(task.id, "canceled");
+    telemetryFlushed += 1;
+    const tokenCount = flushTokenCount(task.id);
+
+    const reserved = task.creditsReserved ?? 0;
+    if (reserved > 0 && project?.ownerId) {
+      await refundCredits(project.ownerId, reserved, {
+        projectId,
+        taskId: task.id,
+        settlementKey: taskCreditSettlementKey(task.id, "pipeline"),
+        description: `Background task #${task.id} stopped when its project moved to Trash`,
+      });
+      creditsRefunded += reserved;
+    }
+
+    const { persisted } = await persistInterruptedZeroTerminal({
+      taskId: task.id,
+      intent: "mutate",
+      intentReceiptId: Number(receiptId),
+      cause: "superseded",
+      evidence: { lastPhase: "project_retirement", changedPaths: [] },
+      allowedStatuses: [...allowedStatuses],
+      taskUpdate: {
+        completionKind: "aborted",
+        creditsReserved: null,
+        tokenCount,
+      },
+    });
+    if (persisted) terminalized += 1;
+  }
+
+  return { selected: tasks.length, terminalized, creditsRefunded, telemetryFlushed };
+}
+
 /**
  * Abort an in-flight build job by taskId.
  * Returns true if a controller was found and aborted, false if the task wasn't running.
@@ -787,14 +923,19 @@ export type CancellablePlanTaskOutcome<T> =
  */
 export async function runCancellablePlanTask<T>(input: {
   taskId: number;
+  projectId: number;
   run: (signal: AbortSignal) => Promise<T>;
   commitCompleted: (value: T) => Promise<boolean>;
   commitCanceled: () => Promise<void>;
   commitFailed: (error: unknown) => Promise<boolean>;
   emitTerminal: (kind: "completed" | "cancelled" | "failed", value?: T | unknown) => Promise<void>;
 }): Promise<CancellablePlanTaskOutcome<T>> {
+  const lifecycleAdmission = await readProjectLifecycleAdmission(input.projectId);
+  if (!lifecycleAdmission.allowed) return { status: "canceled" };
   const abortController = new AbortController();
   activeJobControllers.set(input.taskId, abortController);
+  activeJobProjects.set(input.taskId, input.projectId);
+  const unregisterProjectWork = registerProjectWorkController(input.projectId, abortController);
   let terminalEvent: "completed" | "cancelled" | "failed" | null = null;
 
   const emitTerminalOnce = async (
@@ -832,11 +973,13 @@ export async function runCancellablePlanTask<T>(input: {
     if (failureCommitted) await emitTerminalOnce("failed", error);
     return { status: "failed", error };
   } finally {
+    unregisterProjectWork();
     // cancelActiveJob removes the controller before aborting it. Keep cleanup
     // identity-safe in case a later execution ever reuses the task id.
     if (activeJobControllers.get(input.taskId) === abortController) {
       activeJobControllers.delete(input.taskId);
     }
+    activeJobProjects.delete(input.taskId);
   }
 }
 
@@ -1642,7 +1785,7 @@ async function drainNextBatchTask(completedTaskId: number): Promise<void> {
   const [project] = await db
     .select()
     .from(projectsTable)
-    .where(eq(projectsTable.id, completedTask.projectId));
+    .where(and(eq(projectsTable.id, completedTask.projectId), isNull(projectsTable.deletedAt)));
   if (!project) return;
 
   const recentMessages = await db
@@ -1728,6 +1871,15 @@ export async function drainNextProjectTask(
   projectId: number,
   preferTaskId?: number,
 ): Promise<void> {
+  const lifecycleAdmission = await readProjectJobAdmission(projectId);
+  if (!lifecycleAdmission.allowed) {
+    logger.info(
+      { projectId, code: lifecycleAdmission.code },
+      "Project task drain denied by lifecycle tombstone",
+    );
+    return;
+  }
+
   // Staging gate: if any task for this project is awaiting review, block the queue
   const [blocked] = await db
     .select({ id: agentTasksTable.id })
@@ -1782,7 +1934,10 @@ export async function drainNextProjectTask(
 
   if (!nextTask) return;
 
-  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  const [project] = await db
+    .select()
+    .from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
   if (!project) return;
 
   const [fileRow] = await db
@@ -1982,7 +2137,7 @@ async function cancelRemainingBatchTasks(failedTaskId: number): Promise<void> {
 // sessions, leaking the lock; raw IDs also shared a global namespace with queue
 // infrastructure. A transaction-scoped, namespaced lock is released by Postgres
 // at COMMIT/ROLLBACK and cannot outlive or escape its claim transaction.
-export const PROJECT_JOB_LOCK_NAMESPACE = 0x4e424a42; // "NBJB"
+export const PROJECT_JOB_LOCK_NAMESPACE = 0x4e424a42; // "NBJB" — shared lifecycle namespace
 export const ACCOUNT_JOB_LOCK_NAMESPACE = 0x4e424143; // "NBAC"
 
 type PersistedAdmissionEvent = {
@@ -2096,7 +2251,7 @@ export async function claimProjectJobExecution(
   const [projectOwner] = await db
     .select({ ownerId: projectsTable.ownerId })
     .from(projectsTable)
-    .where(eq(projectsTable.id, projectId))
+    .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)))
     .limit(1);
   if (!projectOwner?.ownerId) return { claimed: false, reason: "project_busy_or_not_claimable" };
 
@@ -2112,6 +2267,16 @@ export async function claimProjectJobExecution(
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(${PROJECT_JOB_LOCK_NAMESPACE}, ${projectId})`,
     );
+
+    // Re-check after the serialized project boundary. The pre-lock lookup only
+    // resolves account admission; this check is the authority that prevents a
+    // queued/durable delivery from claiming a project tombstoned concurrently.
+    const [activeProject] = await tx
+      .select({ id: projectsTable.id })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)))
+      .limit(1);
+    if (!activeProject) return { claimed: false, reason: "project_busy_or_not_claimable" };
 
     const activeBuilds = await countRunningBuildsForAdmission(tx, admissionScope);
     const admission = evaluateParallelBuildAdmission(admissionScope, activeBuilds);
@@ -2221,6 +2386,14 @@ export async function runJob(input: JobInput): Promise<void> {
     queueIndex,
     queueTotalCount,
   } = input;
+  const lifecycleAdmission = await readProjectJobAdmission(projectId);
+  if (!lifecycleAdmission.allowed) {
+    logger.info(
+      { taskId, projectId, code: lifecycleAdmission.code },
+      "Background job denied by project lifecycle tombstone",
+    );
+    return;
+  }
   try {
     await governIntentAdmission({
       phase: "execution",
@@ -2337,6 +2510,7 @@ export async function runJob(input: JobInput): Promise<void> {
   const abortController = new AbortController();
   const { signal } = abortController;
   activeJobControllers.set(taskId, abortController);
+  activeJobProjects.set(taskId, projectId);
   let supportGrantWatchTimer: ReturnType<typeof setInterval> | null = null;
   let supportGrantCheckRunning = false;
 
@@ -2476,6 +2650,15 @@ export async function runJob(input: JobInput): Promise<void> {
     const writeJobHeartbeat = () => {
       void (async () => {
         try {
+          const lifecycle = await readProjectJobAdmission(projectId);
+          if (!lifecycle.allowed) {
+            abortController.abort();
+            logger.info(
+              { taskId, projectId, code: lifecycle.code },
+              "Running job stopped by project lifecycle tombstone",
+            );
+            return;
+          }
           await db
             .update(agentTasksTable)
             .set({ lastHeartbeatAt: new Date() })
@@ -3293,6 +3476,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 const loopRes = await runAgentLoop({
                   mode: "build",
                   projectId,
+                  ownerUserId: project.ownerId,
+                  actorUserId: provenanceActorUserId,
                   queuePromotionActorId: project.ownerId,
                   projectName: project.name,
                   projectKind: project.kind,
@@ -3873,6 +4058,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 const loopRes = await runAgentLoop({
                   mode: "refine",
                   projectId,
+                  ownerUserId: project.ownerId,
+                  actorUserId: provenanceActorUserId,
                   queuePromotionActorId: project.ownerId,
                   projectName: project.name,
                   projectKind: project.kind,
@@ -4193,6 +4380,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               const retryLoopRes = await runAgentLoop({
                 mode: "refine",
                 projectId,
+                ownerUserId: project.ownerId,
+                actorUserId: provenanceActorUserId,
                 queuePromotionActorId: project.ownerId,
                 projectName: project.name,
                 projectKind: project.kind,
@@ -7571,6 +7760,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
     // no session resource survives the claim or needs releasing here.
     activeProjectJobs.delete(projectId);
     activeJobControllers.delete(taskId);
+    activeJobProjects.delete(taskId);
   }
 }
 
@@ -8991,45 +9181,85 @@ async function extractAppJsonSummary(projectId: number): Promise<string> {
   }
 }
 
-async function runEasBuildJob(input: EasJobInput): Promise<void> {
+function throwIfProjectWorkAborted(signal: AbortSignal): void {
+  if (!signal.aborted) return;
+  const error = new Error("Project work canceled");
+  error.name = "AbortError";
+  throw error;
+}
+
+async function waitForProjectWork(signal: AbortSignal, delayMs: number): Promise<void> {
+  throwIfProjectWorkAborted(signal);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      const error = new Error("Project work canceled");
+      error.name = "AbortError";
+      reject(error);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function runEasBuildJobActive(input: EasJobInput, signal: AbortSignal): Promise<void> {
   const { deploymentLogId, projectId, userId, platform, accessToken, appSlug, appOwner } = input;
-  // eslint-disable-next-line no-useless-assignment
-  let easBuildId: string | null = null;
+  let easBuildId: string;
 
   try {
     logger.info({ projectId, platform, appSlug, appOwner }, "EAS build job starting");
-
-    await db
-      .update(deploymentLogsTable)
-      .set({ status: "building", note: "EAS build triggered — waiting for result…" })
-      .where(eq(deploymentLogsTable.id, deploymentLogId));
-
-    const build = await triggerEasBuild({ accessToken, appSlug, appOwner, platform });
-    easBuildId = build.id;
-
-    await db
-      .update(deploymentLogsTable)
-      .set({
-        buildId: easBuildId,
-        status: "building",
-        note: `EAS build in progress (id: ${easBuildId})`,
-      })
-      .where(eq(deploymentLogsTable.id, deploymentLogId));
+    const triggered = await withActiveProjectLifecycle(projectId, async (session) => {
+      throwIfProjectWorkAborted(signal);
+      await db
+        .update(deploymentLogsTable)
+        .set({ status: "building", note: "EAS build triggered — waiting for result…" })
+        .where(eq(deploymentLogsTable.id, deploymentLogId));
+      const build = await triggerEasBuild({
+        accessToken,
+        appSlug,
+        appOwner,
+        platform,
+        signal,
+      });
+      throwIfProjectWorkAborted(signal);
+      if (!(await session.assertActive())) throw new Error("project_inactive");
+      await db
+        .update(deploymentLogsTable)
+        .set({
+          buildId: build.id,
+          status: "building",
+          note: `EAS build in progress (id: ${build.id})`,
+        })
+        .where(eq(deploymentLogsTable.id, deploymentLogId));
+      return build;
+    });
+    if (triggered.state === "inactive") return;
+    let finalBuild = triggered.value;
+    easBuildId = finalBuild.id;
 
     // Poll for completion (max 15 min, every 15 s)
     const maxPollMs = 15 * 60 * 1000;
     const pollIntervalMs = 15_000;
     const startTime = Date.now();
-    let finalBuild = build;
 
     while (Date.now() - startTime < maxPollMs) {
-      await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
-      finalBuild = await getEasBuildStatus(accessToken, easBuildId);
-      const deployStatus = mapEasStatusToDeploymentStatus(finalBuild.status);
-      await db
-        .update(deploymentLogsTable)
-        .set({ status: deployStatus, note: `EAS status: ${finalBuild.status}` })
-        .where(eq(deploymentLogsTable.id, deploymentLogId));
+      await waitForProjectWork(signal, pollIntervalMs);
+      const observed = await withActiveProjectLifecycle(projectId, async (session) => {
+        const build = await getEasBuildStatus(accessToken, easBuildId, signal);
+        throwIfProjectWorkAborted(signal);
+        if (!(await session.assertActive())) throw new Error("project_inactive");
+        const deployStatus = mapEasStatusToDeploymentStatus(build.status);
+        await db
+          .update(deploymentLogsTable)
+          .set({ status: deployStatus, note: `EAS status: ${build.status}` })
+          .where(eq(deploymentLogsTable.id, deploymentLogId));
+        return build;
+      });
+      if (observed.state === "inactive") return;
+      finalBuild = observed.value;
       if (["finished", "errored", "canceled", "timed-out"].includes(finalBuild.status)) break;
     }
 
@@ -9039,7 +9269,8 @@ async function runEasBuildJob(input: EasJobInput): Promise<void> {
 
       let testflightUrl: string | null = null;
       let submissionNote = "";
-      try {
+      const completed = await withActiveProjectLifecycle(projectId, async (session) => {
+        throwIfProjectWorkAborted(signal);
         await db
           .update(deploymentLogsTable)
           .set({
@@ -9049,128 +9280,158 @@ async function runEasBuildJob(input: EasJobInput): Promise<void> {
           })
           .where(eq(deploymentLogsTable.id, deploymentLogId));
 
-        await triggerEasSubmit({ accessToken, buildId: easBuildId, platform, appOwner });
-        testflightUrl =
-          platform === "ios"
-            ? "https://appstoreconnect.apple.com/apps"
-            : "https://play.google.com/console";
-        submissionNote =
-          platform === "ios"
-            ? "Submitted to TestFlight. Check App Store Connect for processing status."
-            : "Uploaded to Google Play Internal Testing track.";
-      } catch (submitErr) {
-        logger.warn({ submitErr, easBuildId }, "EAS submit failed (build still succeeded)");
-        submissionNote = `Build succeeded. Auto-submit failed: ${submitErr instanceof Error ? submitErr.message : "unknown error"}`;
-      }
+        try {
+          await triggerEasSubmit({
+            accessToken,
+            buildId: easBuildId!,
+            platform,
+            appOwner,
+            signal,
+          });
+          testflightUrl =
+            platform === "ios"
+              ? "https://appstoreconnect.apple.com/apps"
+              : "https://play.google.com/console";
+          submissionNote =
+            platform === "ios"
+              ? "Submitted to TestFlight. Check App Store Connect for processing status."
+              : "Uploaded to Google Play Internal Testing track.";
+        } catch (submitErr) {
+          throwIfProjectWorkAborted(signal);
+          logger.warn({ submitErr, easBuildId }, "EAS submit failed (build still succeeded)");
+          submissionNote = `Build succeeded. Auto-submit failed: ${submitErr instanceof Error ? submitErr.message : "unknown error"}`;
+        }
 
-      await db
-        .update(deploymentLogsTable)
-        .set({
-          status: "submitted",
-          downloadUrl: downloadUrl ?? undefined,
-          testflightUrl: testflightUrl ?? undefined,
-          note: submissionNote,
-        })
-        .where(eq(deploymentLogsTable.id, deploymentLogId));
+        if (!(await session.assertActive())) throw new Error("project_inactive");
+        await db
+          .update(deploymentLogsTable)
+          .set({
+            status: "submitted",
+            downloadUrl: downloadUrl ?? undefined,
+            testflightUrl: testflightUrl ?? undefined,
+            note: submissionNote,
+          })
+          .where(eq(deploymentLogsTable.id, deploymentLogId));
 
-      void writeKnowledge({
-        title: `EAS ${platform} build succeeded`,
-        content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) completed and submitted. ${submissionNote}`,
-        type: "build",
-        category: "event",
-        severity: "info",
-        projectId,
-        userId,
-      });
-
-      void db
-        .insert(chatMessagesTable)
-        .values({
+        await writeKnowledge({
+          title: `EAS ${platform} build succeeded`,
+          content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) completed and submitted. ${submissionNote}`,
+          type: "build",
+          category: "event",
+          severity: "info",
           projectId,
-          role: "system",
-          content: `${platform === "ios" ? "iOS" : "Android"} cloud build succeeded and submitted. ${submissionNote}`,
-          agentMode: "eco",
-          planMode: false,
-          plan: {
-            kind: "report",
-            report: {
-              userRequest: `EAS ${platform} build`,
-              filesCreated: [],
-              filesChanged: [],
-              filesRemoved: [],
-              previewUpdated: false,
-              warnings: [],
-            },
-          } as unknown as Record<string, unknown>,
-        })
-        .catch(() => {
-          /* best-effort */
+          userId,
         });
+
+        await db
+          .insert(chatMessagesTable)
+          .values({
+            projectId,
+            role: "system",
+            content: `${platform === "ios" ? "iOS" : "Android"} cloud build succeeded and submitted. ${submissionNote}`,
+            agentMode: "eco",
+            planMode: false,
+            plan: {
+              kind: "report",
+              report: {
+                userRequest: `EAS ${platform} build`,
+                filesCreated: [],
+                filesChanged: [],
+                filesRemoved: [],
+                previewUpdated: false,
+                warnings: [],
+              },
+            } as unknown as Record<string, unknown>,
+          })
+          .catch(() => undefined);
+      });
+      if (completed.state === "inactive") return;
     } else {
       const errorMsg = finalBuild.error?.message ?? `EAS build ${finalBuild.status}`;
-      await db
-        .update(deploymentLogsTable)
-        .set({ status: "failed", note: errorMsg })
-        .where(eq(deploymentLogsTable.id, deploymentLogId));
-
-      void writeKnowledge({
-        title: `EAS ${platform} build failed`,
-        content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) failed: ${errorMsg}. Check credentials in project Secrets.`,
-        type: "build",
-        category: "diagnostic",
-        severity: "error",
-        projectId,
-        userId,
-      });
-
-      void db
-        .insert(chatMessagesTable)
-        .values({
+      const failed = await withActiveProjectLifecycle(projectId, async () => {
+        await db
+          .update(deploymentLogsTable)
+          .set({ status: "failed", note: errorMsg })
+          .where(eq(deploymentLogsTable.id, deploymentLogId));
+        await writeKnowledge({
+          title: `EAS ${platform} build failed`,
+          content: `Project ${projectId} EAS ${platform} build (id: ${easBuildId}) failed: ${errorMsg}. Check credentials in project Secrets.`,
+          type: "build",
+          category: "diagnostic",
+          severity: "error",
           projectId,
-          role: "assistant",
-          content: `${platform === "ios" ? "iOS" : "Android"} cloud build failed: ${errorMsg}`,
-          agentMode: "eco",
-          planMode: false,
-          plan: {
-            kind: "error",
-            message: errorMsg,
-            suggestions: [
-              "Check your Apple/Google credentials in the project Secrets tab.",
-              "Verify your app.json has a valid bundleIdentifier / package name.",
-              "Review the EAS dashboard for detailed build logs.",
-            ],
-          } as unknown as Record<string, unknown>,
-        })
-        .catch(() => {
-          /* best-effort */
+          userId,
         });
+        await db
+          .insert(chatMessagesTable)
+          .values({
+            projectId,
+            role: "assistant",
+            content: `${platform === "ios" ? "iOS" : "Android"} cloud build failed: ${errorMsg}`,
+            agentMode: "eco",
+            planMode: false,
+            plan: {
+              kind: "error",
+              message: errorMsg,
+              suggestions: [
+                "Check your Apple/Google credentials in the project Secrets tab.",
+                "Verify your app.json has a valid bundleIdentifier / package name.",
+                "Review the EAS dashboard for detailed build logs.",
+              ],
+            } as unknown as Record<string, unknown>,
+          })
+          .catch(() => undefined);
+      });
+      if (failed.state === "inactive") return;
     }
   } catch (err) {
+    if (signal.aborted || (err instanceof Error && err.name === "AbortError")) return;
     const message = err instanceof Error ? err.message : "Unknown EAS error";
     logger.error({ err, deploymentLogId, platform }, "EAS build job failed");
-    await db
-      .update(deploymentLogsTable)
-      .set({ status: "failed", note: `Build error: ${message}` })
-      .where(eq(deploymentLogsTable.id, deploymentLogId));
+    await withActiveProjectLifecycle(projectId, async () => {
+      await db
+        .update(deploymentLogsTable)
+        .set({ status: "failed", note: `Build error: ${message}` })
+        .where(eq(deploymentLogsTable.id, deploymentLogId));
+    });
+  }
+}
+
+async function runEasBuildJob(input: EasJobInput): Promise<void> {
+  const admission = await readProjectLifecycleAdmission(input.projectId);
+  if (!admission.allowed) return;
+  const controller = new AbortController();
+  const unregisterProjectWork = registerProjectWorkController(input.projectId, controller);
+  try {
+    await runEasBuildJobActive(input, controller.signal);
+  } finally {
+    unregisterProjectWork();
   }
 }
 
 export function enqueueEasJob(input: EasJobInput): void {
   void (async () => {
-    const { durableEnqueueRaw, isDurableQueueReady, QUEUE_EAS_BUILD } =
+    const { durableEnqueueRawResult, isDurableWorkerReady, QUEUE_EAS_BUILD } =
       await import("./durable-queue");
-    if (isDurableQueueReady()) {
+    if (isDurableWorkerReady(QUEUE_EAS_BUILD)) {
       const key = `eas-${input.deploymentLogId}`;
-      const id = await durableEnqueueRaw(
+      const outcome = await durableEnqueueRawResult(
         QUEUE_EAS_BUILD,
         input as unknown as Record<string, unknown>,
         key,
         { retryLimit: 1, retryDelay: 30, retryBackoff: false },
       );
-      if (id !== null) {
+      if (outcome.status === "enqueued") {
         logger.info(
-          { deploymentLogId: input.deploymentLogId, jobId: id },
+          { deploymentLogId: input.deploymentLogId, jobId: outcome.jobId },
           "EAS build enqueued in durable queue",
+        );
+        return;
+      }
+      if (outcome.status === "duplicate") {
+        logger.info(
+          { deploymentLogId: input.deploymentLogId, code: outcome.code },
+          "Duplicate EAS build enqueue suppressed",
         );
         return;
       }
@@ -9192,12 +9453,14 @@ export function enqueueEasJob(input: EasJobInput): void {
  * headless Chromium, and persists results into the task report.
  * Entirely non-fatal — exceptions are caught and logged.
  */
-export async function runAppTestingJob(
+async function runAppTestingJobActive(
   projectId: number,
   taskId: number,
   projectDescription: string,
   savedTestScript?: string | null,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal) throwIfProjectWorkAborted(signal);
   logger.info({ projectId, taskId, hasSavedScript: !!savedTestScript }, "App testing job starting");
 
   // Emit SSE so users see the testing phase in their chat stream
@@ -9248,6 +9511,7 @@ export async function runAppTestingJob(
       },
     ],
   });
+  if (signal) throwIfProjectWorkAborted(signal);
 
   // Convert E2e smoke failures to the unified TestResult shape stored in app_test_runs
   type TestResult = import("@workspace/db").TestResult;
@@ -9312,10 +9576,12 @@ export async function runAppTestingJob(
       );
       const { runTestGenerationPipeline } = await import("./builder");
       testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
+      if (signal) throwIfProjectWorkAborted(signal);
     }
   } else {
     const { runTestGenerationPipeline } = await import("./builder");
     testPlan = await runTestGenerationPipeline(indexFile.content, projectDescription);
+    if (signal) throwIfProjectWorkAborted(signal);
   }
 
   let stepResults: TestResult[] = [];
@@ -9328,6 +9594,7 @@ export async function runAppTestingJob(
     );
     const { runTestPlan } = await import("./checks/playwright-runner");
     stepResults = await runTestPlan(indexFile.content, testPlan, { timeoutMs: 5000 });
+    if (signal) throwIfProjectWorkAborted(signal);
     testScriptJson = JSON.stringify(testPlan, null, 2);
   } else {
     logger.warn({ projectId, taskId }, "Test generation returned null — skipping step tests");
@@ -9363,6 +9630,7 @@ export async function runAppTestingJob(
       combinedFailures,
       projectDescription,
     );
+    if (signal) throwIfProjectWorkAborted(signal);
 
     if (fixedFiles && fixedFiles.length > 0) {
       // Write the patched files to DB (partial update — replaceAll=false)
@@ -9372,17 +9640,23 @@ export async function runAppTestingJob(
         files: fixedFiles,
         replaceAll: false,
       });
-      const fixedSnapshot = await snapshotFilesForVersion(projectId);
-      const [fixVersion] = await db
-        .insert(projectVersionsTable)
-        .values({
-          projectId,
-          label: `Browser test auto-fix for Task #${taskId}`.slice(0, 200),
-          note: "Snapshot after browser-test auto-fix.",
-          changelogEntry: `Browser-test auto-fix updated ${fixedFiles.length} file(s).`,
-          filesSnapshot: fixedSnapshot,
-        })
-        .returning({ id: projectVersionsTable.id });
+      const versioned = await withActiveProjectLifecycle(projectId, async (session) => {
+        if (!(await session.assertActive())) throw new Error("project_inactive");
+        const fixedSnapshot = await snapshotFilesForVersion(projectId);
+        const [fixVersion] = await db
+          .insert(projectVersionsTable)
+          .values({
+            projectId,
+            label: `Browser test auto-fix for Task #${taskId}`.slice(0, 200),
+            note: "Snapshot after browser-test auto-fix.",
+            changelogEntry: `Browser-test auto-fix updated ${fixedFiles.length} file(s).`,
+            filesSnapshot: fixedSnapshot,
+          })
+          .returning({ id: projectVersionsTable.id });
+        return fixVersion;
+      });
+      if (versioned.state === "inactive") return;
+      const fixVersion = versioned.value;
       if (fixVersion?.id) {
         emitFilesChangedEvent(taskId, projectId, fixVersion.id, fixedFiles, [], "refine");
       }
@@ -9421,6 +9695,7 @@ export async function runAppTestingJob(
             },
           ],
         });
+        if (signal) throwIfProjectWorkAborted(signal);
         const reSmokeResults: TestResult[] = reSmokeSum.scenarios.map((s) => ({
           name: s.name,
           passed: s.passed,
@@ -9442,6 +9717,7 @@ export async function runAppTestingJob(
         if (testPlan) {
           const { runTestPlan } = await import("./checks/playwright-runner");
           reStepResults = await runTestPlan(reloadedIndex.content, testPlan, { timeoutMs: 5000 });
+          if (signal) throwIfProjectWorkAborted(signal);
         }
 
         allResults = [...reSmokeResults, ...reStepResults];
@@ -9467,51 +9743,79 @@ export async function runAppTestingJob(
   const passed = allResults.filter((r) => r.passed).length;
   const failed = allResults.filter((r) => !r.passed).length;
   const ranAt = new Date();
+  if (signal) throwIfProjectWorkAborted(signal);
 
-  logger.info({ projectId, taskId, passed, failed, autoFixed }, "Browser tests complete");
+  const persisted = await withActiveProjectLifecycle(projectId, async (session) => {
+    if (!(await session.assertActive())) throw new Error("project_inactive");
+    logger.info({ projectId, taskId, passed, failed, autoFixed }, "Browser tests complete");
 
-  // Emit a user-visible summary
-  const summaryMsg =
-    failed === 0
-      ? `Browser tests passed (${passed}/${allResults.length})${autoFixed ? " — auto-fix was applied" : ""}`
-      : `Browser tests: ${passed} passed, ${failed} failed${autoFixed ? " (after auto-fix attempt)" : ""}`;
-  await emitEvent(taskId, "narration", summaryMsg);
+    // Emit a user-visible summary
+    const summaryMsg =
+      failed === 0
+        ? `Browser tests passed (${passed}/${allResults.length})${autoFixed ? " — auto-fix was applied" : ""}`
+        : `Browser tests: ${passed} passed, ${failed} failed${autoFixed ? " (after auto-fix attempt)" : ""}`;
+    await emitEvent(taskId, "narration", summaryMsg);
 
-  await db.insert(appTestRunsTable).values({
-    projectId,
-    taskId,
-    ranAt,
-    testScript: testScriptJson || null,
-    results: allResults,
-    passed,
-    failed,
+    await db.insert(appTestRunsTable).values({
+      projectId,
+      taskId,
+      ranAt,
+      testScript: testScriptJson || null,
+      results: allResults,
+      passed,
+      failed,
+    });
+
+    logger.info({ projectId, taskId, passed, failed }, "Test results saved to app_test_runs");
+
+    // Update the task report so InlineReportCard continues to work
+    const [latestTask] = await db
+      .select({ report: agentTasksTable.report })
+      .from(agentTasksTable)
+      .where(eq(agentTasksTable.id, taskId))
+      .limit(1);
+    if (!latestTask) return false;
+
+    const latestReport = (latestTask.report ?? {}) as import("@workspace/db").TaskReport;
+    const updatedReport: import("@workspace/db").TaskReport = {
+      ...latestReport,
+      testResults: allResults,
+      testScript: testScriptJson || undefined,
+      testRanAt: ranAt.toISOString(),
+    };
+
+    await db
+      .update(agentTasksTable)
+      .set({ report: updatedReport })
+      .where(eq(agentTasksTable.id, taskId));
+    return true;
   });
-
-  logger.info({ projectId, taskId, passed, failed }, "Test results saved to app_test_runs");
-
-  // Update the task report so InlineReportCard continues to work
-  const [latestTask] = await db
-    .select({ report: agentTasksTable.report })
-    .from(agentTasksTable)
-    .where(eq(agentTasksTable.id, taskId))
-    .limit(1);
-
-  if (!latestTask) return;
-
-  const latestReport = (latestTask.report ?? {}) as import("@workspace/db").TaskReport;
-  const updatedReport: import("@workspace/db").TaskReport = {
-    ...latestReport,
-    testResults: allResults,
-    testScript: testScriptJson || undefined,
-    testRanAt: ranAt.toISOString(),
-  };
-
-  await db
-    .update(agentTasksTable)
-    .set({ report: updatedReport })
-    .where(eq(agentTasksTable.id, taskId));
+  if (persisted.state === "inactive") return;
 
   logger.info({ projectId, taskId, passed, failed }, "Test results saved to task report");
+}
+
+export async function runAppTestingJob(
+  projectId: number,
+  taskId: number,
+  projectDescription: string,
+  savedTestScript?: string | null,
+): Promise<void> {
+  const admission = await readProjectLifecycleAdmission(projectId);
+  if (!admission.allowed) return;
+  const controller = new AbortController();
+  const unregisterProjectWork = registerProjectWorkController(projectId, controller);
+  try {
+    await runAppTestingJobActive(
+      projectId,
+      taskId,
+      projectDescription,
+      savedTestScript,
+      controller.signal,
+    );
+  } finally {
+    unregisterProjectWork();
+  }
 }
 
 export { extractAppJsonSummary };
@@ -9533,11 +9837,24 @@ export interface CveAutoProtectInput {
  * verifies it by running the platform typecheck, and stores the result.
  * If a projectId is provided, writes a notification into that project's chat.
  */
-export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<void> {
+async function runCveAutoProtectJobActive(
+  input: CveAutoProtectInput,
+  signal?: AbortSignal,
+): Promise<void> {
   const { findingId, projectId } = input;
   logger.info({ findingId, projectId }, "CVE auto-protect job starting");
+  const persistIfProjectActive = async (work: () => Promise<void>): Promise<boolean> => {
+    if (!projectId) {
+      await work();
+      return true;
+    }
+    const persisted = await withActiveProjectLifecycle(projectId, async (session) => {
+      if (!(await session.assertActive())) throw new Error("project_inactive");
+      await work();
+    });
+    return persisted.state === "active";
+  };
 
-  // eslint-disable-next-line no-useless-assignment
   let finding: {
     id: number;
     packageName: string;
@@ -9547,9 +9864,10 @@ export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<
     title: string | null;
     severity: string;
     status: string;
-  } | null = null;
+  };
 
   try {
+    if (signal) throwIfProjectWorkAborted(signal);
     const [row] = await db
       .select()
       .from(cveFindingsTable)
@@ -9571,10 +9889,16 @@ export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<
 
     finding = row;
 
-    await db
-      .update(cveFindingsTable)
-      .set({ patchStatus: "preparing" as CvePatchStatus })
-      .where(eq(cveFindingsTable.id, findingId));
+    if (
+      !(await persistIfProjectActive(async () => {
+        await db
+          .update(cveFindingsTable)
+          .set({ patchStatus: "preparing" as CvePatchStatus })
+          .where(eq(cveFindingsTable.id, findingId));
+      }))
+    ) {
+      return;
+    }
 
     let existingFiles: BuilderFile[] = [];
     if (projectId) {
@@ -9617,28 +9941,32 @@ export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<
       title: finding.title,
       existingFiles,
     });
+    if (signal) throwIfProjectWorkAborted(signal);
 
     if (patchResult.patchedFiles.length === 0 || patchResult.error) {
-      await db
-        .update(cveFindingsTable)
-        .set({
-          patchStatus: "failed" as CvePatchStatus,
-          patchContent: JSON.stringify({
-            error: patchResult.error ?? "No files patched",
-            summary: patchResult.summary,
-          }),
-          patchPreparedAt: new Date(),
-        })
-        .where(eq(cveFindingsTable.id, findingId));
+      const persisted = await persistIfProjectActive(async () => {
+        await db
+          .update(cveFindingsTable)
+          .set({
+            patchStatus: "failed" as CvePatchStatus,
+            patchContent: JSON.stringify({
+              error: patchResult.error ?? "No files patched",
+              summary: patchResult.summary,
+            }),
+            patchPreparedAt: new Date(),
+          })
+          .where(eq(cveFindingsTable.id, findingId));
+        if (projectId) {
+          await writeCveNotification(projectId, findingId, finding!, false, patchResult.summary);
+        }
+      });
+      if (!persisted) return;
 
       logger.warn(
         { findingId, error: patchResult.error },
         "CVE auto-protect: patch generation failed",
       );
 
-      if (projectId) {
-        await writeCveNotification(projectId, findingId, finding, false, patchResult.summary);
-      }
       return;
     }
 
@@ -9665,39 +9993,61 @@ export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<
         "CVE auto-protect: typecheck failed after patch preparation",
       );
     }
+    if (signal) throwIfProjectWorkAborted(signal);
 
-    await db
-      .update(cveFindingsTable)
-      .set({
-        patchStatus: "ready" as CvePatchStatus,
-        patchContent: patchContentJson,
-        patchTypecheckPassed: typecheckPassed,
-        patchPreparedAt: new Date(),
-      })
-      .where(eq(cveFindingsTable.id, findingId));
-
-    logger.info({ findingId, typecheckPassed }, "CVE auto-protect: patch ready");
-
-    if (projectId) {
-      await writeCveNotification(
-        projectId,
-        findingId,
-        finding,
-        true,
-        patchResult.summary,
-        typecheckPassed,
-      );
-    }
-  } catch (err) {
-    logger.error({ err, findingId }, "CVE auto-protect job failed");
-    try {
+    const persisted = await persistIfProjectActive(async () => {
       await db
         .update(cveFindingsTable)
-        .set({ patchStatus: "failed" as CvePatchStatus, patchPreparedAt: new Date() })
+        .set({
+          patchStatus: "ready" as CvePatchStatus,
+          patchContent: patchContentJson,
+          patchTypecheckPassed: typecheckPassed,
+          patchPreparedAt: new Date(),
+        })
         .where(eq(cveFindingsTable.id, findingId));
+      if (projectId) {
+        await writeCveNotification(
+          projectId,
+          findingId,
+          finding!,
+          true,
+          patchResult.summary,
+          typecheckPassed,
+        );
+      }
+    });
+    if (!persisted) return;
+
+    logger.info({ findingId, typecheckPassed }, "CVE auto-protect: patch ready");
+  } catch (err) {
+    if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) return;
+    logger.error({ err, findingId }, "CVE auto-protect job failed");
+    try {
+      await persistIfProjectActive(async () => {
+        await db
+          .update(cveFindingsTable)
+          .set({ patchStatus: "failed" as CvePatchStatus, patchPreparedAt: new Date() })
+          .where(eq(cveFindingsTable.id, findingId));
+      });
     } catch {
       // best-effort
     }
+  }
+}
+
+export async function runCveAutoProtectJob(input: CveAutoProtectInput): Promise<void> {
+  if (!input.projectId) {
+    await runCveAutoProtectJobActive(input);
+    return;
+  }
+  const admission = await readProjectLifecycleAdmission(input.projectId);
+  if (!admission.allowed) return;
+  const controller = new AbortController();
+  const unregisterProjectWork = registerProjectWorkController(input.projectId, controller);
+  try {
+    await runCveAutoProtectJobActive(input, controller.signal);
+  } finally {
+    unregisterProjectWork();
   }
 }
 
@@ -9745,23 +10095,31 @@ async function writeCveNotification(
  */
 export function enqueueCveAutoProtectJob(input: CveAutoProtectInput): void {
   void (async () => {
-    const { durableEnqueueRaw, isDurableQueueReady, QUEUE_CVE_AUTOPROTECT } =
+    const { durableEnqueueRawResult, isDurableWorkerReady, QUEUE_CVE_AUTOPROTECT } =
       await import("./durable-queue");
-    if (isDurableQueueReady()) {
+    if (isDurableWorkerReady(QUEUE_CVE_AUTOPROTECT)) {
       // Idempotency key: findingId is the correct canonical dedup key.
       // CveAutoProtectInput has no scan timestamp; one finding → one patch job.
-      // pg-boss deduplicates re-enqueues with the same key automatically.
+      // The queue adapter maps this canonical key to a stable pg-boss job UUID;
+      // a suppressed duplicate is terminal here and must not launch fallback work.
       const key = `cve-${input.findingId}`;
-      const id = await durableEnqueueRaw(
+      const outcome = await durableEnqueueRawResult(
         QUEUE_CVE_AUTOPROTECT,
         input as unknown as Record<string, unknown>,
         key,
         { retryLimit: 2, retryDelay: 15, retryBackoff: true },
       );
-      if (id !== null) {
+      if (outcome.status === "enqueued") {
         logger.info(
-          { findingId: input.findingId, jobId: id },
+          { findingId: input.findingId, jobId: outcome.jobId },
           "CVE auto-protect enqueued in durable queue",
+        );
+        return;
+      }
+      if (outcome.status === "duplicate") {
+        logger.info(
+          { findingId: input.findingId, code: outcome.code },
+          "Duplicate CVE auto-protect enqueue suppressed",
         );
         return;
       }
@@ -9783,18 +10141,24 @@ export function enqueueCveAutoProtectJob(input: CveAutoProtectInput): void {
  * Must be called after startDurableQueue() resolves. No-ops when queue is unavailable.
  */
 export async function registerJobWorkers(): Promise<void> {
-  const { registerWorker, QUEUE_EAS_BUILD, QUEUE_APP_TESTING, QUEUE_CVE_AUTOPROTECT } =
+  const { registerRequiredWorker, QUEUE_EAS_BUILD, QUEUE_APP_TESTING, QUEUE_CVE_AUTOPROTECT } =
     await import("./durable-queue");
 
-  await registerWorker(
+  await registerRequiredWorker(
     QUEUE_EAS_BUILD,
     async (payload) => {
       await runEasBuildJob(payload as unknown as EasJobInput);
     },
-    { retryLimit: 1, retryDelay: 30, retryBackoff: false },
+    {
+      retryLimit: 1,
+      retryDelay: 30,
+      retryBackoff: false,
+      queuePolicy: "standard",
+      registrationAttempts: 3,
+    },
   );
 
-  await registerWorker(
+  await registerRequiredWorker(
     QUEUE_APP_TESTING,
     async (payload) => {
       const { projectId, taskId, projectDescription, savedTestScript } = payload as {
@@ -9805,15 +10169,27 @@ export async function registerJobWorkers(): Promise<void> {
       };
       await runAppTestingJob(projectId, taskId, projectDescription, savedTestScript);
     },
-    { retryLimit: 2, retryDelay: 15, retryBackoff: true },
+    {
+      retryLimit: 2,
+      retryDelay: 15,
+      retryBackoff: true,
+      queuePolicy: "standard",
+      registrationAttempts: 3,
+    },
   );
 
-  await registerWorker(
+  await registerRequiredWorker(
     QUEUE_CVE_AUTOPROTECT,
     async (payload) => {
       await runCveAutoProtectJob(payload as unknown as CveAutoProtectInput);
     },
-    { retryLimit: 2, retryDelay: 15, retryBackoff: true },
+    {
+      retryLimit: 2,
+      retryDelay: 15,
+      retryBackoff: true,
+      queuePolicy: "standard",
+      registrationAttempts: 3,
+    },
   );
 
   logger.info("Job workers registered for EAS build, app-testing, and CVE auto-protect");

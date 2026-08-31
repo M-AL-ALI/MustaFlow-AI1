@@ -365,9 +365,9 @@ async function persistSnapshot(
     if (!item) throw new ZeroPromptQueuePersistenceError("queue_persistence_contract_invalid");
     if (mutation.kind === "delete") {
       await client.query(
-        `DELETE FROM asset_usage
+        `UPDATE asset_usage SET consumer=$4
           WHERE project_id=$1 AND consumer=$2 AND asset_id=ANY($3::integer[])`,
-        [projectId, `queue:${item.id}`, item.assetIds ?? []],
+        [projectId, `queue:${item.id}`, item.assetIds ?? [], `queue-terminal:${item.id}`],
       );
     } else {
       await client.query(
@@ -420,7 +420,19 @@ async function appendQueueProvenance(
   if (result.rowCount !== 1) {
     throw new ZeroPromptQueuePersistenceError("queue_provenance_missing");
   }
-  return 1;
+  const provenanceAssetIds = [
+    ...("assetIds" in event ? (event.assetIds ?? []) : []),
+    ...("originalAssetIds" in event ? event.originalAssetIds : []),
+  ];
+  if (provenanceAssetIds.length === 0) return 1;
+  const usage: QueryResult = await client.query(
+    `INSERT INTO asset_usage (asset_id, project_id, consumer, created_at)
+     SELECT asset_id, $1, $2, CURRENT_TIMESTAMP
+       FROM unnest($3::integer[]) AS asset_id
+     ON CONFLICT DO NOTHING`,
+    [projectId, `queue-provenance:${event.eventId}`, [...new Set(provenanceAssetIds)]],
+  );
+  return 1 + (usage.rowCount ? 1 : 0);
 }
 
 export function createPostgresZeroPromptQueueDriver(

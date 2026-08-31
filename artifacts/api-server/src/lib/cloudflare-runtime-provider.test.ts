@@ -4,6 +4,7 @@ import {
   deriveRuntimeIdentity,
   verifyControlRequestSignature,
   type ProductionArtifactRelease,
+  type RouteRecord,
 } from "@workspace/tenant-runtime-contracts";
 import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { RuntimeProviderUnavailableError } from "./tenant-runtime-provider";
@@ -119,6 +120,69 @@ async function v1Artifact(identity: string) {
 describe("CloudflareRuntimeProvider", () => {
   beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
   afterEach(() => vi.unstubAllGlobals());
+
+  it("inventories signed project routes and retires only the observed route identity", async () => {
+    const projectId = 51;
+    const sandboxIdentity = await deriveRuntimeIdentity({
+      namespace: "staging",
+      projectId,
+      role: "production",
+      slot: "blue",
+    });
+    const route: RouteRecord = {
+      hostname: "inventory.apps.mustaflow.com",
+      projectId,
+      role: "production",
+      activeSlot: "blue",
+      manifestRevision: "manifest-inventory-1",
+      servicePort: 8080,
+      sandboxIdentity,
+    };
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        json({
+          ok: true,
+          projectId,
+          routes: [route],
+          nextCursor: null,
+          complete: true,
+        }),
+      )
+      .mockResolvedValueOnce(json({ ok: true, hostname: route.hostname }))
+      .mockResolvedValueOnce(json({ ok: true, route: null }));
+
+    const provider = new CloudflareRuntimeProvider(config);
+    const internals = provider as unknown as {
+      deploymentVersion: string | null;
+      controlFeatures: Set<string>;
+    };
+    internals.deploymentVersion = "staging-v1";
+    internals.controlFeatures.add("published-route-inventory-v1");
+
+    await expect(provider.inventoryProductionRoutes(projectId)).resolves.toEqual([route]);
+    await expect(provider.retireObservedProductionRoute(route)).resolves.toEqual({
+      state: "absent",
+    });
+
+    const calls = vi.mocked(fetch).mock.calls.map(([input, init]) => ({
+      url: new URL(String(input)),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) : null,
+      signature: new Headers(init?.headers).get("x-nabuflow-signature"),
+    }));
+    expect(calls.map((call) => `${call.method} ${call.url.pathname}`)).toEqual([
+      "GET /_nabuflow/control/v1/projects/51/routes",
+      "DELETE /_nabuflow/control/v1/routes/inventory.apps.mustaflow.com",
+      "GET /_nabuflow/control/v1/routes/inventory.apps.mustaflow.com",
+    ]);
+    expect(calls[0]!.url.searchParams.get("scanLimit")).toBe("100");
+    expect(calls[1]!.body).toEqual({
+      hostname: route.hostname,
+      expectedManifestRevision: route.manifestRevision,
+      expectedSandboxIdentity: route.sandboxIdentity,
+    });
+    expect(calls.every((call) => typeof call.signature === "string")).toBe(true);
+  });
 
   it("performs a clock check and signs lifecycle requests", async () => {
     const identity = await deriveRuntimeIdentity({

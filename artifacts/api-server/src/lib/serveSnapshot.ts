@@ -15,6 +15,7 @@ import {
 } from "@workspace/db";
 import { guessMime } from "./builder";
 import { isBinaryMime } from "./binary-mime";
+import { resolveProjectFileBytes } from "./project-file-asset-reference";
 import { recordProdLog, hashIp } from "./prodLogs";
 import { logger } from "./logger";
 
@@ -202,7 +203,7 @@ async function serveSnapshotById(
   const mime = file.mimeType || guessMime(file.path);
   res.type(mime).setHeader("Cache-Control", "no-store").setHeader("X-Mustaflow-Env", label);
   if (isBinaryMime(mime)) {
-    res.end(Buffer.from(file.content, "base64"));
+    res.end(await resolveProjectFileBytes({ projectId, content: file.content, mimeType: mime }));
   } else {
     // SECURITY: consoleBridge / editor instrumentation scripts are intentionally
     // NOT injected here. serveSnapshotById serves staging, preview-snapshot, and
@@ -365,7 +366,10 @@ export async function servePreviewSnapshot(
       expiresAt: previewSnapshotsTable.expiresAt,
     })
     .from(previewSnapshotsTable)
-    .where(eq(previewSnapshotsTable.previewSlug, previewSlug));
+    .innerJoin(projectsTable, eq(previewSnapshotsTable.projectId, projectsTable.id))
+    .where(
+      and(eq(previewSnapshotsTable.previewSlug, previewSlug), isNull(projectsTable.deletedAt)),
+    );
 
   if (!preview) {
     res.status(404).type("text/html").send(NOT_FOUND_HTML);
@@ -558,7 +562,7 @@ export async function serveSnapshot(
   const mime = file.mimeType || guessMime(file.path);
   res.type(mime).setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
   if (isBinaryMime(mime)) {
-    const buf = Buffer.from(file.content, "base64");
+    const buf = await resolveProjectFileBytes({ projectId, content: file.content, mimeType: mime });
     bwAccumulate(projectId, buf.length);
     res.end(buf);
   } else {

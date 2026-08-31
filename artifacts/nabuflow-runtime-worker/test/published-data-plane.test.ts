@@ -44,6 +44,10 @@ class MockPublishedSandbox {
     return this.availability;
   }
 
+  async getProcess(): Promise<{ getStatus(): Promise<"running"> }> {
+    return { getStatus: async () => "running" };
+  }
+
   async containerFetch(request: Request, port: number): Promise<Response> {
     expect(port).toBe(8080);
     this.httpRequests.push(request);
@@ -175,6 +179,45 @@ describe("anonymous published application data plane", () => {
       const reflected = (await response.json()) as { method: string; body: string };
       expect(reflected).toEqual({ method, body: body ?? "" });
     }
+  });
+
+  it("forwards published bytes through raw read stubs with zero configuration writes", async () => {
+    const configure = vi.fn(async () => undefined);
+    const setSandboxName = vi.fn(async () => undefined);
+    const setSleepAfter = vi.fn(async () => undefined);
+    const setKeepAlive = vi.fn(async () => undefined);
+    const setTransport = vi.fn(async () => undefined);
+    Object.assign(sandbox, {
+      configure,
+      setSandboxName,
+      setSleepAfter,
+      setKeepAlive,
+      setTransport,
+    });
+    env.NABUFLOW_SANDBOX = {
+      idFromName(value: string) {
+        return { value, toString: () => `container:${value}` };
+      },
+      get() {
+        return sandbox;
+      },
+    } as never;
+
+    const response = await handlePublishedDataPlaneRequest(
+      new Request(`${ORIGIN}/`, {
+        headers: await overrideHeaders("/", "GET", "override-raw-stub-read-0001"),
+      }),
+      env,
+      { coordinator, nowMs: TEST_NOW_MS },
+    );
+
+    expect(response.status).toBe(200);
+    expect(sandbox.httpRequests).toHaveLength(1);
+    expect(configure).not.toHaveBeenCalled();
+    expect(setSandboxName).not.toHaveBeenCalled();
+    expect(setSleepAfter).not.toHaveBeenCalled();
+    expect(setKeepAlive).not.toHaveBeenCalled();
+    expect(setTransport).not.toHaveBeenCalled();
   });
 
   it("returns a structured 404 and invalidates immediately after unregister", async () => {

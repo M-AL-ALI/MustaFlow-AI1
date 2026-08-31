@@ -1,4 +1,3 @@
-import { getSandbox } from "@cloudflare/sandbox";
 import {
   PREVIEW_DATA_PREFIX,
   PREVIEW_GRANT_QUERY_PARAM,
@@ -9,7 +8,7 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { ControlAuditRecord, ControlCoordinator } from "./model";
-import { NabuflowSandbox } from "./runtime-backend";
+import { runtimeSandboxStub, runtimeSandboxWebSocketConnect } from "./runtime-backend";
 
 const PREVIEW_COOKIE_PREFIX = "__Host-nabuflow_preview_";
 // Preview documents are intentionally framed by the NabuFlow app, which lives
@@ -486,12 +485,12 @@ function previewErrorResponse(
   );
 }
 
-function runtimeSandbox(env: WorkerBindings, identity: string): NabuflowSandbox {
-  return getSandbox(env.NABUFLOW_SANDBOX, identity, {
-    keepAlive: true,
-    sleepAfter: env.NABUFLOW_RUNTIME_SLEEP_AFTER,
-    enableDefaultSession: true,
-  }) as NabuflowSandbox;
+function runtimeSandbox(env: WorkerBindings, identity: string): PreviewSandbox {
+  const sandbox = runtimeSandboxStub(env, identity);
+  return {
+    containerFetch: (request, port) => sandbox.containerFetch(request, port),
+    wsConnect: (request, port) => runtimeSandboxWebSocketConnect(sandbox, request, port),
+  };
 }
 
 async function recordPreviewAudit(

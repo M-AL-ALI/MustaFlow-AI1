@@ -23,7 +23,7 @@ vi.mock("@workspace/db", () => ({
   },
 }));
 
-vi.mock("../routes/credits", () => ({
+vi.mock("./credits", () => ({
   deductCreditsAtomic: h.deductCreditsAtomic,
 }));
 

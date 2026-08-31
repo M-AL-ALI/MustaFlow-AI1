@@ -193,6 +193,10 @@ vi.mock("../../../lib/image-provider", () => ({
 
 vi.mock("../../../lib/ora-assets", () => ({
   persistOraAsset: vi.fn(async () => 1),
+  persistOraAssetStrict: vi.fn(async () => 1),
+  reserveOraGeneratedAsset: vi.fn(async () => ({ id: 1, storageKey: "assets/test" })),
+  completeOraGeneratedAsset: vi.fn(async () => 1),
+  cancelOraGeneratedAsset: vi.fn(async () => undefined),
   parseDataUri: (value: string) => {
     const match = value.match(/^data:([^;]+);base64,(.+)$/);
     return match ? { mimeType: match[1], base64: match[2] } : null;
@@ -204,7 +208,33 @@ vi.mock("../../../lib/image-storage", () => ({
     fileUrl: "/api/images/1/file",
     thumbnailUrl: "/api/images/1/thumb",
     storageKey: "test/image.png",
+    sha256: "a".repeat(64),
+    storageObjects: [
+      {
+        storageBackend: "r2",
+        storageKey: "test/image.png",
+        role: "primary",
+        sizeBytes: 5,
+      },
+    ],
   })),
+  deleteStoredImageObjects: vi.fn(async () => undefined),
+}));
+
+vi.mock("../../../lib/asset-registry", () => ({
+  AssetAdmissionError: class AssetAdmissionError extends Error {
+    constructor(
+      public readonly code: string,
+      public readonly status: number,
+      message = code,
+    ) {
+      super(message);
+    }
+  },
+  reserveAsset: vi.fn(async () => ({ id: 1 })),
+  beginAssetUpload: vi.fn(async () => ({ assetId: 1, storageKey: "test/image.png" })),
+  completeAsset: vi.fn(async () => undefined),
+  rejectReservedAsset: vi.fn(async () => undefined),
 }));
 
 vi.mock("../../../lib/public-ai/authed-user", () => ({
@@ -261,7 +291,7 @@ vi.mock("@workspace/db", () => {
       values: () => query,
       set: () => query,
       where: () => query,
-      returning: () => Promise.resolve([]),
+      returning: () => Promise.resolve([{ id: 1 }]),
       then: (resolve: (rows: unknown[]) => unknown) => resolve([]),
     };
     return query;
@@ -597,7 +627,7 @@ What should I tell Replit?`;
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.reply).toContain("Here's the image you asked for");
     expect(res.body.reply).not.toMatch(/sign in|sign up|create an account/i);
-    expect(res.body.imageUrl).toBe("data:image/png;base64,aW1hZ2U=");
+    expect(res.body.imageUrl).toBe("/api/images/1/file");
     expect(res.body.imageMeta).toEqual({
       kind: "logo",
       aspectRatio: "1:1",

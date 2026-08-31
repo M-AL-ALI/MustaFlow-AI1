@@ -1,12 +1,8 @@
 import { Router } from "express";
 import { and, eq, isNull, desc, asc, or, sql } from "drizzle-orm";
 import { db, oraAssetsTable, type OraAssetKind } from "@workspace/db";
-import {
-  PER_USER_STORAGE_BYTES,
-  getUserStorageBytes,
-  resolveOraAssetRowBytes,
-  persistOraAsset,
-} from "../lib/ora-assets";
+import { deleteOraAsset, resolveOraAssetRowBytes, persistOraAssetStrict } from "../lib/ora-assets";
+import { AssetAdmissionError, getQuota } from "../lib/asset-registry";
 import { relinkFileContextAfterRestore } from "../lib/public-ai/file-context-store";
 import { logger } from "../lib/logger";
 
@@ -61,7 +57,7 @@ router.get("/ora/assets", async (req, res) => {
   );
 
   try {
-    const [rows, [countRow], usedBytes] = await Promise.all([
+    const [rows, [countRow], quota] = await Promise.all([
       db
         .select({
           id: oraAssetsTable.id,
@@ -83,7 +79,7 @@ router.get("/ora/assets", async (req, res) => {
         .select({ count: sql<number>`COUNT(*)` })
         .from(oraAssetsTable)
         .where(ownership),
-      getUserStorageBytes(userId),
+      getQuota(userId),
     ]);
 
     const total = Number(countRow?.count ?? 0);
@@ -105,8 +101,9 @@ router.get("/ora/assets", async (req, res) => {
       offset,
       hasMore: offset + rows.length < total,
       storage: {
-        usedBytes,
-        capBytes: PER_USER_STORAGE_BYTES,
+        usedBytes: quota.usedBytes,
+        reservedBytes: quota.reservedBytes,
+        capBytes: quota.limitBytes,
       },
     });
   } catch (err) {
@@ -296,26 +293,28 @@ router.post("/ora/assets/:id/restore", async (req, res) => {
       return;
     }
 
-    const newAssetId = await persistOraAsset({
-      userId,
-      kind: target.kind as OraAssetKind,
-      fileName: target.fileName,
-      mimeType: target.mimeType,
-      format: target.format,
-      prompt: target.prompt,
-      base64: bytes.toString("base64"),
-      rootAssetId: chainRoot,
-      parentAssetId: head.id,
-      versionNumber: (head.versionNumber ?? 1) + 1,
-      sourceFileRef: head.sourceFileRef ?? target.sourceFileRef ?? null,
-      editSummary: `Restored version ${target.versionNumber ?? 1}`,
-    });
-    if (newAssetId == null) {
-      // persistOraAsset returns null on failure OR storage-quota skip.
-      res.status(507).json({
-        error: "Could not save the restored version — your library storage may be full.",
+    let newAssetId: number;
+    try {
+      newAssetId = await persistOraAssetStrict({
+        userId,
+        kind: target.kind as OraAssetKind,
+        fileName: target.fileName,
+        mimeType: target.mimeType,
+        format: target.format,
+        prompt: target.prompt,
+        base64: bytes.toString("base64"),
+        rootAssetId: chainRoot,
+        parentAssetId: head.id,
+        versionNumber: (head.versionNumber ?? 1) + 1,
+        sourceFileRef: head.sourceFileRef ?? target.sourceFileRef ?? null,
+        editSummary: `Restored version ${target.versionNumber ?? 1}`,
       });
-      return;
+    } catch (error) {
+      if (error instanceof AssetAdmissionError) {
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
+      throw error;
     }
 
     // AWAITED relink (not the fire-and-forget edit-path helper): repoint the
@@ -355,23 +354,26 @@ router.delete("/ora/assets/:id", async (req, res) => {
     return;
   }
   try {
-    const result = await db
-      .update(oraAssetsTable)
-      .set({ deletedAt: new Date() })
-      .where(
-        and(
-          eq(oraAssetsTable.id, id),
-          eq(oraAssetsTable.userId, userId),
-          isNull(oraAssetsTable.deletedAt),
-        ),
-      )
-      .returning({ id: oraAssetsTable.id });
-
-    if (result.length === 0) {
+    const result = await deleteOraAsset({ oraAssetId: id, userId });
+    if (result === "not-found") {
       res.status(404).json({ error: "Asset not found" });
       return;
     }
-    res.json({ ok: true });
+    if (result === "referenced") {
+      res.status(409).json({
+        error: "This file is still in use, so it was kept to avoid breaking your work.",
+      });
+      return;
+    }
+    if (result === "cleanup-pending") {
+      res.status(202).json({
+        ok: true,
+        cleanupPending: true,
+        message: "The file is hidden and its storage cleanup is still finishing.",
+      });
+      return;
+    }
+    res.json({ ok: true, bytesRetained: result === "retained" });
   } catch (err) {
     logger.error({ component: "ora-assets", err }, "Failed to delete Ora asset");
     res.status(500).json({ error: "Failed to delete asset" });

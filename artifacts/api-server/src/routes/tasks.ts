@@ -636,12 +636,11 @@ router.post(
 
     // Kick off tests via the durable queue (survives server restarts); fall back
     // to in-memory setImmediate when the queue is unavailable.
-    const { durableEnqueueRaw, isDurableQueueReady, QUEUE_APP_TESTING } =
+    const { durableEnqueueRawResult, isDurableWorkerReady, QUEUE_APP_TESTING } =
       await import("../lib/durable-queue");
-    const key = `testing-${params.data.taskId}`;
     let enqueued = false;
-    if (isDurableQueueReady()) {
-      const jobId = await durableEnqueueRaw(
+    if (isDurableWorkerReady(QUEUE_APP_TESTING)) {
+      const outcome = await durableEnqueueRawResult(
         QUEUE_APP_TESTING,
         {
           projectId: params.data.id,
@@ -649,10 +648,12 @@ router.post(
           projectDescription: project.name ?? project.kind,
           savedTestScript: savedTestScript ?? null,
         },
-        key,
+        undefined,
         { retryLimit: 2, retryDelay: 15, retryBackoff: true },
       );
-      enqueued = jobId !== null;
+      // Rerun is an intentional repeat action; it must not carry a permanent
+      // task-level singleton key that would suppress later user requests.
+      enqueued = outcome.status === "enqueued";
     }
     if (!enqueued) {
       setImmediate(() => {

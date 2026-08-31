@@ -16,6 +16,7 @@
  */
 import { Router, type IRouter } from "express";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { z } from "zod";
 import {
   db,
   galleryTemplatesTable,
@@ -32,7 +33,14 @@ import {
   ProjectWorkspaceUnavailableError,
   resolveProjectWorkspaceId,
 } from "../lib/workspace-tenancy";
-import { z } from "zod";
+import { extractProjectFileAssetIds } from "../lib/project-file-asset-usage";
+
+function templateSnapshotContainsPrivateAssetReference(snapshot: unknown): boolean {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  return Object.values(snapshot as Record<string, unknown>).some(
+    (content) => typeof content === "string" && extractProjectFileAssetIds(content).length > 0,
+  );
+}
 
 const router: IRouter = Router();
 
@@ -204,7 +212,6 @@ router.post("/gallery-templates/:slug/rate", async (req, res): Promise<void> => 
       res.status(404).json({ error: "Template not found" });
       return;
     }
-
     await db
       .insert(templateRatingsTable)
       .values({
@@ -269,6 +276,13 @@ router.post("/gallery-templates/:slug/use", async (req, res): Promise<void> => {
 
     if (!tpl) {
       res.status(404).json({ error: "Template not found" });
+      return;
+    }
+    if (templateSnapshotContainsPrivateAssetReference(tpl.filesSnapshot)) {
+      res.status(409).json({
+        error: "This template contains private uploads and cannot be copied safely yet.",
+        code: "template_private_asset_copy_unsupported",
+      });
       return;
     }
 
@@ -350,6 +364,13 @@ router.post("/gallery-templates/:slug/fork", async (req, res): Promise<void> => 
 
     if (!tpl) {
       res.status(404).json({ error: "Template not found" });
+      return;
+    }
+    if (templateSnapshotContainsPrivateAssetReference(tpl.filesSnapshot)) {
+      res.status(409).json({
+        error: "This template contains private uploads and cannot be copied safely yet.",
+        code: "template_private_asset_copy_unsupported",
+      });
       return;
     }
 

@@ -12,6 +12,16 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// This suite owns R2 retry/header behavior, not project-file persistence.
+// Preserve its DATABASE NONE boundary while retaining the legacy binary
+// behavior expected by uploadSnapshotToR2.
+vi.mock("./project-file-asset-reference", () => ({
+  resolveProjectFileBytes: vi.fn(
+    async (input: { content: string; legacyEncoding?: "base64" | "utf8" }) =>
+      Buffer.from(input.content, input.legacyEncoding === "base64" ? "base64" : "utf8"),
+  ),
+}));
+
 // ── r2CacheControl is a pure helper — test it directly ───────────────────────
 
 import { r2CacheControl } from "./cloudflare";

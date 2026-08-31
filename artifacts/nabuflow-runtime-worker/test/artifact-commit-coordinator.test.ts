@@ -1,11 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlDurableObject } from "../src/control-durable-object";
-import type { StoredArtifactCommitJob } from "../src/model";
+import {
+  DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP,
+  type StoredAcceptanceLeaseJob,
+  type StoredArtifactCommitJob,
+} from "../src/model";
 import { MemoryArtifactCommitQueue, fakeEnv } from "./helpers";
 
 class MemoryDurableStorage {
   private readonly values = new Map<string, unknown>();
   private alarm: number | null = null;
+  failNextAlarmSet = false;
 
   async get<T>(key: string): Promise<T | undefined> {
     return structuredClone(this.values.get(key)) as T | undefined;
@@ -41,7 +46,19 @@ class MemoryDurableStorage {
   }
 
   async setAlarm(scheduledTime: number): Promise<void> {
+    if (this.failNextAlarmSet) {
+      this.failNextAlarmSet = false;
+      throw new Error("injected alarm scheduling failure");
+    }
     this.alarm = scheduledTime;
+  }
+
+  scheduledAlarm(): number | null {
+    return this.alarm;
+  }
+
+  clearAlarmForTest(): void {
+    this.alarm = null;
   }
 }
 
@@ -61,6 +78,276 @@ const claim = {
 afterEach(() => vi.useRealTimers());
 
 describe("artifact commit coordinator leases", () => {
+  it("makes one coordinator-owned successor for a replayed legacy deployment deferral", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const storage = new MemoryDurableStorage();
+    const env = fakeEnv();
+    const durable = coordinator(storage, env);
+    const registered = await durable.registerDurableOperation({
+      key: "acceptance-deployment-legacy",
+      fingerprint: "c".repeat(64),
+      kind: "acceptance-lease",
+      runtimeIdentity: `acceptance:nal_${"a".repeat(40)}`,
+      subjectKey: "create",
+      request: {
+        leaseId: `nal_${"a".repeat(40)}`,
+        operation: "create",
+        ownerSubjectHash: "b".repeat(64),
+      },
+      expectedDeploymentVersion: "acceptance-current-v1",
+      nowMs: 1_000,
+    });
+    expect(registered.state).toBe("new");
+    if (registered.state !== "new") throw new Error("expected a new acceptance job");
+    const legacyJob = structuredClone(registered.job) as StoredAcceptanceLeaseJob;
+    delete legacyJob.deploymentDeferralCount;
+    await storage.put(legacyJob.jobKey, legacyJob);
+
+    const unsafeSignal = `${"wrong-deployment-".repeat(12)}\nsecret-detail`;
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(legacyJob.jobKey, unsafeSignal, 2_000),
+    ).resolves.toBe("deferred");
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(legacyJob.jobKey, unsafeSignal, 2_001),
+    ).resolves.toBe("deferred");
+
+    const queue = env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue;
+    expect(queue.messages).toHaveLength(0);
+    vi.setSystemTime(7_000);
+    await durable.alarm();
+    await durable.alarm();
+    expect(queue.messages).toEqual([
+      expect.objectContaining({
+        jobKey: legacyJob.jobKey,
+        deploymentDeferralCount: 1,
+      }),
+    ]);
+    await expect(durable.getDurableOperation(legacyJob.jobKey)).resolves.toMatchObject({
+      state: "active",
+      deploymentDeferralCount: 1,
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          event: "deployment-version-deferred",
+          deploymentVersion: expect.not.stringContaining("\n"),
+        }),
+      ]),
+    });
+    const stored = await durable.getDurableOperation(legacyJob.jobKey);
+    const deploymentEvent = stored?.events.find(
+      (event) => event.event === "deployment-version-deferred",
+    );
+    expect(deploymentEvent?.deploymentVersion?.length).toBeLessThanOrEqual(100);
+  });
+
+  it("terminalizes repeated deployment mismatches at the direct cap and replays the typed result", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const env = fakeEnv();
+    const durable = coordinator(new MemoryDurableStorage(), env);
+    const registration = {
+      key: "acceptance-deployment-cap",
+      fingerprint: "d".repeat(64),
+      kind: "acceptance-lease" as const,
+      runtimeIdentity: `acceptance:nal_${"c".repeat(40)}`,
+      subjectKey: "create",
+      request: {
+        leaseId: `nal_${"c".repeat(40)}`,
+        operation: "create" as const,
+        ownerSubjectHash: "e".repeat(64),
+      },
+      expectedDeploymentVersion: "acceptance-current-v1",
+    };
+    const registered = await durable.registerDurableOperation({ ...registration, nowMs: 1_000 });
+    expect(registered.state).toBe("new");
+    if (registered.state !== "new") throw new Error("expected a new acceptance job");
+
+    for (
+      let generation = 0;
+      generation < DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP;
+      generation += 1
+    ) {
+      const observedAt = 2_000 + generation * 6_000;
+      await expect(
+        durable.recordDurableOperationDeploymentObservation(
+          registered.job.jobKey,
+          "acceptance-previous-v1",
+          observedAt,
+          generation,
+        ),
+      ).resolves.toBe("deferred");
+      vi.setSystemTime(observedAt + 5_000);
+      await durable.alarm();
+    }
+    const queue = env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue;
+    expect(queue.messages).toHaveLength(DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP);
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(
+        registered.job.jobKey,
+        "acceptance-previous-v1",
+        79_999,
+        0,
+      ),
+    ).resolves.toBe("deferred");
+    expect(queue.messages).toHaveLength(DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP);
+    await expect(durable.getDurableOperation(registered.job.jobKey)).resolves.toMatchObject({
+      state: "active",
+      deploymentDeferralCount: DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP,
+    });
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(
+        registered.job.jobKey,
+        "acceptance-previous-v1",
+        80_000,
+        DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP,
+      ),
+    ).resolves.toBe("terminal");
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(
+        registered.job.jobKey,
+        "acceptance-previous-v1",
+        80_001,
+        DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP,
+      ),
+    ).resolves.toBe("terminal");
+    expect(queue.messages).toHaveLength(DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP);
+    await expect(
+      durable.registerDurableOperation({ ...registration, nowMs: 80_002 }),
+    ).resolves.toEqual({
+      state: "replay",
+      response: {
+        status: 503,
+        body: {
+          ok: false,
+          code: "acceptance_deployment_version_unavailable",
+          message: "The acceptance lease operation could not run on the required Worker deployment",
+          retryable: false,
+        },
+      },
+    });
+    await expect(durable.getDurableOperation(registered.job.jobKey)).resolves.toMatchObject({
+      events: expect.arrayContaining([
+        expect.objectContaining({ event: "deployment-deferral-cap-terminal" }),
+      ]),
+    });
+  });
+
+  it("re-arms a persisted deployment successor when the first alarm write fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const storage = new MemoryDurableStorage();
+    const env = fakeEnv();
+    const durable = coordinator(storage, env);
+    const registered = await durable.registerDurableOperation({
+      key: "acceptance-deployment-alarm-replay",
+      fingerprint: "1".repeat(64),
+      kind: "acceptance-lease",
+      runtimeIdentity: `acceptance:nal_${"1".repeat(40)}`,
+      subjectKey: "create",
+      request: {
+        leaseId: `nal_${"1".repeat(40)}`,
+        operation: "create",
+        ownerSubjectHash: "2".repeat(64),
+      },
+      expectedDeploymentVersion: "acceptance-current-v1",
+      nowMs: 1_000,
+    });
+    expect(registered.state).toBe("new");
+    if (registered.state !== "new") throw new Error("expected a new acceptance job");
+    storage.clearAlarmForTest();
+    storage.failNextAlarmSet = true;
+
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(
+        registered.job.jobKey,
+        "acceptance-previous-v1",
+        2_000,
+      ),
+    ).rejects.toThrow("injected alarm scheduling failure");
+    await expect(durable.getDurableOperation(registered.job.jobKey)).resolves.toMatchObject({
+      state: "active",
+      deploymentDeferralCount: 1,
+      deploymentDeferralEnqueuedCount: 0,
+      deploymentDeferralReadyAtMs: 7_000,
+    });
+
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(
+        registered.job.jobKey,
+        "acceptance-previous-v1",
+        2_001,
+      ),
+    ).resolves.toBe("deferred");
+    expect(storage.scheduledAlarm()).toBe(7_000);
+    vi.setSystemTime(7_000);
+    await durable.alarm();
+    expect((env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue).messages).toEqual([
+      expect.objectContaining({
+        jobKey: registered.job.jobKey,
+        deploymentDeferralCount: 1,
+      }),
+    ]);
+  });
+
+  it("enforces the absolute deadline in the deployment-observation transaction", async () => {
+    const env = fakeEnv();
+    const durable = coordinator(new MemoryDurableStorage(), env);
+    const registration = {
+      key: "acceptance-deployment-deadline",
+      fingerprint: "e".repeat(64),
+      kind: "acceptance-lease" as const,
+      runtimeIdentity: `acceptance:nal_${"d".repeat(40)}`,
+      subjectKey: "create",
+      request: {
+        leaseId: `nal_${"d".repeat(40)}`,
+        operation: "create" as const,
+        ownerSubjectHash: "f".repeat(64),
+      },
+      expectedDeploymentVersion: "acceptance-current-v1",
+    };
+    const registered = await durable.registerDurableOperation({ ...registration, nowMs: 1_000 });
+    expect(registered.state).toBe("new");
+    if (registered.state !== "new") throw new Error("expected a new acceptance job");
+
+    await expect(
+      durable.recordDurableOperationDeploymentObservation(
+        registered.job.jobKey,
+        "acceptance-current-v1",
+        registered.job.deadlineMs,
+      ),
+    ).resolves.toBe("terminal");
+    expect(
+      (env.DURABLE_OPERATION_QUEUE as unknown as MemoryArtifactCommitQueue).messages,
+    ).toHaveLength(0);
+    await expect(durable.getDurableOperation(registered.job.jobKey)).resolves.toMatchObject({
+      state: "failed",
+      deploymentDeferralCount: 0,
+      response: { body: { code: "acceptance_operation_timeout", retryable: false } },
+      events: expect.arrayContaining([expect.objectContaining({ event: "deadline-terminal" })]),
+    });
+    const terminal = await durable.getDurableOperation(registered.job.jobKey);
+    expect(terminal?.events).not.toContainEqual(
+      expect.objectContaining({ event: "deployment-deferral-cap-terminal" }),
+    );
+    await expect(
+      durable.registerDurableOperation({
+        ...registration,
+        nowMs: registered.job.deadlineMs + 1,
+      }),
+    ).resolves.toEqual({
+      state: "replay",
+      response: {
+        status: 504,
+        body: {
+          ok: false,
+          code: "acceptance_operation_timeout",
+          message: "The acceptance lease operation did not complete before the execution deadline",
+          retryable: false,
+        },
+      },
+    });
+  });
+
   it("runs production database ownership through the shared renewable lease chassis", async () => {
     const durable = coordinator();
     const allocationIdentity = "d".repeat(64);

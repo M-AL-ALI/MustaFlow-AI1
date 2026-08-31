@@ -9,7 +9,9 @@ import {
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { projectsTable } from "./projects";
+import { projectArtifactsTable } from "./project-artifacts";
 
 export const ASSET_KINDS = ["image", "file", "snapshot", "recording", "generated"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
@@ -17,7 +19,14 @@ export type AssetKind = (typeof ASSET_KINDS)[number];
 export const ASSET_SCOPES = ["account", "project", "thread"] as const;
 export type AssetScope = (typeof ASSET_SCOPES)[number];
 
-export const ASSET_STATES = ["reserved", "ready", "rejected", "deleted"] as const;
+export const ASSET_STATES = [
+  "reserved",
+  "uploading",
+  "ready",
+  "deleting",
+  "rejected",
+  "deleted",
+] as const;
 export type AssetState = (typeof ASSET_STATES)[number];
 
 export const ASSET_SCAN_STATES = [
@@ -73,6 +82,7 @@ export const assetsTable = pgTable(
     messageId: integer("message_id"),
     context: jsonb("context").$type<AssetContext>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    uploadStartedAt: timestamp("upload_started_at", { withTimezone: true }),
     readyAt: timestamp("ready_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
@@ -92,21 +102,62 @@ export const assetUsageTable = pgTable(
       .notNull()
       .references(() => assetsTable.id, { onDelete: "cascade" }),
     projectId: integer("project_id").references(() => projectsTable.id, { onDelete: "cascade" }),
+    artifactId: integer("artifact_id").references(() => projectArtifactsTable.id, {
+      onDelete: "cascade",
+    }),
     versionId: integer("version_id"),
     filePath: text("file_path"),
     consumer: text("consumer").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    // Keep the type-level identity exactly aligned with the startup migration:
+    // PostgreSQL NULL values are not equal under an ordinary unique index.
     uniqueIndex("asset_usage_identity_uq").on(
       table.assetId,
-      table.projectId,
-      table.versionId,
-      table.filePath,
+      sql`COALESCE(${table.projectId}, -1)`,
+      sql`COALESCE(${table.artifactId}, -1)`,
+      sql`COALESCE(${table.versionId}, -1)`,
+      sql`COALESCE(${table.filePath}, '')`,
       table.consumer,
     ),
     index("asset_usage_asset_idx").on(table.assetId),
     index("asset_usage_project_idx").on(table.projectId),
+  ],
+);
+
+/** @dormantExport Shared validation may consume this once storage-object APIs are exposed. */
+export const ASSET_STORAGE_OBJECT_STATES = [
+  "reserved",
+  "uploading",
+  "ready",
+  "deleting",
+  "deleted",
+] as const;
+
+/** Every physical object billed by the storage provider for one logical asset. */
+export const assetStorageObjectsTable = pgTable(
+  "asset_storage_objects",
+  {
+    id: serial("id").primaryKey(),
+    assetId: integer("asset_id")
+      .notNull()
+      .references(() => assetsTable.id, { onDelete: "cascade" }),
+    storageBackend: text("storage_backend").notNull(),
+    storageKey: text("storage_key").notNull(),
+    role: text("role").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
+    /** Null only for adopted provider objects whose exact bytes still need observation. */
+    sizeMeasuredAt: timestamp("size_measured_at", { withTimezone: true }),
+    state: text("state").notNull().default("reserved"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("asset_storage_objects_key_uq").on(table.storageKey),
+    uniqueIndex("asset_storage_objects_role_uq").on(table.assetId, table.role),
+    index("asset_storage_objects_asset_idx").on(table.assetId, table.state),
   ],
 );
 

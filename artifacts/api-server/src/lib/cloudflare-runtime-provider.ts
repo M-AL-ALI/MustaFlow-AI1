@@ -30,6 +30,10 @@ import {
   promoteRuntimeLayeredArtifactResponseSchema,
   activateRouteResponseSchema,
   deactivateRouteResponseSchema,
+  routeInventoryResponseSchema,
+  routeReadResponseSchema,
+  PUBLISHED_ROUTE_INVENTORY_MAX_PAGES,
+  PUBLISHED_ROUTE_INVENTORY_SCAN_LIMIT,
   productionDatabaseAllocationIdentity,
   productionDatabaseAllocationResponseSchema,
   productionDatabaseReleaseResponseSchema,
@@ -40,6 +44,8 @@ import {
   type TenantRuntimeConfig,
   type AcceptedSealedRelease,
   type ProductionArtifactRelease,
+  type RouteRecord,
+  type RouteInventoryResponse,
 } from "@workspace/tenant-runtime-contracts";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { sealRuntimeArtifact } from "./runtime-artifact";
@@ -67,6 +73,7 @@ import {
   type TenantRuntimeProvider,
   type ZeroGenerationTenantRuntimeProvider,
   type ProductionArtifactPromotingTenantRuntimeProvider,
+  type ProductionRouteInventoryTenantRuntimeProvider,
   type ProductionDatabaseCapabilityTenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
@@ -323,6 +330,7 @@ export class CloudflareRuntimeProvider
     LayeredArtifactDeployingTenantRuntimeProvider,
     ZeroGenerationTenantRuntimeProvider,
     ProductionArtifactPromotingTenantRuntimeProvider,
+    ProductionRouteInventoryTenantRuntimeProvider,
     ProductionDatabaseCapabilityTenantRuntimeProvider
 {
   readonly providerId = "cloudflare";
@@ -1895,6 +1903,77 @@ export class CloudflareRuntimeProvider
     }
     this.deployedArtifacts.delete(input.candidateRelease.targetRuntimeIdentity);
   }
+
+  async inventoryProductionRoutes(projectId: number): Promise<RouteRecord[]> {
+    await this.requireControlFeature("published-route-inventory-v1");
+    const routes = new Map<string, RouteRecord>();
+    const observedCursors = new Set<string>();
+    let cursor: string | null = null;
+    for (let page = 0; page < PUBLISHED_ROUTE_INVENTORY_MAX_PAGES; page += 1) {
+      const query: URLSearchParams = new URLSearchParams({
+        scanLimit: String(PUBLISHED_ROUTE_INVENTORY_SCAN_LIMIT),
+        ...(cursor === null ? {} : { cursor }),
+      });
+      const result: RouteInventoryResponse = await this.request({
+        path: `${CONTROL_API_PREFIX}/projects/${projectId}/routes?${query.toString()}`,
+        parse: routeInventoryResponseSchema,
+      });
+      for (const route of result.routes) routes.set(route.hostname, route);
+      if (result.complete) return [...routes.values()];
+      if (result.nextCursor === null || observedCursors.has(result.nextCursor)) {
+        throw new CloudflareRuntimeControlError(
+          503,
+          "published_route_inventory_incomplete",
+          true,
+          "Published route inventory did not provide forward progress",
+        );
+      }
+      observedCursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+    throw new CloudflareRuntimeControlError(
+      503,
+      "published_route_inventory_limit_exceeded",
+      true,
+      "Published route inventory exceeded its bounded scan",
+    );
+  }
+
+  async readProductionRoute(hostname: string): Promise<RouteRecord | null> {
+    await this.requireControlFeature("published-route-inventory-v1");
+    const result = await this.request({
+      path: `${CONTROL_API_PREFIX}/routes/${encodeURIComponent(hostname)}`,
+      parse: routeReadResponseSchema,
+    });
+    return result.route;
+  }
+
+  async retireObservedProductionRoute(route: RouteRecord) {
+    await this.requireControlFeature("published-route-inventory-v1");
+    const observedIdentity = await sha256Hex(canonicalJson(route));
+    await this.request({
+      method: "DELETE",
+      path: `${CONTROL_API_PREFIX}/routes/${encodeURIComponent(route.hostname)}`,
+      body: {
+        hostname: route.hostname,
+        expectedManifestRevision: route.manifestRevision,
+        expectedSandboxIdentity: route.sandboxIdentity,
+      },
+      idempotencyKey: `published-route-retirement:${observedIdentity}`,
+      operation: this.operationOptions(
+        "production-route.retire-observed",
+        RUNTIME_CONTROL_OPERATION_BOUND_MS,
+        "production_route_retirement_timeout",
+        "production_route_retirement_cancelled",
+      ),
+      parse: deactivateRouteResponseSchema,
+    });
+    const current = await this.readProductionRoute(route.hostname);
+    return current === null
+      ? ({ state: "absent" } as const)
+      : ({ state: "present", route: current } as const);
+  }
+
   async rollbackProductionArtifactActivation(input: {
     activatedRelease: ProductionArtifactRelease;
     previousRelease: ProductionArtifactRelease | null;

@@ -25,10 +25,11 @@ import { Router, type IRouter } from "express";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, projectsTable, previewSnapshotsTable } from "@workspace/db";
 import { serveSnapshot, serveSnapshotForEnv, servePreviewSnapshot } from "../lib/serveSnapshot";
-import { r2GetObject } from "../lib/cloudflare";
+import { cloudflareHostnameCacheTag, r2GetObject } from "../lib/cloudflare";
 import { loadPreviewProject, userCanPreviewProject } from "../lib/livePreviewProxy";
 
 const router: IRouter = Router();
+const PLATFORM_DOMAIN = process.env.PLATFORM_DOMAIN ?? "mustaflow.app";
 
 // ── Staging route: /api/p/:slug/staging/{*splat} ──────────────────────────
 // MUST be registered before the generic catch-all so Express matches it first.
@@ -119,6 +120,9 @@ router.get("/p/:previewSlug/preview/{*splat}", async (req, res): Promise<void> =
 // We tag those responses with X-Mustaflow-Origin: api-fallback.
 router.get("/p/:slug/{*splat}", async (req, res): Promise<void> => {
   const slug = req.params.slug;
+  if (!/^\d+$/.test(slug)) {
+    res.setHeader("Cache-Tag", cloudflareHostnameCacheTag(`${slug}.${PLATFORM_DOMAIN}`)!);
+  }
 
   const splat = req.params.splat;
   const raw = Array.isArray(splat) ? splat.join("/") : (splat ?? "");

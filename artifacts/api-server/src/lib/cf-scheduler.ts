@@ -17,7 +17,7 @@
  *    Writes an admin alert row to deployment_logs.
  */
 
-import { eq, isNotNull, and, lte, gte, like, desc, sql } from "drizzle-orm";
+import { eq, isNotNull, isNull, and, lte, gte, like, desc, sql } from "drizzle-orm";
 import { db, projectDomainsTable, projectsTable, deploymentLogsTable } from "@workspace/db";
 import {
   cfEnabled,
@@ -37,6 +37,15 @@ const DAILY_INTERVAL_MS = 24 * 60 * 60_000;
 const INITIAL_POLL_DELAY_MS = 60_000; // 1 min warm-up before first poll
 const INITIAL_DAILY_DELAY_MS = 90_000; // 1.5 min warm-up before first daily run
 const EXPIRY_WARN_DAYS = 14;
+
+export function buildActiveCfHostnameIdUnion(
+  domainIds: Array<string | null>,
+  legacyProjectIds: Array<string | null>,
+): Set<string> {
+  return new Set(
+    [...domainIds, ...legacyProjectIds].filter((value): value is string => Boolean(value)),
+  );
+}
 
 // ── Cert-status polling ───────────────────────────────────────────────────────
 
@@ -60,9 +69,11 @@ export async function runCertStatusPoll(): Promise<void> {
         isPrimary: projectDomainsTable.isPrimary,
         cfHostnameId: projectDomainsTable.cfHostnameId,
         sslStatus: projectDomainsTable.sslStatus,
+        updatedAt: projectDomainsTable.updatedAt,
       })
       .from(projectDomainsTable)
-      .where(isNotNull(projectDomainsTable.cfHostnameId));
+      .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
+      .where(and(isNotNull(projectDomainsTable.cfHostnameId), isNull(projectsTable.deletedAt)));
 
     for (const domain of domains) {
       polled++;
@@ -81,7 +92,7 @@ export async function runCertStatusPoll(): Promise<void> {
               : "active"
             : newStatus;
 
-        await db
+        const persisted = await db
           .update(projectDomainsTable)
           .set({
             sslStatus: finalStatus,
@@ -89,7 +100,19 @@ export async function runCertStatusPoll(): Promise<void> {
             sslExpiresAt: expiresOn ?? undefined,
             updatedAt: new Date(),
           })
-          .where(eq(projectDomainsTable.id, domain.id));
+          .where(
+            and(
+              eq(projectDomainsTable.id, domain.id),
+              eq(projectDomainsTable.projectId, domain.projectId),
+              eq(projectDomainsTable.cfHostnameId, domain.cfHostnameId!),
+              eq(projectDomainsTable.updatedAt, domain.updatedAt),
+            ),
+          )
+          .returning({ id: projectDomainsTable.id });
+
+        // A concurrent user mutation or retirement changed the row after this
+        // observation. Do not overwrite that newer state or emit side effects.
+        if (!persisted[0]) continue;
 
         // Sync legacy projects.sslStatus for the primary domain
         if (domain.isPrimary) {
@@ -103,7 +126,7 @@ export async function runCertStatusPoll(): Promise<void> {
                   : undefined,
               updatedAt: new Date(),
             })
-            .where(eq(projectsTable.id, domain.projectId));
+            .where(and(eq(projectsTable.id, domain.projectId), isNull(projectsTable.deletedAt)));
         }
 
         // Send domain verified email on first transition to "active"
@@ -166,17 +189,25 @@ export async function runDanglingCnameSweep(): Promise<void> {
       return;
     }
 
-    // Build a set of known cfHostnameIds from project_domains
+    // Only active projects can protect a provider hostname from cleanup. Union
+    // both the multi-domain table and the legacy projects pointer so the sweep
+    // neither preserves tombstoned resources nor deletes a live legacy cert.
     const knownDomains = await db
       .select({
         cfHostnameId: projectDomainsTable.cfHostnameId,
-        hostname: projectDomainsTable.hostname,
-        projectId: projectDomainsTable.projectId,
       })
       .from(projectDomainsTable)
-      .where(isNotNull(projectDomainsTable.cfHostnameId));
+      .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
+      .where(and(isNotNull(projectDomainsTable.cfHostnameId), isNull(projectsTable.deletedAt)));
+    const knownLegacyProjects = await db
+      .select({ cfHostnameId: projectsTable.cfHostnameId })
+      .from(projectsTable)
+      .where(and(isNotNull(projectsTable.cfHostnameId), isNull(projectsTable.deletedAt)));
 
-    const knownIds = new Set(knownDomains.map((d) => d.cfHostnameId));
+    const knownIds = buildActiveCfHostnameIdUnion(
+      knownDomains.map((domain) => domain.cfHostnameId),
+      knownLegacyProjects.map((project) => project.cfHostnameId),
+    );
 
     let removed = 0;
     let kept = 0;
@@ -247,11 +278,13 @@ export async function runExpiryAlert(): Promise<void> {
         cfHostnameId: projectDomainsTable.cfHostnameId,
       })
       .from(projectDomainsTable)
+      .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
       .where(
         and(
           isNotNull(projectDomainsTable.sslExpiresAt),
           lte(projectDomainsTable.sslExpiresAt, cutoff),
           isNotNull(projectDomainsTable.cfHostnameId),
+          isNull(projectsTable.deletedAt),
         ),
       );
 
@@ -424,11 +457,13 @@ export async function runByoCertRotationReminders(): Promise<void> {
         updatedAt: projectDomainsTable.updatedAt,
       })
       .from(projectDomainsTable)
+      .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
       .where(
         and(
           eq(projectDomainsTable.sslSource, "byo"),
           isNotNull(projectDomainsTable.byoCertExpiresAt),
           lte(projectDomainsTable.byoCertExpiresAt, cutoff),
+          isNull(projectsTable.deletedAt),
         ),
       );
 
@@ -540,7 +575,9 @@ export async function getCfHostnameSummary(): Promise<CfHostnameSummary> {
         sslStatus: projectDomainsTable.sslStatus,
         cfHostnameId: projectDomainsTable.cfHostnameId,
       })
-      .from(projectDomainsTable);
+      .from(projectDomainsTable)
+      .innerJoin(projectsTable, eq(projectDomainsTable.projectId, projectsTable.id))
+      .where(isNull(projectsTable.deletedAt));
 
     const summary: CfHostnameSummary = {
       total: 0,

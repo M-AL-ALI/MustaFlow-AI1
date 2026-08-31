@@ -4,7 +4,8 @@
  * Storage strategy (in priority order):
  *   1. Cloudflare R2 (S3-compatible) when CF_R2_* env vars are set.
  *      Uploads full-size WebP + 400px-wide thumbnail to R2.
- *      fileUrl = CF_R2_PUBLIC_URL/<key>  (or a constructed URL).
+ *      Browser delivery remains behind the authenticated image route; provider
+ *      object URLs and keys are never presentation data.
  *   2. Dev fallback (NODE_ENV !== production): image written to OS temp dir;
  *      fileUrl = /api/images/<id>/file  (served by the image-gen route).
  *      storageKey = absolute temp-file path.
@@ -14,15 +15,37 @@
  */
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { createHash, randomUUID } from "node:crypto";
+import { readFile, unlink, writeFile } from "node:fs/promises";
+import {
+  DeleteObjectCommand,
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
 import sharp from "sharp";
 import { logger } from "./logger";
+import { registerAssetStorageObjects } from "./asset-registry";
+
+export type StoredImageObject = {
+  role: "primary" | "thumbnail";
+  storageBackend: "r2" | "dev-file";
+  storageKey: string;
+  sizeBytes: number;
+};
+
+export type StoredImageAssetOwner = {
+  assetId: number;
+  ownerUserId: string;
+  actorUserId: string;
+};
 
 export interface StorageResult {
   fileUrl: string;
   thumbnailUrl: string | null;
   storageKey: string | null;
+  storageObjects: StoredImageObject[];
+  sha256: string;
 }
 
 // ── R2 client ─────────────────────────────────────────────────────────────────
@@ -30,7 +53,6 @@ export interface StorageResult {
 function getR2Config(): {
   client: S3Client;
   bucket: string;
-  publicBaseUrl: string;
 } | null {
   const accountId = process.env.CF_ACCOUNT_ID;
   const accessKey = process.env.CF_R2_ACCESS_KEY_ID;
@@ -45,15 +67,7 @@ function getR2Config(): {
     credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
   });
 
-  // CF_R2_PUBLIC_URL must be set to the public-facing base URL for the bucket,
-  // e.g. https://images.yourdomain.com  (no trailing slash).
-  // If absent, we attempt to construct an r2.dev URL — but that requires the
-  // bucket to have public-access enabled in the Cloudflare dashboard.
-  const publicBaseUrl =
-    process.env.CF_R2_PUBLIC_URL?.replace(/\/$/, "") ??
-    `https://${bucket}.${accountId}.r2.cloudflarestorage.com`;
-
-  return { client, bucket, publicBaseUrl };
+  return { client, bucket };
 }
 
 // ── Upload helpers ─────────────────────────────────────────────────────────────
@@ -63,17 +77,17 @@ async function uploadToR2(
   key: string,
   body: Buffer,
   contentType: string,
-): Promise<string> {
+): Promise<void> {
   await r2.client.send(
     new PutObjectCommand({
       Bucket: r2.bucket,
       Key: key,
       Body: body,
       ContentType: contentType,
-      CacheControl: "public, max-age=31536000, immutable",
+      CacheControl: "private, no-store",
+      ServerSideEncryption: "AES256",
     }),
   );
-  return `${r2.publicBaseUrl}/${key}`;
 }
 
 // ── Download from provider URL or decode data URI ────────────────────────────
@@ -118,24 +132,59 @@ async function storeWebpBuffer(
   keyPrefix: string,
   imageId: number,
   devFileUrl: string,
+  asset: StoredImageAssetOwner,
 ): Promise<StorageResult> {
   const r2 = getR2Config();
+  const sha256 = createHash("sha256").update(webpBuffer).digest("hex");
 
   if (r2) {
-    const key = `${keyPrefix}/${imageId}/full.webp`;
-    const thumbKey = `${keyPrefix}/${imageId}/thumb.webp`;
+    const ownerNamespace = createHash("sha256")
+      .update(asset.ownerUserId)
+      .digest("hex")
+      .slice(0, 24);
+    const opaqueRoot = `${keyPrefix}/${ownerNamespace}/${randomUUID()}`;
+    const key = `${opaqueRoot}/full.webp`;
+    const thumbKey = `${opaqueRoot}/thumb.webp`;
 
     const thumbBuffer = await sharp(rawBufferForThumb)
       .resize({ width: 400, withoutEnlargement: true })
       .webp({ quality: 75 })
       .toBuffer();
 
-    const [fileUrl, thumbnailUrl] = await Promise.all([
-      uploadToR2(r2, key, webpBuffer, "image/webp"),
-      uploadToR2(r2, thumbKey, thumbBuffer, "image/webp"),
-    ]);
-
-    return { fileUrl, thumbnailUrl, storageKey: key };
+    const storageObjects: StoredImageObject[] = [
+      { role: "primary", storageBackend: "r2", storageKey: key, sizeBytes: webpBuffer.length },
+      {
+        role: "thumbnail",
+        storageBackend: "r2",
+        storageKey: thumbKey,
+        sizeBytes: thumbBuffer.length,
+      },
+    ];
+    await registerAssetStorageObjects({
+      ...asset,
+      objects: storageObjects,
+    });
+    const uploadedKeys: string[] = [];
+    try {
+      await uploadToR2(r2, key, webpBuffer, "image/webp");
+      uploadedKeys.push(key);
+      await uploadToR2(r2, thumbKey, thumbBuffer, "image/webp");
+      uploadedKeys.push(thumbKey);
+      return {
+        fileUrl: devFileUrl,
+        thumbnailUrl: `${devFileUrl}?role=thumbnail`,
+        storageKey: key,
+        storageObjects,
+        sha256,
+      };
+    } catch (error) {
+      await Promise.allSettled(
+        uploadedKeys.map((uploadedKey) =>
+          r2.client.send(new DeleteObjectCommand({ Bucket: r2.bucket, Key: uploadedKey })),
+        ),
+      );
+      throw error;
+    }
   }
 
   if (process.env.NODE_ENV === "production") {
@@ -147,8 +196,23 @@ async function storeWebpBuffer(
 
   const tmpBase = join(tmpdir(), `mustaflow-img-${imageId}-${Date.now()}`);
   const tmpPath = `${tmpBase}.webp`;
+  const storageObjects: StoredImageObject[] = [
+    {
+      role: "primary",
+      storageBackend: "dev-file",
+      storageKey: tmpPath,
+      sizeBytes: webpBuffer.length,
+    },
+  ];
+  await registerAssetStorageObjects({ ...asset, objects: storageObjects });
   await writeFile(tmpPath, webpBuffer);
-  return { fileUrl: devFileUrl, thumbnailUrl: null, storageKey: tmpPath };
+  return {
+    fileUrl: devFileUrl,
+    thumbnailUrl: null,
+    storageKey: tmpPath,
+    storageObjects,
+    sha256,
+  };
 }
 
 // ── Main export: generated images ─────────────────────────────────────────────
@@ -156,6 +220,7 @@ async function storeWebpBuffer(
 export async function storeGeneratedImage(
   openaiUrl: string,
   imageId: number,
+  asset: StoredImageAssetOwner,
 ): Promise<StorageResult> {
   const isDataUri = openaiUrl.startsWith("data:");
   logger.info(
@@ -177,6 +242,7 @@ export async function storeGeneratedImage(
       "generated-images",
       imageId,
       `/api/images/${imageId}/file`,
+      asset,
     );
     logger.info({ imageId }, "image-storage: R2 upload complete");
     return result;
@@ -189,6 +255,7 @@ export async function storeGeneratedImage(
     "generated-images",
     imageId,
     `/api/images/${imageId}/file`,
+    asset,
   );
 }
 
@@ -202,6 +269,7 @@ export async function storeUploadedImage(
   webpBuffer: Buffer,
   rawBuffer: Buffer,
   imageId: number,
+  asset: StoredImageAssetOwner,
 ): Promise<StorageResult> {
   logger.info({ imageId }, "image-storage: storing uploaded image");
   return storeWebpBuffer(
@@ -210,12 +278,17 @@ export async function storeUploadedImage(
     "uploaded-images",
     imageId,
     `/api/images/${imageId}/file`,
+    asset,
   );
 }
 
 // ── Edited images (result from provider edit API) ─────────────────────────────
 
-export async function storeEditedImage(openaiUrl: string, imageId: number): Promise<StorageResult> {
+export async function storeEditedImage(
+  openaiUrl: string,
+  imageId: number,
+  asset: StoredImageAssetOwner,
+): Promise<StorageResult> {
   logger.info({ imageId }, "image-storage: storing edited image");
   const rawBuffer = await resolveRawBuffer(openaiUrl);
   const webpBuffer = await sharp(rawBuffer).webp({ quality: 85 }).toBuffer();
@@ -225,7 +298,33 @@ export async function storeEditedImage(openaiUrl: string, imageId: number): Prom
     "edited-images",
     imageId,
     `/api/images/${imageId}/file`,
+    asset,
   );
+}
+
+/** Idempotent compensation for a stored image whose registry completion failed. */
+export async function deleteStoredImageObjects(
+  objects: readonly StoredImageObject[],
+): Promise<void> {
+  const r2 = getR2Config();
+  const failures: unknown[] = [];
+  for (const object of objects) {
+    try {
+      if (object.storageBackend === "r2") {
+        if (!r2) throw new Error("image_storage_unavailable");
+        await r2.client.send(
+          new DeleteObjectCommand({ Bucket: r2.bucket, Key: object.storageKey }),
+        );
+      } else {
+        await unlink(object.storageKey).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        });
+      }
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) throw new Error("image_storage_cleanup_pending");
 }
 
 // ── Fetch image buffer from storage (for edit source) ────────────────────────
@@ -234,21 +333,16 @@ export async function storeEditedImage(openaiUrl: string, imageId: number): Prom
  * Retrieve the raw image bytes for an existing DB image record.
  *
  * Priority order:
- *   1. Dev-mode tmpdir path  (fileUrl starts with /api/images/)
+ *   1. Dev-mode tmpdir path (identified by the storage key)
  *   2. R2 authenticated GetObject (storageKey present + R2 configured)
  *      Works with both public and private R2 buckets.
  *   3. Public HTTPS fetch fallback (storageKey absent or R2 not configured)
  */
 export async function getImageBuffer(storageKey: string | null, fileUrl: string): Promise<Buffer> {
-  // 1. Dev mode: read from OS temp dir
-  if (fileUrl.startsWith("/api/images/")) {
-    if (!storageKey) {
-      throw new Error("No storageKey available for dev-mode image retrieval");
-    }
-    const sysTmp = tmpdir();
-    if (!storageKey.startsWith(sysTmp)) {
-      throw new Error("storageKey is outside tmpdir — refusing to read");
-    }
+  // 1. Dev mode is identified by the storage key itself. Production R2 rows
+  // intentionally also expose only the authenticated /api/images route.
+  const sysTmp = tmpdir();
+  if (storageKey?.startsWith(sysTmp)) {
     return readFile(storageKey);
   }
 

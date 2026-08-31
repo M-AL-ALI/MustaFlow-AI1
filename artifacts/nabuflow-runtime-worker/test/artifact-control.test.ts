@@ -1176,6 +1176,9 @@ describe("sealed runtime artifact control plane", () => {
     });
     expect(backend.stops).toBe(0);
     expect(backend.materializations).toBeGreaterThanOrEqual(2);
+    expect(backend.materializedRuntimeArtifactSha256s.at(-1)).toBe(
+      artifact.envelope.sealedArtifactSha256,
+    );
   });
 
   it("persists the new manifest in error state when an explicit restart fails", async () => {

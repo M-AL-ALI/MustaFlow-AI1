@@ -1,11 +1,17 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import express from "express";
 import request from "supertest";
 import { and, eq, inArray } from "drizzle-orm";
-import { db, oraAssetsTable, oraFileContextsTable } from "@workspace/db";
+import {
+  accountAssetQuotaTable,
+  assetsTable,
+  db,
+  oraAssetsTable,
+  oraFileContextsTable,
+} from "@workspace/db";
 import oraAssetsRouter from "../ora-assets";
 import { persistOraAsset, getNextVersionLineage } from "../../lib/ora-assets";
 import { relinkFileContextAfterRestore } from "../../lib/public-ai/file-context-store";
@@ -13,6 +19,17 @@ import {
   extractIfStatementByCondition,
   extractNamedFunction,
 } from "../../lib/source-ast-test-helper";
+
+const assetObjects = vi.hoisted(() => new Map<string, Buffer>());
+vi.mock("../../lib/asset-r2", () => ({
+  putAssetBuffer: vi.fn(async (input: { key: string; body: Buffer }) => {
+    assetObjects.set(input.key, Buffer.from(input.body));
+  }),
+  readAssetBuffer: vi.fn(async (key: string) => assetObjects.get(key) ?? null),
+  deleteAssetObject: vi.fn(async (key: string) => {
+    assetObjects.delete(key);
+  }),
+}));
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,10 +59,19 @@ function appAs(userId: string) {
 const HELLO_B64 = Buffer.from("hello").toString("base64");
 
 afterAll(async () => {
+  const linked = await db
+    .select({ assetId: oraAssetsTable.assetId })
+    .from(oraAssetsTable)
+    .where(inArray(oraAssetsTable.userId, [USER_A, USER_B]));
   await db.delete(oraAssetsTable).where(inArray(oraAssetsTable.userId, [USER_A, USER_B]));
   await db
     .delete(oraFileContextsTable)
     .where(inArray(oraFileContextsTable.userId, [USER_A, USER_B]));
+  const ids = linked.flatMap((row) => (row.assetId === null ? [] : [row.assetId]));
+  if (ids.length > 0) await db.delete(assetsTable).where(inArray(assetsTable.id, ids));
+  await db
+    .delete(accountAssetQuotaTable)
+    .where(inArray(accountAssetQuotaTable.userId, [USER_A, USER_B]));
 });
 
 describe("persistOraAsset", () => {
@@ -62,7 +88,9 @@ describe("persistOraAsset", () => {
     expect(id).toBeTypeOf("number");
     const [row] = await db.select().from(oraAssetsTable).where(eq(oraAssetsTable.id, id!));
     expect(row.sizeBytes).toBe(5);
-    expect(row.data).toBe(HELLO_B64);
+    expect(row.data).toBeNull();
+    expect(row.assetId).toBeTypeOf("number");
+    expect(row.storageKey).toMatch(/^assets\//);
   });
 
   it("skips empty payloads", async () => {
@@ -385,8 +413,10 @@ describe("POST /ora/assets/:id/restore", () => {
     expect(v3.parentAssetId).toBe(v2);
     expect(v3.versionNumber).toBe(3);
     expect(v3.editSummary).toBe("Restored version 1");
-    // Bytes copied from v1, never a shared storage pointer
-    expect(v3.data).toBe(HELLO_B64);
+    // Bytes copied from v1 into a new unified asset, never a shared pointer.
+    expect(v3.data).toBeNull();
+    expect(v3.assetId).toBeTypeOf("number");
+    expect(v3.storageKey).not.toBeNull();
 
     // History intact: chain now shows all three, new head current
     const chain = await request(appAs(USER_A)).get(`/ora/assets/${v1}/versions`);

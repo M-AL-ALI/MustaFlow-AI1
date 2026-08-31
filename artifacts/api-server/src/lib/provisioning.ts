@@ -40,6 +40,7 @@ import { encryptionService } from "./encryption";
 import { publishProvisioningStep } from "./event-bus";
 import { requiresDirectProjectDatabaseProvisioning } from "./zero-sealed-generation";
 import { supportsExternalRuntimeLogTail } from "./tenant-runtime-provider";
+import { acquireProjectLifecycleSession, registerProjectWorkController } from "./project-lifecycle";
 
 const NEON_API_BASE = "https://console.neon.tech/api/v2";
 
@@ -181,6 +182,15 @@ async function resolveNeonOrgId(apiKey: string): Promise<string | null> {
  * "Retry provisioning" twice in a row.
  */
 const activeProvisioning = new Set<number>();
+const provisioningControllers = new Map<number, AbortController>();
+
+export function cancelLocalProjectProvisioning(projectId: number): boolean {
+  const controller = provisioningControllers.get(projectId);
+  if (!controller) return false;
+  controller.abort();
+  provisioningControllers.delete(projectId);
+  return true;
+}
 
 /**
  * Look up an existing Neon project by its (stable) name. Returns its Neon
@@ -392,11 +402,22 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     return;
   }
   activeProvisioning.add(projectId);
+  const lifecycleSession = await acquireProjectLifecycleSession(projectId);
+  if (!lifecycleSession) {
+    activeProvisioning.delete(projectId);
+    return;
+  }
+  const controller = new AbortController();
+  provisioningControllers.set(projectId, controller);
+  const unregisterProjectWork = registerProjectWorkController(projectId, controller);
 
   const startedAt = new Date();
 
   try {
-    const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+    const [project] = await db
+      .select()
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), sql`${projectsTable.deletedAt} IS NULL`));
     if (!project) return;
 
     if (project.builderMode !== "agentic") {
@@ -462,12 +483,14 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     // Step 1 — container (idempotent: skip if already present)
     let containerId = project.containerId;
     if (!containerId) {
+      if (controller.signal.aborted || !(await lifecycleSession.assertActive())) return;
       await setStep(projectId, "create_container");
       let containerError: string | undefined;
       try {
         const info = await createContainer(projectId, project.stack, undefined, {
           servicePort: project.runtimePort,
         });
+        if (controller.signal.aborted || !(await lifecycleSession.assertActive())) return;
         if (!info) {
           containerError =
             tenantRuntimeProvider.providerId === "fly"
@@ -522,6 +545,7 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     let connectionString: string | null = null;
 
     if (!neonProjectId) {
+      if (controller.signal.aborted || !(await lifecycleSession.assertActive())) return;
       await setStep(projectId, "create_database");
       const existing = await findNeonProjectByName(neonProjectNameFor(projectId));
       if (existing) {
@@ -538,6 +562,7 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
         connectionString = await fetchNeonConnectionUri(existing);
       } else {
         const neon = await createNeonProject(projectId, project.name);
+        if (controller.signal.aborted || !(await lifecycleSession.assertActive())) return;
         if ("error" in neon) {
           await markError(projectId, neon.error, "create_database");
           return;
@@ -600,6 +625,7 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     const durationMs = Date.now() - startedAt.getTime();
     recordCompletionDurationMs(durationMs);
 
+    if (controller.signal.aborted || !(await lifecycleSession.assertActive())) return;
     await db
       .update(projectsTable)
       .set({ provisioningStatus: "ready", provisioningError: null, provisioningStep: null })
@@ -611,6 +637,11 @@ export async function runProvisionProjectJob(projectId: number): Promise<void> {
     const message = err instanceof Error ? err.message : "Unknown provisioning error";
     await markError(projectId, message);
   } finally {
+    unregisterProjectWork();
+    if (provisioningControllers.get(projectId) === controller) {
+      provisioningControllers.delete(projectId);
+    }
+    await lifecycleSession.release();
     activeProvisioning.delete(projectId);
   }
 }
@@ -645,110 +676,121 @@ function neonPreviewProjectNameFor(projectId: number): string {
  * human-readable message — no throw, callers just surface the status.
  */
 export async function provisionPreviewDb(projectId: number): Promise<void> {
-  const [project] = await db
-    .select({
-      id: projectsTable.id,
-      name: projectsTable.name,
-      previewDbStatus: projectsTable.previewDbStatus,
-    })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, projectId));
+  const lifecycleSession = await acquireProjectLifecycleSession(projectId);
+  if (!lifecycleSession) return;
+  const controller = new AbortController();
+  const unregisterProjectWork = registerProjectWorkController(projectId, controller);
+  try {
+    const [project] = await db
+      .select({
+        id: projectsTable.id,
+        name: projectsTable.name,
+        previewDbStatus: projectsTable.previewDbStatus,
+      })
+      .from(projectsTable)
+      .where(and(eq(projectsTable.id, projectId), sql`${projectsTable.deletedAt} IS NULL`));
 
-  if (!project) return;
+    if (!project) return;
 
-  // Idempotent: already done.
-  if (project.previewDbStatus === "ready") return;
+    // Idempotent: already done.
+    if (project.previewDbStatus === "ready") return;
 
-  await db
-    .update(projectsTable)
-    .set({ previewDbStatus: "provisioning" })
-    .where(eq(projectsTable.id, projectId));
-
-  const apiKey = process.env.NEON_API_KEY;
-  if (!apiKey) {
     await db
       .update(projectsTable)
-      .set({
-        previewDbStatus: "error",
-      })
+      .set({ previewDbStatus: "provisioning" })
       .where(eq(projectsTable.id, projectId));
-    logger.warn({ projectId }, "provisionPreviewDb: NEON_API_KEY not set");
-    return;
-  }
 
-  try {
-    // Deduplicate by stable name — safe to call multiple times.
-    const stableName = neonPreviewProjectNameFor(projectId);
-    let connectionString: string | null = null;
+    const apiKey = process.env.NEON_API_KEY;
+    if (!apiKey) {
+      await db
+        .update(projectsTable)
+        .set({
+          previewDbStatus: "error",
+        })
+        .where(eq(projectsTable.id, projectId));
+      logger.warn({ projectId }, "provisionPreviewDb: NEON_API_KEY not set");
+      return;
+    }
 
-    // Check if a preview Neon project already exists (e.g. from a failed/retried run).
-    const existingId = await findNeonProjectByName(stableName);
-    if (existingId) {
-      connectionString = await fetchNeonConnectionUri(existingId);
-    } else {
-      // Create a new Neon project with the stable preview name.
-      const orgId = await resolveNeonOrgId(apiKey);
-      const dbName =
-        project.name
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "-")
-          .slice(0, 32) || `preview_${projectId}`;
+    try {
+      // Deduplicate by stable name — safe to call multiple times.
+      const stableName = neonPreviewProjectNameFor(projectId);
+      let connectionString: string | null = null;
 
-      const body: { project: Record<string, unknown> } = {
-        project: {
-          name: stableName,
-          pg_version: 16,
-          default_database_name: dbName,
-          default_role_name: "mustaflow",
-          region_id: "aws-us-east-1",
-        },
-      };
-      if (orgId) body.project.org_id = orgId;
+      // Check if a preview Neon project already exists (e.g. from a failed/retried run).
+      const existingId = await findNeonProjectByName(stableName);
+      if (existingId) {
+        connectionString = await fetchNeonConnectionUri(existingId);
+      } else {
+        // Create a new Neon project with the stable preview name.
+        const orgId = await resolveNeonOrgId(apiKey);
+        const dbName =
+          project.name
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "-")
+            .slice(0, 32) || `preview_${projectId}`;
 
-      const res = await fetch(`${NEON_API_BASE}/projects`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const errText = await res.text();
-        logger.error(
-          { projectId, status: res.status, err: errText },
-          "Preview Neon project create failed",
-        );
+        const body: { project: Record<string, unknown> } = {
+          project: {
+            name: stableName,
+            pg_version: 16,
+            default_database_name: dbName,
+            default_role_name: "mustaflow",
+            region_id: "aws-us-east-1",
+          },
+        };
+        if (orgId) body.project.org_id = orgId;
+
+        const res = await fetch(`${NEON_API_BASE}/projects`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          logger.error(
+            { projectId, status: res.status, err: errText },
+            "Preview Neon project create failed",
+          );
+          await db
+            .update(projectsTable)
+            .set({ previewDbStatus: "error" })
+            .where(eq(projectsTable.id, projectId));
+          return;
+        }
+        const data = (await res.json()) as {
+          connection_uris?: Array<{ connection_uri: string }>;
+        };
+        connectionString = data.connection_uris?.[0]?.connection_uri ?? null;
+      }
+
+      if (!connectionString) {
         await db
           .update(projectsTable)
           .set({ previewDbStatus: "error" })
           .where(eq(projectsTable.id, projectId));
         return;
       }
-      const data = (await res.json()) as {
-        connection_uris?: Array<{ connection_uri: string }>;
-      };
-      connectionString = data.connection_uris?.[0]?.connection_uri ?? null;
-    }
 
-    if (!connectionString) {
+      if (controller.signal.aborted || !(await lifecycleSession.assertActive())) return;
+      const encrypted = encryptionService.encrypt(connectionString);
+      await db
+        .update(projectsTable)
+        .set({ previewDbUrl: encrypted, previewDbStatus: "ready" })
+        .where(eq(projectsTable.id, projectId));
+
+      logger.info({ projectId }, "Preview DB provisioned successfully");
+    } catch (err) {
+      logger.error({ err, projectId }, "provisionPreviewDb failed");
       await db
         .update(projectsTable)
         .set({ previewDbStatus: "error" })
-        .where(eq(projectsTable.id, projectId));
-      return;
+        .where(and(eq(projectsTable.id, projectId), sql`${projectsTable.deletedAt} IS NULL`));
     }
-
-    const encrypted = encryptionService.encrypt(connectionString);
-    await db
-      .update(projectsTable)
-      .set({ previewDbUrl: encrypted, previewDbStatus: "ready" })
-      .where(eq(projectsTable.id, projectId));
-
-    logger.info({ projectId }, "Preview DB provisioned successfully");
-  } catch (err) {
-    logger.error({ err, projectId }, "provisionPreviewDb failed");
-    await db
-      .update(projectsTable)
-      .set({ previewDbStatus: "error" })
-      .where(eq(projectsTable.id, projectId));
+  } finally {
+    unregisterProjectWork();
+    await lifecycleSession.release();
   }
 }
 

@@ -27,6 +27,10 @@ import {
   controlErrorResponseSchema,
   deactivateRouteRequestSchema,
   deactivateRouteResponseSchema,
+  routeInventoryRequestSchema,
+  routeInventoryResponseSchema,
+  routeReadRequestSchema,
+  routeReadResponseSchema,
   deriveRuntimeIdentity,
   destroyRuntimeRequestSchema,
   destroyRuntimeResponseSchema,
@@ -109,6 +113,8 @@ import type {
   RevokeEchoCapabilityRequest,
   RevokeStripeCapabilityRequest,
   DeactivateRouteRequest,
+  RouteInventoryRequest,
+  RouteReadRequest,
   DestroyRuntimeRequest,
   EnsureRuntimeRequest,
   ExecRuntimeRequest,
@@ -130,6 +136,7 @@ import type {
   EnsureProductionDatabaseRequest,
   ReleaseProductionDatabaseRequest,
   ProductionDatabaseJobRequest,
+  RouteRecord,
 } from "@workspace/tenant-runtime-contracts";
 import { createHash } from "node:crypto";
 import type { WorkerBindings } from "./bindings";
@@ -172,6 +179,7 @@ import {
 } from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
+import { driveRoutePolicyReconciliation } from "./route-policy-reconciliation";
 import {
   ARTIFACT_COMMIT_ABORT_BEFORE_PREFIX,
   ARTIFACT_COMMIT_ABORT_ALWAYS_PREFIX,
@@ -252,6 +260,8 @@ type Endpoint =
   | "logs"
   | "routeActivate"
   | "routeDeactivate"
+  | "routeInventory"
+  | "routeRead"
   | "capabilityProvision"
   | "capabilityRevoke"
   | "databaseCapabilityProvision"
@@ -285,6 +295,7 @@ interface MatchedRoute {
   endpoint: Endpoint;
   locator: RuntimeLocator | null;
   hostname?: string;
+  projectId?: number;
   auditRequestId?: string;
   capability?: { projectId: number; provider: string; name: string };
   artifactSha256?: string;
@@ -803,15 +814,15 @@ export async function handleDurableOperationQueue(
       message: body,
       deploymentVersion: env.CF_VERSION_METADATA.id,
       nowMs,
-      requeue: async (_deferredMessage, delaySeconds) => {
-        message.retry({ delaySeconds });
-      },
     });
     if (deploymentDisposition === "ignore") {
       message.ack();
       continue;
     }
-    if (deploymentDisposition === "deferred") continue;
+    if (deploymentDisposition === "deferred") {
+      message.ack();
+      continue;
+    }
     const claim = await coordinator.claimDurableOperationDriver(body.jobKey, ownerId, nowMs);
     if (claim.state === "not_found" || claim.state === "terminal") {
       message.ack();
@@ -989,6 +1000,8 @@ type ControlInput =
   | UpdateRuntimeManifestRequest
   | ActivateRouteRequest
   | DeactivateRouteRequest
+  | RouteInventoryRequest
+  | RouteReadRequest
   | EnsureRuntimeRequest
   | StartRuntimeRequest
   | StopRuntimeRequest
@@ -1726,12 +1739,28 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
     }
     return { endpoint: "routeActivate", locator: null, hostname: activateRouteMatch[1] };
   }
-  const deactivateRouteMatch = new RegExp(`^${CONTROL_PREFIX}/routes/([^/]+)$`).exec(pathname);
-  if (deactivateRouteMatch) {
-    if (method !== "DELETE") {
+  const routeInventoryMatch = new RegExp(`^${CONTROL_PREFIX}/projects/([1-9][0-9]*)/routes$`).exec(
+    pathname,
+  );
+  if (routeInventoryMatch) {
+    if (method !== "GET") {
       throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
     }
-    return { endpoint: "routeDeactivate", locator: null, hostname: deactivateRouteMatch[1] };
+    return {
+      endpoint: "routeInventory",
+      locator: null,
+      projectId: Number(routeInventoryMatch[1]),
+    };
+  }
+  const deactivateRouteMatch = new RegExp(`^${CONTROL_PREFIX}/routes/([^/]+)$`).exec(pathname);
+  if (deactivateRouteMatch) {
+    if (method === "DELETE") {
+      return { endpoint: "routeDeactivate", locator: null, hostname: deactivateRouteMatch[1] };
+    }
+    if (method === "GET") {
+      return { endpoint: "routeRead", locator: null, hostname: deactivateRouteMatch[1] };
+    }
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
   }
   const productionDatabaseMatch = new RegExp(
     `^${CONTROL_PREFIX}/capabilities/([1-9][0-9]*)/neon-postgres/database/production-allocation$`,
@@ -2407,13 +2436,37 @@ function parseCapabilityControlInput(
 }
 
 function parseRouteInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): ControlInput {
-  if (
-    (route.endpoint !== "routeActivate" && route.endpoint !== "routeDeactivate") ||
-    route.hostname === undefined
-  ) {
-    throw new ControlHttpError(400, "invalid_locator", "Runtime locator is required");
+  if (route.endpoint === "routeInventory") {
+    if (route.projectId === undefined) {
+      throw new ControlHttpError(400, "invalid_project", "Project scope is required");
+    }
+    assertEmptyBody(rawBody);
+    let unknownQuery = false;
+    url.searchParams.forEach((_value, key) => {
+      if (!new Set(["cursor", "scanLimit"]).has(key)) unknownQuery = true;
+    });
+    if (unknownQuery) {
+      throw new ControlHttpError(400, "invalid_request", "Unknown route inventory parameter");
+    }
+    return parseStrict(routeInventoryRequestSchema, {
+      projectId: route.projectId,
+      ...(url.searchParams.has("cursor") ? { cursor: url.searchParams.get("cursor") } : {}),
+      ...(url.searchParams.has("scanLimit")
+        ? { scanLimit: Number(url.searchParams.get("scanLimit")) }
+        : {}),
+    });
+  }
+  if (route.hostname === undefined) {
+    throw new ControlHttpError(400, "invalid_locator", "Route hostname is required");
   }
   assertNoQuery(url);
+  if (route.endpoint === "routeRead") {
+    assertEmptyBody(rawBody);
+    return parseStrict(routeReadRequestSchema, { hostname: route.hostname });
+  }
+  if (route.endpoint !== "routeActivate" && route.endpoint !== "routeDeactivate") {
+    throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+  }
   const body = parseJsonBody(rawBody);
   if (route.endpoint === "routeActivate") {
     const parsed = parseStrict(activateRouteRequestSchema, body);
@@ -2643,11 +2696,41 @@ async function executeEndpoint(
       }),
     };
   }
+  if (endpoint === "routeInventory") {
+    const request = input as RouteInventoryRequest;
+    const inventory = await coordinator.listRoutesByProject(request);
+    return {
+      status: 200,
+      body: routeInventoryResponseSchema.parse({
+        ok: true,
+        projectId: request.projectId,
+        routes: inventory.routes,
+        nextCursor: inventory.nextCursor,
+        complete: inventory.complete,
+      }),
+    };
+  }
+  if (endpoint === "routeRead") {
+    const request = input as RouteReadRequest;
+    return {
+      status: 200,
+      body: routeReadResponseSchema.parse({
+        ok: true,
+        route: await coordinator.getRoute(request.hostname),
+      }),
+    };
+  }
   if (endpoint === "routeActivate") {
     return activatePublishedRoute(input as ActivateRouteRequest, env, coordinator, backend, nowMs);
   }
   if (endpoint === "routeDeactivate") {
-    return deactivatePublishedRoute(input as DeactivateRouteRequest, coordinator);
+    return deactivatePublishedRoute(
+      input as DeactivateRouteRequest,
+      env,
+      coordinator,
+      backend,
+      nowMs,
+    );
   }
   if (endpoint === "layeredArtifactPromotion") {
     if (
@@ -3668,6 +3751,7 @@ async function executeEndpoint(
       const checkpoint = async (
         next: StoredRuntimeManifestRestartJob["checkpoint"],
         runtimeWasRunning?: boolean,
+        rollbackReleaseSha256?: string | null,
       ): Promise<void> => {
         const updated = await coordinator.checkpointDurableOperation({
           jobKey: execution.job.jobKey,
@@ -3675,6 +3759,7 @@ async function executeEndpoint(
           ownerGeneration: execution.job.attempt,
           checkpoint: next,
           ...(runtimeWasRunning === undefined ? {} : { runtimeWasRunning }),
+          ...(rollbackReleaseSha256 === undefined ? {} : { rollbackReleaseSha256 }),
           nowMs: Date.now(),
         });
         if (updated.kind !== "runtime-manifest-restart") {
@@ -3739,6 +3824,14 @@ async function executeEndpoint(
             );
           }
           const wasRunning = current.descriptor.status === "running";
+          const rollbackReleaseSha256 = wasRunning ? current.artifactSha256 : null;
+          if (rollbackReleaseSha256 !== null && !/^[0-9a-f]{64}$/u.test(rollbackReleaseSha256)) {
+            throw new ControlHttpError(
+              409,
+              "artifact_not_committed",
+              "The current runtime release cannot be retained for rollback",
+            );
+          }
           if (wasRunning) {
             await committedRestartArtifact();
             const unbound = await coordinator.unbindContainer(
@@ -3754,7 +3847,7 @@ async function executeEndpoint(
               );
             }
           }
-          await checkpoint("runtime-unbound", wasRunning);
+          await checkpoint("runtime-unbound", wasRunning, rollbackReleaseSha256);
         }
         if (execution.job.checkpoint === "runtime-unbound") {
           const current = await requireRuntime(coordinator, identity);
@@ -3803,7 +3896,12 @@ async function executeEndpoint(
           } else {
             const current = await requireRuntime(coordinator, identity);
             const artifact = await committedRestartArtifact();
-            await materializeCommittedRuntimeArtifact(backend, current, artifact);
+            await materializeCommittedRuntimeArtifact(
+              backend,
+              current,
+              artifact,
+              execution.job.rollbackReleaseSha256,
+            );
             await checkpoint("materialized");
           }
         }
@@ -3816,6 +3914,7 @@ async function executeEndpoint(
           current.descriptor.lastError = null;
           await coordinator.putRuntime(identity, current);
           await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
+          await reconcileStartedRuntimeKeepAlive(current, coordinator, backend);
           await checkpoint("process-started");
         }
         if (execution.job.checkpoint === "process-started") {
@@ -3879,6 +3978,14 @@ async function executeEndpoint(
       );
     }
     const wasRunning = runtime.descriptor.status === "running";
+    const rollbackReleaseSha256 = wasRunning ? runtime.artifactSha256 : null;
+    if (rollbackReleaseSha256 !== null && !/^[0-9a-f]{64}$/u.test(rollbackReleaseSha256)) {
+      throw new ControlHttpError(
+        409,
+        "artifact_not_committed",
+        "The current runtime release cannot be retained for rollback",
+      );
+    }
     if (wasRunning && request.restart !== "restart") {
       throw new ControlHttpError(
         409,
@@ -3956,13 +4063,19 @@ async function executeEndpoint(
         // Materialization already kills every tenant process before replacing the sealed release.
         // Fully stopping the Sandbox here makes the immediately-following filesystem RPC race the
         // container shutdown and fail before the first release-directory operation.
-        await materializeCommittedRuntimeArtifact(backend, runtime, restartArtifact);
+        await materializeCommittedRuntimeArtifact(
+          backend,
+          runtime,
+          restartArtifact,
+          rollbackReleaseSha256,
+        );
         const started = await backend.start(runtime);
         runtime.processId = started.processId;
         runtime.descriptor.status = "running";
         runtime.descriptor.readyAt = started.readyAt;
         await coordinator.putRuntime(identity, runtime);
         await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
+        await reconcileStartedRuntimeKeepAlive(runtime, coordinator, backend);
       } catch {
         await coordinator.unbindContainer(runtimeContainerId(env, identity), identity);
         await safelyStopFailedRuntime(backend, runtime);
@@ -4134,6 +4247,7 @@ async function executeEndpoint(
         current.descriptor.lastError = null;
         await coordinator.putRuntime(identity, current);
         await coordinator.bindContainer(runtimeContainerId(env, identity), identity);
+        await reconcileStartedRuntimeKeepAlive(current, coordinator, backend);
         await checkpoint("process-started");
       }
       if (execution.job.checkpoint === "process-started") {
@@ -4718,6 +4832,111 @@ function runtimeContainerId(env: WorkerBindings, identity: string): string {
   return env.NABUFLOW_SANDBOX.idFromName(identity).toString();
 }
 
+const ROUTE_KEEPALIVE_RECONCILIATION_PASSES = 3;
+
+async function productionSlotIdentities(env: WorkerBindings, projectId: number): Promise<string[]> {
+  return Promise.all(
+    (["blue", "green"] as const).map((slot) =>
+      deriveRuntimeIdentity({
+        namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+        projectId,
+        role: "production",
+        slot,
+      }),
+    ),
+  );
+}
+
+async function productionSlotIdentitiesFromExpected(
+  env: WorkerBindings,
+  expectedIdentity: string,
+): Promise<string[]> {
+  const parsed = await parseRuntimeIdentityForNamespace(
+    expectedIdentity,
+    env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+  ).catch(() => null);
+  if (parsed === null || parsed.role !== "production") return [expectedIdentity];
+  return productionSlotIdentities(env, parsed.projectId);
+}
+
+function sameRoute(left: RouteRecord | null, right: RouteRecord): boolean {
+  return (
+    left !== null &&
+    left.hostname === right.hostname &&
+    left.projectId === right.projectId &&
+    left.role === right.role &&
+    left.activeSlot === right.activeSlot &&
+    left.manifestRevision === right.manifestRevision &&
+    left.servicePort === right.servicePort &&
+    left.sandboxIdentity === right.sandboxIdentity
+  );
+}
+
+async function persistRuntimeKeepAlive(
+  backend: RuntimeBackend,
+  identity: string,
+  keepAlive: boolean,
+): Promise<void> {
+  try {
+    await backend.setKeepAlive(identity, keepAlive);
+  } catch {
+    throw new ControlHttpError(
+      503,
+      "route_keepalive_reconciliation_failed",
+      "Published route container policy could not be reconciled",
+      true,
+    );
+  }
+}
+
+/**
+ * Starting a Sandbox deliberately resets keepAlive to false. Production runtimes
+ * must then converge to the route registry's current truth before the start can
+ * complete, or a recovered active route would become sleepable ten minutes later.
+ * A second read closes activation/deactivation races without making start infer
+ * policy from stale descriptor state.
+ */
+async function reconcileStartedRuntimeKeepAlive(
+  runtime: StoredRuntime,
+  coordinator: ControlCoordinator,
+  backend: RuntimeBackend,
+): Promise<void> {
+  if (runtime.descriptor.role !== "production") return;
+  for (let pass = 0; pass < ROUTE_KEEPALIVE_RECONCILIATION_PASSES; pass += 1) {
+    const before = await coordinator.hasRouteForSandboxIdentity(runtime.descriptor.identity);
+    await persistRuntimeKeepAlive(backend, runtime.descriptor.identity, before);
+    const after = await coordinator.hasRouteForSandboxIdentity(runtime.descriptor.identity);
+    if (after === before) return;
+  }
+  throw new ControlHttpError(
+    503,
+    "route_keepalive_reconciliation_busy",
+    "Published route container policy changed too many times to reconcile",
+    true,
+  );
+}
+
+async function drivePublishedRoutePolicyAfterCas(
+  hostname: string,
+  coordinator: ControlCoordinator,
+  backend: RuntimeBackend,
+  nowMs: number,
+): Promise<void> {
+  const result = await driveRoutePolicyReconciliation({
+    coordinator,
+    backend,
+    hostname,
+    nowMs: () => nowMs,
+  });
+  if (result !== "terminal") return;
+  throw new ControlHttpError(
+    503,
+    "route_policy_reconciliation_exhausted",
+    "Published route container policy reached its retry cap",
+    false,
+  );
+}
+
 async function activatePublishedRoute(
   request: ActivateRouteRequest,
   env: WorkerBindings,
@@ -4773,35 +4992,47 @@ async function activatePublishedRoute(
     );
   }
 
-  const availability = await backend.availability(runtime);
-  if (!availability.ready) {
-    await coordinator.appendSystemLog(
-      route.sandboxIdentity,
-      `Published route activation rejected runtime availability (stage=${availability.stage}, cause=${availability.cause}).`,
-    );
-    const recovery = await schedulePublishedRuntimeRecovery(runtime, env, {
-      coordinator,
-      nowMs,
-    });
-    if (recovery === "exhausted") {
+  const currentRoute = await coordinator.getRoute(route.hostname);
+  const slotIdentities = await productionSlotIdentities(env, route.projectId);
+  if (!sameRoute(currentRoute, route)) {
+    const availability = await backend.availability(runtime);
+    if (!availability.ready) {
+      await coordinator.appendSystemLog(
+        route.sandboxIdentity,
+        `Published route activation rejected runtime availability (stage=${availability.stage}, cause=${availability.cause}).`,
+      );
+      const recovery = await schedulePublishedRuntimeRecovery(runtime, env, {
+        coordinator,
+        nowMs,
+      });
+      if (recovery === "exhausted") {
+        throw new ControlHttpError(
+          409,
+          "published_runtime_recovery_exhausted",
+          "Published runtime recovery reached its retry cap",
+          false,
+        );
+      }
       throw new ControlHttpError(
         409,
-        "published_runtime_recovery_exhausted",
-        "Published runtime recovery reached its retry cap",
-        false,
+        "published_runtime_not_ready",
+        recovery === "scheduled"
+          ? "The selected production runtime is recovering before route activation"
+          : "The selected production runtime is not ready for route activation",
+        true,
       );
     }
-    throw new ControlHttpError(
-      409,
-      "published_runtime_not_ready",
-      recovery === "scheduled"
-        ? "The selected production runtime is recovering before route activation"
-        : "The selected production runtime is not ready for route activation",
-      true,
-    );
   }
 
-  const state = await coordinator.activateRoute(route, request.expectedPreviousManifestRevision);
+  // Route truth and its bounded provider-policy intent commit together. The provider boundary is
+  // deliberately after the CAS, so a failed or abandoned candidate can never be made persistent.
+  const state = await coordinator.activateRoute(route, request.expectedPreviousManifestRevision, {
+    identities: [
+      ...slotIdentities,
+      ...(currentRoute === null ? [] : [currentRoute.sandboxIdentity]),
+    ],
+    nowMs,
+  });
   if (state === "conflict") {
     throw new ControlHttpError(
       409,
@@ -4810,21 +5041,27 @@ async function activatePublishedRoute(
       true,
     );
   }
+  await drivePublishedRoutePolicyAfterCas(route.hostname, coordinator, backend, nowMs);
   return { status: 200, body: { ok: true, route } };
 }
 
 async function deactivatePublishedRoute(
   request: DeactivateRouteRequest,
+  env: WorkerBindings,
   coordinator: ControlCoordinator,
+  backend: RuntimeBackend,
+  nowMs: number,
 ): Promise<StoredHttpResponse> {
+  const slotIdentities = await productionSlotIdentitiesFromExpected(
+    env,
+    request.expectedSandboxIdentity,
+  );
   const state = await coordinator.deactivateRoute(
     request.hostname,
     request.expectedManifestRevision,
     request.expectedSandboxIdentity,
+    { identities: slotIdentities, nowMs },
   );
-  if (state === "not_found") {
-    throw new ControlHttpError(404, "published_route_not_found", "Published route not found");
-  }
   if (state === "conflict") {
     throw new ControlHttpError(
       409,
@@ -4833,6 +5070,7 @@ async function deactivatePublishedRoute(
       true,
     );
   }
+  await drivePublishedRoutePolicyAfterCas(request.hostname, coordinator, backend, nowMs);
   return { status: 200, body: { ok: true, hostname: request.hostname } };
 }
 
@@ -4872,6 +5110,8 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     logs: logsRuntimeResponseSchema,
     routeActivate: activateRouteResponseSchema,
     routeDeactivate: deactivateRouteResponseSchema,
+    routeInventory: routeInventoryResponseSchema,
+    routeRead: routeReadResponseSchema,
     capabilityProvision: capabilityProvisionResponseSchema,
     capabilityRevoke: capabilityRevokeResponseSchema,
     databaseCapabilityProvision: capabilityProvisionResponseSchema,
@@ -4997,12 +5237,17 @@ async function materializeCommittedRuntimeArtifact(
   backend: RuntimeBackend,
   runtime: StoredRuntime,
   artifact: CommittedRuntimeArtifact,
+  rollbackReleaseSha256?: string | null,
 ): Promise<void> {
+  const materializationRuntime =
+    rollbackReleaseSha256 === undefined
+      ? runtime
+      : { ...runtime, artifactSha256: rollbackReleaseSha256 };
   if (artifact.kind === "v1") {
-    await backend.materialize(runtime, artifact.artifact);
+    await backend.materialize(materializationRuntime, artifact.artifact);
     return;
   }
-  await backend.materializeLayered(runtime, artifact.artifact, artifact.layers);
+  await backend.materializeLayered(materializationRuntime, artifact.artifact, artifact.layers);
 }
 
 async function verifyStoredLayerIntegrity(

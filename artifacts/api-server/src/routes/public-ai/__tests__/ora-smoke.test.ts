@@ -150,6 +150,9 @@ const fileBuilderMock = vi.hoisted(() => ({
 
 const assetsMock = vi.hoisted(() => ({
   persistOraAsset: vi.fn(async (): Promise<number | null> => 1),
+  reserveOraGeneratedAsset: vi.fn(async () => ({ id: 1, storageKey: "assets/test" })),
+  completeOraGeneratedAsset: vi.fn(async (): Promise<number> => 1),
+  cancelOraGeneratedAsset: vi.fn(async () => undefined),
   // Standalone file generation has no prior version chain, so lineage is null.
   getNextVersionLineage: vi.fn(async (): Promise<null> => null),
   getNextVersionLineageFromAssetId: vi.fn(async (): Promise<null> => null),
@@ -237,12 +240,16 @@ vi.mock("../../../lib/image-provider", () => ({
 
 vi.mock("../../../lib/ora-assets", async () => ({
   persistOraAsset: assetsMock.persistOraAsset,
+  persistOraAssetStrict: assetsMock.persistOraAsset,
+  reserveOraGeneratedAsset: assetsMock.reserveOraGeneratedAsset,
+  completeOraGeneratedAsset: assetsMock.completeOraGeneratedAsset,
+  cancelOraGeneratedAsset: assetsMock.cancelOraGeneratedAsset,
   getNextVersionLineage: assetsMock.getNextVersionLineage,
   getNextVersionLineageFromAssetId: assetsMock.getNextVersionLineageFromAssetId,
   getOraAssetBytes: assetsMock.getOraAssetBytes,
   getOraAssetMeta: assetsMock.getOraAssetMeta,
   oraR2OffloadEnabled: vi.fn(() => false),
-  PER_USER_STORAGE_BYTES: 200 * 1024 * 1024,
+  PER_USER_STORAGE_BYTES: 500 * 1024 * 1024,
   parseDataUri: (value: string) => {
     const match = value.match(/^data:([^;]+);base64,(.+)$/);
     return match ? { mimeType: match[1], base64: match[2] } : null;
@@ -254,7 +261,17 @@ vi.mock("../../../lib/image-storage", () => ({
     fileUrl: "/api/images/1/file",
     thumbnailUrl: "/api/images/1/thumb",
     storageKey: "test/image.png",
+    sha256: "a".repeat(64),
+    storageObjects: [
+      {
+        storageBackend: "r2",
+        storageKey: "test/image.png",
+        role: "primary",
+        sizeBytes: 5,
+      },
+    ],
   })),
+  deleteStoredImageObjects: vi.fn(async () => undefined),
 }));
 
 vi.mock("../../../lib/public-ai/authed-user", () => ({
@@ -353,6 +370,22 @@ vi.mock("@workspace/db", () => {
   };
 });
 
+vi.mock("../../../lib/asset-registry", () => ({
+  AssetAdmissionError: class AssetAdmissionError extends Error {
+    constructor(
+      public readonly code: string,
+      public readonly status: number,
+      message = code,
+    ) {
+      super(message);
+    }
+  },
+  reserveAsset: vi.fn(async () => ({ id: 1 })),
+  beginAssetUpload: vi.fn(async () => ({ assetId: 1, storageKey: "test/image.png" })),
+  completeAsset: vi.fn(async () => undefined),
+  rejectReservedAsset: vi.fn(async () => undefined),
+}));
+
 // ─── Pure imports (after vi.mock declarations) ────────────────────────────────
 
 import {
@@ -401,11 +434,20 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 async function buildChatApp() {
   process.env.ORA_SESSION_SECRET = TEST_SECRET;
   process.env.PUBLIC_AI_ENABLED = "true";
+  process.env.DATABASE_URL ||= "postgresql://ora-test:ora-test@127.0.0.1:5432/ora-test";
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
   const router = (await import("../chat")).default;
   app.use(router);
+  app.use(
+    (error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      res.status(500).json({
+        testError: error instanceof Error ? error.message : String(error),
+        testStack: error instanceof Error ? error.stack : undefined,
+      });
+    },
+  );
   return app;
 }
 
@@ -480,7 +522,7 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
       .set("Cookie", `ora-session=${makeSession()}`)
       .send({ message: "What is the capital of France?", messages: [] });
 
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toHaveProperty("reply");
     expect(typeof res.body.reply).toBe("string");
     expect(res.body.reply.length).toBeGreaterThan(0);
@@ -532,7 +574,7 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
       .set("Cookie", `ora-session=${makeSession()}`)
       .send({ message: "Generate a logo for my bakery", messages: [] });
 
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.imageUrl).toBeTruthy();
     expect(res.body.imageMeta).toEqual({
       kind: "logo",
@@ -600,7 +642,7 @@ What should I tell Replit about the typecheck failure?`;
         referenceSavedMemories: true,
       });
 
-    expect(res.status).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.memoriesUsed).toBeUndefined();
     expect(res.body.memorySaveCandidate).toBeUndefined();
   });
@@ -1276,15 +1318,43 @@ describe("n) Explicit file generation — POST /public-ai/generate-file", () => 
     expect(res.body.fileData).toBeTruthy();
     expect(res.body.mimeType).toBe("text/csv");
     expect(res.body.assetId).toBe(1);
-    expect(assetsMock.persistOraAsset).toHaveBeenCalledTimes(1);
+    expect(assetsMock.reserveOraGeneratedAsset).toHaveBeenCalledTimes(1);
+    expect(assetsMock.completeOraGeneratedAsset).toHaveBeenCalledTimes(1);
+    expect(assetsMock.reserveOraGeneratedAsset.mock.invocationCallOrder[0]).toBeLessThan(
+      fileBuilderMock.generateFileFromPrompt.mock.invocationCallOrder[0]!,
+    );
     expect(usageMock.consumeOraQuota).toHaveBeenCalledWith("gen-user-1", "core", "message");
   });
 
-  it("still returns the file (200, no assetId) when durable persistence fails — best-effort", async () => {
+  it("refuses at aggregate quota before file generation spends or returns bytes", async () => {
+    authState.user = { userId: "gen-user-full", tier: "core", isPaid: true };
+    const { AssetAdmissionError } = await import("../../../lib/asset-registry");
+    assetsMock.reserveOraGeneratedAsset.mockRejectedValueOnce(
+      new AssetAdmissionError(
+        "asset_quota_exceeded",
+        413,
+        "Your account storage is full (500 MB used of 500 MB).",
+      ),
+    );
+
+    const res = await request(app)
+      .post("/public-ai/generate-file")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Make a CSV of my data", format: "csv", messages: [] });
+
+    expect(res.status).toBe(413);
+    expect(res.body).toMatchObject({
+      code: "asset_quota_exceeded",
+      error: "Your account storage is full (500 MB used of 500 MB).",
+    });
+    expect(fileBuilderMock.generateFileFromPrompt).not.toHaveBeenCalled();
+    expect(res.body.fileData).toBeUndefined();
+    expect(usageMock.refundOraQuota).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails honestly without returning bytes when durable persistence fails", async () => {
     authState.user = { userId: "gen-user-2", tier: "core", isPaid: true };
-    // Primary: reject through the mock. Fallback: if the mock is bypassed and
-    // the real persistOraAsset runs, the dbState flag makes the DB insert throw.
-    assetsMock.persistOraAsset.mockRejectedValueOnce(new Error("R2/library outage"));
+    assetsMock.completeOraGeneratedAsset.mockRejectedValueOnce(new Error("R2/library outage"));
     dbState.insertShouldThrow = true;
 
     const res = await request(app)
@@ -1292,14 +1362,14 @@ describe("n) Explicit file generation — POST /public-ai/generate-file", () => 
       .set("Cookie", `ora-session=${makeSession()}`)
       .send({ message: "Make a CSV of my data", format: "csv", messages: [] });
 
-    expect(res.status).toBe(200);
-    expect(res.body.fileName).toMatch(/\.csv$/);
-    expect(res.body.fileData).toBeTruthy();
+    expect(res.status).toBe(500);
+    expect(res.body.fileName).toBeUndefined();
+    expect(res.body.fileData).toBeUndefined();
     expect(res.body.assetId).toBeUndefined();
-    // The persist WAS attempted (and threw) — best-effort, not silently skipped.
-    expect(assetsMock.persistOraAsset).toHaveBeenCalledTimes(1);
-    // A failed persist must NOT refund the message quota — the user got the file.
-    expect(usageMock.refundOraQuota).not.toHaveBeenCalled();
+    expect(res.body.error).toBe("Failed to generate file. Please try again.");
+    expect(assetsMock.completeOraGeneratedAsset).toHaveBeenCalledTimes(1);
+    expect(assetsMock.cancelOraGeneratedAsset).toHaveBeenCalledTimes(1);
+    expect(usageMock.refundOraQuota).toHaveBeenCalledTimes(1);
   });
 
   it("does NOT persist an asset for an anonymous visitor (file still generated)", async () => {
@@ -1313,6 +1383,7 @@ describe("n) Explicit file generation — POST /public-ai/generate-file", () => 
     expect(res.status).toBe(200);
     expect(res.body.fileData).toBeTruthy();
     expect(res.body.assetId).toBeUndefined();
-    expect(assetsMock.persistOraAsset).not.toHaveBeenCalled();
+    expect(assetsMock.reserveOraGeneratedAsset).not.toHaveBeenCalled();
+    expect(assetsMock.completeOraGeneratedAsset).not.toHaveBeenCalled();
   });
 });

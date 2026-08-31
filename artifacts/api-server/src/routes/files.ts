@@ -6,7 +6,7 @@ import { guessMime } from "../lib/builder";
 
 import { extractPageMap } from "../lib/page-map";
 import { logger } from "../lib/logger";
-import { writeFileToContainer } from "../lib/tenant-runtime";
+import { syncFilesToContainer, writeFileToContainer } from "../lib/tenant-runtime";
 import { runEslintFix } from "../lib/checks/eslint-runner";
 import { applyProjectEslintFixes } from "../lib/eslint-fix-all";
 import { readDiagnostics } from "../lib/agent-senses";
@@ -18,6 +18,14 @@ import {
 } from "../lib/livePreviewProxy";
 import { serveProjectFilesPreview } from "../lib/project-files-preview";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
+import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
+import { isBinaryMime } from "../lib/binary-mime";
+import {
+  parseProjectFileAssetReference,
+  projectFileByteSize,
+  resolveProjectFileBytes,
+  resolveProjectFileClientContent,
+} from "../lib/project-file-asset-reference";
 
 const router: IRouter = Router();
 
@@ -39,7 +47,7 @@ router.get(
         id: projectFilesTable.id,
         path: projectFilesTable.path,
         mimeType: projectFilesTable.mimeType,
-        size: projectFilesTable.content,
+        content: projectFilesTable.content,
         artifactId: projectFilesTable.artifactId,
         updatedAt: projectFilesTable.updatedAt,
       })
@@ -52,7 +60,7 @@ router.get(
         id: r.id,
         path: r.path,
         mimeType: r.mimeType,
-        size: r.size.length,
+        size: projectFileByteSize({ content: r.content, mimeType: r.mimeType }),
         artifactId: r.artifactId,
         updatedAt: r.updatedAt,
       })),
@@ -79,7 +87,18 @@ router.get(
       .where(eq(projectFilesTable.projectId, projectId))
       .orderBy(asc(projectFilesTable.path));
 
-    res.json(rows);
+    res.json(
+      await Promise.all(
+        rows.map(async (row) => ({
+          ...row,
+          content: await resolveProjectFileClientContent({
+            projectId,
+            content: row.content,
+            mimeType: row.mimeType,
+          }),
+        })),
+      ),
+    );
   },
 );
 
@@ -99,6 +118,7 @@ router.get(
         id: projectFilesTable.id,
         path: projectFilesTable.path,
         content: projectFilesTable.content,
+        mimeType: projectFilesTable.mimeType,
       })
       .from(projectFilesTable)
       .where(eq(projectFilesTable.projectId, projectId))
@@ -114,6 +134,7 @@ router.get(
 
     for (const file of files) {
       if (results.length >= 50) break;
+      if (isBinaryMime(file.mimeType) || parseProjectFileAssetReference(file.content)) continue;
       const lines = file.content.split("\n");
       for (let i = 0; i < lines.length && results.length < 50; i++) {
         if (lines[i]!.toLowerCase().includes(lowerQ)) {
@@ -177,16 +198,25 @@ router.post(
     }
 
     const mimeType = guessMime(normalizedPath);
-    const [created] = await db
-      .insert(projectFilesTable)
-      .values({
+    const created = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(projectFilesTable)
+        .values({
+          projectId,
+          artifactId: resolvedArtifactId,
+          path: normalizedPath,
+          content,
+          mimeType,
+        })
+        .returning();
+      await reconcileProjectFileAssetUsage(tx, {
         projectId,
         artifactId: resolvedArtifactId,
-        path: normalizedPath,
-        content,
-        mimeType,
-      })
-      .returning();
+        filePath: normalizedPath,
+        nextContent: content,
+      });
+      return row;
+    });
 
     res.status(201).json({
       id: created.id,
@@ -230,7 +260,11 @@ router.get(
       id: row.id,
       path: row.path,
       mimeType: row.mimeType,
-      content: row.content,
+      content: await resolveProjectFileClientContent({
+        projectId,
+        content: row.content,
+        mimeType: row.mimeType,
+      }),
       updatedAt: row.updatedAt,
     });
   },
@@ -259,11 +293,21 @@ router.patch(
       res.status(404).json({ error: "File not found" });
       return;
     }
-    const [updated] = await db
-      .update(projectFilesTable)
-      .set({ content, updatedAt: new Date() })
-      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(projectFilesTable)
+        .set({ content, updatedAt: new Date() })
+        .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)))
+        .returning();
+      if (!row) throw new Error("Project file changed before it could be saved");
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: existing.artifactId,
+        filePath: row.path,
+        nextContent: content,
+      });
+      return row;
+    });
     res.json({
       id: updated.id,
       path: updated.path,
@@ -367,9 +411,17 @@ router.delete(
       res.status(404).json({ error: "File not found" });
       return;
     }
-    await db
-      .delete(projectFilesTable)
-      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(projectFilesTable)
+        .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: existing.artifactId,
+        filePath: existing.path,
+        nextContent: null,
+      });
+    });
     res.json({ deleted: true });
   },
 );
@@ -419,11 +471,27 @@ router.patch(
     }
 
     const newMimeType = guessMime(normalizedPath);
-    const [updated] = await db
-      .update(projectFilesTable)
-      .set({ path: normalizedPath, mimeType: newMimeType, updatedAt: new Date() })
-      .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)))
-      .returning();
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(projectFilesTable)
+        .set({ path: normalizedPath, mimeType: newMimeType, updatedAt: new Date() })
+        .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)))
+        .returning();
+      if (!row) throw new Error("Project file changed before it could be renamed");
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: existing.artifactId,
+        filePath: existing.path,
+        nextContent: null,
+      });
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: existing.artifactId,
+        filePath: normalizedPath,
+        nextContent: existing.content,
+      });
+      return row;
+    });
 
     res.json({
       id: updated.id,
@@ -541,6 +609,7 @@ router.post(
         id: projectFilesTable.id,
         path: projectFilesTable.path,
         content: projectFilesTable.content,
+        mimeType: projectFilesTable.mimeType,
       })
       .from(projectFilesTable)
       .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, fileId)));
@@ -564,7 +633,9 @@ router.post(
     // save can otherwise race with the sync and lint stale content.
     if (containerId) {
       try {
-        await writeFileToContainer(containerId, file.path, file.content, projectId);
+        await syncFilesToContainer(containerId, projectId, [
+          { path: file.path, content: file.content },
+        ]);
       } catch {
         // Non-fatal — readDiagnostics will surface the resulting failure.
       }
@@ -609,7 +680,12 @@ router.get(
       res.status(404).json({ error: "File not found" });
       return;
     }
-    res.type("text/plain").setHeader("Cache-Control", "no-store").send(row.content);
+    const bytes = await resolveProjectFileBytes({
+      projectId,
+      content: row.content,
+      mimeType: row.mimeType,
+    });
+    res.type(row.mimeType).setHeader("Cache-Control", "no-store").send(bytes);
   },
 );
 

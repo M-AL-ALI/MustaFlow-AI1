@@ -115,6 +115,20 @@ vi.mock("../lib/logger", () => ({
 vi.mock("../lib/preview-access", () => ({
   deriveConfiguredPreviewAccess: vi.fn(() => ({ kind: "ready" })),
 }));
+vi.mock("../lib/project-lifecycle", () => ({
+  requireActiveProjectLifecycleSession: (
+    _req: express.Request,
+    _res: express.Response,
+    next: express.NextFunction,
+  ) => next(),
+  withActiveProjectLifecycle: async (
+    _projectId: number,
+    work: (session: { assertActive: () => Promise<boolean> }) => Promise<unknown>,
+  ) => ({
+    state: "active" as const,
+    value: await work({ assertActive: async () => true }),
+  }),
+}));
 
 import containersRouter from "./containers";
 import { CloudflareRuntimeControlError } from "../lib/cloudflare-runtime-provider";

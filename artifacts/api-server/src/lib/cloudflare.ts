@@ -18,9 +18,18 @@
  */
 
 import { createHmac, createHash } from "crypto";
+import type { CloudflareSecurityResourceReceipt } from "@workspace/db";
 import { logger } from "./logger";
+import { resolveProjectFileBytes } from "./project-file-asset-reference";
 
 const CF_API_BASE = "https://api.cloudflare.com/client/v4";
+const RETIREMENT_CONTROL_TIMEOUT_MS = 30_000;
+const CACHE_PURGE_TAGS_PER_REQUEST = 30;
+const SECURITY_RECONCILIATION_PAGE_SIZE = 100;
+const SECURITY_RECONCILIATION_MAX_PAGES = 20;
+const KV_INVENTORY_PAGE_SIZE = 1_000;
+const KV_INVENTORY_MAX_PAGES = 20;
+const KV_INVENTORY_MAX_PROJECT_ROUTES = 512;
 
 export function cfEnabled(): boolean {
   return Boolean(process.env.CF_ZONE_ID && process.env.CF_API_TOKEN);
@@ -253,7 +262,193 @@ export async function deleteCustomHostname(cfHostnameId: string): Promise<boolea
   }
 }
 
+export type CustomHostnameRetirementVerification =
+  | { state: "absent" }
+  | { state: "present" }
+  | { state: "unavailable"; stage: "delete" | "read" };
+
+/**
+ * Strict certificate-release primitive for governed project retirement.
+ * The ordinary domain route remains best-effort; retirement requires both an
+ * accepted delete and an authoritative absent read before clearing its pointer.
+ */
+export async function retireCustomHostname(
+  cfHostnameId: string,
+): Promise<CustomHostnameRetirementVerification> {
+  if (!cfEnabled()) return { state: "unavailable", stage: "delete" };
+  try {
+    const deleted = await fetch(
+      `${CF_API_BASE}/zones/${zoneId()}/custom_hostnames/${cfHostnameId}`,
+      {
+        method: "DELETE",
+        headers: readHeaders(),
+        signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+      },
+    );
+    if (!deleted.ok && deleted.status !== 404) {
+      return { state: "unavailable", stage: "delete" };
+    }
+  } catch (err) {
+    logger.warn({ err, cfHostnameId }, "CF custom hostname retirement delete threw");
+    return { state: "unavailable", stage: "delete" };
+  }
+
+  try {
+    const observed = await fetch(
+      `${CF_API_BASE}/zones/${zoneId()}/custom_hostnames/${cfHostnameId}`,
+      { headers: readHeaders(), signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS) },
+    );
+    if (observed.status === 404) return { state: "absent" };
+    if (observed.ok) return { state: "present" };
+    return { state: "unavailable", stage: "read" };
+  } catch (err) {
+    logger.warn({ err, cfHostnameId }, "CF custom hostname retirement verification threw");
+    return { state: "unavailable", stage: "read" };
+  }
+}
+
 // ── WAF + Bot Management defaults — Task #560 ─────────────────────────────────
+
+export type CloudflareSecurityApplyResult =
+  | { state: "applied"; resources: CloudflareSecurityResourceReceipt[] }
+  | { state: "unavailable"; resources: CloudflareSecurityResourceReceipt[] };
+
+type CfRulesetRule = { id?: string; ref?: string; description?: string };
+type CfRuleset = { id?: string; rules?: CfRulesetRule[] };
+type CfFirewallRule = {
+  id?: string;
+  ref?: string;
+  description?: string;
+  filter?: { id?: string };
+};
+type CfRateLimit = { id?: string; description?: string };
+type CfMtlsCertificate = { id?: string; name?: string };
+type SecurityReconciliation<T> =
+  | { state: "found"; value: T }
+  | { state: "absent" }
+  | { state: "unavailable" };
+
+function stableSecurityRef(scopeIdentity: string, purpose: string): string {
+  const digest = createHash("sha256")
+    .update(`nabuflow:${scopeIdentity}:${purpose}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `nabuflow-${digest}`;
+}
+
+function dedupeSecurityResources(
+  resources: CloudflareSecurityResourceReceipt[],
+): CloudflareSecurityResourceReceipt[] {
+  const unique = new Map<string, CloudflareSecurityResourceReceipt>();
+  for (const resource of resources) {
+    unique.set(`${resource.kind}:${resource.rulesetId ?? ""}:${resource.id}`, resource);
+  }
+  return [...unique.values()];
+}
+
+async function listSecurityResources<T>(path: string): Promise<SecurityReconciliation<T[]>> {
+  const values: T[] = [];
+  for (let page = 1; page <= SECURITY_RECONCILIATION_MAX_PAGES; page++) {
+    try {
+      const separator = path.includes("?") ? "&" : "?";
+      const response = await fetch(
+        `${CF_API_BASE}${path}${separator}page=${page}&per_page=${SECURITY_RECONCILIATION_PAGE_SIZE}`,
+        { headers: readHeaders(), signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS) },
+      );
+      if (!response.ok) return { state: "unavailable" };
+      const json = (await response.json()) as CfListResult<T>;
+      if (!json.success || !json.result) return { state: "unavailable" };
+      values.push(...json.result);
+      const total = json.result_info?.total_count;
+      if (
+        json.result.length < SECURITY_RECONCILIATION_PAGE_SIZE ||
+        (typeof total === "number" && values.length >= total)
+      ) {
+        return { state: "found", value: values };
+      }
+    } catch {
+      return { state: "unavailable" };
+    }
+  }
+  // Refuse to append after an incomplete bounded scan.
+  return { state: "unavailable" };
+}
+
+async function reconcileRulesetRule(
+  phase: string,
+  ref: string,
+  legacyDescription?: string,
+): Promise<SecurityReconciliation<CloudflareSecurityResourceReceipt>> {
+  try {
+    const response = await fetch(
+      `${CF_API_BASE}/zones/${zoneId()}/rulesets/phases/${phase}/entrypoint`,
+      { headers: readHeaders(), signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS) },
+    );
+    if (response.status === 404) return { state: "absent" };
+    if (!response.ok) return { state: "unavailable" };
+    const json = (await response.json()) as CfApiResult<CfRuleset>;
+    const rulesetId = json.result?.id;
+    const rule = json.result?.rules?.find(
+      (candidate) =>
+        candidate.ref === ref ||
+        (!candidate.ref && legacyDescription && candidate.description === legacyDescription),
+    );
+    return rulesetId && rule?.id
+      ? {
+          state: "found",
+          value: { kind: "ruleset_rule", id: rule.id, rulesetId, ref },
+        }
+      : { state: "absent" };
+  } catch {
+    return { state: "unavailable" };
+  }
+}
+
+async function ensureRulesetRule(input: {
+  phase: string;
+  ref: string;
+  body: Record<string, unknown>;
+  existing: CloudflareSecurityResourceReceipt[];
+}): Promise<CloudflareSecurityResourceReceipt | null> {
+  const tracked = input.existing.find(
+    (resource) => resource.kind === "ruleset_rule" && resource.ref === input.ref,
+  );
+  if (tracked) return tracked;
+  const legacyDescription =
+    typeof input.body.description === "string" ? input.body.description : undefined;
+  const reconciled = await reconcileRulesetRule(input.phase, input.ref, legacyDescription);
+  if (reconciled.state === "found") return reconciled.value;
+  if (reconciled.state === "unavailable") return null;
+
+  try {
+    const response = await fetch(
+      `${CF_API_BASE}/zones/${zoneId()}/rulesets/phases/${input.phase}/entrypoint/rules`,
+      {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ ...input.body, ref: input.ref }),
+        signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+      },
+    );
+    if (response.ok) {
+      const json = (await response.json()) as CfApiResult<CfRuleset | CfRulesetRule>;
+      const result = json.result;
+      if (result && "rules" in result) {
+        const rule = result.rules?.find((candidate) => candidate.ref === input.ref);
+        if (result.id && rule?.id) {
+          return { kind: "ruleset_rule", id: rule.id, rulesetId: result.id, ref: input.ref };
+        }
+      }
+    }
+  } catch (error) {
+    logger.warn({ error, ref: input.ref }, "CF ruleset create outcome was ambiguous");
+  }
+
+  // A timeout can happen after Cloudflare committed. Re-read by the stable ref
+  // before allowing a caller to retry, otherwise PATCH can append duplicates.
+  const afterCreate = await reconcileRulesetRule(input.phase, input.ref, legacyDescription);
+  return afterCreate.state === "found" ? afterCreate.value : null;
+}
 
 /**
  * Apply default WAF and bot management settings for a newly created custom hostname.
@@ -268,42 +463,35 @@ export async function deleteCustomHostname(cfHostnameId: string): Promise<boolea
  */
 export async function applyDefaultWafRules(
   hostname: string,
-  _cfHostnameId: string,
-): Promise<boolean> {
-  if (!cfEnabled()) return false;
-  try {
-    // Apply managed rulesets via Zone Rulesets API (http_request_firewall_managed phase).
-    // This is a zone-level operation that includes a hostname condition.
-    const resp = await fetch(
-      `${CF_API_BASE}/zones/${zoneId()}/rulesets/phases/http_request_firewall_managed/entrypoint/rules`,
-      {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({
-          description: `WAF defaults for ${hostname}`,
-          action: "execute",
-          expression: `http.host eq "${hostname}"`,
-          action_parameters: {
-            id: "efb7b8c949ac4650a09736fc376e9aee", // CF Managed Ruleset
-            overrides: { enabled: true },
-          },
-        }),
+  cfHostnameId: string,
+  existingResources: CloudflareSecurityResourceReceipt[] = [],
+): Promise<CloudflareSecurityApplyResult> {
+  if (!cfEnabled()) return { state: "unavailable", resources: existingResources };
+  const ref = stableSecurityRef(cfHostnameId, "default-waf");
+  const resource = await ensureRulesetRule({
+    phase: "http_request_firewall_managed",
+    ref,
+    existing: existingResources,
+    body: {
+      description: `WAF defaults for ${hostname}`,
+      action: "execute",
+      expression: `http.host eq "${hostname}"`,
+      action_parameters: {
+        id: "efb7b8c949ac4650a09736fc376e9aee",
+        overrides: { enabled: true },
       },
-    );
-    if (!resp.ok) {
-      const json = (await resp.json()) as CfApiResult<unknown>;
-      logger.warn(
-        { hostname, errors: json.errors },
-        "CF applyDefaultWafRules: managed ruleset apply failed (non-fatal)",
-      );
-      return false;
-    }
-    logger.info({ hostname }, "CF applyDefaultWafRules: WAF defaults applied");
-    return true;
-  } catch (err) {
-    logger.warn({ err, hostname }, "CF applyDefaultWafRules threw (non-fatal)");
-    return false;
+    },
+  });
+  const resources = dedupeSecurityResources([
+    ...existingResources,
+    ...(resource ? [resource] : []),
+  ]);
+  if (!resource) {
+    logger.warn({ hostname, ref }, "CF default WAF creation could not be reconciled");
+    return { state: "unavailable", resources };
   }
+  logger.info({ hostname, ref }, "CF default WAF rule reconciled");
+  return { state: "applied", resources };
 }
 
 export interface DomainSecurityConfigForCf {
@@ -315,6 +503,7 @@ export interface DomainSecurityConfigForCf {
   mtlsCaCert?: string;
   wafEnabled?: boolean;
   botManagement?: boolean;
+  cloudflareResources?: CloudflareSecurityResourceReceipt[];
 }
 
 // ── Input validators ──────────────────────────────────────────────────────────
@@ -344,6 +533,172 @@ export function isValidCountryCode(s: string): boolean {
   return /^[A-Z]{2}$/.test(s);
 }
 
+async function reconcileFirewallRule(
+  ref: string,
+  legacyDescription?: string,
+): Promise<SecurityReconciliation<CloudflareSecurityResourceReceipt[]>> {
+  const listed = await listSecurityResources<CfFirewallRule>(`/zones/${zoneId()}/firewall/rules`);
+  if (listed.state !== "found") return { state: "unavailable" };
+  const rule = listed.value.find(
+    (candidate) =>
+      candidate.ref === ref ||
+      (!candidate.ref && legacyDescription && candidate.description === legacyDescription),
+  );
+  if (!rule?.id) return { state: "absent" };
+  return {
+    state: "found",
+    value: [
+      { kind: "firewall_rule", id: rule.id, ref },
+      ...(rule.filter?.id ? [{ kind: "firewall_filter" as const, id: rule.filter.id, ref }] : []),
+    ],
+  };
+}
+
+async function ensureFirewallRule(input: {
+  ref: string;
+  rule: Record<string, unknown>;
+  existing: CloudflareSecurityResourceReceipt[];
+}): Promise<CloudflareSecurityResourceReceipt[] | null> {
+  const trackedRule = input.existing.find(
+    (resource) => resource.kind === "firewall_rule" && resource.ref === input.ref,
+  );
+  if (trackedRule) {
+    return input.existing.filter((resource) => resource.ref === input.ref);
+  }
+  const legacyDescription =
+    typeof input.rule.description === "string" ? input.rule.description : undefined;
+  const reconciled = await reconcileFirewallRule(input.ref, legacyDescription);
+  if (reconciled.state === "found") return reconciled.value;
+  if (reconciled.state === "unavailable") return null;
+  try {
+    const response = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify([{ ...input.rule, ref: input.ref }]),
+      signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const json = (await response.json()) as CfListResult<CfFirewallRule>;
+      const rule = json.result?.find((candidate) => candidate.ref === input.ref);
+      if (rule?.id) {
+        return [
+          { kind: "firewall_rule", id: rule.id, ref: input.ref },
+          ...(rule.filter?.id
+            ? [{ kind: "firewall_filter" as const, id: rule.filter.id, ref: input.ref }]
+            : []),
+        ];
+      }
+    }
+  } catch (error) {
+    logger.warn({ error, ref: input.ref }, "CF firewall create outcome was ambiguous");
+  }
+  const afterCreate = await reconcileFirewallRule(input.ref, legacyDescription);
+  return afterCreate.state === "found" ? afterCreate.value : null;
+}
+
+async function reconcileRateLimit(
+  ref: string,
+  legacyDescription?: string,
+): Promise<SecurityReconciliation<CloudflareSecurityResourceReceipt>> {
+  const listed = await listSecurityResources<CfRateLimit>(`/zones/${zoneId()}/rate_limits`);
+  if (listed.state !== "found") return { state: "unavailable" };
+  const rateLimit = listed.value.find(
+    (candidate) =>
+      candidate.description === `NabuFlow ${ref}` ||
+      (legacyDescription && candidate.description === legacyDescription),
+  );
+  return rateLimit?.id
+    ? { state: "found", value: { kind: "rate_limit", id: rateLimit.id, ref } }
+    : { state: "absent" };
+}
+
+async function ensureRateLimit(input: {
+  ref: string;
+  body: Record<string, unknown>;
+  existing: CloudflareSecurityResourceReceipt[];
+  legacyDescription?: string;
+}): Promise<CloudflareSecurityResourceReceipt | null> {
+  const tracked = input.existing.find(
+    (resource) => resource.kind === "rate_limit" && resource.ref === input.ref,
+  );
+  if (tracked) return tracked;
+  const reconciled = await reconcileRateLimit(input.ref, input.legacyDescription);
+  if (reconciled.state === "found") return reconciled.value;
+  if (reconciled.state === "unavailable") return null;
+  try {
+    const response = await fetch(`${CF_API_BASE}/zones/${zoneId()}/rate_limits`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ ...input.body, description: `NabuFlow ${input.ref}` }),
+      signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const json = (await response.json()) as CfApiResult<CfRateLimit>;
+      if (json.result?.id) {
+        return { kind: "rate_limit", id: json.result.id, ref: input.ref };
+      }
+    }
+  } catch (error) {
+    logger.warn({ error, ref: input.ref }, "CF rate-limit create outcome was ambiguous");
+  }
+  const afterCreate = await reconcileRateLimit(input.ref, input.legacyDescription);
+  return afterCreate.state === "found" ? afterCreate.value : null;
+}
+
+async function reconcileMtlsCertificate(
+  ref: string,
+  legacyName?: string,
+): Promise<SecurityReconciliation<CloudflareSecurityResourceReceipt>> {
+  const listed = await listSecurityResources<CfMtlsCertificate>(
+    `/zones/${zoneId()}/access/certificates`,
+  );
+  if (listed.state !== "found") return { state: "unavailable" };
+  const certificate = listed.value.find(
+    (candidate) =>
+      candidate.name === `NabuFlow ${ref}` || (legacyName && candidate.name === legacyName),
+  );
+  return certificate?.id
+    ? { state: "found", value: { kind: "mtls_certificate", id: certificate.id, ref } }
+    : { state: "absent" };
+}
+
+async function ensureMtlsCertificate(input: {
+  hostname: string;
+  caCert: string;
+  ref: string;
+  existing: CloudflareSecurityResourceReceipt[];
+}): Promise<CloudflareSecurityResourceReceipt | null> {
+  const tracked = input.existing.find(
+    (resource) => resource.kind === "mtls_certificate" && resource.ref === input.ref,
+  );
+  if (tracked) return tracked;
+  const reconciled = await reconcileMtlsCertificate(input.ref, `mTLS CA for ${input.hostname}`);
+  if (reconciled.state === "found") return reconciled.value;
+  if (reconciled.state === "unavailable") return null;
+  try {
+    const response = await fetch(`${CF_API_BASE}/zones/${zoneId()}/access/certificates`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        name: `NabuFlow ${input.ref}`,
+        certificate: input.caCert,
+        associated_hostnames: [input.hostname],
+      }),
+      signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const json = (await response.json()) as CfApiResult<CfMtlsCertificate>;
+      if (json.result?.id) {
+        return { kind: "mtls_certificate", id: json.result.id, ref: input.ref };
+      }
+    }
+  } catch (error) {
+    logger.warn({ error, ref: input.ref }, "CF mTLS create outcome was ambiguous");
+  }
+  const afterCreate = await reconcileMtlsCertificate(input.ref, `mTLS CA for ${input.hostname}`);
+  return afterCreate.state === "found" ? afterCreate.value : null;
+}
+
 /**
  * Apply per-domain security config to Cloudflare.
  *
@@ -357,194 +712,332 @@ export function isValidCountryCode(s: string): boolean {
  * All values are validated before being interpolated into CF expression strings.
  * Invalid entries are logged and silently skipped — tenant isolation is preserved.
  *
- * Returns true if at least one rule was successfully applied; false otherwise.
+ * Returns the exact provider receipts. Stable refs make ambiguous POST outcomes
+ * reconcilable and prevent repeated PATCH requests from appending duplicates.
  */
 export async function applySecurityConfig(
   hostname: string,
   config: DomainSecurityConfigForCf,
-): Promise<boolean> {
-  if (!cfEnabled()) return false;
+  scopeIdentity = hostname,
+): Promise<CloudflareSecurityApplyResult> {
+  const existing = dedupeSecurityResources(config.cloudflareResources ?? []);
+  if (!cfEnabled()) return { state: "unavailable", resources: existing };
 
   // Hostname must be a safe token (no expression metacharacters)
   if (/"/.test(hostname)) {
     logger.error({ hostname }, "CF applySecurityConfig: hostname contains quotes — aborting");
-    return false;
+    return { state: "unavailable", resources: existing };
   }
 
-  let anyApplied = false;
+  const resources = [...existing];
+  let complete = true;
+  const add = (created: CloudflareSecurityResourceReceipt[] | null): void => {
+    if (!created) complete = false;
+    else resources.push(...created);
+  };
 
-  try {
-    // ── IP deny ───────────────────────────────────────────────────────────────
-    if (config.ipDeny && config.ipDeny.length > 0) {
-      const validIps = config.ipDeny.filter((ip) => {
-        if (!isValidIpOrCidr(ip)) {
-          logger.warn({ hostname, ip }, "CF applySecurityConfig: ipDeny entry invalid — skipping");
-          return false;
-        }
-        return true;
-      });
-      if (validIps.length > 0) {
-        // CF expression: ip.src in {a.b.c.d e.e.e.e} — space-separated, no quotes around IPs
-        const ipSet = validIps.join(" ");
-        const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
-          method: "POST",
-          headers: jsonHeaders(),
-          body: JSON.stringify([
-            {
-              action: "block",
-              description: `IP deny list for ${hostname}`,
-              filter: {
-                expression: `(http.host eq "${hostname}") and (ip.src in {${ipSet}})`,
-              },
-            },
-          ]),
-        });
-        if (resp.ok) anyApplied = true;
-        else logger.warn({ hostname }, "CF applySecurityConfig: ipDeny rule failed");
-      }
-    }
+  const firewallRule = async (
+    purpose: string,
+    action: string,
+    description: string,
+    expression: string,
+  ): Promise<void> => {
+    add(
+      await ensureFirewallRule({
+        ref: stableSecurityRef(scopeIdentity, purpose),
+        existing: resources,
+        rule: { action, description, filter: { expression } },
+      }),
+    );
+  };
 
-    // ── IP allow ──────────────────────────────────────────────────────────────
-    if (config.ipAllow && config.ipAllow.length > 0) {
-      const validIps = config.ipAllow.filter((ip) => {
-        if (!isValidIpOrCidr(ip)) {
-          logger.warn({ hostname, ip }, "CF applySecurityConfig: ipAllow entry invalid — skipping");
-          return false;
-        }
-        return true;
-      });
-      if (validIps.length > 0) {
-        const ipSet = validIps.join(" ");
-        // Block everyone NOT in the allow set
-        const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
-          method: "POST",
-          headers: jsonHeaders(),
-          body: JSON.stringify([
-            {
-              action: "block",
-              description: `IP allowlist enforcement for ${hostname}`,
-              filter: {
-                expression: `(http.host eq "${hostname}") and not (ip.src in {${ipSet}})`,
-              },
-            },
-          ]),
-        });
-        if (resp.ok) anyApplied = true;
-        else logger.warn({ hostname }, "CF applySecurityConfig: ipAllow rule failed");
-      }
-    }
-
-    // ── Geo-block ─────────────────────────────────────────────────────────────
-    if (config.geoBlock && config.geoBlock.length > 0) {
-      const validCcs = config.geoBlock.filter((cc) => {
-        if (!isValidCountryCode(cc)) {
-          logger.warn(
-            { hostname, cc },
-            "CF applySecurityConfig: geoBlock country code invalid — skipping",
-          );
-          return false;
-        }
-        return true;
-      });
-      if (validCcs.length > 0) {
-        // CF expression: ip.geoip.country in {"CC1" "CC2"} — quoted, space-separated
-        const ccList = validCcs.map((cc) => `"${cc}"`).join(" ");
-        const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
-          method: "POST",
-          headers: jsonHeaders(),
-          body: JSON.stringify([
-            {
-              action: "block",
-              description: `Geo-block for ${hostname}`,
-              filter: {
-                expression: `(http.host eq "${hostname}") and (ip.geoip.country in {${ccList}})`,
-              },
-            },
-          ]),
-        });
-        if (resp.ok) anyApplied = true;
-        else logger.warn({ hostname }, "CF applySecurityConfig: geoBlock rule failed");
-      }
-    }
-
-    // ── Rate limit ────────────────────────────────────────────────────────────
-    if (config.rateLimitRps && config.rateLimitRps > 0) {
-      const rps = Math.max(1, Math.min(100_000, Math.floor(config.rateLimitRps)));
-      const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/rate_limits`, {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({
-          match: {
-            request: {
-              methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
-              schemes: ["HTTP", "HTTPS"],
-              url: `${hostname}/*`,
-            },
-          },
-          threshold: rps,
-          period: 1, // per-second window
-          action: {
-            mode: "simulate", // 'simulate' logs; change to 'ban' for hard block
-            timeout: 60,
-            response: { content_type: "application/json", body: `{"error":"rate limit exceeded"}` },
-          },
-          description: `Rate limit ${rps} RPS for ${hostname}`,
-          enabled: true,
-        }),
-      });
-      if (resp.ok) anyApplied = true;
-      else logger.warn({ hostname, rps }, "CF applySecurityConfig: rate limit rule failed");
-    }
-
-    // ── WAF enabled / disabled ────────────────────────────────────────────────
-    if (config.wafEnabled === false) {
-      // Add a skip rule for this hostname to bypass CF Managed Ruleset
-      const resp = await fetch(
-        `${CF_API_BASE}/zones/${zoneId()}/rulesets/phases/http_request_firewall_managed/entrypoint/rules`,
-        {
-          method: "POST",
-          headers: jsonHeaders(),
-          body: JSON.stringify({
-            description: `WAF skip for ${hostname}`,
-            action: "skip",
-            expression: `http.host eq "${hostname}"`,
-            action_parameters: { ruleset: "current" },
-          }),
-        },
+  if (config.ipDeny?.length) {
+    const values = config.ipDeny.filter(isValidIpOrCidr);
+    if (values.length) {
+      await firewallRule(
+        "ip-deny",
+        "block",
+        `IP deny list for ${hostname}`,
+        `(http.host eq "${hostname}") and (ip.src in {${values.join(" ")}})`,
       );
-      if (resp.ok) anyApplied = true;
-      else logger.warn({ hostname }, "CF applySecurityConfig: WAF skip rule failed");
     }
-
-    // ── Bot Management challenge ──────────────────────────────────────────────
-    // Requires CF Bot Management (Enterprise). Gracefully skips when unavailable.
-    if (config.botManagement === true) {
-      const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/firewall/rules`, {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify([
-          {
-            action: "challenge",
-            description: `Bot management challenge for ${hostname}`,
-            filter: {
-              expression: `(http.host eq "${hostname}") and (cf.bot_management.score lt 30)`,
-            },
-          },
-        ]),
-      });
-      if (resp.ok) anyApplied = true;
-      else
-        logger.warn(
-          { hostname },
-          "CF applySecurityConfig: bot challenge rule failed (may require Bot Management plan)",
-        );
-    }
-
-    return anyApplied;
-  } catch (err) {
-    logger.warn({ err, hostname }, "CF applySecurityConfig threw (non-fatal)");
-    return false;
   }
+  if (config.ipAllow?.length) {
+    const values = config.ipAllow.filter(isValidIpOrCidr);
+    if (values.length) {
+      await firewallRule(
+        "ip-allow",
+        "block",
+        `IP allowlist enforcement for ${hostname}`,
+        `(http.host eq "${hostname}") and not (ip.src in {${values.join(" ")}})`,
+      );
+    }
+  }
+  if (config.geoBlock?.length) {
+    const values = config.geoBlock.filter(isValidCountryCode);
+    if (values.length) {
+      await firewallRule(
+        "geo-block",
+        "block",
+        `Geo-block for ${hostname}`,
+        `(http.host eq "${hostname}") and (ip.geoip.country in {${values
+          .map((country) => `"${country}"`)
+          .join(" ")}})`,
+      );
+    }
+  }
+  if (config.rateLimitRps && config.rateLimitRps > 0) {
+    const rps = Math.max(1, Math.min(100_000, Math.floor(config.rateLimitRps)));
+    const created = await ensureRateLimit({
+      ref: stableSecurityRef(scopeIdentity, "rate-limit"),
+      existing: resources,
+      legacyDescription: `Rate limit ${rps} RPS for ${hostname}`,
+      body: {
+        match: {
+          request: {
+            methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
+            schemes: ["HTTP", "HTTPS"],
+            url: `${hostname}/*`,
+          },
+        },
+        threshold: rps,
+        period: 1,
+        action: {
+          mode: "simulate",
+          timeout: 60,
+          response: { content_type: "application/json", body: `{"error":"rate limit exceeded"}` },
+        },
+        enabled: true,
+      },
+    });
+    add(created ? [created] : null);
+  }
+  if (config.wafEnabled === false) {
+    const created = await ensureRulesetRule({
+      phase: "http_request_firewall_managed",
+      ref: stableSecurityRef(scopeIdentity, "waf-skip"),
+      existing: resources,
+      body: {
+        description: `WAF skip for ${hostname}`,
+        action: "skip",
+        expression: `http.host eq "${hostname}"`,
+        action_parameters: { ruleset: "current" },
+      },
+    });
+    add(created ? [created] : null);
+  }
+  if (config.botManagement === true) {
+    await firewallRule(
+      "bot-management",
+      "challenge",
+      `Bot management challenge for ${hostname}`,
+      `(http.host eq "${hostname}") and (cf.bot_management.score lt 30)`,
+    );
+  }
+  if (config.mtlsEnabled && config.mtlsCaCert) {
+    const created = await ensureMtlsCertificate({
+      hostname,
+      caCert: config.mtlsCaCert,
+      ref: stableSecurityRef(scopeIdentity, "mtls"),
+      existing: resources,
+    });
+    add(created ? [created] : null);
+  }
+
+  return {
+    state: complete ? "applied" : "unavailable",
+    resources: dedupeSecurityResources(resources),
+  };
+}
+
+export type CloudflareSecurityDiscoveryResult =
+  | { state: "complete"; resources: CloudflareSecurityResourceReceipt[] }
+  | { state: "unavailable"; resources: CloudflareSecurityResourceReceipt[] };
+
+type ExactSecurityIdentity = { ref: string; legacyIdentity: string };
+
+function exactSecurityIdentities(
+  scopes: string[],
+  purpose: string,
+  legacyIdentity: string,
+): ExactSecurityIdentity[] {
+  return [...new Set(scopes)].map((scope) => ({
+    ref: stableSecurityRef(scope, purpose),
+    legacyIdentity,
+  }));
+}
+
+function matchExactSecurityIdentity<T extends { ref?: string }>(
+  candidate: T,
+  candidateLegacyIdentity: string | undefined,
+  expected: ExactSecurityIdentity[],
+): ExactSecurityIdentity | undefined {
+  return expected.find(
+    (identity) =>
+      candidate.ref === identity.ref ||
+      (!candidate.ref && candidateLegacyIdentity === identity.legacyIdentity),
+  );
+}
+
+/**
+ * Discover only resources with a stable ref or an exact historical description
+ * derivable from this hostname/config. This never creates, updates, or deletes.
+ */
+export async function discoverCloudflareSecurityResources(input: {
+  hostname: string;
+  cfHostnameId: string | null;
+  config: DomainSecurityConfigForCf;
+  existing?: CloudflareSecurityResourceReceipt[];
+}): Promise<CloudflareSecurityDiscoveryResult> {
+  const resources = [...(input.existing ?? input.config.cloudflareResources ?? [])];
+  const expectsProviderResources =
+    !!input.cfHostnameId ||
+    !!input.config.ipDeny?.some(isValidIpOrCidr) ||
+    !!input.config.ipAllow?.some(isValidIpOrCidr) ||
+    !!input.config.geoBlock?.some(isValidCountryCode) ||
+    (input.config.rateLimitRps ?? 0) > 0 ||
+    input.config.wafEnabled === false ||
+    input.config.botManagement === true ||
+    (!!input.config.mtlsEnabled && !!input.config.mtlsCaCert);
+  if (!expectsProviderResources && resources.length === 0) {
+    return { state: "complete", resources: [] };
+  }
+  if (!cfEnabled() || /"/.test(input.hostname)) {
+    return { state: "unavailable", resources: dedupeSecurityResources(resources) };
+  }
+  const scopes = [input.cfHostnameId, input.hostname].filter((scope): scope is string => !!scope);
+
+  const rulesetTargets: ExactSecurityIdentity[] = [];
+  if (input.cfHostnameId) {
+    rulesetTargets.push(
+      ...exactSecurityIdentities(
+        [input.cfHostnameId],
+        "default-waf",
+        `WAF defaults for ${input.hostname}`,
+      ),
+    );
+  }
+  if (input.config.wafEnabled === false) {
+    rulesetTargets.push(
+      ...exactSecurityIdentities(scopes, "waf-skip", `WAF skip for ${input.hostname}`),
+    );
+  }
+  if (rulesetTargets.length > 0) {
+    try {
+      const response = await fetch(
+        `${CF_API_BASE}/zones/${zoneId()}/rulesets/phases/http_request_firewall_managed/entrypoint`,
+        { headers: readHeaders(), signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS) },
+      );
+      if (response.status !== 404) {
+        if (!response.ok) {
+          return { state: "unavailable", resources: dedupeSecurityResources(resources) };
+        }
+        const json = (await response.json()) as CfApiResult<CfRuleset>;
+        if (!json.success || !json.result?.id || !Array.isArray(json.result.rules)) {
+          return { state: "unavailable", resources: dedupeSecurityResources(resources) };
+        }
+        for (const rule of json.result.rules) {
+          if (!rule.id) continue;
+          const identity = matchExactSecurityIdentity(rule, rule.description, rulesetTargets);
+          if (identity) {
+            resources.push({
+              kind: "ruleset_rule",
+              id: rule.id,
+              rulesetId: json.result.id,
+              ref: identity.ref,
+            });
+          }
+        }
+      }
+    } catch {
+      return { state: "unavailable", resources: dedupeSecurityResources(resources) };
+    }
+  }
+
+  const firewallTargets = [
+    ...(input.config.ipDeny?.some(isValidIpOrCidr)
+      ? exactSecurityIdentities(scopes, "ip-deny", `IP deny list for ${input.hostname}`)
+      : []),
+    ...(input.config.ipAllow?.some(isValidIpOrCidr)
+      ? exactSecurityIdentities(
+          scopes,
+          "ip-allow",
+          `IP allowlist enforcement for ${input.hostname}`,
+        )
+      : []),
+    ...(input.config.geoBlock?.some(isValidCountryCode)
+      ? exactSecurityIdentities(scopes, "geo-block", `Geo-block for ${input.hostname}`)
+      : []),
+    ...(input.config.botManagement === true
+      ? exactSecurityIdentities(
+          scopes,
+          "bot-management",
+          `Bot management challenge for ${input.hostname}`,
+        )
+      : []),
+  ];
+  if (firewallTargets.length > 0) {
+    const listed = await listSecurityResources<CfFirewallRule>(`/zones/${zoneId()}/firewall/rules`);
+    if (listed.state !== "found") {
+      return { state: "unavailable", resources: dedupeSecurityResources(resources) };
+    }
+    for (const rule of listed.value) {
+      if (!rule.id) continue;
+      const identity = matchExactSecurityIdentity(rule, rule.description, firewallTargets);
+      if (!identity) continue;
+      resources.push({ kind: "firewall_rule", id: rule.id, ref: identity.ref });
+      if (rule.filter?.id) {
+        resources.push({ kind: "firewall_filter", id: rule.filter.id, ref: identity.ref });
+      }
+    }
+  }
+
+  if (input.config.rateLimitRps && input.config.rateLimitRps > 0) {
+    const rps = Math.max(1, Math.min(100_000, Math.floor(input.config.rateLimitRps)));
+    const targets = exactSecurityIdentities(
+      scopes,
+      "rate-limit",
+      `Rate limit ${rps} RPS for ${input.hostname}`,
+    );
+    const listed = await listSecurityResources<CfRateLimit>(`/zones/${zoneId()}/rate_limits`);
+    if (listed.state !== "found") {
+      return { state: "unavailable", resources: dedupeSecurityResources(resources) };
+    }
+    for (const rateLimit of listed.value) {
+      if (!rateLimit.id) continue;
+      const identity = targets.find(
+        (target) =>
+          rateLimit.description === `NabuFlow ${target.ref}` ||
+          rateLimit.description === target.legacyIdentity,
+      );
+      if (identity) {
+        resources.push({ kind: "rate_limit", id: rateLimit.id, ref: identity.ref });
+      }
+    }
+  }
+
+  if (input.config.mtlsEnabled && input.config.mtlsCaCert) {
+    const targets = exactSecurityIdentities(scopes, "mtls", `mTLS CA for ${input.hostname}`);
+    const listed = await listSecurityResources<CfMtlsCertificate>(
+      `/zones/${zoneId()}/access/certificates`,
+    );
+    if (listed.state !== "found") {
+      return { state: "unavailable", resources: dedupeSecurityResources(resources) };
+    }
+    for (const certificate of listed.value) {
+      if (!certificate.id) continue;
+      const identity = targets.find(
+        (target) =>
+          certificate.name === `NabuFlow ${target.ref}` ||
+          certificate.name === target.legacyIdentity,
+      );
+      if (identity) {
+        resources.push({ kind: "mtls_certificate", id: certificate.id, ref: identity.ref });
+      }
+    }
+  }
+
+  return { state: "complete", resources: dedupeSecurityResources(resources) };
 }
 
 /**
@@ -592,6 +1085,120 @@ export async function disableMtls(certId: string): Promise<boolean> {
     logger.warn({ err, certId }, "CF disableMtls threw (non-fatal)");
     return false;
   }
+}
+
+export type CloudflareSecurityRetirementVerification =
+  | { state: "absent" }
+  | { state: "present" }
+  | { state: "unavailable"; stage: "delete" | "read" };
+
+function securityResourcePath(resource: CloudflareSecurityResourceReceipt): string | null {
+  switch (resource.kind) {
+    case "ruleset_rule":
+      return resource.rulesetId
+        ? `/zones/${zoneId()}/rulesets/${resource.rulesetId}/rules/${resource.id}`
+        : null;
+    case "firewall_rule":
+      return `/zones/${zoneId()}/firewall/rules/${resource.id}`;
+    case "firewall_filter":
+      return `/zones/${zoneId()}/filters/${resource.id}`;
+    case "rate_limit":
+      return `/zones/${zoneId()}/rate_limits/${resource.id}`;
+    case "mtls_certificate":
+      return `/zones/${zoneId()}/access/certificates/${resource.id}`;
+  }
+}
+
+/**
+ * Delete one exact tracked security resource and authoritatively verify it is
+ * absent. A transport error is never converted into a successful receipt.
+ */
+export async function retireCloudflareSecurityResource(
+  resource: CloudflareSecurityResourceReceipt,
+): Promise<CloudflareSecurityRetirementVerification> {
+  if (!cfEnabled()) return { state: "unavailable", stage: "delete" };
+  const path = securityResourcePath(resource);
+  if (!path) return { state: "unavailable", stage: "delete" };
+  try {
+    const deleted = await fetch(`${CF_API_BASE}${path}`, {
+      method: "DELETE",
+      headers: readHeaders(),
+      signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+    });
+    if (!deleted.ok && deleted.status !== 404) {
+      return { state: "unavailable", stage: "delete" };
+    }
+  } catch (error) {
+    logger.warn({ error, resource }, "CF security-resource retirement delete threw");
+    return { state: "unavailable", stage: "delete" };
+  }
+
+  try {
+    if (resource.kind === "ruleset_rule") {
+      const response = await fetch(
+        `${CF_API_BASE}/zones/${zoneId()}/rulesets/${resource.rulesetId}`,
+        { headers: readHeaders(), signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS) },
+      );
+      if (response.status === 404) return { state: "absent" };
+      if (!response.ok) return { state: "unavailable", stage: "read" };
+      const json = (await response.json()) as CfApiResult<CfRuleset>;
+      if (!json.success || !json.result) return { state: "unavailable", stage: "read" };
+      return json.result?.rules?.some((rule) => rule.id === resource.id)
+        ? { state: "present" }
+        : { state: "absent" };
+    }
+    const observed = await fetch(`${CF_API_BASE}${path}`, {
+      headers: readHeaders(),
+      signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+    });
+    if (observed.status === 404) return { state: "absent" };
+    if (observed.ok) {
+      const json = (await observed.json()) as CfApiResult<unknown>;
+      return json.success ? { state: "present" } : { state: "unavailable", stage: "read" };
+    }
+    return { state: "unavailable", stage: "read" };
+  } catch (error) {
+    logger.warn({ error, resource }, "CF security-resource retirement verification threw");
+    return { state: "unavailable", stage: "read" };
+  }
+}
+
+export type CloudflareSecurityRetirementBatch = {
+  state: "absent" | "unavailable";
+  outcomes: Array<{
+    resource: CloudflareSecurityResourceReceipt;
+    verification: CloudflareSecurityRetirementVerification;
+  }>;
+};
+
+/** Bounded exact-resource cleanup used by detach surfaces. */
+export async function retireCloudflareSecurityResources(
+  resources: CloudflareSecurityResourceReceipt[],
+): Promise<CloudflareSecurityRetirementBatch> {
+  const ordered = dedupeSecurityResources(resources).sort((left, right) => {
+    // Cloudflare firewall-rule deletion does not delete its filter. Remove the
+    // rule first so the filter is no longer in use.
+    const rank = (kind: CloudflareSecurityResourceReceipt["kind"]): number =>
+      kind === "firewall_rule" ? 0 : kind === "firewall_filter" ? 2 : 1;
+    return rank(left.kind) - rank(right.kind);
+  });
+  const outcomes: CloudflareSecurityRetirementBatch["outcomes"] = [];
+  const concurrency = 4;
+  for (let offset = 0; offset < ordered.length; offset += concurrency) {
+    const batch = ordered.slice(offset, offset + concurrency);
+    outcomes.push(
+      ...(await Promise.all(
+        batch.map(async (resource) => ({
+          resource,
+          verification: await retireCloudflareSecurityResource(resource),
+        })),
+      )),
+    );
+    if (outcomes.some((outcome) => outcome.verification.state !== "absent")) {
+      return { state: "unavailable", outcomes };
+    }
+  }
+  return { state: "absent", outcomes };
 }
 
 /**
@@ -1141,7 +1748,14 @@ export async function uploadSnapshotToR2(
     files.map(async (f) => {
       const key = `${prefix}/${f.path.replace(/^\//, "")}`;
       const isBase64 = f.mimeType ? isBinaryMime(f.mimeType) : false;
-      const body = isBase64 ? Buffer.from(f.content, "base64") : Buffer.from(f.content, "utf8");
+      const body = isBase64
+        ? await resolveProjectFileBytes({
+            projectId,
+            content: f.content,
+            mimeType: f.mimeType ?? "application/octet-stream",
+            legacyEncoding: "base64",
+          })
+        : Buffer.from(f.content, "utf8");
       const contentType = f.mimeType ?? "application/octet-stream";
       const cacheControl = r2CacheControl(f.path);
 
@@ -1279,19 +1893,25 @@ export async function uploadMaintenancePage(projectId: number, html?: string): P
 export async function setProjectMaintenanceMode(
   hostnames: string[],
   enabled: boolean,
-): Promise<void> {
-  if (!kvEnabled()) return;
-  await Promise.all(
+): Promise<{ updated: string[]; failed: string[]; configured: boolean }> {
+  if (!kvEnabled()) return { updated: [], failed: [], configured: false };
+  const outcomes = await Promise.all(
     hostnames.map(async (h) => {
       try {
         const existing = await readHostnameKV(h);
-        if (!existing) return;
+        if (!existing) return { hostname: h, state: "failed" as const };
         await writeHostnameKV(h, { ...existing, maintenance: enabled });
+        return { hostname: h, state: "updated" as const };
       } catch {
-        /* best-effort */
+        return { hostname: h, state: "failed" as const };
       }
     }),
   );
+  return {
+    configured: true,
+    updated: outcomes.filter((item) => item.state === "updated").map((item) => item.hostname),
+    failed: outcomes.filter((item) => item.state === "failed").map((item) => item.hostname),
+  };
 }
 
 /**
@@ -1336,6 +1956,61 @@ export interface HostnameRoute {
   errorPage404?: string | null;
   /** Custom 500 HTML served by the Worker on origin error / R2 5xx. Null = platform default. */
   errorPage500?: string | null;
+}
+
+export type HostnameRouteObservation = {
+  hostname: string;
+  route: HostnameRoute;
+};
+
+export type HostnameRouteReadResult =
+  | { state: "found"; observation: HostnameRouteObservation }
+  | { state: "absent" }
+  | { state: "unavailable" };
+
+export type HostnameRouteInventoryResult =
+  | { state: "complete"; observations: HostnameRouteObservation[] }
+  | { state: "unavailable"; observations: HostnameRouteObservation[] };
+
+interface CfKvKeyListResult {
+  success: boolean;
+  result?: Array<{ name?: string }>;
+  result_info?: { cursor?: string };
+}
+
+function isHostnameRoute(value: unknown): value is HostnameRoute {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const route = value as Partial<HostnameRoute>;
+  return (
+    Number.isSafeInteger(route.projectId) &&
+    Number(route.projectId) > 0 &&
+    Number.isSafeInteger(route.versionId) &&
+    Number(route.versionId) > 0 &&
+    Array.isArray(route.versionHistory) &&
+    route.versionHistory.length <= 5 &&
+    route.versionHistory.every((version) => Number.isSafeInteger(version) && version > 0) &&
+    typeof route.maintenance === "boolean" &&
+    (route.preferredRegion === null || typeof route.preferredRegion === "string") &&
+    (route.errorPage404 === undefined ||
+      route.errorPage404 === null ||
+      typeof route.errorPage404 === "string") &&
+    (route.errorPage500 === undefined ||
+      route.errorPage500 === null ||
+      typeof route.errorPage500 === "string")
+  );
+}
+
+function sameHostnameRoute(left: HostnameRoute, right: HostnameRoute): boolean {
+  return (
+    left.projectId === right.projectId &&
+    left.versionId === right.versionId &&
+    left.maintenance === right.maintenance &&
+    left.preferredRegion === right.preferredRegion &&
+    left.errorPage404 === right.errorPage404 &&
+    left.errorPage500 === right.errorPage500 &&
+    left.versionHistory.length === right.versionHistory.length &&
+    left.versionHistory.every((version, index) => version === right.versionHistory[index])
+  );
 }
 
 function kvApiBase(): string {
@@ -1383,6 +2058,90 @@ export async function deleteHostnameKV(hostname: string): Promise<boolean> {
   }
 }
 
+export type HostnameRetirementVerification =
+  | { state: "absent" }
+  | { state: "present" }
+  | { state: "unavailable"; stage: "delete" | "read" };
+
+/** Authoritative metadata read. Unlike readHostnameKV, errors are not folded into absence. */
+export async function readHostnameKVObservation(
+  hostname: string,
+): Promise<HostnameRouteReadResult> {
+  if (!kvEnabled()) return { state: "unavailable" };
+  try {
+    const response = await fetch(`${kvApiBase()}/values/${encodeURIComponent(hostname)}`, {
+      headers: readHeaders(),
+      signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+    });
+    if (response.status === 404) return { state: "absent" };
+    if (!response.ok) return { state: "unavailable" };
+    const value: unknown = await response.json();
+    return isHostnameRoute(value)
+      ? { state: "found", observation: { hostname, route: value } }
+      : { state: "unavailable" };
+  } catch (error) {
+    logger.warn({ error, hostname }, "KV route metadata read threw");
+    return { state: "unavailable" };
+  }
+}
+
+/**
+ * Delete only the route identity that was authoritatively observed. KV has no
+ * server-side CAS, so the immediate pre-delete re-read is fail-closed if the
+ * hostname was republished or reassigned before cleanup reached it.
+ */
+export async function retireObservedHostnameKV(
+  observation: HostnameRouteObservation,
+): Promise<HostnameRetirementVerification> {
+  const current = await readHostnameKVObservation(observation.hostname);
+  if (current.state === "absent") return { state: "absent" };
+  if (current.state === "unavailable") return { state: "unavailable", stage: "read" };
+  if (!sameHostnameRoute(current.observation.route, observation.route)) {
+    return { state: "present" };
+  }
+  try {
+    const deleted = await fetch(
+      `${kvApiBase()}/values/${encodeURIComponent(observation.hostname)}`,
+      {
+        method: "DELETE",
+        headers: readHeaders(),
+        signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+      },
+    );
+    if (!deleted.ok && deleted.status !== 404) {
+      return { state: "unavailable", stage: "delete" };
+    }
+  } catch (error) {
+    logger.warn({ error, hostname: observation.hostname }, "KV route retirement delete threw");
+    return { state: "unavailable", stage: "delete" };
+  }
+  const afterDelete = await readHostnameKVObservation(observation.hostname);
+  if (afterDelete.state === "absent") return { state: "absent" };
+  if (afterDelete.state === "found") return { state: "present" };
+  return { state: "unavailable", stage: "read" };
+}
+
+/**
+ * Strict route-retirement primitive. Unlike the ordinary publish synchronizer,
+ * this never treats a transport failure as absence: both the DELETE and a
+ * subsequent authoritative 404 read are required before cleanup may advance.
+ */
+export async function retireHostnameKV(
+  hostname: string,
+  expectedProjectId?: number,
+): Promise<HostnameRetirementVerification> {
+  const observed = await readHostnameKVObservation(hostname);
+  if (observed.state === "absent") return { state: "absent" };
+  if (observed.state === "unavailable") return { state: "unavailable", stage: "read" };
+  if (
+    expectedProjectId !== undefined &&
+    observed.observation.route.projectId !== expectedProjectId
+  ) {
+    return { state: "present" };
+  }
+  return retireObservedHostnameKV(observed.observation);
+}
+
 /**
  * Read a hostname route from the Worker KV.
  * Returns null when not found or KV is not configured.
@@ -1399,6 +2158,74 @@ export async function readHostnameKV(hostname: string): Promise<HostnameRoute | 
     logger.warn({ err, hostname }, "KV readHostnameKV threw");
     return null;
   }
+}
+
+/**
+ * Bounded full-namespace reconciliation for every hostname still pointing at a
+ * project. This recovers overwritten slug history that no database row retains.
+ * An incomplete provider scan or malformed routing value is never called clean.
+ */
+export async function inventoryHostnameKVRoutesByProject(
+  projectId: number,
+): Promise<HostnameRouteInventoryResult> {
+  const observations: HostnameRouteObservation[] = [];
+  if (!kvEnabled() || !Number.isSafeInteger(projectId) || projectId < 1) {
+    return { state: "unavailable", observations };
+  }
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < KV_INVENTORY_MAX_PAGES; page += 1) {
+    let listed: CfKvKeyListResult;
+    try {
+      const query = new URLSearchParams({
+        limit: String(KV_INVENTORY_PAGE_SIZE),
+        ...(cursor === null ? {} : { cursor }),
+      });
+      const response = await fetch(`${kvApiBase()}/keys?${query.toString()}`, {
+        headers: readHeaders(),
+        signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+      });
+      if (!response.ok) return { state: "unavailable", observations };
+      listed = (await response.json()) as CfKvKeyListResult;
+    } catch (error) {
+      logger.warn({ error, projectId }, "KV route inventory list threw");
+      return { state: "unavailable", observations };
+    }
+    if (!listed.success || !Array.isArray(listed.result)) {
+      return { state: "unavailable", observations };
+    }
+    const names = listed.result
+      .map((entry) => entry.name)
+      .filter((name): name is string => {
+        return typeof name === "string" && name.length > 0 && name.length <= 253;
+      });
+    if (names.length !== listed.result.length) {
+      return { state: "unavailable", observations };
+    }
+    for (let offset = 0; offset < names.length; offset += 4) {
+      const reads = await Promise.all(
+        names.slice(offset, offset + 4).map((hostname) => readHostnameKVObservation(hostname)),
+      );
+      for (const read of reads) {
+        if (read.state === "unavailable") return { state: "unavailable", observations };
+        if (read.state !== "found" || read.observation.route.projectId !== projectId) continue;
+        if (!seen.has(read.observation.hostname)) {
+          seen.add(read.observation.hostname);
+          observations.push(read.observation);
+        }
+        if (observations.length > KV_INVENTORY_MAX_PROJECT_ROUTES) {
+          return { state: "unavailable", observations };
+        }
+      }
+    }
+    const nextCursor = listed.result_info?.cursor;
+    if (typeof nextCursor !== "string" || nextCursor.length === 0) {
+      return { state: "complete", observations };
+    }
+    if (nextCursor === cursor) return { state: "unavailable", observations };
+    cursor = nextCursor;
+  }
+  return { state: "unavailable", observations };
 }
 
 /**
@@ -1504,36 +2331,46 @@ export async function syncAllHostnamesKV(opts: {
 
 // ── Cloudflare cache purge ────────────────────────────────────────────────────
 
-/**
- * Purge the Cloudflare edge cache for all URLs served under the given hostnames.
- *
- * Purges the root path (/) on each hostname. This is sufficient for HTML-heavy
- * static apps since hashed assets are immutable and don't need purging.
- *
- * Falls back gracefully when CF is not configured.
- */
+export function cloudflareHostnameCacheTag(hostname: string): string | null {
+  const normalized = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (
+    normalized.length < 1 ||
+    normalized.length > 253 ||
+    !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+  return `nabuflow-host-${normalized}`;
+}
+
+/** Exact eviction for every cached path and regional Cache API key of a hostname. */
 export async function purgeCacheForHostnames(hostnames: string[]): Promise<boolean> {
   if (!cfEnabled()) return false;
   if (hostnames.length === 0) return true;
 
-  const urls: string[] = [];
-  for (const h of hostnames) {
-    urls.push(`https://${h}/`, `https://${h}/index.html`);
-  }
+  const tags = [...new Set(hostnames.map(cloudflareHostnameCacheTag))];
+  if (tags.some((tag) => tag === null)) return false;
+  const exactTags = tags as string[];
 
   try {
-    const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/purge_cache`, {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: JSON.stringify({ files: urls }),
-    });
-    const json = (await resp.json()) as CfApiResult<unknown>;
-    if (!json.success) {
-      const msg = json.errors?.map((e) => e.message).join("; ") ?? "CF purge failed";
-      logger.warn({ hostnames, msg }, "CF purgeCacheForHostnames failed");
-      return false;
+    for (let offset = 0; offset < exactTags.length; offset += CACHE_PURGE_TAGS_PER_REQUEST) {
+      const batch = exactTags.slice(offset, offset + CACHE_PURGE_TAGS_PER_REQUEST);
+      const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/purge_cache`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ tags: batch }),
+        signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+      });
+      const json = (await resp.json()) as CfApiResult<unknown>;
+      if (!resp.ok || !json.success) {
+        const msg = json.errors?.map((e) => e.message).join("; ") ?? "CF purge failed";
+        logger.warn({ hostnames, msg }, "CF purgeCacheForHostnames failed");
+        return false;
+      }
     }
-    logger.info({ hostnames, urlCount: urls.length }, "CF cache purged");
+    logger.info({ hostnames, tagCount: exactTags.length }, "CF hostname cache tags purged");
     return true;
   } catch (err) {
     logger.warn({ err, hostnames }, "CF purgeCacheForHostnames threw");

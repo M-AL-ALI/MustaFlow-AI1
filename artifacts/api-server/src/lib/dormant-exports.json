@@ -33,5 +33,20 @@
     "path": "artifacts/api-server/src/lib/zero-model-control-store.ts",
     "symbol": "readActiveZeroModelBinding",
     "reachableWhen": "ZM-4 activates registry resolver mode after the evaluation-gated provider-control slice."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/project-file-asset-reference.ts",
+    "symbol": "pinProjectFileAssetHistory",
+    "reachableWhen": "A first-party project-file mutation delegates a standalone durable history pin to this shared helper."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/project-retirement-contract.ts",
+    "symbol": "decideProjectRetirementClaim",
+    "reachableWhen": "A first-party in-process claimant needs the pure decision outside the worker's atomic SQL claim predicate."
+  },
+  {
+    "path": "lib/db/src/schema/assets.ts",
+    "symbol": "ASSET_STORAGE_OBJECT_STATES",
+    "reachableWhen": "A shared runtime validator or public storage-object contract enumerates the durable object states."
   }
 ]

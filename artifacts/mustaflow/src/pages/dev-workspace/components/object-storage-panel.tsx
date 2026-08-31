@@ -18,6 +18,7 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { uploadProjectAsset } from "@/lib/asset-upload";
 
 interface ProjectUpload {
   id: number;
@@ -27,6 +28,7 @@ interface ProjectUpload {
   sizeBytes?: number;
   createdAt: string;
   publicUrl?: string;
+  backend: "asset" | "legacy";
 }
 
 interface ObjectStoragePanelProps {
@@ -87,7 +89,11 @@ function FileRow({
     }
     setDeleting(true);
     try {
-      const res = await authFetch(`/api/projects/${projectId}/uploads/${file.id}`, {
+      const endpoint =
+        file.backend === "asset"
+          ? `/api/assets/${file.id}`
+          : `/api/projects/${projectId}/uploads/${file.id}`;
+      const res = await authFetch(endpoint, {
         method: "DELETE",
         credentials: "include",
       });
@@ -98,7 +104,7 @@ function FileRow({
       setDeleting(false);
       setConfirmDelete(false);
     }
-  }, [confirmDelete, projectId, file.id, onDeleted]);
+  }, [confirmDelete, projectId, file.backend, file.id, onDeleted]);
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-border/50 last:border-0 hover:bg-muted/20 group transition-colors">
@@ -162,12 +168,12 @@ function FileRow({
 
 function CodeSnippet({ projectId }: { projectId: number }) {
   const [copied, setCopied] = useState(false);
-  const code = `// Access your uploaded files
-const response = await fetch('/api/projects/${projectId}/uploads');
-const { uploads } = await response.json();
+  const code = `// List this project's governed assets
+const response = await fetch('/api/assets?projectId=${projectId}&limit=100');
+const { assets } = await response.json();
 
-// Use a file's objectPath to serve it
-// Public URL: /api/storage/public-objects/{objectPath}`;
+// Authenticated content URL for each result:
+// /api/assets/{assetId}/content`;
 
   return (
     <div className="border border-border rounded-md overflow-hidden">
@@ -204,10 +210,55 @@ export function ObjectStoragePanel({ projectId }: ObjectStoragePanelProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await authFetch(`/api/projects/${projectId}/uploads`, { credentials: "include" });
-      if (res.ok) {
-        const data = (await res.json()) as { uploads: ProjectUpload[] };
-        setFiles(data.uploads ?? []);
+      const [assetResponse, legacyResponse] = await Promise.all([
+        authFetch(`/api/assets?projectId=${projectId}&limit=100`, { credentials: "include" }),
+        authFetch(`/api/projects/${projectId}/uploads`, { credentials: "include" }),
+      ]);
+      if (assetResponse.ok && legacyResponse.ok) {
+        const assetData = (await assetResponse.json()) as {
+          assets?: Array<{
+            id: number;
+            filename: string;
+            mimeType: string;
+            sizeBytes: number;
+            contentUrl: string;
+            createdAt: string;
+            source: string;
+          }>;
+        };
+        const legacyData = (await legacyResponse.json()) as {
+          uploads?: Array<{
+            id: number;
+            filename: string;
+            mimeType: string;
+            sizeBytes: number;
+            createdAt: string;
+          }>;
+        };
+        setFiles([
+          ...(assetData.assets ?? [])
+            .filter((asset) => asset.source !== "legacy-project-upload")
+            .map((asset) => ({
+              id: asset.id,
+              name: asset.filename,
+              objectPath: asset.contentUrl,
+              publicUrl: asset.contentUrl,
+              contentType: asset.mimeType,
+              sizeBytes: asset.sizeBytes,
+              createdAt: asset.createdAt,
+              backend: "asset" as const,
+            })),
+          ...(legacyData.uploads ?? []).map((upload) => ({
+            id: upload.id,
+            name: upload.filename,
+            objectPath: String(upload.id),
+            publicUrl: `/api/projects/${projectId}/uploads/${upload.id}/content`,
+            contentType: upload.mimeType,
+            sizeBytes: upload.sizeBytes,
+            createdAt: upload.createdAt,
+            backend: "legacy" as const,
+          })),
+        ]);
       } else {
         setError("Failed to load files.");
       }
@@ -229,49 +280,7 @@ export function ObjectStoragePanel({ projectId }: ObjectStoragePanelProps) {
       setError(null);
       try {
         for (const file of Array.from(fileList)) {
-          // Step 1: request presigned URL
-          const urlRes = await authFetch(`/api/projects/${projectId}/uploads/request-url`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: file.name,
-              contentType: file.type || "application/octet-stream",
-              size: file.size,
-            }),
-            credentials: "include",
-          });
-          if (!urlRes.ok) {
-            setError(`Failed to get upload URL for ${file.name}`);
-            continue;
-          }
-          const { uploadURL, objectPath } = (await urlRes.json()) as {
-            uploadURL: string;
-            objectPath: string;
-          };
-
-          // Step 2: upload directly — must succeed before registering
-          const putRes = await fetch(uploadURL, {
-            method: "PUT",
-            headers: { "Content-Type": file.type || "application/octet-stream" },
-            body: file,
-          });
-          if (!putRes.ok) {
-            setError(`Upload failed for ${file.name} (storage returned ${putRes.status})`);
-            continue;
-          }
-
-          // Step 3: register the upload (only after confirmed PUT success)
-          await authFetch(`/api/projects/${projectId}/uploads`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: file.name,
-              contentType: file.type || "application/octet-stream",
-              sizeBytes: file.size,
-              objectPath,
-            }),
-            credentials: "include",
-          });
+          await uploadProjectAsset({ projectId, file, source: "picker" });
         }
         await loadFiles();
       } catch (e) {

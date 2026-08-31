@@ -53,6 +53,7 @@ export interface TriggerBuildInput {
   appOwner: string;
   platform: EasPlatform;
   profile?: string;
+  signal?: AbortSignal;
 }
 
 export interface TriggerSubmitInput {
@@ -60,6 +61,7 @@ export interface TriggerSubmitInput {
   buildId: string;
   platform: EasPlatform;
   appOwner: string;
+  signal?: AbortSignal;
 }
 
 async function easFetch<T>(path: string, accessToken: string, options?: RequestInit): Promise<T> {
@@ -86,7 +88,7 @@ async function easFetch<T>(path: string, accessToken: string, options?: RequestI
  * Returns the EAS build object (with id, status, etc).
  */
 export async function triggerEasBuild(input: TriggerBuildInput): Promise<EasBuild> {
-  const { accessToken, appSlug, appOwner, platform, profile = "production" } = input;
+  const { accessToken, appSlug, appOwner, platform, profile = "production", signal } = input;
 
   logger.info({ platform, appSlug, appOwner }, "Triggering EAS build");
 
@@ -100,6 +102,7 @@ export async function triggerEasBuild(input: TriggerBuildInput): Promise<EasBuil
   const result = await easFetch<{ data: EasBuild }>("/builds", accessToken, {
     method: "POST",
     body: JSON.stringify(body),
+    signal,
   });
 
   return result.data;
@@ -108,8 +111,12 @@ export async function triggerEasBuild(input: TriggerBuildInput): Promise<EasBuil
 /**
  * Poll the status of an EAS build.
  */
-export async function getEasBuildStatus(accessToken: string, buildId: string): Promise<EasBuild> {
-  const result = await easFetch<{ data: EasBuild }>(`/builds/${buildId}`, accessToken);
+export async function getEasBuildStatus(
+  accessToken: string,
+  buildId: string,
+  signal?: AbortSignal,
+): Promise<EasBuild> {
+  const result = await easFetch<{ data: EasBuild }>(`/builds/${buildId}`, accessToken, { signal });
   return result.data;
 }
 
@@ -117,7 +124,7 @@ export async function getEasBuildStatus(accessToken: string, buildId: string): P
  * Trigger EAS Submit to send the build to TestFlight (iOS) or Play Store Internal Testing (Android).
  */
 export async function triggerEasSubmit(input: TriggerSubmitInput): Promise<EasSubmission> {
-  const { accessToken, buildId, platform } = input;
+  const { accessToken, buildId, platform, signal } = input;
 
   logger.info({ buildId, platform }, "Triggering EAS submit");
 
@@ -130,6 +137,7 @@ export async function triggerEasSubmit(input: TriggerSubmitInput): Promise<EasSu
   const result = await easFetch<{ data: EasSubmission }>("/submissions", accessToken, {
     method: "POST",
     body: JSON.stringify(body),
+    signal,
   });
 
   return result.data;

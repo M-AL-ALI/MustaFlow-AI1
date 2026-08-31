@@ -91,6 +91,8 @@ export const artifactCommitEventKindSchema = z.enum([
   "driver-succeeded",
   "driver-failed",
   "deadline-terminal",
+  "deployment-deferral-cap-terminal",
+  "policy-disabled-terminal",
   "queue-unavailable",
 ]);
 

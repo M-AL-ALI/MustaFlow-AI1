@@ -216,11 +216,13 @@ const {
       const tx = {
         execute: vi.fn().mockResolvedValue([]),
         select: (shape?: unknown) => ({
-          from: (_table: { __id?: string }) =>
+          from: (table: { __id?: string }) =>
             makeSelectChain(
-              shape && typeof shape === "object" && Object.keys(shape).join(",") === "id"
-                ? []
-                : [{ id: TASK_ID, creditsReserved: null }],
+              table.__id === "projects"
+                ? [mockProject]
+                : shape && typeof shape === "object" && Object.keys(shape).join(",") === "id"
+                  ? []
+                  : [{ id: TASK_ID, creditsReserved: null }],
             ),
         }),
         update: (_table: unknown) => ({
@@ -429,7 +431,7 @@ vi.mock("./architect", () => ({
   ARCHITECT_CREDIT_COST: 5,
   ARCHITECT_AUTOFIX_TITLE_PREFIX: "[auto-fix]",
 }));
-vi.mock("../routes/credits", () => ({
+vi.mock("./credits", () => ({
   getOrCreateCredits: vi.fn().mockResolvedValue({ balance: 9999 }),
   deductCredits: vi.fn().mockResolvedValue(undefined),
   refundCredits: vi.fn().mockResolvedValue(undefined),
@@ -449,6 +451,43 @@ vi.mock("./artifacts", () => ({
 vi.mock("./durable-queue", () => ({
   durableEnqueue: vi.fn().mockResolvedValue(null),
   isDurableQueueReady: vi.fn().mockReturnValue(false),
+}));
+
+// The stop-path tests exercise cancellation after execution admission. Keep
+// that prerequisite deterministic instead of inheriting the host's rollout
+// flag or receipt store state.
+vi.mock("./zero-intent-admission", () => ({
+  governIntentAdmission: vi.fn().mockResolvedValue({
+    receiptId: 1,
+    requestId: "stop-test",
+    mode: "enforced",
+  }),
+}));
+
+vi.mock("./project-lifecycle", () => ({
+  readProjectLifecycleAdmission: vi.fn(async (projectId: number) => ({
+    allowed: true as const,
+    projectId,
+  })),
+  registerProjectWorkController: vi.fn(() => () => undefined),
+  abortLocalProjectWork: vi.fn(() => 0),
+  withActiveProjectLifecycle: vi.fn(
+    async (
+      projectId: number,
+      work: (session: {
+        projectId: number;
+        assertActive(): Promise<boolean>;
+        release(): Promise<void>;
+      }) => Promise<unknown>,
+    ) => ({
+      state: "active" as const,
+      value: await work({
+        projectId,
+        assertActive: async () => true,
+        release: async () => undefined,
+      }),
+    }),
+  ),
 }));
 
 // Prevent provisioning side-effects from leaking into the test suite.
@@ -547,6 +586,7 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
 
     const planPromise = runCancellablePlanTask({
       taskId: TASK_ID,
+      projectId: PROJECT_ID,
       run: (signal) => {
         signalSeen = signal;
         return new Promise<never>((_, reject) => {
@@ -590,6 +630,7 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
 
     const planPromise = runCancellablePlanTask({
       taskId: TASK_ID,
+      projectId: PROJECT_ID,
       run: () =>
         new Promise<{ summary: string }>((resolve) => {
           resolvePlan = resolve;
@@ -625,6 +666,7 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
     const jobPromise = runJob({
       taskId: TASK_ID,
       projectId: PROJECT_ID,
+      intentReceiptId: 1,
       kind: "build",
       userPrompt: "Build me a todo app with colourful cards",
       agentMode: "lite",
@@ -633,12 +675,7 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
     // Allow the job to advance through its setup DB calls and reach the
     // builder pipeline (all awaits in the setup path resolve immediately
     // because they hit our synchronous-resolve mocks).
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await vi.waitFor(() => expect(mockRunBuildPipeline).toHaveBeenCalled());
 
     // Simulate the user clicking Stop.
     const aborted = cancelActiveJob(TASK_ID);
@@ -670,21 +707,18 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
   it("the SSE stream emits 'queued' before 'cancelled' — event ordering is preserved", async () => {
     // This test is distinct from the one above: it verifies that the SSE
     // event ORDER is correct (queued must appear before cancelled in the
-    // emitted event list).  Both tests use 6 setImmediate ticks to give
-    // runJob time to reach the builder before the cancel fires — this is
-    // the proven-reliable pattern that avoids the async-tick ordering
-    // ambiguity present in pure pre-abort approaches.
+    // emitted event list). Wait for the provider boundary explicitly so
+    // added admission checks cannot turn timing into a false test failure.
     const jobPromise = runJob({
       taskId: TASK_ID,
       projectId: PROJECT_ID,
+      intentReceiptId: 1,
       kind: "build",
       userPrompt: "A dashboard with real-time charts",
       agentMode: "lite",
     });
 
-    for (let i = 0; i < 6; i++) {
-      await new Promise<void>((r) => setImmediate(r));
-    }
+    await vi.waitFor(() => expect(mockRunBuildPipeline).toHaveBeenCalled());
 
     cancelActiveJob(TASK_ID);
     await jobPromise;
@@ -705,17 +739,13 @@ describe("Task #753 — Stop button cancellation (stubbed AI provider)", () => {
     const jobPromise = runJob({
       taskId: TASK_ID,
       projectId: PROJECT_ID,
+      intentReceiptId: 1,
       kind: "build",
       userPrompt: "An e-commerce storefront",
       agentMode: "eco",
     });
 
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await vi.waitFor(() => expect(mockRunBuildPipeline).toHaveBeenCalled());
 
     // First cancel — should succeed
     const first = cancelActiveJob(TASK_ID);
@@ -766,6 +796,7 @@ describe("Task #754 — Stop button cancellation via agentic builder loop", () =
     const jobPromise = runJob({
       taskId: TASK_ID,
       projectId: PROJECT_ID,
+      intentReceiptId: 1,
       kind: "build",
       userPrompt: "Build me a todo app with colourful cards",
       agentMode: "lite",
@@ -774,9 +805,7 @@ describe("Task #754 — Stop button cancellation via agentic builder loop", () =
     // Allow the job to advance through its setup DB calls and reach the
     // agent loop (all awaits in the setup path resolve immediately because
     // they hit our synchronous-resolve mocks).
-    for (let i = 0; i < 6; i++) {
-      await new Promise<void>((r) => setImmediate(r));
-    }
+    await vi.waitFor(() => expect(mockRunAgentLoop).toHaveBeenCalled());
 
     // Simulate the user clicking Stop.
     const aborted = cancelActiveJob(TASK_ID);
@@ -809,14 +838,13 @@ describe("Task #754 — Stop button cancellation via agentic builder loop", () =
     const jobPromise = runJob({
       taskId: TASK_ID,
       projectId: PROJECT_ID,
+      intentReceiptId: 1,
       kind: "build",
       userPrompt: "A dashboard with real-time charts",
       agentMode: "lite",
     });
 
-    for (let i = 0; i < 6; i++) {
-      await new Promise<void>((r) => setImmediate(r));
-    }
+    await vi.waitFor(() => expect(mockRunAgentLoop).toHaveBeenCalled());
 
     cancelActiveJob(TASK_ID);
     await jobPromise;
@@ -833,14 +861,13 @@ describe("Task #754 — Stop button cancellation via agentic builder loop", () =
     const jobPromise = runJob({
       taskId: TASK_ID,
       projectId: PROJECT_ID,
+      intentReceiptId: 1,
       kind: "build",
       userPrompt: "An e-commerce storefront",
       agentMode: "eco",
     });
 
-    for (let i = 0; i < 6; i++) {
-      await new Promise<void>((r) => setImmediate(r));
-    }
+    await vi.waitFor(() => expect(mockRunAgentLoop).toHaveBeenCalled());
 
     const first = cancelActiveJob(TASK_ID);
     const second = cancelActiveJob(TASK_ID);

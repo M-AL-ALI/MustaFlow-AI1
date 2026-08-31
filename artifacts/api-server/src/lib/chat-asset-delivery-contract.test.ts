@@ -20,15 +20,15 @@ describe("chat asset delivery remains governed end to end", () => {
     expect(jobs).not.toContain("fetchAttachmentAsDataUri(url);");
   });
 
-  it("puts composer-generated images through quota, private R2, and usage tracking", () => {
-    expect(images.indexOf("reserveAsset({")).toBeLessThan(images.indexOf("putAssetBuffer({"));
+  it("keeps one private R2 byte owner for composer-generated images", () => {
+    expect(images.indexOf("reserveAssetAgainstAvailableQuota({")).toBeLessThan(
+      images.indexOf("putAssetBuffer({"),
+    );
     expect(images.indexOf("putAssetBuffer({")).toBeLessThan(images.indexOf("completeAsset({"));
-    expect(images).toContain("resolveArtifactId(project.id, null)");
-    expect(images).toContain("eq(projectFilesTable.artifactId, artifactId)");
-    expect(images).toMatch(/tx\s*\.insert\(assetUsageTable\)/u);
-    expect(images).toContain("savedPath = safeSavePath");
-    expect(images).toContain("...(savedPath ? { savedPath } : {})");
     expect(images).toContain("url: `/api/assets/${reservation.id}/content`");
+    expect(images).not.toContain("projectFilesTable");
+    expect(images).not.toContain('buffer.toString("base64")');
+    expect(images).not.toMatch(/8\s*\*\s*1024\s*\*\s*1024/u);
     expect(images).not.toContain("existing.find(() => false)");
   });
 });

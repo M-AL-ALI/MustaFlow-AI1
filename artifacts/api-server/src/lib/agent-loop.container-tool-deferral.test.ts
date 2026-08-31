@@ -43,6 +43,16 @@ vi.mock("./agent-prompts", async () => ({
   createPrompt: promptMocks.createPrompt,
 }));
 
+vi.mock("./project-lifecycle", () => ({
+  withActiveProjectLifecycle: async (
+    _projectId: number,
+    work: (session: { assertActive: () => Promise<boolean> }) => Promise<unknown>,
+  ) => ({
+    state: "active" as const,
+    value: await work({ assertActive: async () => true }),
+  }),
+}));
+
 import {
   FileWorkspace,
   applyToolResultToRepeatedErrorState,

@@ -5,6 +5,7 @@ import type {
   RuntimeManifestContract,
   AcceptedSealedRelease,
   ProductionArtifactRelease,
+  RouteRecord,
 } from "@workspace/tenant-runtime-contracts";
 
 /**
@@ -35,7 +36,8 @@ export type RuntimeCreateResult = RuntimeInfo | RuntimeCreateFailure | null;
 
 export interface RuntimeFile {
   path: string;
-  content: string;
+  /** UTF-8 source text or exact binary bytes resolved before provider I/O. */
+  content: string | Uint8Array;
 }
 
 export interface RuntimeExecResult {
@@ -246,7 +248,30 @@ export function supportsProductionArtifactPromotion(
   );
 }
 
-export interface ProductionDatabaseCapabilityTenantRuntimeProvider extends ProductionArtifactPromotingTenantRuntimeProvider {
+export type ProductionRouteRetirementVerification =
+  | { state: "absent" }
+  | { state: "present"; route: RouteRecord };
+
+/** Signed, metadata-only route registry access used by governed retirement. */
+export interface ProductionRouteInventoryTenantRuntimeProvider extends ProductionArtifactPromotingTenantRuntimeProvider {
+  inventoryProductionRoutes(projectId: number): Promise<RouteRecord[]>;
+  readProductionRoute(hostname: string): Promise<RouteRecord | null>;
+  retireObservedProductionRoute(route: RouteRecord): Promise<ProductionRouteRetirementVerification>;
+}
+
+export function supportsProductionRouteInventory(
+  provider: TenantRuntimeProvider,
+): provider is ProductionRouteInventoryTenantRuntimeProvider {
+  const candidate = provider as Partial<ProductionRouteInventoryTenantRuntimeProvider>;
+  return (
+    supportsProductionArtifactPromotion(provider) &&
+    typeof candidate.inventoryProductionRoutes === "function" &&
+    typeof candidate.readProductionRoute === "function" &&
+    typeof candidate.retireObservedProductionRoute === "function"
+  );
+}
+
+export interface ProductionDatabaseCapabilityTenantRuntimeProvider extends ProductionRouteInventoryTenantRuntimeProvider {
   ensureProductionDatabaseCapability(input: {
     projectId: number;
     operationTimeoutMs?: number;

@@ -202,6 +202,16 @@ function applyRegionToResponse(
   return new Response(resp.body, { status: resp.status, headers: newHeaders });
 }
 
+export function hostnameCacheTag(hostname: string): string {
+  return `nabuflow-host-${hostname.toLowerCase()}`;
+}
+
+function applyHostnameCacheTag(resp: Response, hostname: string): Response {
+  const headers = new Headers(resp.headers);
+  headers.set("Cache-Tag", hostnameCacheTag(hostname));
+  return new Response(resp.body, { status: resp.status, headers });
+}
+
 function r2ObjectToResponse(obj: R2ObjectBody, path: string): Response {
   const mime = obj.httpMetadata?.contentType ?? guessMime(path);
   const etag = obj.httpEtag;
@@ -330,7 +340,7 @@ export default {
         "X-Served-By": "mustaflow-edge",
       };
       addRegionHeaders(hdrs, route.preferredRegion);
-      return new Response(body, { status: 503, headers: hdrs });
+      return applyHostnameCacheTag(new Response(body, { status: 503, headers: hdrs }), hostname);
     }
 
     // ── 3. Determine file path ────────────────────────────────────────────────
@@ -350,7 +360,10 @@ export default {
       if (resp) {
         // 200 (fresh content) or 304 (not modified) — return immediately.
         // A 304 must NOT trigger the next-version failover loop.
-        const final = applyRegionToResponse(resp, route.preferredRegion);
+        const final = applyHostnameCacheTag(
+          applyRegionToResponse(resp, route.preferredRegion),
+          hostname,
+        );
         // When a preferredRegion is set and the response is fresh (200), also
         // warm the region-scoped edge cache partition in the background so
         // subsequent requests to this PoP hit CF cache instead of R2.
@@ -369,7 +382,10 @@ export default {
         const key = `${route.projectId}/${vId}/index.html`;
         const resp = await fetchFromR2(env.SNAPSHOTS, key, request, "index.html");
         if (resp) {
-          const final = applyRegionToResponse(resp, route.preferredRegion);
+          const final = applyHostnameCacheTag(
+            applyRegionToResponse(resp, route.preferredRegion),
+            hostname,
+          );
           if (route.preferredRegion && resp.status === 200) {
             ctx.waitUntil(
               cacheWithRegion(
@@ -399,7 +415,10 @@ export default {
         "X-Served-By": "mustaflow-edge",
       };
       addRegionHeaders(notFoundHdrs, route.preferredRegion);
-      return new Response(notFoundBody, { status: 404, headers: notFoundHdrs });
+      return applyHostnameCacheTag(
+        new Response(notFoundBody, { status: 404, headers: notFoundHdrs }),
+        hostname,
+      );
     }
 
     const defaultNotFoundHdrs: Record<string, string> = {
@@ -408,6 +427,9 @@ export default {
       "X-Served-By": "mustaflow-edge",
     };
     addRegionHeaders(defaultNotFoundHdrs, route.preferredRegion);
-    return new Response(DEFAULT_NOT_FOUND_HTML, { status: 404, headers: defaultNotFoundHdrs });
+    return applyHostnameCacheTag(
+      new Response(DEFAULT_NOT_FOUND_HTML, { status: 404, headers: defaultNotFoundHdrs }),
+      hostname,
+    );
   },
 };

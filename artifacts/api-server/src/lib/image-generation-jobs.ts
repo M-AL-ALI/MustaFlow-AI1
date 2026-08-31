@@ -31,7 +31,13 @@ import {
   type ImageStyle,
 } from "./image-provider";
 import { validateImagePrompt } from "./image-safety";
-import { storeGeneratedImage, storeEditedImage, getImageBuffer } from "./image-storage";
+import {
+  deleteStoredImageObjects,
+  getImageBuffer,
+  storeEditedImage,
+  storeGeneratedImage,
+  type StoredImageObject,
+} from "./image-storage";
 import {
   deductCreditsAtomic,
   refundCredits,
@@ -48,9 +54,13 @@ import {
 } from "./public-ai/model-router";
 import { buildOraImageEditProfile } from "./public-ai/image-quality";
 import { logger } from "./logger";
-import { completeAsset, rejectReservedAsset, reserveAsset } from "./asset-registry";
-
-const GENERATED_ASSET_RESERVATION_BYTES = 8 * 1024 * 1024;
+import {
+  beginAssetUpload,
+  completeAsset,
+  rejectReservedAsset,
+  reserveAssetAgainstAvailableQuota,
+} from "./asset-registry";
+import { acquireProjectLifecycleSession, registerProjectWorkController } from "./project-lifecycle";
 
 export type JobStatus = "pending" | "generating" | "completed" | "failed";
 
@@ -67,6 +77,37 @@ export interface ImageJob {
 }
 
 const jobs = new Map<string, ImageJob>();
+
+async function bindGeneratedImageAsset(input: {
+  imageId: number;
+  assetId: number;
+  userId: string;
+}): Promise<void> {
+  try {
+    await db
+      .update(generatedImagesTable)
+      .set({ assetId: input.assetId, updatedAt: sql`now()` })
+      .where(eq(generatedImagesTable.id, input.imageId));
+  } catch (error) {
+    await rejectReservedAsset({
+      assetId: input.assetId,
+      ownerUserId: input.userId,
+      actorUserId: input.userId,
+      code: "asset_cancelled",
+    });
+    throw error;
+  }
+}
+
+function projectInactiveError(): Error & { code: "project_inactive" } {
+  return Object.assign(new Error("Project is no longer active"), {
+    code: "project_inactive" as const,
+  });
+}
+
+function throwIfProjectWorkAborted(signal: AbortSignal | null): void {
+  if (signal?.aborted) throw projectInactiveError();
+}
 
 // Prune completed/failed jobs older than 1 hour to prevent unbounded growth
 const JOB_TTL_MS = 60 * 60 * 1000;
@@ -339,9 +380,9 @@ export async function enqueueImageJob(
 
   const imageId = imageRow.id;
 
-  let reservedAsset: Awaited<ReturnType<typeof reserveAsset>>;
+  let reservedAsset: Awaited<ReturnType<typeof reserveAssetAgainstAvailableQuota>>;
   try {
-    reservedAsset = await reserveAsset({
+    reservedAsset = await reserveAssetAgainstAvailableQuota({
       ownerUserId: userId,
       actorUserId: userId,
       projectId: projectId ?? null,
@@ -351,7 +392,6 @@ export async function enqueueImageJob(
       source: "image-generation",
       filename: `generated-${imageId}.webp`,
       mimeType: "image/webp",
-      sizeBytes: GENERATED_ASSET_RESERVATION_BYTES,
       context: { generatedImageId: imageId, purpose: purpose ?? null },
     });
   } catch (error) {
@@ -367,10 +407,11 @@ export async function enqueueImageJob(
     throw error;
   }
 
-  await db
-    .update(generatedImagesTable)
-    .set({ assetId: reservedAsset.id, updatedAt: sql`now()` })
-    .where(eq(generatedImagesTable.id, imageId));
+  await bindGeneratedImageAsset({
+    imageId,
+    assetId: reservedAsset.id,
+    userId,
+  });
 
   // Step 5: Deduct credits atomically
   const deduction = await deductCreditsAtomic(userId, creditCost, {
@@ -508,9 +549,9 @@ export async function enqueueImageEditJob(
   if (!imageRow) throw new Error("Failed to create edit image record");
   const imageId = imageRow.id;
 
-  let reservedAsset: Awaited<ReturnType<typeof reserveAsset>>;
+  let reservedAsset: Awaited<ReturnType<typeof reserveAssetAgainstAvailableQuota>>;
   try {
-    reservedAsset = await reserveAsset({
+    reservedAsset = await reserveAssetAgainstAvailableQuota({
       ownerUserId: userId,
       actorUserId: userId,
       projectId: projectId ?? null,
@@ -520,7 +561,6 @@ export async function enqueueImageEditJob(
       source: "image-edit",
       filename: `edited-${imageId}.webp`,
       mimeType: "image/webp",
-      sizeBytes: GENERATED_ASSET_RESERVATION_BYTES,
       context: { generatedImageId: imageId, parentImageId },
     });
   } catch (error) {
@@ -536,10 +576,11 @@ export async function enqueueImageEditJob(
     throw error;
   }
 
-  await db
-    .update(generatedImagesTable)
-    .set({ assetId: reservedAsset.id, updatedAt: sql`now()` })
-    .where(eq(generatedImagesTable.id, imageId));
+  await bindGeneratedImageAsset({
+    imageId,
+    assetId: reservedAsset.id,
+    userId,
+  });
 
   let creditsWereDeducted = false;
   if (billingMode === "credits") {
@@ -611,7 +652,22 @@ async function runImageEditJob(
     subscriptionTier,
   } = opts;
 
+  let lifecycleSession: Awaited<ReturnType<typeof acquireProjectLifecycleSession>> = null;
+  const projectController = opts.projectId ? new AbortController() : null;
+  let unregisterProjectWork: (() => void) | null = null;
+  let storedObjects: StoredImageObject[] = [];
+  let completionCommitted = false;
+
   try {
+    if (opts.projectId) {
+      unregisterProjectWork = registerProjectWorkController(opts.projectId, projectController!);
+      lifecycleSession = await acquireProjectLifecycleSession(opts.projectId);
+      if (!lifecycleSession) throw projectInactiveError();
+      throwIfProjectWorkAborted(projectController!.signal);
+    }
+    const uploadClaim = await beginAssetUpload({ assetId, actorUserId: userId });
+    if (!uploadClaim) throw new Error("Generated asset reservation is unavailable");
+
     job.status = "generating";
     await db
       .update(generatedImagesTable)
@@ -621,6 +677,7 @@ async function runImageEditJob(
     logger.info({ jobId, imageId, quality }, "image-jobs: fetching source image for edit");
 
     const imageBuffer = await getImageBuffer(parentStorageKey, parentFileUrl);
+    throwIfProjectWorkAborted(projectController?.signal ?? null);
 
     logger.info({ jobId, imageId }, "image-jobs: calling edit provider");
 
@@ -631,10 +688,17 @@ async function runImageEditJob(
       aspectRatio: (parentAspectRatio as ImageAspectRatio) ?? "1:1",
       subscriptionTier,
     });
+    throwIfProjectWorkAborted(projectController?.signal ?? null);
 
     logger.info({ jobId, imageId }, "image-jobs: storing edit result");
 
-    const { fileUrl, thumbnailUrl, storageKey } = await storeEditedImage(result.openaiUrl, imageId);
+    const { fileUrl, thumbnailUrl, storageKey, storageObjects } = await storeEditedImage(
+      result.openaiUrl,
+      imageId,
+      { assetId, ownerUserId: userId, actorUserId: userId },
+    );
+    storedObjects = storageObjects;
+    throwIfProjectWorkAborted(projectController?.signal ?? null);
 
     if (!storageKey) throw new Error("Generated asset storage was not durable");
     const completedBuffer = await getImageBuffer(storageKey, fileUrl);
@@ -647,12 +711,8 @@ async function runImageEditJob(
       finalSizeBytes: completedBuffer.length,
       finalMimeType: "image/webp",
       finalStorageKey: storageKey,
-    });
-
-    await db
-      .update(generatedImagesTable)
-      .set({
-        status: "completed",
+      generatedImage: {
+        imageId,
         fileUrl,
         thumbnailUrl,
         storageKey,
@@ -660,32 +720,28 @@ async function runImageEditJob(
         providerName: result.providerName,
         modelName: result.modelName,
         quality: result.quality,
-        updatedAt: sql`now()`,
-      })
-      .where(eq(generatedImagesTable.id, imageId));
+      },
+    });
+    completionCommitted = true;
 
     job.status = "completed";
     job.fileUrl = fileUrl;
     job.thumbnailUrl = thumbnailUrl ?? undefined;
 
-    // Ora-origin inline edits are mirrored into the durable Ora asset library so
-    // the edited result shows up under Library across devices/sessions. Image
-    // Studio edits (billingMode "credits") are NOT copied — they already live in
-    // generated_images and are surfaced by the Studio. Best-effort: a persist
-    // failure must never affect the job outcome.
+    // Ora-origin inline edits gain a Library metadata link to this same unified
+    // asset. No second provider object and no second quota charge are created.
     if (opts.billingMode === "ora") {
       try {
-        const buffer = await getImageBuffer(storageKey, fileUrl);
         const { persistOraAsset } = await import("./ora-assets");
         await persistOraAsset({
           userId,
           oraProjectId: opts.oraProjectId ?? null,
           kind: "image",
-          fileName: `ora-edit-${Date.now()}.png`,
-          mimeType: "image/png",
-          format: "png",
+          fileName: `ora-edit-${imageId}.webp`,
+          mimeType: "image/webp",
+          format: "webp",
           prompt: instruction,
-          base64: buffer.toString("base64"),
+          unifiedAssetId: assetId,
         });
       } catch (persistErr) {
         logger.warn(
@@ -705,6 +761,15 @@ async function runImageEditJob(
         ? String((err as { code?: string }).code)
         : "provider_error";
 
+    if (completionCommitted) {
+      job.status = "completed";
+      logger.error(
+        { jobId, imageId, errorClass: err instanceof Error ? err.name : "unknown" },
+        "image-jobs: post-commit edit bookkeeping failed; durable completion preserved",
+      );
+      return;
+    }
+
     await db
       .update(generatedImagesTable)
       .set({
@@ -715,6 +780,18 @@ async function runImageEditJob(
       })
       .where(eq(generatedImagesTable.id, imageId));
 
+    if (storedObjects.length > 0) {
+      await deleteStoredImageObjects(storedObjects).catch((cleanupError: unknown) => {
+        logger.warn(
+          {
+            jobId,
+            imageId,
+            errorClass: cleanupError instanceof Error ? cleanupError.name : "unknown",
+          },
+          "image-jobs: edit object cleanup remains pending",
+        );
+      });
+    }
     await rejectReservedAsset({
       assetId,
       ownerUserId: userId,
@@ -738,6 +815,9 @@ async function runImageEditJob(
 
     job.status = "failed";
     job.error = message;
+  } finally {
+    unregisterProjectWork?.();
+    await lifecycleSession?.release();
   }
 }
 
@@ -758,7 +838,22 @@ async function runImageJob(
     subscriptionTier,
   } = opts;
 
+  let lifecycleSession: Awaited<ReturnType<typeof acquireProjectLifecycleSession>> = null;
+  const projectController = opts.projectId ? new AbortController() : null;
+  let unregisterProjectWork: (() => void) | null = null;
+  let storedObjects: StoredImageObject[] = [];
+  let completionCommitted = false;
+
   try {
+    if (opts.projectId) {
+      unregisterProjectWork = registerProjectWorkController(opts.projectId, projectController!);
+      lifecycleSession = await acquireProjectLifecycleSession(opts.projectId);
+      if (!lifecycleSession) throw projectInactiveError();
+      throwIfProjectWorkAborted(projectController!.signal);
+    }
+    const uploadClaim = await beginAssetUpload({ assetId, actorUserId: userId });
+    if (!uploadClaim) throw new Error("Generated asset reservation is unavailable");
+
     // Mark as generating
     job.status = "generating";
     await db
@@ -781,13 +876,17 @@ async function runImageJob(
       transparentBackground,
       subscriptionTier,
     });
+    throwIfProjectWorkAborted(projectController?.signal ?? null);
 
     logger.info({ jobId, imageId }, "image-jobs: storing result");
 
-    const { fileUrl, thumbnailUrl, storageKey } = await storeGeneratedImage(
+    const { fileUrl, thumbnailUrl, storageKey, storageObjects } = await storeGeneratedImage(
       result.openaiUrl,
       imageId,
+      { assetId, ownerUserId: userId, actorUserId: userId },
     );
+    storedObjects = storageObjects;
+    throwIfProjectWorkAborted(projectController?.signal ?? null);
 
     if (!storageKey) throw new Error("Generated asset storage was not durable");
     const completedBuffer = await getImageBuffer(storageKey, fileUrl);
@@ -800,13 +899,8 @@ async function runImageJob(
       finalSizeBytes: completedBuffer.length,
       finalMimeType: "image/webp",
       finalStorageKey: storageKey,
-    });
-
-    // Update DB — completed
-    await db
-      .update(generatedImagesTable)
-      .set({
-        status: "completed",
+      generatedImage: {
+        imageId,
         fileUrl,
         thumbnailUrl,
         storageKey,
@@ -814,29 +908,28 @@ async function runImageJob(
         providerName: result.providerName,
         modelName: result.modelName,
         quality: result.quality,
-        updatedAt: sql`now()`,
-      })
-      .where(eq(generatedImagesTable.id, imageId));
+      },
+    });
+    completionCommitted = true;
 
     job.status = "completed";
     job.fileUrl = fileUrl;
     job.thumbnailUrl = thumbnailUrl ?? undefined;
 
-    // Copy into the durable Ora asset library when requested (Ora-chat path).
-    // Best-effort: never let a persist failure affect the job outcome.
+    // Add the Ora Library metadata view over this same unified asset. This must
+    // never copy provider bytes or charge storage twice.
     if (opts.persistToOraLibrary) {
       try {
-        const buffer = await getImageBuffer(storageKey, fileUrl);
         const { persistOraAsset } = await import("./ora-assets");
         await persistOraAsset({
           userId,
           oraProjectId: opts.oraProjectId ?? null,
           kind: "image",
-          fileName: `ora-image-${Date.now()}.png`,
-          mimeType: "image/png",
-          format: "png",
+          fileName: `ora-image-${imageId}.webp`,
+          mimeType: "image/webp",
+          format: "webp",
           prompt,
-          base64: buffer.toString("base64"),
+          unifiedAssetId: assetId,
         });
       } catch (persistErr) {
         logger.warn(
@@ -856,6 +949,15 @@ async function runImageJob(
         ? String((err as { code?: string }).code)
         : "provider_error";
 
+    if (completionCommitted) {
+      job.status = "completed";
+      logger.error(
+        { jobId, imageId, errorClass: err instanceof Error ? err.name : "unknown" },
+        "image-jobs: post-commit generation bookkeeping failed; durable completion preserved",
+      );
+      return;
+    }
+
     await db
       .update(generatedImagesTable)
       .set({
@@ -866,6 +968,18 @@ async function runImageJob(
       })
       .where(eq(generatedImagesTable.id, imageId));
 
+    if (storedObjects.length > 0) {
+      await deleteStoredImageObjects(storedObjects).catch((cleanupError: unknown) => {
+        logger.warn(
+          {
+            jobId,
+            imageId,
+            errorClass: cleanupError instanceof Error ? cleanupError.name : "unknown",
+          },
+          "image-jobs: generated object cleanup remains pending",
+        );
+      });
+    }
     await rejectReservedAsset({
       assetId,
       ownerUserId: userId,
@@ -881,5 +995,8 @@ async function runImageJob(
 
     job.status = "failed";
     job.error = message;
+  } finally {
+    unregisterProjectWork?.();
+    await lifecycleSession?.release();
   }
 }

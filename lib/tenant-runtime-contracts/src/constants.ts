@@ -13,6 +13,7 @@ export const CONTROL_FEATURES = [
   "runtime-reconciliation-v4",
   "trusted-build-v1",
   "production-database-v1",
+  "published-route-inventory-v1",
 ] as const;
 
 export const RUNTIME_ROLES = ["preview", "production"] as const;

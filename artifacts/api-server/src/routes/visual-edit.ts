@@ -34,6 +34,7 @@ import {
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
 import { intentReceiptStore } from "../lib/zero-intent-receipt-store";
+import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
 
 const router: IRouter = Router();
 
@@ -392,8 +393,14 @@ router.post(
             eq(projectFilesTable.content, change.afterContent),
           ),
         )
-        .returning({ id: projectFilesTable.id });
+        .returning({ id: projectFilesTable.id, artifactId: projectFilesTable.artifactId });
       if (!file) return false;
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId: file.artifactId,
+        filePath: change.filePath,
+        nextContent: change.beforeContent,
+      });
       await tx
         .update(visualEditChangesTable)
         .set({ status: "undone", undoneAt: new Date() })
@@ -598,6 +605,12 @@ async function persistVisualChange(input: {
       )
       .returning({ id: projectFilesTable.id });
     if (!updatedFile) throw new Error("visual edit source changed before persistence");
+    await reconcileProjectFileAssetUsage(tx, {
+      projectId: input.projectId,
+      artifactId: input.file.artifactId,
+      filePath: input.file.path,
+      nextContent: input.updated,
+    });
     const [change] = await tx
       .insert(visualEditChangesTable)
       .values({

@@ -2,7 +2,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import app from "./app";
+import app, { startProjectRetirementWorkerAfterMigrations } from "./app";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { createMultiplayerServer } from "./lib/multiplayer";
@@ -41,6 +41,8 @@ import {
   startSchemaContractVerificationCadence,
   zeroPromptQueueSchemaContractState,
 } from "./lib/schema-contract-state";
+import { resumeProjectRetirementOperations } from "./lib/project-retirement";
+import { startAssetReservationSweeperAfterMigrations } from "./lib/asset-reservation-sweeper";
 
 const execFileAsync = promisify(execFile);
 
@@ -332,9 +334,9 @@ void runStartupMigrations()
     if (result.failed !== 0) {
       logger.error(
         { failedMigrations: result.failed },
-        "Admin authority reconciliation skipped because startup migrations did not pass",
+        "Post-migration workers and admin reconciliation skipped because startup migrations did not pass",
       );
-      return;
+      return false;
     }
     try {
       await reconcileAdminAuthorityAtBoot();
@@ -343,13 +345,15 @@ void runStartupMigrations()
       // user_roles grants keep working; no legacy environment door is reopened.
       logger.error({ error }, "Admin authority reconciliation failed closed");
     }
+    return true;
   })
   .catch((err) => {
     // Non-fatal: log and continue — a partial schema is better than no server.
     startupHealthState.recordMigrations("error", ["unexpected-startup-migration-error"]);
     logger.error({ err }, "startup-migrations: unexpected error (continuing)");
+    return false;
   })
-  .then(async () => {
+  .then(async (migrationsPassed) => {
     const queueSchemaContract = await zeroPromptQueueSchemaContractState.verify(pool);
     logger.info(
       {
@@ -362,6 +366,30 @@ void runStartupMigrations()
     );
     startSchemaContractVerificationCadence(pool);
     startBillingSettlementSweeper();
+    if (!migrationsPassed) {
+      logger.error(
+        "Project retirement worker remains unregistered because startup migrations failed",
+      );
+      return runContainerSelfCheck().catch((err: unknown) => {
+        logger.warn({ err }, "container subsystem: self-check threw unexpectedly");
+      });
+    }
+    startAssetReservationSweeperAfterMigrations();
+    const retirementWorker = await startProjectRetirementWorkerAfterMigrations();
+    if (retirementWorker.status === "ready") {
+      await resumeProjectRetirementOperations().catch((error: unknown) => {
+        logger.error(
+          { error },
+          "project retirement resume failed; durable receipts remain pending",
+        );
+      });
+      const retirementResumeTimer = setInterval(() => {
+        void resumeProjectRetirementOperations().catch((error: unknown) => {
+          logger.error({ error }, "project retirement periodic resume failed");
+        });
+      }, 60_000);
+      retirementResumeTimer.unref?.();
+    }
     return runContainerSelfCheck().catch((err: unknown) => {
       // Non-fatal: log and continue — a degraded container subsystem is better
       // than a stopped server. The health endpoint will reflect the error status.

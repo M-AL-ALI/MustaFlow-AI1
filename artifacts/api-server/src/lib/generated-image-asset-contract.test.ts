@@ -9,8 +9,11 @@ describe("generated images share the unified asset registry", () => {
       source.indexOf("export async function enqueueImageJob"),
       source.indexOf("// ── Image edit job"),
     );
-    expect(enqueue.indexOf("reserveAsset({")).toBeGreaterThan(0);
-    expect(enqueue.indexOf("reserveAsset({")).toBeLessThan(enqueue.indexOf("deductCreditsAtomic"));
+    expect(enqueue.indexOf("reserveAssetAgainstAvailableQuota({")).toBeGreaterThan(0);
+    expect(enqueue.indexOf("reserveAssetAgainstAvailableQuota({")).toBeLessThan(
+      enqueue.indexOf("deductCreditsAtomic"),
+    );
+    expect(enqueue).not.toContain("reservedSizeBytes");
     expect(enqueue).toContain('status: "failed"');
   });
 
@@ -22,7 +25,7 @@ describe("generated images share the unified asset registry", () => {
   });
 
   it("links the Image Studio row to the unified asset before provider work begins", () => {
-    expect(source).toContain(".set({ assetId: reservedAsset.id");
+    expect(source).toContain("await bindGeneratedImageAsset({");
     expect(source).toContain("assetId: reservedAsset.id");
   });
 });

@@ -8,6 +8,8 @@ import type {
   AcceptanceVault,
   StoredAcceptanceLease,
 } from "./acceptance-provisioner-model";
+import type { ControlCoordinator, StoredDurableOperationJob } from "./model";
+import { registerJanitorDestroy } from "./acceptance-provisioner-worker";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
@@ -15,9 +17,23 @@ const LEASE_PREFIX = "lease:";
 const AUDIT_PREFIX = "audit:";
 const AUDIT_SEQUENCE_KEY = "audit-sequence";
 const MAX_AUDIT_RECORDS = 1_000;
+const JANITOR_DISPATCH_ATTEMPT_CAP = 12;
+const JANITOR_DISPATCH_RETRY_MS = 5_000;
+const JANITOR_DISPATCH_DEADLINE_MS = 15 * 60 * 1_000;
+const CLEANUP_CONTROL_TERMINAL_CODES = new Set([
+  "acceptance_operation_timeout",
+  "acceptance_deployment_version_unavailable",
+]);
 
 function leaseKey(leaseId: string): string {
   return `${LEASE_PREFIX}${leaseId}`;
+}
+
+function cleanupControlTerminalCode(job: StoredDurableOperationJob | null): string {
+  const body = job?.response?.body as { code?: unknown } | undefined;
+  return typeof body?.code === "string" && CLEANUP_CONTROL_TERMINAL_CODES.has(body.code)
+    ? body.code
+    : "acceptance_cleanup_incomplete";
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -185,10 +201,14 @@ export class AcceptanceVaultDurableObject
 
   async listExpired(nowMs: number, limit: number): Promise<StoredAcceptanceLease[]> {
     const leases = await this.ctx.storage.list<StoredAcceptanceLease>({ prefix: LEASE_PREFIX });
+    const cleanupOnly = this.env.ACCEPTANCE_STAGING_ENABLED !== "true";
     return [...leases.values()]
       .filter(
         (lease) =>
-          lease.expiresAtMs <= nowMs && lease.state !== "destroyed" && lease.state !== "destroying",
+          (cleanupOnly || lease.expiresAtMs <= nowMs) &&
+          lease.state !== "destroyed" &&
+          lease.cleanupDispatchState !== "registered" &&
+          lease.cleanupDispatchState !== "terminal",
       )
       .sort((left, right) => left.expiresAtMs - right.expiresAtMs)
       .slice(0, Math.min(limit, ACCEPTANCE_JANITOR_BATCH_LIMIT))
@@ -220,17 +240,41 @@ export class AcceptanceVaultDurableObject
       input.material === null
         ? null
         : await encryptMaterial(this.env.ACCEPTANCE_VAULT_KEK, current, input.material.value);
-    return this.ctx.storage.transaction(async (transaction) => {
+    const stored = await this.ctx.storage.transaction(async (transaction) => {
       const lease = await transaction.get<StoredAcceptanceLease>(leaseKey(input.leaseId));
       if (lease === undefined || lease.ownerSubjectHash !== input.ownerSubjectHash) return null;
       lease.resource = structuredClone(input.resource);
       lease.material = material;
       lease.costAmountMinorUnits = input.costAmountMinorUnits;
-      lease.state = "active";
       lease.updatedAtMs = input.nowMs;
+      const cleanupRequired =
+        this.env.ACCEPTANCE_STAGING_ENABLED !== "true" ||
+        lease.expiresAtMs <= input.nowMs ||
+        lease.state === "expired" ||
+        lease.state === "destroying" ||
+        lease.state === "destroyed" ||
+        lease.cleanupDispatchState === "pending" ||
+        lease.cleanupDispatchState === "registered" ||
+        lease.cleanupDispatchState === "terminal";
+      if (cleanupRequired) {
+        // A provider create can finish after cleanup policy has won. Persist the locator, but
+        // never resurrect the lease: mint a fresh fenced cleanup generation for the new bytes.
+        lease.state = "expired";
+        lease.terminalCode = null;
+        lease.cleanupDispatchGeneration = (lease.cleanupDispatchGeneration ?? 0) + 1;
+        lease.cleanupDispatchState = "pending";
+        lease.cleanupDispatchAttempts = 0;
+        lease.cleanupDispatchNextAttemptAtMs = input.nowMs;
+        lease.cleanupDispatchDeadlineMs = input.nowMs + JANITOR_DISPATCH_DEADLINE_MS;
+        delete lease.cleanupDispatchJobKey;
+      } else {
+        lease.state = "active";
+      }
       await transaction.put(leaseKey(input.leaseId), lease);
       return structuredClone(lease);
     });
+    await this.scheduleNextAlarm();
+    return stored;
   }
 
   async readMaterial(input: {
@@ -251,7 +295,15 @@ export class AcceptanceVaultDurableObject
   }): Promise<StoredAcceptanceLease | null> {
     return this.ctx.storage.transaction(async (transaction) => {
       const lease = await transaction.get<StoredAcceptanceLease>(leaseKey(input.leaseId));
-      if (lease === undefined || lease.ownerSubjectHash !== input.ownerSubjectHash) return null;
+      if (
+        lease === undefined ||
+        lease.ownerSubjectHash !== input.ownerSubjectHash ||
+        lease.state !== "active" ||
+        lease.cleanupDispatchState === "pending" ||
+        lease.cleanupDispatchState === "registered"
+      ) {
+        return null;
+      }
       lease.capabilityRevision = input.revision;
       lease.state = "provisioned";
       lease.updatedAtMs = input.nowMs;
@@ -272,7 +324,10 @@ export class AcceptanceVaultDurableObject
         lease.ownerSubjectHash !== input.ownerSubjectHash ||
         lease.scope.provider !== "fly" ||
         lease.resource?.provider !== "fly" ||
-        lease.resource.configurationWritten !== true
+        lease.resource.configurationWritten !== true ||
+        lease.state !== "active" ||
+        lease.cleanupDispatchState === "pending" ||
+        lease.cleanupDispatchState === "registered"
       ) {
         return null;
       }
@@ -286,6 +341,7 @@ export class AcceptanceVaultDurableObject
   async markDestroying(input: {
     leaseId: string;
     ownerSubjectHash: string | null;
+    cleanupGeneration?: number;
     nowMs: number;
   }): Promise<StoredAcceptanceLease | null> {
     return this.mutateTerminal(input, "destroying", null);
@@ -294,6 +350,7 @@ export class AcceptanceVaultDurableObject
   async markDestroyed(input: {
     leaseId: string;
     ownerSubjectHash: string | null;
+    cleanupGeneration?: number;
     nowMs: number;
   }): Promise<StoredAcceptanceLease | null> {
     return this.mutateTerminal(input, "destroyed", null);
@@ -308,8 +365,41 @@ export class AcceptanceVaultDurableObject
     return this.mutateTerminal(input, "failed", input.code);
   }
 
+  async markCleanupFailed(input: {
+    leaseId: string;
+    ownerSubjectHash: string | null;
+    cleanupGeneration?: number;
+    nowMs: number;
+  }): Promise<StoredAcceptanceLease | null> {
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const lease = await transaction.get<StoredAcceptanceLease>(leaseKey(input.leaseId));
+      if (
+        lease === undefined ||
+        (input.ownerSubjectHash !== null && lease.ownerSubjectHash !== input.ownerSubjectHash) ||
+        (input.cleanupGeneration !== undefined &&
+          lease.cleanupDispatchGeneration !== input.cleanupGeneration)
+      ) {
+        return null;
+      }
+      lease.state = "failed";
+      lease.updatedAtMs = input.nowMs;
+      lease.terminalCode = "acceptance_cleanup_incomplete";
+      lease.cleanupDispatchState = "terminal";
+      delete lease.cleanupDispatchJobKey;
+      await transaction.put(leaseKey(input.leaseId), lease);
+      return structuredClone(lease);
+    });
+    await this.scheduleNextAlarm();
+    return result;
+  }
+
   private async mutateTerminal(
-    input: { leaseId: string; ownerSubjectHash: string | null; nowMs: number },
+    input: {
+      leaseId: string;
+      ownerSubjectHash: string | null;
+      cleanupGeneration?: number;
+      nowMs: number;
+    },
     state: "destroying" | "destroyed" | "failed",
     terminalCode: string | null,
   ): Promise<StoredAcceptanceLease | null> {
@@ -317,7 +407,9 @@ export class AcceptanceVaultDurableObject
       const lease = await transaction.get<StoredAcceptanceLease>(leaseKey(input.leaseId));
       if (
         lease === undefined ||
-        (input.ownerSubjectHash !== null && lease.ownerSubjectHash !== input.ownerSubjectHash)
+        (input.ownerSubjectHash !== null && lease.ownerSubjectHash !== input.ownerSubjectHash) ||
+        (input.cleanupGeneration !== undefined &&
+          lease.cleanupDispatchGeneration !== input.cleanupGeneration)
       ) {
         return null;
       }
@@ -327,6 +419,8 @@ export class AcceptanceVaultDurableObject
       if (state === "destroyed") {
         lease.material = null;
         lease.capabilityRevision = null;
+        lease.cleanupDispatchState = "terminal";
+        delete lease.cleanupDispatchJobKey;
       }
       await transaction.put(leaseKey(input.leaseId), lease);
       return structuredClone(lease);
@@ -360,24 +454,265 @@ export class AcceptanceVaultDurableObject
   }
 
   async alarm(): Promise<void> {
-    const due = await this.listExpired(Date.now(), ACCEPTANCE_JANITOR_BATCH_LIMIT);
-    for (const lease of due) {
-      await this.env.ACCEPTANCE_OPERATION_QUEUE.send({
-        schemaVersion: 1,
-        kind: "acceptance-janitor",
-        leaseId: lease.leaseId,
-      });
-    }
+    await this.runCleanup(Date.now());
+  }
+
+  async runCleanup(nowMs: number): Promise<void> {
+    await this.reconcileRegisteredCleanup(nowMs);
+    const due = await this.stageDueCleanup(nowMs, this.env.ACCEPTANCE_STAGING_ENABLED !== "true");
+    for (const lease of due) await this.dispatchCleanup(lease, nowMs);
     await this.scheduleNextAlarm();
   }
 
+  private async reconcileRegisteredCleanup(nowMs: number): Promise<void> {
+    const leases = await this.ctx.storage.list<StoredAcceptanceLease>({ prefix: LEASE_PREFIX });
+    const control = this.env.ACCEPTANCE_COORDINATOR.get(
+      this.env.ACCEPTANCE_COORDINATOR.idFromName("acceptance-coordinator"),
+    );
+    for (const snapshot of leases.values()) {
+      if (
+        snapshot.cleanupDispatchState !== "registered" ||
+        (snapshot.cleanupDispatchNextAttemptAtMs ?? nowMs) > nowMs
+      ) {
+        continue;
+      }
+      let job: StoredDurableOperationJob | null = null;
+      let coordinatorReadFailed = false;
+      try {
+        job =
+          snapshot.cleanupDispatchJobKey === undefined
+            ? null
+            : await (control as unknown as ControlCoordinator).getDurableOperation(
+                snapshot.cleanupDispatchJobKey,
+              );
+      } catch {
+        // A transient coordinator read is not evidence that cleanup ended. The same bounded
+        // deadline remains authoritative and the alarm will observe it again.
+        coordinatorReadFailed = true;
+      }
+      const jobActive = job?.state === "active";
+      const controlCode = cleanupControlTerminalCode(job);
+      await this.ctx.storage.transaction(async (transaction) => {
+        const current = await transaction.get<StoredAcceptanceLease>(leaseKey(snapshot.leaseId));
+        if (
+          current?.cleanupDispatchState !== "registered" ||
+          current.cleanupDispatchGeneration !== snapshot.cleanupDispatchGeneration ||
+          current.cleanupDispatchJobKey !== snapshot.cleanupDispatchJobKey
+        ) {
+          return;
+        }
+        if (current.state === "destroyed") {
+          current.cleanupDispatchState = "terminal";
+          current.updatedAtMs = nowMs;
+          delete current.cleanupDispatchJobKey;
+          await transaction.put(leaseKey(current.leaseId), current);
+          return;
+        }
+        if (coordinatorReadFailed && nowMs < (current.cleanupDispatchDeadlineMs ?? nowMs)) {
+          current.cleanupDispatchNextAttemptAtMs = Math.min(
+            current.cleanupDispatchDeadlineMs ?? nowMs + JANITOR_DISPATCH_RETRY_MS,
+            nowMs + JANITOR_DISPATCH_RETRY_MS,
+          );
+          await transaction.put(leaseKey(current.leaseId), current);
+          return;
+        }
+        const attempts = current.cleanupDispatchAttempts ?? 0;
+        if (
+          nowMs >= (current.cleanupDispatchDeadlineMs ?? nowMs) ||
+          attempts >= JANITOR_DISPATCH_ATTEMPT_CAP
+        ) {
+          current.state = "failed";
+          current.updatedAtMs = nowMs;
+          current.terminalCode = "acceptance_cleanup_incomplete";
+          current.cleanupDispatchState = "terminal";
+          delete current.cleanupDispatchJobKey;
+          await transaction.put(leaseKey(current.leaseId), current);
+          const sequence = (await transaction.get<number>(AUDIT_SEQUENCE_KEY)) ?? 0;
+          const next = sequence + 1;
+          await transaction.put(AUDIT_SEQUENCE_KEY, next);
+          await transaction.put(`${AUDIT_PREFIX}${String(next).padStart(12, "0")}`, {
+            sequence: next,
+            at: new Date(nowMs).toISOString(),
+            leaseId: current.leaseId,
+            provider: current.scope.provider,
+            operation: "destroy",
+            outcome: `failed:${controlCode}`,
+            state: current.state,
+            resourceCount: current.resource?.ids.length ?? 0,
+            costAmountMinorUnits: current.costAmountMinorUnits,
+          } satisfies AcceptanceLeaseAuditRecord);
+          if (next > MAX_AUDIT_RECORDS) {
+            await transaction.delete(
+              `${AUDIT_PREFIX}${String(next - MAX_AUDIT_RECORDS).padStart(12, "0")}`,
+            );
+          }
+          return;
+        }
+        if (jobActive) {
+          current.cleanupDispatchNextAttemptAtMs = Math.min(
+            current.cleanupDispatchDeadlineMs ?? nowMs + JANITOR_DISPATCH_RETRY_MS,
+            nowMs + JANITOR_DISPATCH_RETRY_MS,
+          );
+          await transaction.put(leaseKey(current.leaseId), current);
+          return;
+        }
+        current.state = "expired";
+        current.updatedAtMs = nowMs;
+        current.terminalCode = null;
+        current.cleanupDispatchGeneration = (current.cleanupDispatchGeneration ?? 0) + 1;
+        current.cleanupDispatchState = "pending";
+        current.cleanupDispatchNextAttemptAtMs = nowMs;
+        delete current.cleanupDispatchJobKey;
+        await transaction.put(leaseKey(current.leaseId), current);
+        const sequence = (await transaction.get<number>(AUDIT_SEQUENCE_KEY)) ?? 0;
+        const next = sequence + 1;
+        await transaction.put(AUDIT_SEQUENCE_KEY, next);
+        await transaction.put(`${AUDIT_PREFIX}${String(next).padStart(12, "0")}`, {
+          sequence: next,
+          at: new Date(nowMs).toISOString(),
+          leaseId: current.leaseId,
+          provider: current.scope.provider,
+          operation: "destroy",
+          outcome: `retrying:${controlCode}`,
+          state: current.state,
+          resourceCount: current.resource?.ids.length ?? 0,
+          costAmountMinorUnits: current.costAmountMinorUnits,
+        } satisfies AcceptanceLeaseAuditRecord);
+        if (next > MAX_AUDIT_RECORDS) {
+          await transaction.delete(
+            `${AUDIT_PREFIX}${String(next - MAX_AUDIT_RECORDS).padStart(12, "0")}`,
+          );
+        }
+      });
+    }
+  }
+
+  private async stageDueCleanup(
+    nowMs: number,
+    cleanupOnly: boolean,
+  ): Promise<StoredAcceptanceLease[]> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const leases = await transaction.list<StoredAcceptanceLease>({ prefix: LEASE_PREFIX });
+      const due: StoredAcceptanceLease[] = [];
+      for (const lease of [...leases.values()].sort((a, b) => a.expiresAtMs - b.expiresAtMs)) {
+        if (due.length >= ACCEPTANCE_JANITOR_BATCH_LIMIT) break;
+        // A pre-generation deployment can leave a lease in `destroying` with no durable
+        // dispatch identity. Treat it as unfinished cleanup: stage a real generation below and
+        // let the same bounded coordinator path prove the resource gone.
+        if (lease.state === "destroyed") continue;
+        if (
+          lease.cleanupDispatchState === "registered" ||
+          lease.cleanupDispatchState === "terminal"
+        ) {
+          continue;
+        }
+        if (!cleanupOnly && lease.expiresAtMs > nowMs && lease.cleanupDispatchState !== "pending") {
+          continue;
+        }
+        if (
+          lease.cleanupDispatchState === "pending" &&
+          (lease.cleanupDispatchNextAttemptAtMs ?? lease.expiresAtMs) > nowMs
+        ) {
+          continue;
+        }
+        if (lease.cleanupDispatchState !== "pending") {
+          lease.state = "expired";
+          lease.updatedAtMs = nowMs;
+          lease.terminalCode = null;
+          lease.cleanupDispatchGeneration = (lease.cleanupDispatchGeneration ?? 0) + 1;
+          lease.cleanupDispatchState = "pending";
+          lease.cleanupDispatchAttempts = 0;
+          lease.cleanupDispatchNextAttemptAtMs = nowMs;
+          lease.cleanupDispatchDeadlineMs = nowMs + JANITOR_DISPATCH_DEADLINE_MS;
+          delete lease.cleanupDispatchJobKey;
+          await transaction.put(leaseKey(lease.leaseId), lease);
+        }
+        due.push(structuredClone(lease));
+      }
+      return due;
+    });
+  }
+
+  private async dispatchCleanup(lease: StoredAcceptanceLease, nowMs: number): Promise<void> {
+    const claim = await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<StoredAcceptanceLease>(leaseKey(lease.leaseId));
+      if (current?.cleanupDispatchState !== "pending") return null;
+      const attempts = current.cleanupDispatchAttempts ?? 0;
+      if (
+        nowMs >= (current.cleanupDispatchDeadlineMs ?? nowMs) ||
+        attempts >= JANITOR_DISPATCH_ATTEMPT_CAP
+      ) {
+        current.state = "failed";
+        current.updatedAtMs = nowMs;
+        current.terminalCode = "acceptance_cleanup_incomplete";
+        current.cleanupDispatchState = "terminal";
+        delete current.cleanupDispatchJobKey;
+        await transaction.put(leaseKey(current.leaseId), current);
+        const sequence = (await transaction.get<number>(AUDIT_SEQUENCE_KEY)) ?? 0;
+        const next = sequence + 1;
+        await transaction.put(AUDIT_SEQUENCE_KEY, next);
+        await transaction.put(`${AUDIT_PREFIX}${String(next).padStart(12, "0")}`, {
+          sequence: next,
+          at: new Date(nowMs).toISOString(),
+          leaseId: current.leaseId,
+          provider: current.scope.provider,
+          operation: "destroy",
+          outcome: "failed:acceptance_cleanup_incomplete",
+          state: current.state,
+          resourceCount: current.resource?.ids.length ?? 0,
+          costAmountMinorUnits: current.costAmountMinorUnits,
+        } satisfies AcceptanceLeaseAuditRecord);
+        if (next > MAX_AUDIT_RECORDS) {
+          await transaction.delete(
+            `${AUDIT_PREFIX}${String(next - MAX_AUDIT_RECORDS).padStart(12, "0")}`,
+          );
+        }
+        return { state: "terminal" as const, lease: structuredClone(current) };
+      }
+      current.cleanupDispatchAttempts = attempts + 1;
+      current.cleanupDispatchNextAttemptAtMs = nowMs + JANITOR_DISPATCH_RETRY_MS;
+      await transaction.put(leaseKey(current.leaseId), current);
+      return { state: "claimed" as const, lease: structuredClone(current) };
+    });
+    if (claim === null) return;
+    if (claim.state === "terminal") return;
+    const claimed = claim.lease;
+    try {
+      const registration = await registerJanitorDestroy(this.env, claimed);
+      await this.ctx.storage.transaction(async (transaction) => {
+        const current = await transaction.get<StoredAcceptanceLease>(leaseKey(claimed.leaseId));
+        if (
+          current?.cleanupDispatchState === "pending" &&
+          current.cleanupDispatchGeneration === claimed.cleanupDispatchGeneration
+        ) {
+          current.cleanupDispatchState = "registered";
+          current.cleanupDispatchJobKey = registration.jobKey;
+          current.cleanupDispatchNextAttemptAtMs = nowMs + JANITOR_DISPATCH_RETRY_MS;
+          current.updatedAtMs = nowMs;
+          await transaction.put(leaseKey(current.leaseId), current);
+        }
+      });
+    } catch {
+      // The persisted pending state and next alarm provide bounded recovery.
+    }
+  }
+
   private async scheduleNextAlarm(): Promise<void> {
+    const cleanupOnly = this.env.ACCEPTANCE_STAGING_ENABLED !== "true";
+    const nowMs = Date.now();
     const leases = await this.ctx.storage.list<StoredAcceptanceLease>({ prefix: LEASE_PREFIX });
     let next: number | null = null;
     for (const lease of leases.values()) {
-      if (lease.state === "destroyed" || lease.state === "destroying") continue;
-      next = next === null ? lease.expiresAtMs : Math.min(next, lease.expiresAtMs);
+      if (lease.state === "destroyed" || lease.cleanupDispatchState === "terminal") continue;
+      const candidate =
+        lease.cleanupDispatchState === "pending" || lease.cleanupDispatchState === "registered"
+          ? (lease.cleanupDispatchNextAttemptAtMs ?? lease.expiresAtMs)
+          : cleanupOnly
+            ? nowMs
+            : lease.expiresAtMs;
+      next = next === null ? candidate : Math.min(next, candidate);
     }
-    if (next !== null) await this.ctx.storage.setAlarm(next);
+    if (next === null) await this.ctx.storage.deleteAlarm();
+    else await this.ctx.storage.setAlarm(next);
   }
 }

@@ -3,7 +3,7 @@ import {
   deriveRuntimeIdentity,
   signPreviewGrant,
 } from "@workspace/tenant-runtime-contracts";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handlePreviewDataPlaneRequest } from "../src/preview-data-plane";
 import type { StoredRuntime } from "../src/model";
 import { MemoryCoordinator, TEST_NOW_MS, fakeEnv } from "./helpers";
@@ -199,6 +199,52 @@ describe("authenticated preview data plane", () => {
       "frame-ancestors https://mustaflow.com https://*.mustaflow.com",
     );
     expect(sandbox.httpRequests[0]?.url).toBe("https://tenant.preview.invalid/hello?value=1");
+  });
+
+  it("forwards preview bytes through a raw stub with zero configuration writes", async () => {
+    const configure = vi.fn(async () => undefined);
+    const setSandboxName = vi.fn(async () => undefined);
+    const setSleepAfter = vi.fn(async () => undefined);
+    const setKeepAlive = vi.fn(async () => undefined);
+    const setTransport = vi.fn(async () => undefined);
+    Object.assign(sandbox, {
+      configure,
+      setSandboxName,
+      setSleepAfter,
+      setKeepAlive,
+      setTransport,
+    });
+    env.NABUFLOW_SANDBOX = {
+      idFromName(value: string) {
+        return { value, toString: () => `container:${value}` };
+      },
+      get() {
+        return sandbox;
+      },
+    } as never;
+
+    const redeemed = await handlePreviewDataPlaneRequest(
+      new Request(
+        `${origin}${PREVIEW_DATA_PREFIX}/${identity}/?__nfg=${encodeURIComponent(await grant())}`,
+      ),
+      env,
+      { coordinator, nowMs: TEST_NOW_MS },
+    );
+    const response = await handlePreviewDataPlaneRequest(
+      new Request(`${origin}${PREVIEW_DATA_PREFIX}/${identity}/`, {
+        headers: { cookie: cookieFrom(redeemed!) },
+      }),
+      env,
+      { coordinator, nowMs: TEST_NOW_MS },
+    );
+
+    expect(response?.status).toBe(200);
+    expect(sandbox.httpRequests).toHaveLength(1);
+    expect(configure).not.toHaveBeenCalled();
+    expect(setSandboxName).not.toHaveBeenCalled();
+    expect(setSleepAfter).not.toHaveBeenCalled();
+    expect(setKeepAlive).not.toHaveBeenCalled();
+    expect(setTransport).not.toHaveBeenCalled();
   });
 
   it("injects the shared visual-edit bridge into authenticated HTML preview responses", async () => {

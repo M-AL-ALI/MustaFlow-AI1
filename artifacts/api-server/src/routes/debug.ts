@@ -20,6 +20,10 @@ import { and, eq, isNull } from "drizzle-orm";
 import { getAuth } from "@clerk/express";
 import { execInContainer } from "../lib/tenant-runtime";
 import { logger } from "../lib/logger";
+import {
+  acquireProjectLifecycleSession,
+  registerProjectWorkController,
+} from "../lib/project-lifecycle";
 
 export interface DebugServer {
   wss: WebSocketServer;
@@ -103,19 +107,6 @@ export function createDebugServer(): DebugServer {
     const machineId = project.containerId;
     const isNode = !project.stack?.includes("python") && !project.stack?.includes("flask");
 
-    // Detect which debug adapter to use and start it in the container.
-    const dapCmd = isNode
-      ? ["node", "--inspect=0.0.0.0:9229", "/app/index.js"]
-      : [
-          "python",
-          "-m",
-          "debugpy",
-          "--listen",
-          "0.0.0.0:5678",
-          "--wait-for-client",
-          "/app/main.py",
-        ];
-
     const dapPort = isNode ? 9229 : 5678;
 
     logger.info({ projectId, machineId, isNode, dapPort }, "DAP session starting");
@@ -128,9 +119,59 @@ export function createDebugServer(): DebugServer {
     });
 
     // DAP command routing — translate our simplified wire protocol to container exec calls
+    const activeCommandControllers = new Set<AbortController>();
     ws.on("message", async (data: Buffer | ArrayBuffer | Buffer[]) => {
+      let lifecycleSession: Awaited<ReturnType<typeof acquireProjectLifecycleSession>> = null;
+      const controller = new AbortController();
+      let unregisterProjectWork: (() => void) | null = null;
+      activeCommandControllers.add(controller);
       try {
         const msg = JSON.parse(data.toString("utf8")) as { type: string; [k: string]: unknown };
+
+        unregisterProjectWork = registerProjectWorkController(projectId, controller);
+        lifecycleSession = await acquireProjectLifecycleSession(projectId);
+        if (!lifecycleSession) {
+          send(ws, { type: "error", message: "Project not found" });
+          ws.close(4004, "Project not found");
+          return;
+        }
+        if (controller.signal.aborted || ws.readyState !== WebSocket.OPEN) return;
+
+        const [currentProject] = await db
+          .select({
+            ownerId: projectsTable.ownerId,
+            containerId: projectsTable.containerId,
+            containerStatus: projectsTable.containerStatus,
+            stack: projectsTable.stack,
+          })
+          .from(projectsTable)
+          .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
+        if (
+          !currentProject ||
+          currentProject.ownerId !== userId ||
+          !currentProject.containerId ||
+          currentProject.containerStatus !== "running"
+        ) {
+          send(ws, { type: "error", message: "Project container is not available" });
+          ws.close(4002, "Container not running");
+          return;
+        }
+        if (controller.signal.aborted || ws.readyState !== WebSocket.OPEN) return;
+
+        const commandMachineId = currentProject.containerId;
+        const commandIsNode =
+          !currentProject.stack?.includes("python") && !currentProject.stack?.includes("flask");
+        const commandDap = commandIsNode
+          ? ["node", "--inspect=0.0.0.0:9229", "/app/index.js"]
+          : [
+              "python",
+              "-m",
+              "debugpy",
+              "--listen",
+              "0.0.0.0:5678",
+              "--wait-for-client",
+              "/app/main.py",
+            ];
 
         if (msg.type === "initialize") {
           send(ws, {
@@ -146,7 +187,8 @@ export function createDebugServer(): DebugServer {
         }
 
         if (msg.type === "continue") {
-          const r = await execInContainer(machineId, dapCmd, projectId);
+          const r = await execInContainer(commandMachineId, commandDap, projectId);
+          if (controller.signal.aborted) return;
           send(ws, { type: "continued" });
           if (r.output) {
             send(ws, { type: "output", category: "stdout", output: r.output });
@@ -161,14 +203,15 @@ export function createDebugServer(): DebugServer {
 
         if (msg.type === "evaluate") {
           const expr = String(msg.expression ?? "");
-          const evalCmd = isNode
+          const evalCmd = commandIsNode
             ? [
                 "node",
                 "-e",
                 `try { const r = eval(${JSON.stringify(expr)}); process.stdout.write(String(r)); } catch(e) { process.stderr.write(String(e)); }`,
               ]
             : ["python", "-c", `import ast; print(eval(${JSON.stringify(expr)}))`];
-          const r = await execInContainer(machineId, evalCmd, projectId);
+          const r = await execInContainer(commandMachineId, evalCmd, projectId);
+          if (controller.signal.aborted) return;
           send(ws, {
             type: "evaluate-result",
             expression: expr,
@@ -182,11 +225,17 @@ export function createDebugServer(): DebugServer {
           return;
         }
       } catch (err) {
-        logger.warn({ err, projectId }, "DAP message parse error");
+        logger.warn({ err, projectId }, "DAP command failed");
+      } finally {
+        unregisterProjectWork?.();
+        await lifecycleSession?.release();
+        activeCommandControllers.delete(controller);
       }
     });
 
     ws.on("close", () => {
+      for (const controller of activeCommandControllers) controller.abort();
+      activeCommandControllers.clear();
       logger.info({ projectId, machineId }, "Debug session closed");
     });
 

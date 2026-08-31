@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
-import { RequestUploadUrlBody, RequestUploadUrlResponse } from "@workspace/api-zod";
+import { RequestUploadUrlBody } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { ObjectPermission } from "../lib/objectAcl";
 
@@ -21,23 +21,12 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
     return;
   }
 
-  try {
-    const { name, size, contentType } = parsed.data;
-
-    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-    const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
-
-    res.json(
-      RequestUploadUrlResponse.parse({
-        uploadURL,
-        objectPath,
-        metadata: { name, size, contentType },
-      }),
-    );
-  } catch (error) {
-    req.log.error({ err: error }, "Error generating upload URL");
-    res.status(500).json({ error: "Failed to generate upload URL" });
-  }
+  // This legacy account-global endpoint had no durable owner or registration
+  // receipt, so a disclosed URL could create untracked paid storage. Project
+  // uploads and the unified asset registry are the governed replacements.
+  res.status(410).json({
+    error: "Upload this file from inside a project so NabuFlow can keep it safely attached.",
+  });
 });
 
 /**

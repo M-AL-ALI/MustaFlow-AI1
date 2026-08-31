@@ -24,6 +24,426 @@ type MigrationStep = {
 
 type MigrationClient = Pick<import("pg").PoolClient, "query">;
 
+type RetirementColumnState = {
+  column_name: string;
+  data_type: string;
+  is_nullable: "YES" | "NO";
+  column_default: string | null;
+};
+
+type RetirementConstraintState = {
+  constraint_name: string;
+  constraint_type: "c" | "f" | "p";
+  definition: string;
+};
+
+type RetirementIndexState = {
+  index_name: string;
+  index_definition: string;
+};
+
+const RETIREMENT_PROGRESS_REPAIR_SQL = `'{
+  "route":{"state":"pending","failureCode":null,"hostnames":[],"cache":{"state":"pending"}},
+  "tasks":{"state":"pending","count":0,"terminalized":0,"creditsRefunded":0,"telemetryFlushed":0},
+  "domains":[],"retainedLegacyRuntimePointers":[],"runtimes":[]
+}'::jsonb`;
+
+const RETIREMENT_COLUMNS = [
+  { name: "id", type: "TEXT", dataType: "text", required: true, defaultSql: null },
+  {
+    name: "project_id",
+    type: "INTEGER",
+    dataType: "integer",
+    required: true,
+    defaultSql: null,
+  },
+  {
+    name: "requested_by",
+    type: "TEXT",
+    dataType: "text",
+    required: true,
+    defaultSql: null,
+  },
+  {
+    name: "state",
+    type: "TEXT",
+    dataType: "text",
+    required: true,
+    defaultSql: "'accepted'",
+  },
+  {
+    name: "attempt_count",
+    type: "INTEGER",
+    dataType: "integer",
+    required: true,
+    defaultSql: "0",
+  },
+  {
+    name: "lease_version",
+    type: "INTEGER",
+    dataType: "integer",
+    required: true,
+    defaultSql: "0",
+  },
+  {
+    name: "lease_expires_at",
+    type: "TIMESTAMPTZ",
+    dataType: "timestamp with time zone",
+    required: false,
+    defaultSql: null,
+  },
+  {
+    name: "progress",
+    type: "JSONB",
+    dataType: "jsonb",
+    required: true,
+    defaultSql: null,
+  },
+  {
+    name: "failure_code",
+    type: "TEXT",
+    dataType: "text",
+    required: false,
+    defaultSql: null,
+  },
+  {
+    name: "failure_target",
+    type: "JSONB",
+    dataType: "jsonb",
+    required: false,
+    defaultSql: null,
+  },
+  {
+    name: "created_at",
+    type: "TIMESTAMPTZ",
+    dataType: "timestamp with time zone",
+    required: true,
+    defaultSql: "NOW()",
+  },
+  {
+    name: "started_at",
+    type: "TIMESTAMPTZ",
+    dataType: "timestamp with time zone",
+    required: false,
+    defaultSql: null,
+  },
+  {
+    name: "completed_at",
+    type: "TIMESTAMPTZ",
+    dataType: "timestamp with time zone",
+    required: false,
+    defaultSql: null,
+  },
+  {
+    name: "updated_at",
+    type: "TIMESTAMPTZ",
+    dataType: "timestamp with time zone",
+    required: true,
+    defaultSql: "NOW()",
+  },
+] as const;
+
+function normalizeRetirementDefinition(value: string): string {
+  return value
+    .toLowerCase()
+    .replaceAll('"', "")
+    .replace(/::[a-z_]+(?:\[\])?/gu, "")
+    .replace(/\b[a-z_][a-z0-9_]*\./gu, "")
+    .replace(/\s+/gu, "")
+    .replaceAll("usingbtree", "")
+    .replace(/[();]/gu, "")
+    .replaceAll("[", "")
+    .replaceAll("]", "");
+}
+
+function retirementDefaultMatches(actual: string | null, expected: string | null): boolean {
+  if (expected === null) return true;
+  if (actual === null) return false;
+  const normalized = normalizeRetirementDefinition(actual);
+  if (expected === "'accepted'") return normalized === "'accepted'";
+  if (expected === "0") return normalized === "0";
+  return normalized === "now" || normalized === "current_timestamp";
+}
+
+function retirementConstraintMatches(name: string, definition: string): boolean {
+  const normalized = normalizeRetirementDefinition(definition);
+  if (name === "project_retirement_operations_pkey") return normalized === "primarykeyid";
+  if (name === "project_retirement_operations_attempt_count_check") {
+    return normalized === "checkattempt_count>=0";
+  }
+  if (name === "project_retirement_operations_lease_version_check") {
+    return normalized === "checklease_version>=0";
+  }
+  if (name === "project_retirement_operations_project_id_fkey") {
+    return normalized === "foreignkeyproject_idreferencesprojectsidondeletecascade";
+  }
+  if (name === "project_retirement_operations_state_check") {
+    return (
+      normalized === "checkstatein'accepted','running','failed','completed','canceled'" ||
+      normalized === "checkstate=anyarray'accepted','running','failed','completed','canceled'"
+    );
+  }
+  return false;
+}
+
+const RETIREMENT_CONSTRAINTS = [
+  {
+    name: "project_retirement_operations_state_check",
+    type: "c",
+    sql: "CHECK (state IN ('accepted','running','failed','completed','canceled'))",
+  },
+  {
+    name: "project_retirement_operations_attempt_count_check",
+    type: "c",
+    sql: "CHECK (attempt_count >= 0)",
+  },
+  {
+    name: "project_retirement_operations_lease_version_check",
+    type: "c",
+    sql: "CHECK (lease_version >= 0)",
+  },
+  {
+    name: "project_retirement_operations_project_id_fkey",
+    type: "f",
+    sql: "FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+  },
+] as const;
+
+const RETIREMENT_INDEXES = [
+  {
+    name: "project_retirement_operations_project_idx",
+    sql: "CREATE INDEX IF NOT EXISTS project_retirement_operations_project_idx ON project_retirement_operations(project_id, created_at)",
+    normalized:
+      "createindexproject_retirement_operations_project_idxonproject_retirement_operationsproject_id,created_at",
+  },
+  {
+    name: "project_retirement_operations_state_idx",
+    sql: "CREATE INDEX IF NOT EXISTS project_retirement_operations_state_idx ON project_retirement_operations(state, updated_at)",
+    normalized:
+      "createindexproject_retirement_operations_state_idxonproject_retirement_operationsstate,updated_at",
+  },
+  {
+    name: "project_retirement_operations_active_project_uq",
+    sql: "CREATE UNIQUE INDEX IF NOT EXISTS project_retirement_operations_active_project_uq ON project_retirement_operations(project_id) WHERE state IN ('accepted','running') OR (state = 'failed' AND completed_at IS NULL)",
+    normalized:
+      "createuniqueindexproject_retirement_operations_active_project_uqonproject_retirement_operationsproject_idwherestatein'accepted','running'orstate='failed'andcompleted_atisnull",
+    alternateNormalized:
+      "createuniqueindexproject_retirement_operations_active_project_uqonproject_retirement_operationsproject_idwherestate=anyarray'accepted','running'orstate='failed'andcompleted_atisnull",
+  },
+] as const;
+
+function quoteMigrationIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+export async function applyProjectRetirementOperationsMigration(
+  client: MigrationClient,
+): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    const tableState = await client.query<{ table_exists: boolean }>(`
+      SELECT to_regclass('project_retirement_operations') IS NOT NULL AS table_exists
+    `);
+    if (!tableState.rows[0]?.table_exists) {
+      await client.query(`
+      CREATE TABLE IF NOT EXISTS project_retirement_operations (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        requested_by TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'accepted',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        lease_version INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TIMESTAMPTZ,
+        progress JSONB NOT NULL,
+        failure_code TEXT,
+        failure_target JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        started_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT project_retirement_operations_state_check
+          CHECK (state IN ('accepted','running','failed','completed','canceled')),
+        CONSTRAINT project_retirement_operations_attempt_count_check CHECK (attempt_count >= 0),
+        CONSTRAINT project_retirement_operations_lease_version_check CHECK (lease_version >= 0),
+        CONSTRAINT project_retirement_operations_project_id_fkey
+          FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      )
+    `);
+      for (const index of RETIREMENT_INDEXES) await client.query(index.sql);
+      await client.query("COMMIT");
+      return;
+    }
+
+    const columnResult = await client.query<RetirementColumnState>(`
+      SELECT column_name, data_type, is_nullable, column_default
+        FROM information_schema.columns
+       WHERE table_schema = current_schema()
+         AND table_name = 'project_retirement_operations'
+    `);
+    const columns = new Map(columnResult.rows.map((column) => [column.column_name, column]));
+    const missing = RETIREMENT_COLUMNS.filter((column) => !columns.has(column.name));
+    if (missing.length > 0) {
+      await client.query(
+        `ALTER TABLE project_retirement_operations ${missing
+          .map((column) => `ADD COLUMN ${column.name} ${column.type}`)
+          .join(", ")}`,
+      );
+    }
+    for (const column of RETIREMENT_COLUMNS) {
+      const existing = columns.get(column.name);
+      if (existing !== undefined && existing.data_type !== column.dataType) {
+        throw new Error(`project_retirement_column_type_mismatch:${column.name}`);
+      }
+    }
+
+    const potentiallyNullable = RETIREMENT_COLUMNS.some(
+      (column) =>
+        column.required &&
+        (columns.get(column.name)?.is_nullable === "YES" || !columns.has(column.name)),
+    );
+    if (potentiallyNullable) {
+      const repairState = await client.query<{ repair_needed: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1 FROM project_retirement_operations
+           WHERE requested_by IS NULL OR state IS NULL OR attempt_count IS NULL
+              OR lease_version IS NULL OR progress IS NULL OR created_at IS NULL
+              OR updated_at IS NULL
+        ) AS repair_needed
+      `);
+      if (repairState.rows[0]?.repair_needed) {
+        await client.query(`
+      UPDATE project_retirement_operations
+         SET requested_by = COALESCE(requested_by, 'system:migration-repair'),
+             state = COALESCE(state, 'accepted'),
+             attempt_count = COALESCE(attempt_count, 0),
+             lease_version = COALESCE(lease_version, 0),
+             progress = COALESCE(progress, ${RETIREMENT_PROGRESS_REPAIR_SQL}),
+             created_at = COALESCE(created_at, NOW()),
+             updated_at = COALESCE(updated_at, NOW())
+       WHERE requested_by IS NULL OR state IS NULL OR attempt_count IS NULL
+          OR lease_version IS NULL OR progress IS NULL OR created_at IS NULL OR updated_at IS NULL
+    `);
+      }
+    }
+
+    const columnRepairs: string[] = [];
+    for (const column of RETIREMENT_COLUMNS) {
+      const existing = columns.get(column.name);
+      if (
+        column.defaultSql !== null &&
+        !retirementDefaultMatches(existing?.column_default ?? null, column.defaultSql)
+      ) {
+        columnRepairs.push(`ALTER COLUMN ${column.name} SET DEFAULT ${column.defaultSql}`);
+      }
+      if (column.required && existing?.is_nullable !== "NO") {
+        columnRepairs.push(`ALTER COLUMN ${column.name} SET NOT NULL`);
+      }
+    }
+    if (columnRepairs.length > 0) {
+      await client.query(`ALTER TABLE project_retirement_operations ${columnRepairs.join(", ")}`);
+    }
+
+    const constraintResult = await client.query<RetirementConstraintState>(`
+      SELECT conname AS constraint_name, contype AS constraint_type,
+             pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+       WHERE conrelid = 'project_retirement_operations'::regclass
+    `);
+    const primaryKeys = constraintResult.rows.filter(
+      (constraint) => constraint.constraint_type === "p",
+    );
+    const canonicalPrimaryKey = primaryKeys.find(
+      (constraint) =>
+        constraint.constraint_name === "project_retirement_operations_pkey" &&
+        retirementConstraintMatches("project_retirement_operations_pkey", constraint.definition),
+    );
+    if (!canonicalPrimaryKey) {
+      const equivalentPrimaryKey = primaryKeys.find((constraint) =>
+        retirementConstraintMatches("project_retirement_operations_pkey", constraint.definition),
+      );
+      const incorrectlyNamedCanonical = primaryKeys.find(
+        (constraint) => constraint.constraint_name === "project_retirement_operations_pkey",
+      );
+      if (incorrectlyNamedCanonical) {
+        await client.query(
+          `ALTER TABLE project_retirement_operations DROP CONSTRAINT ${quoteMigrationIdentifier(incorrectlyNamedCanonical.constraint_name)}`,
+        );
+      }
+      if (
+        equivalentPrimaryKey &&
+        equivalentPrimaryKey.constraint_name !== incorrectlyNamedCanonical?.constraint_name
+      ) {
+        await client.query(
+          `ALTER TABLE project_retirement_operations RENAME CONSTRAINT ${quoteMigrationIdentifier(equivalentPrimaryKey.constraint_name)} TO project_retirement_operations_pkey`,
+        );
+      } else {
+        for (const primaryKey of primaryKeys) {
+          if (primaryKey.constraint_name === incorrectlyNamedCanonical?.constraint_name) continue;
+          await client.query(
+            `ALTER TABLE project_retirement_operations DROP CONSTRAINT ${quoteMigrationIdentifier(primaryKey.constraint_name)}`,
+          );
+        }
+        await client.query(
+          `ALTER TABLE project_retirement_operations ADD CONSTRAINT project_retirement_operations_pkey PRIMARY KEY (id)`,
+        );
+      }
+    }
+    for (const expected of RETIREMENT_CONSTRAINTS) {
+      const named = constraintResult.rows.find(
+        (constraint) => constraint.constraint_name === expected.name,
+      );
+      const namedCanonical =
+        named !== undefined &&
+        named.constraint_type === expected.type &&
+        retirementConstraintMatches(expected.name, named.definition);
+      if (namedCanonical) continue;
+      if (named !== undefined) {
+        await client.query(
+          `ALTER TABLE project_retirement_operations DROP CONSTRAINT ${quoteMigrationIdentifier(named.constraint_name)}`,
+        );
+      }
+      const equivalentAlias = constraintResult.rows.find(
+        (constraint) =>
+          constraint.constraint_name !== expected.name &&
+          constraint.constraint_type === expected.type &&
+          retirementConstraintMatches(expected.name, constraint.definition),
+      );
+      if (equivalentAlias) {
+        await client.query(
+          `ALTER TABLE project_retirement_operations RENAME CONSTRAINT ${quoteMigrationIdentifier(equivalentAlias.constraint_name)} TO ${quoteMigrationIdentifier(expected.name)}`,
+        );
+      } else {
+        await client.query(
+          `ALTER TABLE project_retirement_operations ADD CONSTRAINT ${expected.name} ${expected.sql}`,
+        );
+      }
+    }
+
+    const indexResult = await client.query<RetirementIndexState>(`
+      SELECT indexname AS index_name, indexdef AS index_definition
+        FROM pg_indexes
+       WHERE schemaname = current_schema()
+         AND tablename = 'project_retirement_operations'
+    `);
+    for (const expected of RETIREMENT_INDEXES) {
+      const existing = indexResult.rows.find((index) => index.index_name === expected.name);
+      const normalized =
+        existing === undefined ? null : normalizeRetirementDefinition(existing.index_definition);
+      const canonical =
+        normalized === expected.normalized ||
+        ("alternateNormalized" in expected && normalized === expected.alternateNormalized);
+      if (existing !== undefined && !canonical) {
+        await client.query(`DROP INDEX ${quoteMigrationIdentifier(existing.index_name)}`);
+      }
+      if (!canonical) await client.query(expected.sql);
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function applyUnifiedAssetRegistryMigration(client: MigrationClient): Promise<void> {
   await client.query("BEGIN");
   try {
@@ -58,7 +478,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         storage_backend TEXT NOT NULL DEFAULT 'r2',
         storage_key TEXT NOT NULL UNIQUE,
         state TEXT NOT NULL DEFAULT 'reserved'
-          CHECK (state IN ('reserved', 'ready', 'rejected', 'deleted')),
+          CHECK (state IN ('reserved', 'uploading', 'ready', 'deleting', 'rejected', 'deleted')),
         scan_state TEXT NOT NULL DEFAULT 'not-scanned'
           CHECK (scan_state IN ('not-required', 'not-scanned', 'clean', 'threat', 'failed')),
         rejection_code TEXT,
@@ -68,6 +488,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         message_id INTEGER,
         context JSONB,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        upload_started_at TIMESTAMPTZ,
         ready_at TIMESTAMPTZ,
         deleted_at TIMESTAMPTZ
       )
@@ -79,6 +500,24 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       `CREATE INDEX IF NOT EXISTS assets_owner_state_idx ON assets(owner_user_id, state)`,
     );
     await client.query(`ALTER TABLE assets ADD COLUMN IF NOT EXISTS text_preview TEXT`);
+    await client.query(`ALTER TABLE assets ADD COLUMN IF NOT EXISTS upload_started_at TIMESTAMPTZ`);
+    await client.query(`
+      DO $$
+      DECLARE current_definition TEXT;
+      BEGIN
+        SELECT pg_get_constraintdef(oid)
+          INTO current_definition
+          FROM pg_constraint
+         WHERE conrelid = 'assets'::regclass
+           AND conname = 'assets_state_check';
+        IF current_definition IS NULL OR current_definition NOT LIKE '%uploading%' THEN
+          ALTER TABLE assets DROP CONSTRAINT IF EXISTS assets_state_check;
+          ALTER TABLE assets
+            ADD CONSTRAINT assets_state_check
+            CHECK (state IN ('reserved', 'uploading', 'ready', 'deleting', 'rejected', 'deleted'));
+        END IF;
+      END $$
+    `);
     await client.query(
       `CREATE INDEX IF NOT EXISTS assets_project_created_idx ON assets(project_id, created_at DESC)`,
     );
@@ -86,10 +525,43 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       `CREATE INDEX IF NOT EXISTS assets_thread_created_idx ON assets(thread_key, created_at DESC)`,
     );
     await client.query(`
+      CREATE TABLE IF NOT EXISTS asset_storage_objects (
+        id SERIAL PRIMARY KEY,
+        asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+        storage_backend TEXT NOT NULL,
+        storage_key TEXT NOT NULL,
+        role TEXT NOT NULL,
+        size_bytes BIGINT NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+        size_measured_at TIMESTAMPTZ,
+        state TEXT NOT NULL DEFAULT 'reserved'
+          CHECK (state IN ('reserved', 'uploading', 'ready', 'deleting', 'deleted')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        ready_at TIMESTAMPTZ,
+        deleted_at TIMESTAMPTZ
+      )
+    `);
+    await client.query(`
+      ALTER TABLE asset_storage_objects
+        ADD COLUMN IF NOT EXISTS size_measured_at TIMESTAMPTZ
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS asset_storage_objects_key_uq
+        ON asset_storage_objects(storage_key)
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS asset_storage_objects_role_uq
+        ON asset_storage_objects(asset_id, role)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS asset_storage_objects_asset_idx
+        ON asset_storage_objects(asset_id, state)
+    `);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS asset_usage (
         id SERIAL PRIMARY KEY,
         asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
         project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        artifact_id INTEGER REFERENCES project_artifacts(id) ON DELETE CASCADE,
         version_id INTEGER,
         file_path TEXT,
         consumer TEXT NOT NULL,
@@ -97,18 +569,69 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS asset_usage_asset_idx ON asset_usage(asset_id)`);
+    await client.query(`
+      ALTER TABLE asset_usage
+        ADD COLUMN IF NOT EXISTS artifact_id INTEGER REFERENCES project_artifacts(id) ON DELETE CASCADE
+    `);
     await client.query(
       `CREATE INDEX IF NOT EXISTS asset_usage_project_idx ON asset_usage(project_id)`,
     );
     await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS asset_usage_identity_uq
-        ON asset_usage(
-          asset_id,
-          COALESCE(project_id, -1),
-          COALESCE(version_id, -1),
-          COALESCE(file_path, ''),
-          consumer
-        )
+      DO $$
+      DECLARE
+        current_definition TEXT;
+        normalized_definition TEXT;
+      BEGIN
+        SELECT indexdef
+          INTO current_definition
+          FROM pg_indexes
+         WHERE schemaname = ANY(current_schemas(FALSE))
+           AND indexname = 'asset_usage_identity_uq';
+        normalized_definition := regexp_replace(
+          lower(COALESCE(current_definition, '')),
+          '[[:space:]]+',
+          '',
+          'g'
+        );
+        IF current_definition IS NULL
+           OR position('coalesce(project_id,' IN normalized_definition) = 0
+           OR position('coalesce(artifact_id,' IN normalized_definition) = 0
+           OR position('coalesce(version_id,' IN normalized_definition) = 0
+           OR position('coalesce(file_path,' IN normalized_definition) = 0 THEN
+          DROP INDEX IF EXISTS asset_usage_identity_uq;
+          CREATE UNIQUE INDEX asset_usage_identity_uq
+            ON asset_usage(
+              asset_id,
+              COALESCE(project_id, -1),
+              COALESCE(artifact_id, -1),
+              COALESCE(version_id, -1),
+              COALESCE(file_path, ''),
+              consumer
+            );
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION require_attachable_asset_for_usage()
+      RETURNS TRIGGER AS $$
+      DECLARE current_state TEXT;
+      BEGIN
+        SELECT state INTO current_state
+          FROM assets
+         WHERE id = NEW.asset_id
+         FOR SHARE;
+        IF current_state IS DISTINCT FROM 'ready' THEN
+          RAISE EXCEPTION 'asset_not_ready' USING ERRCODE = '55000';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    await client.query(`DROP TRIGGER IF EXISTS asset_usage_requires_ready_asset ON asset_usage`);
+    await client.query(`
+      CREATE TRIGGER asset_usage_requires_ready_asset
+      BEFORE INSERT OR UPDATE OF asset_id ON asset_usage
+      FOR EACH ROW EXECUTE FUNCTION require_attachable_asset_for_usage()
     `);
     await client.query(`
       CREATE TABLE IF NOT EXISTS storage_addon_subscriptions (
@@ -151,6 +674,17 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     await client.query(`
       CREATE INDEX IF NOT EXISTS asset_analysis_asset_idx
         ON asset_analysis_events(asset_id)
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS asset_storage_reconciliation_runs (
+        request_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('running', 'completed', 'failed')),
+        receipt JSONB,
+        terminal JSONB,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMPTZ
+      )
     `);
     await client.query(`
       CREATE TABLE IF NOT EXISTS visual_edit_sessions (
@@ -225,6 +759,64 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       ON CONFLICT (storage_key) DO NOTHING
     `);
     await client.query(`
+      UPDATE generated_images image
+         SET asset_id = asset.id,
+             updated_at = NOW()
+        FROM assets asset
+       WHERE image.asset_id IS NULL
+         AND image.status = 'completed'
+         AND asset.owner_user_id = image.user_id
+         AND asset.storage_key = COALESCE(image.storage_key, 'legacy-generated/' || image.id::text)
+    `);
+    await client.query(`
+      INSERT INTO asset_storage_objects (
+        asset_id, storage_backend, storage_key, role, size_bytes, state, ready_at, deleted_at
+      )
+      SELECT id,
+             storage_backend,
+             storage_key,
+             'primary',
+             size_bytes,
+             CASE
+               WHEN state IN ('reserved', 'uploading') THEN state
+               WHEN state = 'ready' THEN 'ready'
+               WHEN state = 'deleting' THEN 'deleting'
+               ELSE 'deleted'
+             END,
+             ready_at,
+             deleted_at
+        FROM assets
+       WHERE storage_backend IN ('r2', 'legacy-object')
+      ON CONFLICT (storage_key) DO NOTHING
+    `);
+    // Historical Image Studio thumbnails were not individually metered.  Their
+    // deterministic keys are made durable now; a governed provider-HEAD audit
+    // fills their exact byte sizes without guessing during startup.
+    await client.query(`
+      INSERT INTO asset_storage_objects (
+        asset_id, storage_backend, storage_key, role, size_bytes, state, ready_at, deleted_at
+      )
+      SELECT asset.id,
+             'r2',
+             regexp_replace(asset.storage_key, '/full\\.webp$', '/thumb.webp'),
+             'thumbnail',
+             0,
+             CASE
+               WHEN asset.state IN ('reserved', 'uploading') THEN asset.state
+               WHEN asset.state = 'ready' THEN 'ready'
+               WHEN asset.state = 'deleting' THEN 'deleting'
+               ELSE 'deleted'
+             END,
+             asset.ready_at,
+             asset.deleted_at
+        FROM generated_images image
+        JOIN assets asset ON asset.id = image.asset_id
+       WHERE asset.storage_backend = 'r2'
+         AND asset.storage_key ~ '/full\\.webp$'
+         AND image.thumbnail_url IS NOT NULL
+      ON CONFLICT (storage_key) DO NOTHING
+    `);
+    await client.query(`
       INSERT INTO assets (
         owner_user_id, actor_user_id, project_id, scope, kind, source, filename, mime_type,
         size_bytes, storage_backend, storage_key, state, scan_state, text_preview, created_at, ready_at
@@ -250,17 +842,336 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       JOIN projects p ON p.id = u.project_id
       ON CONFLICT (storage_key) DO NOTHING
     `);
+    // The legacy upload mirror above can create assets during this very first
+    // run.  Re-run the additive physical-object insert after the mirror so no
+    // newly adopted object waits for a second boot to gain a deletion receipt.
+    await client.query(`
+      INSERT INTO asset_storage_objects (
+        asset_id, storage_backend, storage_key, role, size_bytes, state, ready_at, deleted_at
+      )
+      SELECT id,
+             storage_backend,
+             storage_key,
+             'primary',
+             size_bytes,
+             CASE
+               WHEN state IN ('reserved', 'uploading') THEN state
+               WHEN state = 'ready' THEN 'ready'
+               WHEN state = 'deleting' THEN 'deleting'
+               ELSE 'deleted'
+             END,
+             ready_at,
+             deleted_at
+        FROM assets
+       WHERE storage_backend IN ('r2', 'legacy-object')
+      ON CONFLICT (storage_key) DO NOTHING
+    `);
+    // Backfill every structured durable reference into one deletion ledger.
+    // Each statement is additive and safe to replay; the direct-store checks in
+    // deleteReadyAsset remain an independent belt-and-suspenders proof.
+    await client.query(`
+      INSERT INTO asset_usage (asset_id, project_id, version_id, consumer)
+      SELECT id, project_id, version_id, 'asset-version:' || version_id::text
+        FROM assets
+       WHERE state = 'ready' AND version_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO asset_usage (asset_id, project_id, consumer)
+      SELECT id, project_id, 'asset-task:' || task_id::text
+        FROM assets
+       WHERE state = 'ready' AND task_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      WITH refs AS (
+        SELECT activity.id AS activity_id,
+               activity.project_id,
+               asset_id
+          FROM project_activity activity
+          CROSS JOIN LATERAL (
+            SELECT jsonb_array_elements_text(
+              CASE
+                WHEN jsonb_typeof(activity.metadata -> 'assetIds') = 'array'
+                  THEN activity.metadata -> 'assetIds'
+                ELSE '[]'::jsonb
+              END
+            ) AS asset_id
+            UNION
+            SELECT jsonb_array_elements_text(
+              CASE
+                WHEN jsonb_typeof(activity.metadata -> 'originalAssetIds') = 'array'
+                  THEN activity.metadata -> 'originalAssetIds'
+                ELSE '[]'::jsonb
+              END
+            ) AS asset_id
+          ) extracted
+         WHERE extracted.asset_id ~ '^[1-9][0-9]*$'
+      )
+      INSERT INTO asset_usage (asset_id, project_id, consumer)
+      SELECT refs.asset_id::integer,
+             refs.project_id,
+             'queue-provenance:' || refs.activity_id::text
+        FROM refs
+        JOIN assets a ON a.id = refs.asset_id::integer AND a.state = 'ready'
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO asset_usage (asset_id, project_id, consumer)
+      SELECT id, project_id, 'asset-message:' || message_id::text
+        FROM assets
+       WHERE state = 'ready' AND message_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO asset_usage (asset_id, project_id, consumer)
+      SELECT gi.asset_id, gi.project_id, 'generated-image:' || gi.id::text
+        FROM generated_images gi
+        JOIN assets a ON a.id = gi.asset_id AND a.state = 'ready'
+       WHERE gi.asset_id IS NOT NULL AND gi.deleted_at IS NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      WITH extracted AS (
+        SELECT cm.id AS message_id,
+               cm.project_id,
+               CASE
+                 WHEN jsonb_typeof(item -> 'assetId') = 'number'
+                   THEN (item ->> 'assetId')::integer
+                 ELSE NULLIF(substring(item ->> 'url' FROM '^/api/assets/([0-9]+)/content$'), '')::integer
+               END AS asset_id
+          FROM chat_messages cm
+          CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(cm.attachments) = 'array' THEN cm.attachments ELSE '[]'::jsonb END
+          ) AS item
+      )
+      INSERT INTO asset_usage (asset_id, project_id, consumer)
+      SELECT extracted.asset_id,
+             extracted.project_id,
+             'chat-message:' || extracted.message_id::text
+        FROM extracted
+        JOIN assets a ON a.id = extracted.asset_id AND a.state = 'ready'
+       WHERE extracted.asset_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      WITH refs AS (
+        SELECT file.project_id,
+               file.artifact_id,
+               file.path,
+               (match)[1]::integer AS asset_id
+          FROM project_files file
+          CROSS JOIN LATERAL regexp_matches(
+            file.content,
+            '/api/assets/([1-9][0-9]*)/content',
+            'g'
+          ) AS match
+      )
+      INSERT INTO asset_usage (asset_id, project_id, artifact_id, file_path, consumer)
+      SELECT refs.asset_id,
+             refs.project_id,
+             refs.artifact_id,
+             refs.path,
+             'project-file'
+        FROM refs
+        JOIN assets asset ON asset.id=refs.asset_id AND asset.state='ready'
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      WITH extracted AS (
+        SELECT task.id AS task_id,
+               task.project_id,
+               NULLIF(substring(item ->> 'url' FROM '^/api/assets/([0-9]+)/content$'), '')::integer AS asset_id
+          FROM agent_tasks task
+          CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(task.attachments) = 'array' THEN task.attachments ELSE '[]'::jsonb END
+          ) AS item
+      )
+      INSERT INTO asset_usage (asset_id, project_id, consumer)
+      SELECT extracted.asset_id,
+             extracted.project_id,
+             'agent-task:' || extracted.task_id::text
+        FROM extracted
+        JOIN assets a ON a.id = extracted.asset_id AND a.state = 'ready'
+       WHERE extracted.asset_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      WITH extracted AS (
+        SELECT entry.id AS entry_id,
+               NULLIF(
+                 substring(entry.annotation FROM '"logoAssetId"[[:space:]]*:[[:space:]]*([0-9]+)'),
+                 ''
+               )::integer AS asset_id
+          FROM knowledge_entries entry
+         WHERE entry.type = 'style_memory'
+           AND entry.category = 'brand_profile'
+           AND entry.archived_at IS NULL
+      )
+      INSERT INTO asset_usage (asset_id, consumer)
+      SELECT extracted.asset_id, 'brand-profile:' || extracted.entry_id::text
+        FROM extracted
+        JOIN assets a ON a.id = extracted.asset_id AND a.state = 'ready'
+       WHERE extracted.asset_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      WITH derivative_refs AS (
+        SELECT child.id,
+               child.project_id,
+               CASE
+                 WHEN child.context ->> 'derivativeOfAssetId' ~ '^[1-9][0-9]*$'
+                   THEN (child.context ->> 'derivativeOfAssetId')::integer
+                 ELSE NULL
+               END AS parent_asset_id
+          FROM assets child
+         WHERE child.state = 'ready'
+      )
+      INSERT INTO asset_usage (asset_id, project_id, consumer)
+      SELECT derivative_refs.parent_asset_id,
+             derivative_refs.project_id,
+             'asset-derivative:' || derivative_refs.id::text
+        FROM derivative_refs
+        JOIN assets parent
+          ON parent.id = derivative_refs.parent_asset_id
+         AND parent.state = 'ready'
+       WHERE derivative_refs.parent_asset_id IS NOT NULL
+      ON CONFLICT DO NOTHING
+    `);
+    // Ora's durable Library is a metadata view over the same account-wide
+    // asset registry. Adopt historical rows without copying bytes: R2 objects
+    // keep their key, while old DB-backed blobs receive a typed legacy key and
+    // remain readable through Ora's private compatibility path.
+    await client.query(`ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS asset_id INTEGER`);
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'ora_assets_asset_id_fkey'
+        ) THEN
+          ALTER TABLE ora_assets
+            ADD CONSTRAINT ora_assets_asset_id_fkey
+            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE SET NULL;
+        END IF;
+      END $$
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ora_assets_asset_id_uq
+        ON ora_assets(asset_id) WHERE asset_id IS NOT NULL
+    `);
     await client.query(`
       INSERT INTO account_asset_quota (user_id, used_bytes, reserved_bytes)
       SELECT owner_user_id,
              COALESCE(SUM(size_bytes) FILTER (WHERE state = 'ready'), 0),
-             COALESCE(SUM(size_bytes) FILTER (WHERE state = 'reserved'), 0)
+             COALESCE(SUM(size_bytes) FILTER (WHERE state IN ('reserved', 'uploading')), 0)
         FROM assets
        GROUP BY owner_user_id
-      ON CONFLICT (user_id) DO UPDATE
-        SET used_bytes = EXCLUDED.used_bytes,
-            reserved_bytes = EXCLUDED.reserved_bytes,
-            updated_at = NOW()
+      ON CONFLICT (user_id) DO NOTHING
+    `);
+    await client.query(`
+      WITH adopted AS (
+        INSERT INTO assets (
+          owner_user_id, actor_user_id, scope, kind, source, filename, mime_type,
+          size_bytes, storage_backend, storage_key, state, scan_state,
+          context, created_at, ready_at, deleted_at
+        )
+        SELECT
+          ora.user_id,
+          ora.user_id,
+          'account',
+          CASE WHEN ora.kind = 'image' THEN 'image' ELSE 'file' END,
+          'ora-library-legacy',
+          ora.file_name,
+          ora.mime_type,
+          ora.size_bytes,
+          CASE WHEN ora.storage_key IS NULL THEN 'ora-db' ELSE 'r2' END,
+          COALESCE(ora.storage_key, 'ora-db/' || ora.id::text),
+          CASE WHEN ora.deleted_at IS NULL THEN 'ready' ELSE 'deleted' END,
+          'not-required',
+          jsonb_build_object('oraAssetId', ora.id, 'oraProjectId', ora.ora_project_id),
+          ora.created_at,
+          CASE WHEN ora.deleted_at IS NULL THEN ora.created_at ELSE NULL END,
+          ora.deleted_at
+        FROM ora_assets ora
+        WHERE ora.asset_id IS NULL
+        ON CONFLICT (storage_key) DO NOTHING
+        RETURNING owner_user_id, size_bytes, state
+      ), adoption_delta AS (
+        SELECT owner_user_id,
+               COALESCE(SUM(size_bytes) FILTER (WHERE state = 'ready'), 0) AS used_bytes,
+               COALESCE(SUM(size_bytes) FILTER (WHERE state IN ('reserved', 'uploading')), 0)
+                 AS reserved_bytes
+          FROM adopted
+         GROUP BY owner_user_id
+      )
+      UPDATE account_asset_quota quota
+         SET used_bytes = quota.used_bytes + adoption_delta.used_bytes,
+             reserved_bytes = quota.reserved_bytes + adoption_delta.reserved_bytes,
+             updated_at = NOW()
+        FROM adoption_delta
+       WHERE quota.user_id = adoption_delta.owner_user_id
+    `);
+    await client.query(`
+      UPDATE ora_assets ora
+         SET asset_id = asset.id
+        FROM assets asset
+       WHERE ora.asset_id IS NULL
+         AND asset.owner_user_id = ora.user_id
+         AND asset.storage_key = COALESCE(ora.storage_key, 'ora-db/' || ora.id::text)
+    `);
+    await client.query(`
+      INSERT INTO asset_storage_objects (
+        asset_id, storage_backend, storage_key, role, size_bytes, state, ready_at, deleted_at
+      )
+      SELECT asset.id,
+             asset.storage_backend,
+             asset.storage_key,
+             'primary',
+             asset.size_bytes,
+             CASE
+               WHEN asset.state IN ('reserved', 'uploading') THEN asset.state
+               WHEN asset.state = 'ready' THEN 'ready'
+               WHEN asset.state = 'deleting' THEN 'deleting'
+               ELSE 'deleted'
+             END,
+             asset.ready_at,
+             asset.deleted_at
+        FROM ora_assets ora
+        JOIN assets asset ON asset.id = ora.asset_id
+      ON CONFLICT (storage_key) DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO asset_usage (asset_id, consumer)
+      SELECT ora.asset_id, 'ora-library:' || ora.id::text
+        FROM ora_assets ora
+        JOIN assets asset ON asset.id = ora.asset_id AND asset.state = 'ready'
+       WHERE ora.deleted_at IS NULL
+      ON CONFLICT DO NOTHING
+    `);
+    await client.query(`
+      INSERT INTO account_asset_quota (user_id, used_bytes, reserved_bytes)
+      SELECT owner_user_id,
+             COALESCE(SUM(size_bytes) FILTER (WHERE state = 'ready'), 0),
+             COALESCE(SUM(size_bytes) FILTER (WHERE state IN ('reserved', 'uploading')), 0)
+       FROM assets
+       GROUP BY owner_user_id
+      ON CONFLICT (user_id) DO NOTHING
+    `);
+    // Positive byte totals and legacy sources whose upload table already held
+    // an exact size are measured facts. Adopted generated-image objects remain
+    // NULL until the governed provider metadata reconciliation observes them;
+    // this also distinguishes an observed, legitimate zero-byte object from an
+    // unmeasured one.
+    await client.query(`
+      UPDATE asset_storage_objects object
+         SET size_measured_at = COALESCE(object.ready_at, object.created_at, NOW())
+        FROM assets asset
+       WHERE asset.id=object.asset_id
+         AND object.size_measured_at IS NULL
+         AND (
+           object.size_bytes > 0
+           OR asset.source IN ('legacy-project-upload', 'ora-library-legacy')
+         )
     `);
     await client.query("COMMIT");
   } catch (error) {
@@ -6985,6 +7896,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-unified-asset-registry",
     async run(client) {
       await applyUnifiedAssetRegistryMigration(client);
+    },
+  },
+  {
+    name: "migrate-project-retirement-operations",
+    async run(client) {
+      await applyProjectRetirementOperationsMigration(client);
     },
   },
 ];

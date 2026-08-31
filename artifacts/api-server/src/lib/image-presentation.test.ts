@@ -10,7 +10,7 @@ describe("private image presentation", () => {
       thumbnailUrl: "https://private-bucket.invalid/thumb.webp",
     });
     expect(row.fileUrl).toBe("/api/images/42/file");
-    expect(row.thumbnailUrl).toBe("/api/images/42/file");
+    expect(row.thumbnailUrl).toBe("/api/images/42/file?role=thumbnail");
     expect(JSON.stringify(row)).not.toContain("private-bucket.invalid");
   });
 

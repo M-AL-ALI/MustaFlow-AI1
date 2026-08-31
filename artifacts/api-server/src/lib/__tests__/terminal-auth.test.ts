@@ -14,10 +14,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { IncomingMessage } from "node:http";
 
 // ── Hoisted mocks ────────────────────────────────────────────────────────────
-const { mockGetAuth, mockDbWhere, mockExecInContainer } = vi.hoisted(() => ({
+const {
+  mockGetAuth,
+  mockDbWhere,
+  mockExecInContainer,
+  mockAcquireProjectLifecycleSession,
+  mockRegisterProjectWorkController,
+  mockReleaseProjectLifecycleSession,
+} = vi.hoisted(() => ({
   mockGetAuth: vi.fn(),
   mockDbWhere: vi.fn(),
   mockExecInContainer: vi.fn(),
+  mockAcquireProjectLifecycleSession: vi.fn(),
+  mockRegisterProjectWorkController: vi.fn(),
+  mockReleaseProjectLifecycleSession: vi.fn(),
 }));
 
 vi.mock("@clerk/express", () => ({
@@ -41,8 +51,13 @@ vi.mock("drizzle-orm", () => ({
   isNull: vi.fn(),
 }));
 
-vi.mock("../container", () => ({
+vi.mock("../tenant-runtime", () => ({
   execInContainer: mockExecInContainer,
+}));
+
+vi.mock("../project-lifecycle", () => ({
+  acquireProjectLifecycleSession: mockAcquireProjectLifecycleSession,
+  registerProjectWorkController: mockRegisterProjectWorkController,
 }));
 
 vi.mock("../logger", () => ({
@@ -99,6 +114,12 @@ describe("terminal WebSocket authentication guard", () => {
     vi.resetAllMocks();
     mockDbWhere.mockResolvedValue([RUNNING_PROJECT]);
     mockExecInContainer.mockResolvedValue({ ok: true, output: "" });
+    mockAcquireProjectLifecycleSession.mockResolvedValue({
+      projectId: 42,
+      assertActive: vi.fn().mockResolvedValue(true),
+      release: mockReleaseProjectLifecycleSession,
+    });
+    mockRegisterProjectWorkController.mockReturnValue(vi.fn());
   });
 
   it("rejects an unauthenticated connection with 4001 before any container access", async () => {

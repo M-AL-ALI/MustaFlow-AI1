@@ -44,6 +44,13 @@ import { publishDomainEvent } from "../lib/event-bus";
 import { logger } from "../lib/logger";
 import { checkProjectAccess } from "../lib/auth";
 import { encryptionService } from "../lib/encryption";
+import { withActiveProjectLifecycle } from "../lib/project-lifecycle";
+import {
+  purgeCacheForHostnames,
+  retireCloudflareSecurityResources,
+  retireCustomHostname,
+  retireHostnameKV,
+} from "../lib/cloudflare";
 
 const router: IRouter = Router();
 
@@ -609,7 +616,7 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
       namecheapOrderId: namecheapOrderId ?? null,
       stripePaymentIntentId: paymentIntentId ?? null,
       stripeCustomerId: resolvedStripeCustomerId,
-      projectId: resolvedProjectId ?? null,
+      projectId: null,
       pricePaidUsd,
       renewalPriceUsd,
       whoisFirstName: defaultContact.firstName,
@@ -632,43 +639,57 @@ router.post("/domains/purchase/confirm", async (req, res): Promise<void> => {
   // Auto-attach to project if provided (either from request body or recovered from session metadata)
   if (resolvedProjectId) {
     try {
-      // Reconfirm that the project still exists before attaching the domain.
-      const [project] = await db
-        .select({ id: projectsTable.id })
-        .from(projectsTable)
-        .where(and(eq(projectsTable.id, resolvedProjectId), isNull(projectsTable.deletedAt)));
+      await withActiveProjectLifecycle(resolvedProjectId, async (session) => {
+        // Reconfirm ownership while the project lifecycle fence is held.
+        const [project] = await db
+          .select({ id: projectsTable.id })
+          .from(projectsTable)
+          .where(and(eq(projectsTable.id, resolvedProjectId), isNull(projectsTable.deletedAt)));
 
-      if (project) {
-        const token = `mustaflow-verify=${randomHex()}`;
-        const labels = hostname.split(".");
-        const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
-        const inserted = await db
-          .insert(projectDomainsTable)
-          .values({
-            projectId: resolvedProjectId,
-            hostname,
-            isPrimary: false,
-            recordType,
-            verificationToken: token,
-            verificationStatus: "verified",
-            sslStatus: "pending",
-            environment: "production",
-          })
-          .onConflictDoNothing()
-          .returning({ id: projectDomainsTable.id });
+        if (project) {
+          const token = `mustaflow-verify=${randomHex()}`;
+          const labels = hostname.split(".");
+          const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
+          const inserted = await db
+            .insert(projectDomainsTable)
+            .values({
+              projectId: resolvedProjectId,
+              hostname,
+              isPrimary: false,
+              recordType,
+              verificationToken: token,
+              verificationStatus: "verified",
+              sslStatus: "pending",
+              environment: "production",
+            })
+            .onConflictDoNothing()
+            .returning({ id: projectDomainsTable.id });
 
-        publishDomainEvent({ type: "added", hostname, projectId: resolvedProjectId });
+          publishDomainEvent({ type: "added", hostname, projectId: resolvedProjectId });
 
-        // Kick off SSL issuance
-        const domainRowId = inserted[0]?.id;
-        if (domainRowId) {
-          setImmediate(() => {
-            void activateSslForDomain(domainRowId, hostname, null, resolvedProjectId!, false).catch(
-              () => {},
+          // Kick off SSL issuance
+          const domainRowId = inserted[0]?.id;
+          if (domainRowId) {
+            const ssl = await activateSslForDomain(
+              domainRowId,
+              hostname,
+              null,
+              resolvedProjectId!,
+              false,
             );
-          });
+            if (ssl.sslStatus === "failed") {
+              await db.delete(projectDomainsTable).where(eq(projectDomainsTable.id, domainRowId));
+            } else {
+              await db
+                .update(purchasedDomainsTable)
+                .set({ projectId: resolvedProjectId, updatedAt: sql`now()` })
+                .where(eq(purchasedDomainsTable.id, newDomain.id));
+              newDomain.projectId = resolvedProjectId;
+            }
+            await session.assertActive();
+          }
         }
-      }
+      });
     } catch (err) {
       logger.warn({ err, hostname, projectId }, "Auto-attach to project failed (non-fatal)");
     }
@@ -1446,74 +1467,143 @@ router.patch("/domains/purchased/:id/project", async (req, res): Promise<void> =
     return;
   }
 
-  if (projectId !== undefined && projectId !== null) {
-    // Verify ownership
-    const [project] = await db
-      .select({ id: projectsTable.id })
-      .from(projectsTable)
-      .where(
-        and(
-          eq(projectsTable.id, projectId),
-          eq(projectsTable.ownerId, userId),
-          isNull(projectsTable.deletedAt),
-        ),
-      );
-    if (!project) {
-      res.status(404).json({ error: "Project not found or not owned by you" });
-      return;
-    }
-
-    // Add to project_domains if not already there
-    const token = `mustaflow-verify=${randomHex()}`;
-    const labels = domain.hostname.split(".");
-    const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
-    const insertedDomain = await db
-      .insert(projectDomainsTable)
-      .values({
-        projectId,
-        hostname: domain.hostname,
-        isPrimary: false,
-        recordType,
-        verificationToken: token,
-        verificationStatus: "verified",
-        sslStatus: "pending",
-        environment: "production",
-      })
-      .onConflictDoNothing()
-      .returning({ id: projectDomainsTable.id });
-
-    publishDomainEvent({ type: "added", hostname: domain.hostname, projectId });
-    const attachedDomainRowId = insertedDomain[0]?.id;
-    if (attachedDomainRowId) {
-      setImmediate(() => {
-        void activateSslForDomain(
-          attachedDomainRowId,
-          domain.hostname,
-          null,
-          projectId,
-          false,
-        ).catch(() => {});
-      });
-    }
-  } else if (projectId === null && domain.projectId) {
-    // Detach: remove from project_domains
-    await db
-      .delete(projectDomainsTable)
-      .where(
-        and(
-          eq(projectDomainsTable.hostname, domain.hostname),
-          eq(projectDomainsTable.projectId, domain.projectId),
-        ),
-      );
+  const lifecycleProjectId = projectId ?? domain.projectId;
+  if (lifecycleProjectId == null) {
+    res.status(400).json({ error: "A project is required to change this domain assignment." });
+    return;
   }
 
-  const [updated] = await db
-    .update(purchasedDomainsTable)
-    .set({ projectId: projectId ?? null, updatedAt: sql`now()` })
-    .where(eq(purchasedDomainsTable.id, id))
-    .returning();
+  const lifecycleResult = await withActiveProjectLifecycle(lifecycleProjectId, async (session) => {
+    if (!(await session.assertActive())) return null;
 
-  res.json({ domain: updated ? redactPurchasedDomainCredential(updated) : updated });
+    if (projectId !== undefined && projectId !== null) {
+      // Verify ownership
+      const [project] = await db
+        .select({ id: projectsTable.id })
+        .from(projectsTable)
+        .where(
+          and(
+            eq(projectsTable.id, projectId),
+            eq(projectsTable.ownerId, userId),
+            isNull(projectsTable.deletedAt),
+          ),
+        );
+      if (!project) {
+        res.status(404).json({ error: "Project not found or not owned by you" });
+        return;
+      }
+
+      // Add to project_domains if not already there
+      const token = `mustaflow-verify=${randomHex()}`;
+      const labels = domain.hostname.split(".");
+      const recordType: "a" | "cname" = labels.length === 2 ? "a" : "cname";
+      const insertedDomain = await db
+        .insert(projectDomainsTable)
+        .values({
+          projectId,
+          hostname: domain.hostname,
+          isPrimary: false,
+          recordType,
+          verificationToken: token,
+          verificationStatus: "verified",
+          sslStatus: "pending",
+          environment: "production",
+        })
+        .onConflictDoNothing()
+        .returning({ id: projectDomainsTable.id });
+
+      publishDomainEvent({ type: "added", hostname: domain.hostname, projectId });
+      const attachedDomainRowId = insertedDomain[0]?.id;
+      if (attachedDomainRowId) {
+        await activateSslForDomain(attachedDomainRowId, domain.hostname, null, projectId, false);
+      }
+    } else if (projectId === null && domain.projectId) {
+      const [attachedDomain] = await db
+        .select({
+          id: projectDomainsTable.id,
+          cfHostnameId: projectDomainsTable.cfHostnameId,
+          securityConfig: projectDomainsTable.securityConfig,
+        })
+        .from(projectDomainsTable)
+        .where(
+          and(
+            eq(projectDomainsTable.hostname, domain.hostname),
+            eq(projectDomainsTable.projectId, domain.projectId),
+          ),
+        )
+        .limit(1);
+
+      const security = await retireCloudflareSecurityResources(
+        attachedDomain?.securityConfig?.cloudflareResources ?? [],
+      );
+      if (security.state !== "absent") {
+        res.status(503).json({
+          error: "The domain security policy could not be detached safely.",
+          code: "domain_security_cleanup_unconfirmed",
+        });
+        return null;
+      }
+      if (attachedDomain?.cfHostnameId) {
+        const certificate = await retireCustomHostname(attachedDomain.cfHostnameId);
+        if (certificate.state !== "absent") {
+          res.status(503).json({
+            error: "The domain certificate could not be detached safely.",
+            code: "domain_custom_hostname_cleanup_unconfirmed",
+          });
+          return null;
+        }
+      }
+      const route = await retireHostnameKV(domain.hostname, lifecycleProjectId);
+      if (route.state !== "absent" || !(await purgeCacheForHostnames([domain.hostname]))) {
+        res.status(503).json({
+          error: "The domain route could not be detached safely.",
+          code: "domain_route_cleanup_unconfirmed",
+        });
+        return null;
+      }
+      if (!(await session.assertActive())) return null;
+      return db.transaction(async (tx) => {
+        if (attachedDomain) {
+          await tx
+            .delete(projectDomainsTable)
+            .where(
+              and(
+                eq(projectDomainsTable.id, attachedDomain.id),
+                eq(projectDomainsTable.projectId, domain.projectId!),
+              ),
+            );
+        }
+        const [detached] = await tx
+          .update(purchasedDomainsTable)
+          .set({ projectId: null, updatedAt: sql`now()` })
+          .where(
+            and(
+              eq(purchasedDomainsTable.id, id),
+              eq(purchasedDomainsTable.projectId, domain.projectId!),
+            ),
+          )
+          .returning();
+        return detached ?? null;
+      });
+    }
+
+    if (!(await session.assertActive())) return null;
+    const [assignment] = await db
+      .update(purchasedDomainsTable)
+      .set({ projectId: projectId ?? null, updatedAt: sql`now()` })
+      .where(eq(purchasedDomainsTable.id, id))
+      .returning();
+    return assignment ?? null;
+  });
+
+  if (res.headersSent) return;
+  const updated = lifecycleResult.state === "active" ? lifecycleResult.value : null;
+  if (!updated) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  res.json({ domain: redactPurchasedDomainCredential(updated) });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

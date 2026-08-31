@@ -15,8 +15,15 @@ import {
   type StripeCapabilityPolicy,
   type ProductionDatabaseAllocationRecord,
 } from "@workspace/tenant-runtime-contracts";
+import { getSandbox } from "@cloudflare/sandbox";
 import type { WorkerBindings } from "../src/bindings";
 import { handleDurableOperationQueue, handleControlRequest } from "../src/worker";
+import {
+  ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP,
+  ROUTE_POLICY_RECONCILIATION_DEADLINE_MS,
+  ROUTE_POLICY_RECONCILIATION_LEASE_MS,
+  ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+} from "../src/model";
 import type {
   CapabilityVault,
   CapabilityVaultInvocationResult,
@@ -46,6 +53,9 @@ import type {
   StoredProductionDatabaseJob,
   StoredRuntimeStartJob,
   RemovedRuntimeLayeredArtifact,
+  RoutePolicyMutation,
+  RoutePolicyReconciliationClaim,
+  StoredRoutePolicyReconciliation,
 } from "../src/model";
 import type {
   BackendAvailabilityResult,
@@ -189,6 +199,7 @@ export class MemoryCoordinator implements ControlCoordinator {
   readonly runtimeReconciliations = new Map<string, RuntimeReconciliationAuditRecord>();
   readonly runtimes = new Map<string, StoredRuntime>();
   readonly routes = new Map<string, RouteRecord>();
+  readonly routePolicyReconciliations = new Map<string, StoredRoutePolicyReconciliation>();
   readonly containerBindings = new Map<string, string>();
   readonly artifacts = new Map<string, StoredRuntimeArtifact>();
   readonly layeredArtifacts = new Map<string, StoredRuntimeLayeredArtifact>();
@@ -451,6 +462,7 @@ export class MemoryCoordinator implements ControlCoordinator {
     checkpoint: DurableOperationCheckpoint;
     payloadContentSha256s?: string[];
     runtimeWasRunning?: boolean;
+    rollbackReleaseSha256?: string | null;
     nowMs: number;
   }): Promise<StoredDurableOperationJob> {
     if (this.artifactCommitJobs.has(input.jobKey)) {
@@ -471,6 +483,9 @@ export class MemoryCoordinator implements ControlCoordinator {
     job.checkpoint = input.checkpoint as never;
     if (job.kind === "runtime-manifest-restart" && input.runtimeWasRunning !== undefined) {
       job.runtimeWasRunning = input.runtimeWasRunning;
+    }
+    if (job.kind === "runtime-manifest-restart" && input.rollbackReleaseSha256 !== undefined) {
+      job.rollbackReleaseSha256 = input.rollbackReleaseSha256;
     }
     this.appendDurableOperationEvent(job, "checkpoint-advanced", input.nowMs);
     return structuredClone(job);
@@ -1063,23 +1078,128 @@ export class MemoryCoordinator implements ControlCoordinator {
     return route === undefined ? null : structuredClone(route);
   }
 
+  async listRoutesByProject(input: {
+    projectId: number;
+    cursor?: string;
+    scanLimit: number;
+  }): Promise<{ routes: RouteRecord[]; nextCursor: string | null; complete: boolean }> {
+    const ordered = [...this.routes.values()].sort((left, right) =>
+      left.hostname.localeCompare(right.hostname),
+    );
+    const start =
+      input.cursor === undefined ? 0 : ordered.findIndex((route) => route.hostname > input.cursor!);
+    const normalizedStart = start < 0 ? ordered.length : start;
+    const scanned = ordered.slice(normalizedStart, normalizedStart + input.scanLimit + 1);
+    const complete = scanned.length <= input.scanLimit;
+    const bounded = scanned.slice(0, input.scanLimit);
+    return {
+      routes: bounded
+        .filter((route) => route.projectId === input.projectId)
+        .map((route) => structuredClone(route)),
+      nextCursor: complete ? null : (bounded.at(-1)?.hostname ?? null),
+      complete,
+    };
+  }
+
+  async hasRouteForSandboxIdentity(identity: string): Promise<boolean> {
+    return [...this.routes.values()].some((route) => route.sandboxIdentity === identity);
+  }
+
+  private putRoutePolicy(
+    hostname: string,
+    activeIdentity: string | null,
+    policy: RoutePolicyMutation,
+  ): void {
+    const identities = [
+      ...new Set([...policy.identities, ...(activeIdentity ? [activeIdentity] : [])]),
+    ].sort();
+    const fingerprint = `${activeIdentity ?? "none"}:${identities.join(",")}`;
+    const previous = this.routePolicyReconciliations.get(hostname);
+    if (previous?.fingerprint === fingerprint) return;
+    this.routePolicyReconciliations.set(hostname, {
+      schemaVersion: 1,
+      hostname,
+      generation: (previous?.generation ?? 0) + 1,
+      fingerprint,
+      identities,
+      state: "pending",
+      completedIdentities: [],
+      attempt: 0,
+      ownerId: null,
+      leaseUntilMs: null,
+      deadlineMs: policy.nowMs + ROUTE_POLICY_RECONCILIATION_DEADLINE_MS,
+      nextAttemptAtMs: policy.nowMs,
+      terminal: null,
+      createdAtMs: policy.nowMs,
+      updatedAtMs: policy.nowMs,
+    });
+  }
+
+  private reopenRoutePolicy(intent: StoredRoutePolicyReconciliation, nowMs: number): void {
+    intent.generation += 1;
+    intent.state = "pending";
+    intent.completedIdentities = [];
+    intent.ownerId = null;
+    intent.leaseUntilMs = null;
+    intent.nextAttemptAtMs = nowMs;
+    intent.terminal = null;
+    intent.updatedAtMs = nowMs;
+  }
+
+  private terminalizeRoutePolicy(
+    intent: StoredRoutePolicyReconciliation,
+    cause: "attempt_cap" | "deadline" | "provider_write_failed",
+    nowMs: number,
+  ): void {
+    intent.state = "failed";
+    intent.ownerId = null;
+    intent.leaseUntilMs = null;
+    intent.nextAttemptAtMs = intent.deadlineMs;
+    intent.terminal = {
+      schemaVersion: 1,
+      code: "route_policy_reconciliation_exhausted",
+      cause,
+      attempts: intent.attempt,
+      maxAttempts: ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP,
+      remainingWrites: Math.max(0, intent.identities.length - intent.completedIdentities.length),
+      terminalAt: new Date(nowMs).toISOString(),
+    };
+    intent.updatedAtMs = nowMs;
+  }
+
   async activateRoute(
     route: RouteRecord,
     expectedPreviousManifestRevision: string | null,
-  ): Promise<"activated" | "conflict"> {
+    policy?: RoutePolicyMutation,
+  ): Promise<"activated" | "replay" | "conflict"> {
     const current = this.routes.get(route.hostname);
-    if ((current?.manifestRevision ?? null) !== expectedPreviousManifestRevision) return "conflict";
+    const replay =
+      current !== undefined &&
+      current.projectId === route.projectId &&
+      current.role === route.role &&
+      current.activeSlot === route.activeSlot &&
+      current.manifestRevision === route.manifestRevision &&
+      current.servicePort === route.servicePort &&
+      current.sandboxIdentity === route.sandboxIdentity;
+    if (!replay && (current?.manifestRevision ?? null) !== expectedPreviousManifestRevision) {
+      return "conflict";
+    }
     this.routes.set(route.hostname, structuredClone(route));
-    return "activated";
+    if (policy !== undefined) this.putRoutePolicy(route.hostname, route.sandboxIdentity, policy);
+    return replay ? "replay" : "activated";
   }
 
   async deactivateRoute(
     hostname: string,
     expectedManifestRevision: string,
     expectedSandboxIdentity: string,
+    policy?: RoutePolicyMutation,
   ): Promise<"deactivated" | "not_found" | "conflict"> {
     const current = this.routes.get(hostname);
-    if (current === undefined) return "not_found";
+    if (current === undefined) {
+      if (policy !== undefined) this.putRoutePolicy(hostname, null, policy);
+      return "not_found";
+    }
     if (
       current.manifestRevision !== expectedManifestRevision ||
       current.sandboxIdentity !== expectedSandboxIdentity
@@ -1087,7 +1207,163 @@ export class MemoryCoordinator implements ControlCoordinator {
       return "conflict";
     }
     this.routes.delete(hostname);
+    if (policy !== undefined) this.putRoutePolicy(hostname, null, policy);
     return "deactivated";
+  }
+
+  async claimRoutePolicyReconciliation(
+    hostname: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<RoutePolicyReconciliationClaim> {
+    const intent = this.routePolicyReconciliations.get(hostname);
+    if (intent === undefined) return { state: "not_found" };
+    if (intent.state === "completed") return { state: "completed" };
+    if (intent.state === "failed") return { state: "terminal" };
+    if (intent.deadlineMs <= nowMs) {
+      this.terminalizeRoutePolicy(intent, "deadline", nowMs);
+      return { state: "terminal" };
+    }
+    if (intent.attempt >= ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP) {
+      this.terminalizeRoutePolicy(intent, "attempt_cap", nowMs);
+      return { state: "terminal" };
+    }
+    if (intent.nextAttemptAtMs > nowMs) return { state: "not_due" };
+    if (intent.leaseUntilMs !== null && intent.leaseUntilMs > nowMs) return { state: "busy" };
+
+    intent.attempt += 1;
+    intent.ownerId = ownerId;
+    intent.leaseUntilMs = Math.min(intent.deadlineMs, nowMs + ROUTE_POLICY_RECONCILIATION_LEASE_MS);
+    intent.updatedAtMs = nowMs;
+    const activeIdentity = this.routes.get(hostname)?.sandboxIdentity ?? null;
+    const completed = new Set(intent.completedIdentities);
+    const inactiveWrites = intent.identities
+      .filter((identity) => identity !== activeIdentity && !completed.has(identity))
+      .map((identity) => ({ identity, keepAlive: false }));
+    return {
+      state: "claimed",
+      hostname,
+      generation: intent.generation,
+      attempt: intent.attempt,
+      ownerId,
+      writes:
+        activeIdentity === null || completed.has(activeIdentity)
+          ? inactiveWrites
+          : [...inactiveWrites, { identity: activeIdentity, keepAlive: true }],
+    };
+  }
+
+  async recordRoutePolicyWrite(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    identity: string;
+    nowMs: number;
+  }): Promise<"recorded" | "superseded"> {
+    const intent = this.routePolicyReconciliations.get(input.hostname);
+    if (
+      intent?.state === "completed" &&
+      intent.generation === input.generation &&
+      intent.completedIdentities.includes(input.identity)
+    ) {
+      return "recorded";
+    }
+    if (
+      intent === undefined ||
+      intent.state === "failed" ||
+      intent.generation !== input.generation ||
+      intent.attempt !== input.attempt ||
+      intent.ownerId !== input.ownerId ||
+      !intent.identities.includes(input.identity)
+    ) {
+      if (intent !== undefined && intent.state !== "failed")
+        this.reopenRoutePolicy(intent, input.nowMs);
+      return "superseded";
+    }
+    if (!intent.completedIdentities.includes(input.identity)) {
+      intent.completedIdentities.push(input.identity);
+      intent.completedIdentities.sort();
+    }
+    intent.updatedAtMs = input.nowMs;
+    return "recorded";
+  }
+
+  async failRoutePolicyReconciliation(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    nowMs: number;
+  }): Promise<"pending" | "terminal" | "superseded"> {
+    const intent = this.routePolicyReconciliations.get(input.hostname);
+    if (
+      intent === undefined ||
+      intent.state === "failed" ||
+      intent.generation !== input.generation ||
+      intent.attempt !== input.attempt ||
+      intent.ownerId !== input.ownerId
+    ) {
+      if (intent !== undefined && intent.state !== "failed")
+        this.reopenRoutePolicy(intent, input.nowMs);
+      return "superseded";
+    }
+    intent.ownerId = null;
+    intent.leaseUntilMs = null;
+    if (
+      intent.attempt >= ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP ||
+      intent.deadlineMs <= input.nowMs
+    ) {
+      this.terminalizeRoutePolicy(intent, "provider_write_failed", input.nowMs);
+      return "terminal";
+    }
+    intent.nextAttemptAtMs = Math.min(
+      intent.deadlineMs,
+      input.nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+    );
+    intent.updatedAtMs = input.nowMs;
+    return "pending";
+  }
+
+  async completeRoutePolicyReconciliation(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    nowMs: number;
+  }): Promise<"completed" | "superseded"> {
+    const intent = this.routePolicyReconciliations.get(input.hostname);
+    if (intent?.state === "completed" && intent.generation === input.generation) {
+      return "completed";
+    }
+    if (
+      intent === undefined ||
+      intent.state === "failed" ||
+      intent.generation !== input.generation ||
+      intent.attempt !== input.attempt ||
+      intent.ownerId !== input.ownerId ||
+      intent.completedIdentities.length !== intent.identities.length
+    ) {
+      if (intent !== undefined && intent.state !== "failed")
+        this.reopenRoutePolicy(intent, input.nowMs);
+      return "superseded";
+    }
+    intent.state = "completed";
+    intent.ownerId = null;
+    intent.leaseUntilMs = null;
+    intent.terminal = null;
+    intent.updatedAtMs = input.nowMs;
+    return "completed";
+  }
+
+  async getRoutePolicyReconciliation(
+    hostname: string,
+  ): Promise<StoredRoutePolicyReconciliation | null> {
+    return structuredClone(this.routePolicyReconciliations.get(hostname) ?? null);
+  }
+
+  async listRoutePolicyReconciliations(): Promise<StoredRoutePolicyReconciliation[]> {
+    return [...this.routePolicyReconciliations.values()].map((intent) => structuredClone(intent));
   }
 
   async appendSystemLog(identity: string, message: string): Promise<void> {
@@ -1145,6 +1421,7 @@ export class MockBackend implements RuntimeBackend {
   destroys = 0;
   execs = 0;
   materializations = 0;
+  readonly materializedRuntimeArtifactSha256s: Array<string | null> = [];
   processLogs = { stdout: "server ready\n", stderr: "" };
   availabilityResult: BackendAvailabilityResult = {
     ready: true,
@@ -1153,6 +1430,9 @@ export class MockBackend implements RuntimeBackend {
     status: 200,
   };
   readonly availabilityChecks: string[] = [];
+  readonly keepAliveChanges: Array<{ identity: string; keepAlive: boolean }> = [];
+  readonly keepAliveByIdentity = new Map<string, boolean>();
+  beforeKeepAliveChange?: (identity: string, keepAlive: boolean) => Promise<void>;
   reconciliationResult: BackendReconciliationResult = {
     ready: true,
     stage: "health",
@@ -1196,6 +1476,12 @@ export class MockBackend implements RuntimeBackend {
     this.destroys += 1;
   }
 
+  async setKeepAlive(identity: string, keepAlive: boolean): Promise<void> {
+    this.keepAliveChanges.push({ identity, keepAlive });
+    await this.beforeKeepAliveChange?.(identity, keepAlive);
+    this.keepAliveByIdentity.set(identity, keepAlive);
+  }
+
   async status(_runtime: StoredRuntime): Promise<BackendStatusResult> {
     return { running: true, lastError: null, cause: "running" };
   }
@@ -1232,19 +1518,21 @@ export class MockBackend implements RuntimeBackend {
   }
 
   async materialize(
-    _runtime: StoredRuntime,
+    runtime: StoredRuntime,
     artifact: StoredRuntimeArtifact,
   ): Promise<{ filesWritten: number }> {
     this.materializations += 1;
+    this.materializedRuntimeArtifactSha256s.push(runtime.artifactSha256);
     return { filesWritten: artifact.envelope.content.files.length };
   }
 
   async materializeLayered(
-    _runtime: StoredRuntime,
+    runtime: StoredRuntime,
     artifact: StoredRuntimeLayeredArtifact,
     _layers: StoredRuntimeLayer[],
   ): Promise<{ filesWritten: number; layersMaterialized: number }> {
     this.materializations += 1;
+    this.materializedRuntimeArtifactSha256s.push(runtime.artifactSha256);
     return {
       filesWritten:
         artifact.envelope.content.appArtifact.content.files.length +
@@ -1698,10 +1986,13 @@ export function fakeEnv(): WorkerBindings {
     ARTIFACT_COMMIT_QUEUE: artifactCommitQueue as unknown as Queue<ArtifactCommitQueueMessage>,
     NABUFLOW_SANDBOX: {
       idFromName(identity: string) {
-        return { toString: () => `container:${identity}` };
+        return { identity, toString: () => `container:${identity}` };
+      },
+      get(id: { identity: string }): unknown {
+        return getSandbox(this as never, id.identity, {});
       },
     },
-  } as WorkerBindings;
+  } as unknown as WorkerBindings;
 }
 
 export async function signedRequest(input: {

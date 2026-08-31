@@ -760,6 +760,7 @@ describe("Task #753 — Stop button: HTTP integration (real endpoints + real SSE
     let planStarted = false;
     const planPromise = runCancellablePlanTask({
       taskId: TASK_ID,
+      projectId: PROJECT_ID,
       run: (signal) => {
         planStarted = true;
         return new Promise<never>((_, reject) => {

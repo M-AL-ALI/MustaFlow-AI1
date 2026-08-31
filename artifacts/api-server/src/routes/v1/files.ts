@@ -13,6 +13,7 @@ import { Router, type IRouter } from "express";
 import { and, asc, eq } from "drizzle-orm";
 import { db, projectFilesTable, projectArtifactsTable } from "@workspace/db";
 import { checkV1ProjectAccess, requirePatScope } from "./access";
+import { reconcileProjectFileAssetUsage } from "../../lib/project-file-asset-usage";
 
 const router: IRouter = Router();
 
@@ -179,20 +180,52 @@ router.put(
 
     const artifactId = primaryArtifact?.id ?? null;
 
-    // Upsert: update if exists, insert if not.
-    const [existing] = await db
-      .select({ id: projectFilesTable.id })
-      .from(projectFilesTable)
-      .where(
-        and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.path, normalisedPath)),
-      );
+    // Keep the file upsert and its asset-reference ledger in one transaction.
+    const result = await db.transaction(async (tx) => {
+      const [existing] = await tx
+        .select({ id: projectFilesTable.id })
+        .from(projectFilesTable)
+        .where(
+          and(
+            eq(projectFilesTable.projectId, projectId),
+            eq(projectFilesTable.path, normalisedPath),
+          ),
+        );
 
-    if (existing) {
-      await db
-        .update(projectFilesTable)
-        .set({ content: contentStr, mimeType: resolvedMime, updatedAt: new Date() })
-        .where(eq(projectFilesTable.id, existing.id));
+      if (existing) {
+        await tx
+          .update(projectFilesTable)
+          .set({ content: contentStr, mimeType: resolvedMime, updatedAt: new Date() })
+          .where(eq(projectFilesTable.id, existing.id));
+        await reconcileProjectFileAssetUsage(tx, {
+          projectId,
+          artifactId,
+          filePath: normalisedPath,
+          nextContent: contentStr,
+        });
+        return { updated: true, id: existing.id };
+      }
 
+      const [created] = await tx
+        .insert(projectFilesTable)
+        .values({
+          projectId,
+          artifactId,
+          path: normalisedPath,
+          content: contentStr,
+          mimeType: resolvedMime,
+        })
+        .returning({ id: projectFilesTable.id });
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId,
+        artifactId,
+        filePath: normalisedPath,
+        nextContent: contentStr,
+      });
+      return { updated: false, id: created?.id };
+    });
+
+    if (result.updated) {
       res.json({
         file: {
           path: normalisedPath,
@@ -202,24 +235,9 @@ router.put(
         },
       });
     } else {
-      const [created] = await db
-        .insert(projectFilesTable)
-        .values({
-          projectId,
-          artifactId,
-          path: normalisedPath,
-          content: contentStr,
-          mimeType: resolvedMime,
-        })
-        .returning({
-          id: projectFilesTable.id,
-          path: projectFilesTable.path,
-          mimeType: projectFilesTable.mimeType,
-        });
-
       res.status(201).json({
         file: {
-          id: created?.id,
+          id: result.id,
           path: normalisedPath,
           mimeType: resolvedMime,
           size: contentStr.length,

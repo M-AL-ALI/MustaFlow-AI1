@@ -12,6 +12,14 @@ import type {
   RuntimeReconciliationObservation,
   RuntimeReconciliationTerminal,
 } from "@workspace/tenant-runtime-contracts";
+import {
+  DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP,
+  DURABLE_OPERATION_DEPLOYMENT_RETRY_DELAY_SECONDS,
+  ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP,
+  ROUTE_POLICY_RECONCILIATION_DEADLINE_MS,
+  ROUTE_POLICY_RECONCILIATION_LEASE_MS,
+  ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+} from "./model";
 import type { WorkerBindings } from "./bindings";
 import type {
   ControlAuditRecord,
@@ -34,12 +42,17 @@ import type {
   ArtifactCommitDriverClaim,
   ArtifactCommitCheckpoint,
   RemovedRuntimeLayeredArtifact,
+  RoutePolicyMutation,
+  RoutePolicyReconciliationClaim,
+  StoredRoutePolicyReconciliation,
 } from "./model";
 import { deleteArtifactObjects } from "./artifact-storage";
 import {
   deleteDependencyLayerObjects,
   deleteLayeredArtifactAppObjects,
 } from "./artifact-layer-storage";
+import { driveRoutePolicyReconciliation } from "./route-policy-reconciliation";
+import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
 
 const IDEMPOTENCY_PENDING_TTL_MS = 10 * 60 * 1_000;
 const IDEMPOTENCY_COMPLETED_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -72,6 +85,110 @@ function runtimeReconciliationSequenceKey(sequence: number): string {
 
 function routeKey(hostname: string): string {
   return `route:${hostname}`;
+}
+
+function routePolicyKey(hostname: string): string {
+  return `route-policy-reconciliation:${hostname}`;
+}
+
+function sameStoredRoute(left: RouteRecord | undefined, right: RouteRecord): boolean {
+  return (
+    left !== undefined &&
+    left.hostname === right.hostname &&
+    left.projectId === right.projectId &&
+    left.role === right.role &&
+    left.activeSlot === right.activeSlot &&
+    left.manifestRevision === right.manifestRevision &&
+    left.servicePort === right.servicePort &&
+    left.sandboxIdentity === right.sandboxIdentity
+  );
+}
+
+function normalizedRoutePolicyIdentities(
+  identities: string[],
+  activeIdentity: string | null,
+): string[] {
+  const normalized = new Set(activeIdentity === null ? [] : [activeIdentity]);
+  for (const identity of identities) {
+    if (typeof identity !== "string" || identity.length === 0 || identity.length > 256) {
+      throw new Error("Route policy identity is invalid");
+    }
+    normalized.add(identity);
+  }
+  if (normalized.size === 0 || normalized.size > 4) {
+    throw new Error("Route policy identity set is invalid");
+  }
+  return [...normalized].sort();
+}
+
+function routePolicyFingerprint(activeIdentity: string | null, identities: string[]): string {
+  return `${activeIdentity ?? "none"}:${identities.join(",")}`;
+}
+
+function newRoutePolicyReconciliation(
+  hostname: string,
+  activeIdentity: string | null,
+  policy: RoutePolicyMutation,
+  previous: StoredRoutePolicyReconciliation | undefined,
+): StoredRoutePolicyReconciliation {
+  const identities = normalizedRoutePolicyIdentities(policy.identities, activeIdentity);
+  const fingerprint = routePolicyFingerprint(activeIdentity, identities);
+  // Completed desired state is an honest replay. A failed terminal is evidence about one
+  // bounded generation, not a permanent veto on the same desired state: a later governed
+  // mutation mints a fresh generation and can converge after a transient provider failure.
+  if (previous?.fingerprint === fingerprint && previous.state !== "failed") return previous;
+  return {
+    schemaVersion: 1,
+    hostname,
+    generation: (previous?.generation ?? 0) + 1,
+    fingerprint,
+    identities,
+    state: "pending",
+    completedIdentities: [],
+    attempt: 0,
+    ownerId: null,
+    leaseUntilMs: null,
+    deadlineMs: policy.nowMs + ROUTE_POLICY_RECONCILIATION_DEADLINE_MS,
+    nextAttemptAtMs: policy.nowMs,
+    terminal: null,
+    createdAtMs: policy.nowMs,
+    updatedAtMs: policy.nowMs,
+  };
+}
+
+function reopenRoutePolicyReconciliation(
+  intent: StoredRoutePolicyReconciliation,
+  nowMs: number,
+): void {
+  intent.generation += 1;
+  intent.state = "pending";
+  intent.completedIdentities = [];
+  intent.ownerId = null;
+  intent.leaseUntilMs = null;
+  intent.nextAttemptAtMs = nowMs;
+  intent.terminal = null;
+  intent.updatedAtMs = nowMs;
+}
+
+function terminalizeRoutePolicyReconciliation(
+  intent: StoredRoutePolicyReconciliation,
+  cause: "attempt_cap" | "deadline" | "provider_write_failed",
+  nowMs: number,
+): void {
+  intent.state = "failed";
+  intent.ownerId = null;
+  intent.leaseUntilMs = null;
+  intent.nextAttemptAtMs = intent.deadlineMs;
+  intent.terminal = {
+    schemaVersion: 1,
+    code: "route_policy_reconciliation_exhausted",
+    cause,
+    attempts: intent.attempt,
+    maxAttempts: ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP,
+    remainingWrites: Math.max(0, intent.identities.length - intent.completedIdentities.length),
+    terminalAt: new Date(nowMs).toISOString(),
+  };
+  intent.updatedAtMs = nowMs;
 }
 
 function artifactKey(identity: string, sealedArtifactSha256: string): string {
@@ -116,7 +233,15 @@ function durableOperationQueueMessage(
     runtimeIdentity: job.runtimeIdentity,
     subjectKey: job.subjectKey,
     kind: job.kind,
+    ...(job.deploymentDeferralCount === undefined || job.deploymentDeferralCount === 0
+      ? {}
+      : { deploymentDeferralCount: job.deploymentDeferralCount }),
   };
+}
+
+function boundedDeploymentVersionSignal(value: string): string {
+  const bounded = value.replace(/[^A-Za-z0-9._:-]/gu, "?").slice(0, 100);
+  return bounded.length === 0 ? "unknown" : bounded;
 }
 
 function appendDurableOperationEvent(
@@ -208,6 +333,87 @@ function durableOperationAbandonedResponse(
       ok: false,
       code: "artifact_commit_abandoned",
       message: "The artifact commit owner disappeared before the operation completed",
+      retryable: false,
+    },
+  };
+}
+
+function durableOperationDeploymentUnavailableResponse(
+  kind: StoredDurableOperationJob["kind"],
+): StoredHttpResponse {
+  if (kind === "runtime-start") {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        code: "runtime_start_deployment_version_unavailable",
+        message: "Runtime start could not run on the required Worker deployment",
+        retryable: false,
+      },
+    };
+  }
+  if (kind === "runtime-manifest-restart") {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        code: "runtime_manifest_update_deployment_version_unavailable",
+        message: "Runtime manifest restart could not run on the required Worker deployment",
+        retryable: false,
+      },
+    };
+  }
+  if (kind === "acceptance-lease") {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        code: "acceptance_deployment_version_unavailable",
+        message: "The acceptance lease operation could not run on the required Worker deployment",
+        retryable: false,
+      },
+    };
+  }
+  if (kind === "layered-artifact-promotion") {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        code: "artifact_promotion_deployment_version_unavailable",
+        message: "Artifact promotion could not run on the required Worker deployment",
+        retryable: false,
+      },
+    };
+  }
+  if (kind === "production-database") {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        code: "production_database_deployment_version_unavailable",
+        message: "Production database operation could not run on the required Worker deployment",
+        retryable: false,
+      },
+    };
+  }
+  return {
+    status: 503,
+    body: {
+      ok: false,
+      code: "artifact_commit_deployment_version_unavailable",
+      message: "Artifact commit could not run on the required Worker deployment",
+      retryable: false,
+    },
+  };
+}
+
+function acceptanceCleanupDisabledResponse(): StoredHttpResponse {
+  return {
+    status: 503,
+    body: {
+      ok: false,
+      code: "acceptance_cleanup_disabled",
+      message: "Acceptance cleanup is disabled",
       retryable: false,
     },
   };
@@ -343,6 +549,24 @@ export class ControlDurableObject
   implements ControlCoordinator
 {
   private readonly routeCache = new Map<string, RouteRecord | null>();
+  private readonly routePolicyBackend: Pick<RuntimeBackend, "setKeepAlive">;
+  private readonly currentTimeMs: () => number;
+  private readonly afterRoutePolicyProviderWrite?: (writeCount: number) => Promise<void>;
+
+  constructor(
+    ctx: DurableObjectState,
+    env: WorkerBindings,
+    dependencies: {
+      routePolicyBackend?: Pick<RuntimeBackend, "setKeepAlive">;
+      nowMs?: () => number;
+      afterRoutePolicyProviderWrite?: (writeCount: number) => Promise<void>;
+    } = {},
+  ) {
+    super(ctx, env);
+    this.routePolicyBackend = dependencies.routePolicyBackend ?? new CloudflareSandboxBackend(env);
+    this.currentTimeMs = dependencies.nowMs ?? Date.now;
+    this.afterRoutePolicyProviderWrite = dependencies.afterRoutePolicyProviderWrite;
+  }
 
   async consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean> {
     const key = `nonce:${await sha256Hex(nonce)}`;
@@ -508,6 +732,8 @@ export class ControlDurableObject
         leaseUntilMs: null,
         abandonAtMs: null,
         deadlineMs: input.nowMs + DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
+        deploymentDeferralCount: 0,
+        deploymentDeferralEnqueuedCount: 0,
         createdAtMs: input.nowMs,
         updatedAtMs: input.nowMs,
       };
@@ -666,6 +892,38 @@ export class ControlDurableObject
     return job;
   }
 
+  async terminalizeDisabledAcceptanceOperation(
+    jobKey: string,
+    nowMs: number,
+  ): Promise<"completed" | "already_terminal" | "not_found" | "wrong_kind"> {
+    const expiresAtMs = nowMs + IDEMPOTENCY_COMPLETED_TTL_MS;
+    const result = await this.ctx.storage.transaction(async (transaction) => {
+      const job = await transaction.get<StoredDurableOperationJob>(jobKey);
+      if (job === undefined) return "not_found" as const;
+      if (job.kind !== "acceptance-lease") return "wrong_kind" as const;
+      if (job.state !== "active") return "already_terminal" as const;
+
+      const response = acceptanceCleanupDisabledResponse();
+      job.state = "failed";
+      job.ownerId = null;
+      job.leaseUntilMs = null;
+      job.abandonAtMs = null;
+      job.response = response;
+      appendDurableOperationEvent(job, "policy-disabled-terminal", nowMs);
+      await transaction.put(jobKey, job);
+      await transaction.put(job.idempotencyStorageKey, {
+        fingerprint: job.fingerprint,
+        state: "completed",
+        expiresAtMs,
+        response,
+        jobKey,
+      } satisfies StoredIdempotencyRecord);
+      return "completed" as const;
+    });
+    if (result === "completed") await this.scheduleCleanup(this.ctx.storage, expiresAtMs);
+    return result;
+  }
+
   async getArtifactCommit(jobKey: string): Promise<StoredArtifactCommitJob | null> {
     const job = await this.getDurableOperation(jobKey);
     return job === null ||
@@ -760,16 +1018,89 @@ export class ControlDurableObject
     jobKey: string,
     deploymentVersion: string,
     nowMs: number,
+    deliveredDeferralCount?: number,
   ): Promise<"matched" | "deferred" | "not_found" | "terminal"> {
-    return this.ctx.storage.transaction(async (transaction) => {
+    const deliveredGeneration =
+      deliveredDeferralCount === undefined
+        ? 0
+        : Number.isSafeInteger(deliveredDeferralCount) && deliveredDeferralCount >= 0
+          ? deliveredDeferralCount
+          : -1;
+    const result = await this.ctx.storage.transaction(async (transaction) => {
       const job = await transaction.get<StoredDurableOperationJob>(jobKey);
-      if (job === undefined) return "not_found" as const;
-      if (job.state !== "active") return "terminal" as const;
-      if (job.expectedDeploymentVersion === deploymentVersion) return "matched" as const;
-      appendDurableOperationEvent(job, "deployment-version-deferred", nowMs, deploymentVersion);
+      if (job === undefined) return { state: "not_found" as const };
+      if (job.state !== "active") return { state: "terminal" as const };
+      job.deploymentDeferralCount ??= 0;
+      job.deploymentDeferralEnqueuedCount ??= 0;
+      if (job.deadlineMs <= nowMs) {
+        const response = durableOperationAbandonedResponse(job.kind);
+        job.state = "failed";
+        job.ownerId = null;
+        job.leaseUntilMs = null;
+        job.abandonAtMs = null;
+        job.response = response;
+        appendDurableOperationEvent(job, "deadline-terminal", nowMs);
+        await transaction.put(jobKey, job);
+        await transaction.put(job.idempotencyStorageKey, {
+          fingerprint: job.fingerprint,
+          state: "completed",
+          expiresAtMs: nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
+          response,
+          jobKey,
+        } satisfies StoredIdempotencyRecord);
+        return { state: "terminal" as const };
+      }
+      // A replay of an older queue generation observes the existing successor and does not mint
+      // another one. This is the multiplication guard for at-least-once queue delivery.
+      if (deliveredGeneration !== job.deploymentDeferralCount) {
+        const scheduleAtMs =
+          job.deploymentDeferralCount > job.deploymentDeferralEnqueuedCount
+            ? job.deploymentDeferralReadyAtMs
+            : undefined;
+        return { state: "deferred" as const, scheduleAtMs };
+      }
+      if (job.expectedDeploymentVersion === deploymentVersion) {
+        return { state: "matched" as const };
+      }
+      if (job.deploymentDeferralCount >= DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP) {
+        const response = durableOperationDeploymentUnavailableResponse(job.kind);
+        job.state = "failed";
+        job.ownerId = null;
+        job.leaseUntilMs = null;
+        job.abandonAtMs = null;
+        job.response = response;
+        appendDurableOperationEvent(job, "deployment-deferral-cap-terminal", nowMs);
+        await transaction.put(jobKey, job);
+        await transaction.put(job.idempotencyStorageKey, {
+          fingerprint: job.fingerprint,
+          state: "completed",
+          expiresAtMs: nowMs + IDEMPOTENCY_COMPLETED_TTL_MS,
+          response,
+          jobKey,
+        } satisfies StoredIdempotencyRecord);
+        return { state: "terminal" as const };
+      }
+      job.deploymentDeferralCount += 1;
+      const scheduleAtMs = nowMs + DURABLE_OPERATION_DEPLOYMENT_RETRY_DELAY_SECONDS * 1_000;
+      job.deploymentDeferralReadyAtMs = scheduleAtMs;
+      appendDurableOperationEvent(
+        job,
+        "deployment-version-deferred",
+        nowMs,
+        boundedDeploymentVersionSignal(deploymentVersion),
+      );
       await transaction.put(jobKey, job);
-      return "deferred" as const;
+      return { state: "deferred" as const, scheduleAtMs };
     });
+    if (result.state === "terminal") {
+      await this.scheduleCleanup(this.ctx.storage, nowMs + IDEMPOTENCY_COMPLETED_TTL_MS);
+      return "terminal";
+    }
+    if (result.state !== "deferred") return result.state;
+    if (result.scheduleAtMs !== undefined) {
+      await this.scheduleCleanup(this.ctx.storage, result.scheduleAtMs);
+    }
+    return "deferred";
   }
 
   async recordArtifactCommitNudge(jobKey: string, nowMs: number) {
@@ -820,6 +1151,7 @@ export class ControlDurableObject
     checkpoint: DurableOperationCheckpoint;
     payloadContentSha256s?: string[];
     runtimeWasRunning?: boolean;
+    rollbackReleaseSha256?: string | null;
     nowMs: number;
   }): Promise<StoredDurableOperationJob> {
     return this.ctx.storage.transaction(async (transaction) => {
@@ -862,6 +1194,19 @@ export class ControlDurableObject
           throw new Error("Runtime running state requires the manifest restart unbound checkpoint");
         }
         job.runtimeWasRunning = input.runtimeWasRunning;
+      }
+      if (input.rollbackReleaseSha256 !== undefined) {
+        if (
+          job.kind !== "runtime-manifest-restart" ||
+          input.checkpoint !== "runtime-unbound" ||
+          (input.rollbackReleaseSha256 !== null &&
+            !/^[0-9a-f]{64}$/u.test(input.rollbackReleaseSha256))
+        ) {
+          throw new Error(
+            "Runtime rollback release requires the manifest restart unbound checkpoint",
+          );
+        }
+        job.rollbackReleaseSha256 = input.rollbackReleaseSha256;
       }
       appendDurableOperationEvent(job, "checkpoint-advanced", input.nowMs);
       await transaction.put(input.jobKey, job);
@@ -1418,17 +1763,67 @@ export class ControlDurableObject
     return structuredClone(route);
   }
 
+  async listRoutesByProject(input: {
+    projectId: number;
+    cursor?: string;
+    scanLimit: number;
+  }): Promise<{ routes: RouteRecord[]; nextCursor: string | null; complete: boolean }> {
+    const records = await this.ctx.storage.list<RouteRecord>({
+      prefix: "route:",
+      ...(input.cursor === undefined ? {} : { startAfter: routeKey(input.cursor) }),
+      limit: input.scanLimit + 1,
+    });
+    const scanned = [...records.entries()];
+    const complete = scanned.length <= input.scanLimit;
+    const bounded = scanned.slice(0, input.scanLimit);
+    const nextCursor = complete ? null : (bounded.at(-1)?.[0].slice("route:".length) ?? null);
+    return {
+      routes: bounded
+        .map(([, route]) => route)
+        .filter((route) => route.projectId === input.projectId)
+        .map((route) => structuredClone(route)),
+      nextCursor,
+      complete,
+    };
+  }
+
+  async hasRouteForSandboxIdentity(identity: string): Promise<boolean> {
+    const routes = await this.ctx.storage.list<RouteRecord>({ prefix: "route:" });
+    return [...routes.values()].some((route) => route.sandboxIdentity === identity);
+  }
+
   async activateRoute(
     route: RouteRecord,
     expectedPreviousManifestRevision: string | null,
-  ): Promise<"activated" | "conflict"> {
+    policy?: RoutePolicyMutation,
+  ): Promise<"activated" | "replay" | "conflict"> {
+    // Pre-arm before the atomic route+intent transaction. A crash can therefore leave either a
+    // harmless alarm without an intent, or an intent with a durable alarm, never a stranded intent.
+    if (policy !== undefined) {
+      await this.scheduleCleanup(
+        this.ctx.storage,
+        policy.nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+      );
+    }
     const result = await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<RouteRecord>(routeKey(route.hostname));
-      if ((current?.manifestRevision ?? null) !== expectedPreviousManifestRevision) {
+      const replay = sameStoredRoute(current, route);
+      if (!replay && (current?.manifestRevision ?? null) !== expectedPreviousManifestRevision) {
         return { state: "conflict" as const, current: current ?? null };
       }
-      await transaction.put(routeKey(route.hostname), route);
-      return { state: "activated" as const, current: route };
+      if (!replay) await transaction.put(routeKey(route.hostname), route);
+      if (policy !== undefined) {
+        const key = routePolicyKey(route.hostname);
+        const previous = await transaction.get<StoredRoutePolicyReconciliation>(key);
+        const intent = newRoutePolicyReconciliation(
+          route.hostname,
+          route.sandboxIdentity,
+          policy,
+          previous,
+        );
+        if (intent !== previous) await transaction.put(key, intent);
+      }
+      return { state: replay ? ("replay" as const) : ("activated" as const), current: route };
     });
     this.routeCache.set(route.hostname, result.current);
     return result.state;
@@ -1438,10 +1833,25 @@ export class ControlDurableObject
     hostname: string,
     expectedManifestRevision: string,
     expectedSandboxIdentity: string,
+    policy?: RoutePolicyMutation,
   ): Promise<"deactivated" | "not_found" | "conflict"> {
+    if (policy !== undefined) {
+      await this.scheduleCleanup(
+        this.ctx.storage,
+        policy.nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+      );
+    }
     const result = await this.ctx.storage.transaction(async (transaction) => {
       const current = await transaction.get<RouteRecord>(routeKey(hostname));
-      if (current === undefined) return { state: "not_found" as const, current: null };
+      if (current === undefined) {
+        if (policy !== undefined) {
+          const key = routePolicyKey(hostname);
+          const previous = await transaction.get<StoredRoutePolicyReconciliation>(key);
+          const intent = newRoutePolicyReconciliation(hostname, null, policy, previous);
+          if (intent !== previous) await transaction.put(key, intent);
+        }
+        return { state: "not_found" as const, current: null };
+      }
       if (
         current.manifestRevision !== expectedManifestRevision ||
         current.sandboxIdentity !== expectedSandboxIdentity
@@ -1449,10 +1859,238 @@ export class ControlDurableObject
         return { state: "conflict" as const, current };
       }
       await transaction.delete(routeKey(hostname));
+      if (policy !== undefined) {
+        const key = routePolicyKey(hostname);
+        const previous = await transaction.get<StoredRoutePolicyReconciliation>(key);
+        const intent = newRoutePolicyReconciliation(hostname, null, policy, previous);
+        if (intent !== previous) await transaction.put(key, intent);
+      }
       return { state: "deactivated" as const, current: null };
     });
     this.routeCache.set(hostname, result.current);
     return result.state;
+  }
+
+  async claimRoutePolicyReconciliation(
+    hostname: string,
+    ownerId: string,
+    nowMs: number,
+  ): Promise<RoutePolicyReconciliationClaim> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = routePolicyKey(hostname);
+      const intent = await transaction.get<StoredRoutePolicyReconciliation>(key);
+      if (intent === undefined) return { state: "not_found" as const };
+      if (intent.state === "completed") return { state: "completed" as const };
+      if (intent.state === "failed") return { state: "terminal" as const };
+
+      const route = await transaction.get<RouteRecord>(routeKey(hostname));
+      const activeIdentity = route?.sandboxIdentity ?? null;
+      const identities = normalizedRoutePolicyIdentities(intent.identities, activeIdentity);
+      const fingerprint = routePolicyFingerprint(activeIdentity, identities);
+      if (intent.fingerprint !== fingerprint) {
+        const replacement = newRoutePolicyReconciliation(
+          hostname,
+          activeIdentity,
+          { identities, nowMs },
+          intent,
+        );
+        await transaction.put(key, replacement);
+        return { state: "not_due" as const };
+      }
+      if (intent.deadlineMs <= nowMs) {
+        terminalizeRoutePolicyReconciliation(intent, "deadline", nowMs);
+        await transaction.put(key, intent);
+        return { state: "terminal" as const };
+      }
+      if (intent.attempt >= ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP) {
+        terminalizeRoutePolicyReconciliation(intent, "attempt_cap", nowMs);
+        await transaction.put(key, intent);
+        return { state: "terminal" as const };
+      }
+      if (intent.nextAttemptAtMs > nowMs) return { state: "not_due" as const };
+      if (intent.leaseUntilMs !== null && intent.leaseUntilMs > nowMs) {
+        return { state: "busy" as const };
+      }
+
+      intent.attempt += 1;
+      intent.ownerId = ownerId;
+      intent.leaseUntilMs = Math.min(
+        intent.deadlineMs,
+        nowMs + ROUTE_POLICY_RECONCILIATION_LEASE_MS,
+      );
+      intent.updatedAtMs = nowMs;
+      const completed = new Set(intent.completedIdentities);
+      const inactiveWrites = identities
+        .filter((identity) => identity !== activeIdentity && !completed.has(identity))
+        .map((identity) => ({ identity, keepAlive: false }));
+      const writes =
+        activeIdentity === null || completed.has(activeIdentity)
+          ? inactiveWrites
+          : [...inactiveWrites, { identity: activeIdentity, keepAlive: true }];
+      await transaction.put(key, intent);
+      return {
+        state: "claimed" as const,
+        hostname,
+        generation: intent.generation,
+        attempt: intent.attempt,
+        ownerId,
+        writes,
+      };
+    });
+  }
+
+  async recordRoutePolicyWrite(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    identity: string;
+    nowMs: number;
+  }): Promise<"recorded" | "superseded"> {
+    await this.scheduleCleanup(
+      this.ctx.storage,
+      input.nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+    );
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = routePolicyKey(input.hostname);
+      const intent = await transaction.get<StoredRoutePolicyReconciliation>(key);
+      if (
+        intent?.state === "completed" &&
+        intent.generation === input.generation &&
+        intent.completedIdentities.includes(input.identity)
+      ) {
+        return "recorded" as const;
+      }
+      if (
+        intent === undefined ||
+        intent.state === "failed" ||
+        intent.generation !== input.generation ||
+        intent.attempt !== input.attempt ||
+        intent.ownerId !== input.ownerId
+      ) {
+        if (intent !== undefined && intent.state !== "failed") {
+          reopenRoutePolicyReconciliation(intent, input.nowMs);
+          await transaction.put(key, intent);
+        }
+        return "superseded" as const;
+      }
+      if (!intent.identities.includes(input.identity)) {
+        reopenRoutePolicyReconciliation(intent, input.nowMs);
+        await transaction.put(key, intent);
+        return "superseded" as const;
+      }
+      if (!intent.completedIdentities.includes(input.identity)) {
+        intent.completedIdentities.push(input.identity);
+        intent.completedIdentities.sort();
+      }
+      intent.updatedAtMs = input.nowMs;
+      await transaction.put(key, intent);
+      return "recorded" as const;
+    });
+  }
+
+  async failRoutePolicyReconciliation(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    nowMs: number;
+  }): Promise<"pending" | "terminal" | "superseded"> {
+    await this.scheduleCleanup(
+      this.ctx.storage,
+      input.nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+    );
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = routePolicyKey(input.hostname);
+      const intent = await transaction.get<StoredRoutePolicyReconciliation>(key);
+      if (
+        intent === undefined ||
+        intent.state === "failed" ||
+        intent.generation !== input.generation ||
+        intent.attempt !== input.attempt ||
+        intent.ownerId !== input.ownerId
+      ) {
+        if (intent !== undefined && intent.state !== "failed") {
+          reopenRoutePolicyReconciliation(intent, input.nowMs);
+          await transaction.put(key, intent);
+        }
+        return "superseded" as const;
+      }
+      intent.ownerId = null;
+      intent.leaseUntilMs = null;
+      if (
+        intent.attempt >= ROUTE_POLICY_RECONCILIATION_ATTEMPT_CAP ||
+        intent.deadlineMs <= input.nowMs
+      ) {
+        terminalizeRoutePolicyReconciliation(intent, "provider_write_failed", input.nowMs);
+        await transaction.put(key, intent);
+        return "terminal" as const;
+      }
+      intent.nextAttemptAtMs = Math.min(
+        intent.deadlineMs,
+        input.nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+      );
+      intent.updatedAtMs = input.nowMs;
+      await transaction.put(key, intent);
+      return "pending" as const;
+    });
+  }
+
+  async completeRoutePolicyReconciliation(input: {
+    hostname: string;
+    generation: number;
+    attempt: number;
+    ownerId: string;
+    nowMs: number;
+  }): Promise<"completed" | "superseded"> {
+    await this.scheduleCleanup(
+      this.ctx.storage,
+      input.nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS,
+    );
+    return this.ctx.storage.transaction(async (transaction) => {
+      const key = routePolicyKey(input.hostname);
+      const intent = await transaction.get<StoredRoutePolicyReconciliation>(key);
+      if (intent?.state === "completed" && intent.generation === input.generation) {
+        return "completed" as const;
+      }
+      if (
+        intent === undefined ||
+        intent.state === "failed" ||
+        intent.generation !== input.generation ||
+        intent.attempt !== input.attempt ||
+        intent.ownerId !== input.ownerId ||
+        intent.completedIdentities.length !== intent.identities.length
+      ) {
+        if (intent !== undefined && intent.state !== "failed") {
+          reopenRoutePolicyReconciliation(intent, input.nowMs);
+          await transaction.put(key, intent);
+        }
+        return "superseded" as const;
+      }
+      intent.state = "completed";
+      intent.ownerId = null;
+      intent.leaseUntilMs = null;
+      intent.terminal = null;
+      intent.updatedAtMs = input.nowMs;
+      await transaction.put(key, intent);
+      return "completed" as const;
+    });
+  }
+
+  async getRoutePolicyReconciliation(
+    hostname: string,
+  ): Promise<StoredRoutePolicyReconciliation | null> {
+    return (
+      (await this.ctx.storage.get<StoredRoutePolicyReconciliation>(routePolicyKey(hostname))) ??
+      null
+    );
+  }
+
+  async listRoutePolicyReconciliations(): Promise<StoredRoutePolicyReconciliation[]> {
+    const records = await this.ctx.storage.list<StoredRoutePolicyReconciliation>({
+      prefix: "route-policy-reconciliation:",
+    });
+    return [...records.values()];
   }
 
   async appendSystemLog(identity: string, message: string): Promise<void> {
@@ -1497,7 +2135,39 @@ export class ControlDurableObject
   }
 
   async alarm(): Promise<void> {
-    const nowMs = Date.now();
+    const nowMs = this.currentTimeMs();
+    const routePolicyIntents = await this.listRoutePolicyReconciliations();
+    for (const intent of routePolicyIntents) {
+      if (intent.state !== "pending") continue;
+      const driveAt = Math.max(intent.nextAttemptAtMs, intent.leaseUntilMs ?? 0);
+      if (driveAt > nowMs) {
+        await this.scheduleCleanup(this.ctx.storage, Math.min(driveAt, intent.deadlineMs));
+        continue;
+      }
+      // Pre-arm the successor before the provider boundary. Isolate death after either provider
+      // write therefore leaves a durable retry even though the current alarm invocation vanishes.
+      await this.scheduleCleanup(
+        this.ctx.storage,
+        Math.min(intent.deadlineMs, nowMs + ROUTE_POLICY_RECONCILIATION_RETRY_MS),
+      );
+      await driveRoutePolicyReconciliation({
+        coordinator: this,
+        backend: this.routePolicyBackend,
+        hostname: intent.hostname,
+        nowMs: this.currentTimeMs,
+        afterProviderWrite: this.afterRoutePolicyProviderWrite,
+      });
+      const current = await this.getRoutePolicyReconciliation(intent.hostname);
+      if (current?.state === "pending") {
+        await this.scheduleCleanup(
+          this.ctx.storage,
+          Math.min(
+            current.deadlineMs,
+            Math.max(current.nextAttemptAtMs, current.leaseUntilMs ?? 0),
+          ),
+        );
+      }
+    }
     const durableJobs = await this.ctx.storage.list<StoredDurableOperationJob>({
       prefix: "durable-operation-job:",
     });
@@ -1515,8 +2185,16 @@ export class ControlDurableObject
             nextDurableJobAlarm === null ? deleteAt : Math.min(nextDurableJobAlarm, deleteAt);
         continue;
       }
+      const deploymentSuccessorPending =
+        (snapshot.deploymentDeferralCount ?? 0) > (snapshot.deploymentDeferralEnqueuedCount ?? 0);
       const driveAt = Math.min(
-        snapshot.leaseUntilMs ?? snapshot.updatedAtMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS,
+        snapshot.leaseUntilMs ??
+          (deploymentSuccessorPending
+            ? (snapshot.deploymentDeferralReadyAtMs ??
+              snapshot.updatedAtMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS)
+            : (snapshot.deploymentDeferralCount ?? 0) > 0
+              ? snapshot.deadlineMs
+              : snapshot.updatedAtMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS),
         snapshot.deadlineMs,
       );
       if (driveAt > nowMs) {
@@ -1545,8 +2223,33 @@ export class ControlDurableObject
           } satisfies StoredIdempotencyRecord);
           return { action: "terminal" as const, job };
         }
+        job.deploymentDeferralCount ??= 0;
+        job.deploymentDeferralEnqueuedCount ??= 0;
+        if (job.deploymentDeferralCount > job.deploymentDeferralEnqueuedCount) {
+          const readyAt =
+            job.deploymentDeferralReadyAtMs ??
+            job.updatedAtMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS;
+          if (readyAt > nowMs) {
+            return { action: "wait" as const, job, nextAt: readyAt };
+          }
+          const previousEnqueuedCount = job.deploymentDeferralEnqueuedCount;
+          job.deploymentDeferralEnqueuedCount = job.deploymentDeferralCount;
+          delete job.deploymentDeferralReadyAtMs;
+          appendDurableOperationEvent(job, "alarm-redelivery", nowMs);
+          await transaction.put(key, job);
+          return {
+            action: "requeue" as const,
+            job,
+            deploymentSuccessor: true,
+            previousEnqueuedCount,
+          };
+        }
         if (job.leaseUntilMs !== null && job.leaseUntilMs > nowMs) {
-          return { action: "wait" as const, job };
+          return {
+            action: "wait" as const,
+            job,
+            nextAt: Math.min(job.leaseUntilMs, job.deadlineMs),
+          };
         }
         if (job.ownerId !== null || job.leaseUntilMs !== null) {
           appendDurableOperationEvent(job, "lease-expired", nowMs);
@@ -1556,7 +2259,7 @@ export class ControlDurableObject
         job.abandonAtMs = null;
         appendDurableOperationEvent(job, "alarm-redelivery", nowMs);
         await transaction.put(key, job);
-        return { action: "requeue" as const, job };
+        return { action: "requeue" as const, job, deploymentSuccessor: false };
       });
       if (recovery === null) continue;
       if (recovery.action === "terminal") {
@@ -1566,7 +2269,7 @@ export class ControlDurableObject
         continue;
       }
       if (recovery.action === "wait") {
-        const next = Math.min(recovery.job.leaseUntilMs!, recovery.job.deadlineMs);
+        const next = Math.min(recovery.nextAt, recovery.job.deadlineMs);
         nextDurableJobAlarm =
           nextDurableJobAlarm === null ? next : Math.min(nextDurableJobAlarm, next);
         continue;
@@ -1582,11 +2285,22 @@ export class ControlDurableObject
         await this.ctx.storage.transaction(async (transaction) => {
           const job = await transaction.get<StoredDurableOperationJob>(key);
           if (job === undefined || job.state !== "active") return;
+          if (
+            recovery.deploymentSuccessor &&
+            job.deploymentDeferralCount === recovery.job.deploymentDeferralCount &&
+            job.deploymentDeferralEnqueuedCount === recovery.job.deploymentDeferralEnqueuedCount
+          ) {
+            job.deploymentDeferralEnqueuedCount = recovery.previousEnqueuedCount;
+            job.deploymentDeferralReadyAtMs = nowMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS;
+          }
           appendDurableOperationEvent(job, "queue-unavailable", nowMs);
           await transaction.put(key, job);
         });
       }
-      const next = Math.min(recovery.job.deadlineMs, nowMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS);
+      const next =
+        enqueued && recovery.deploymentSuccessor
+          ? recovery.job.deadlineMs
+          : Math.min(recovery.job.deadlineMs, nowMs + DURABLE_OPERATION_QUEUE_WATCHDOG_MS);
       nextDurableJobAlarm =
         nextDurableJobAlarm === null ? next : Math.min(nextDurableJobAlarm, next);
     }

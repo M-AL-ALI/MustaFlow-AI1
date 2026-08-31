@@ -1,11 +1,17 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { assetsTable, assetAnalysisEventsTable, db } from "@workspace/db";
 import { proposeImageAltText } from "./builder";
-import { durableEnqueueRaw, isDurableQueueReady, registerWorker } from "./durable-queue";
+import {
+  durableEnqueueRawResult,
+  isDurableQueueReady,
+  isDurableWorkerReady,
+  registerRequiredWorker,
+} from "./durable-queue";
 import { logger } from "./logger";
 import { nabuflowGateHttpError } from "./nabuflow-billing";
 import { readAssetBuffer } from "./asset-r2";
 import { withOneCleanRetry } from "./asset-alt-text-policy";
+import { withActiveProjectLifecycle } from "./project-lifecycle";
 
 export const QUEUE_ASSET_ALT_TEXT = "mustaflow.asset-alt-text";
 export const ASSET_ALT_TEXT_SEMANTICS = "alt-text-v1";
@@ -15,6 +21,7 @@ type AssetAltTextPayload = {
   eventId: number;
   userId: string;
   assetId: number;
+  projectId: number | null;
 };
 
 export type AssetAltTextResult =
@@ -27,12 +34,14 @@ function payload(value: Record<string, unknown>): AssetAltTextPayload | null {
   const eventId = Number(value.eventId);
   const assetId = Number(value.assetId);
   const userId = typeof value.userId === "string" ? value.userId : "";
+  const projectId = value.projectId === null ? null : Number(value.projectId);
   return Number.isSafeInteger(eventId) &&
     eventId > 0 &&
     Number.isSafeInteger(assetId) &&
     assetId > 0 &&
-    userId
-    ? { eventId, assetId, userId }
+    userId &&
+    (projectId === null || (Number.isSafeInteger(projectId) && projectId > 0))
+    ? { eventId, assetId, userId, projectId }
     : null;
 }
 
@@ -69,7 +78,7 @@ export async function createAssetAltTextEvent(input: {
  * delivery harmless. One clean retry is allowed for provider weather; a user
  * description is never overwritten because the result lands as a suggestion.
  */
-export async function runAssetAltTextAnalysis(
+async function runActiveAssetAltTextAnalysis(
   input: AssetAltTextPayload,
 ): Promise<AssetAltTextResult> {
   const [claimed] = await db
@@ -80,6 +89,9 @@ export async function runAssetAltTextAnalysis(
         eq(assetAnalysisEventsTable.id, input.eventId),
         eq(assetAnalysisEventsTable.userId, input.userId),
         eq(assetAnalysisEventsTable.assetId, input.assetId),
+        input.projectId === null
+          ? isNull(assetAnalysisEventsTable.projectId)
+          : eq(assetAnalysisEventsTable.projectId, input.projectId),
         eq(assetAnalysisEventsTable.model, ASSET_ALT_TEXT_SEMANTICS),
         eq(assetAnalysisEventsTable.status, "queued"),
       ),
@@ -100,7 +112,12 @@ export async function runAssetAltTextAnalysis(
     .from(assetsTable)
     .where(and(eq(assetsTable.id, input.assetId), eq(assetsTable.ownerUserId, input.userId)))
     .limit(1);
-  if (!asset || asset.state !== "ready" || !asset.mimeType.startsWith("image/")) {
+  if (
+    !asset ||
+    asset.projectId !== input.projectId ||
+    asset.state !== "ready" ||
+    !asset.mimeType.startsWith("image/")
+  ) {
     await setEventStatus(input.eventId, "failed");
     return { status: "failed" };
   }
@@ -169,6 +186,22 @@ export async function runAssetAltTextAnalysis(
   }
 }
 
+/**
+ * Project-scoped vision work holds the same lifecycle lock as governed Trash
+ * from the claim through the provider call and final metering receipt. An
+ * account-level asset has no project lifecycle and keeps its existing path.
+ */
+export async function runAssetAltTextAnalysis(
+  input: AssetAltTextPayload,
+): Promise<AssetAltTextResult> {
+  if (input.projectId === null) return runActiveAssetAltTextAnalysis(input);
+  const outcome = await withActiveProjectLifecycle(input.projectId, async (session) => {
+    if (!(await session.assertActive())) return { status: "skipped" } as const;
+    return runActiveAssetAltTextAnalysis(input);
+  });
+  return outcome.state === "active" ? outcome.value : { status: "skipped" };
+}
+
 export async function enqueueAutomaticAssetAltText(input: {
   userId: string;
   projectId: number | null;
@@ -176,8 +209,10 @@ export async function enqueueAutomaticAssetAltText(input: {
 }): Promise<number> {
   const eventId = await createAssetAltTextEvent(input);
   const work = { ...input, eventId };
-  const jobId = await durableEnqueueRaw(QUEUE_ASSET_ALT_TEXT, work, `asset-alt-${eventId}`);
-  if (!jobId) {
+  const outcome = isDurableWorkerReady(QUEUE_ASSET_ALT_TEXT)
+    ? await durableEnqueueRawResult(QUEUE_ASSET_ALT_TEXT, work, `asset-alt-${eventId}`)
+    : ({ status: "unavailable" } as const);
+  if (outcome.status === "unavailable" || outcome.status === "failed") {
     setImmediate(() => {
       void runAssetAltTextAnalysis(work).catch((error) => {
         logger.warn(
@@ -193,6 +228,22 @@ export async function enqueueAutomaticAssetAltText(input: {
 /** Reclaims interrupted work after a process restart, then registers one worker. */
 export async function registerAssetAltTextWorker(): Promise<void> {
   if (!isDurableQueueReady()) return;
+  const registration = await registerRequiredWorker(
+    QUEUE_ASSET_ALT_TEXT,
+    async (value) => {
+      const parsed = payload(value);
+      if (!parsed) throw new Error("asset_alt_text_payload_invalid");
+      await runAssetAltTextAnalysis(parsed);
+    },
+    {
+      retryLimit: 2,
+      retryDelay: 15,
+      retryBackoff: true,
+      queuePolicy: "standard",
+      registrationAttempts: 3,
+    },
+  );
+  if (registration.status !== "ready") return;
   await db
     .update(assetAnalysisEventsTable)
     .set({ status: "queued" })
@@ -202,16 +253,12 @@ export async function registerAssetAltTextWorker(): Promise<void> {
         eq(assetAnalysisEventsTable.status, "started"),
       ),
     );
-  await registerWorker(QUEUE_ASSET_ALT_TEXT, async (value) => {
-    const parsed = payload(value);
-    if (!parsed) throw new Error("asset_alt_text_payload_invalid");
-    await runAssetAltTextAnalysis(parsed);
-  });
   const pending = await db
     .select({
       eventId: assetAnalysisEventsTable.id,
       userId: assetAnalysisEventsTable.userId,
       assetId: assetAnalysisEventsTable.assetId,
+      projectId: assetAnalysisEventsTable.projectId,
     })
     .from(assetAnalysisEventsTable)
     .where(
@@ -223,6 +270,6 @@ export async function registerAssetAltTextWorker(): Promise<void> {
     .orderBy(sql`${assetAnalysisEventsTable.createdAt} ASC`)
     .limit(100);
   for (const item of pending) {
-    await durableEnqueueRaw(QUEUE_ASSET_ALT_TEXT, item, `asset-alt-${item.eventId}`);
+    await durableEnqueueRawResult(QUEUE_ASSET_ALT_TEXT, item, `asset-alt-${item.eventId}`);
   }
 }

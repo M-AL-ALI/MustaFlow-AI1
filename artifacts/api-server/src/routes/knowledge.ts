@@ -8,6 +8,7 @@ import {
   creditTransactionsTable,
   userCreditsTable,
   assetsTable,
+  assetUsageTable,
 } from "@workspace/db";
 import { presentZeroMemoryProvenance, presentZeroMemoryVersion } from "@workspace/ora-contracts";
 import { isAdminUser } from "../lib/adminAuth";
@@ -927,6 +928,9 @@ router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
 
   if (existing) {
     const [updated] = await db.transaction(async (tx) => {
+      await tx
+        .delete(assetUsageTable)
+        .where(eq(assetUsageTable.consumer, `brand-profile:${existing.id}`));
       const updatedRows = await tx
         .update(knowledgeEntriesTable)
         .set({
@@ -940,6 +944,16 @@ router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
         .returning();
       const updatedRow = updatedRows[0];
       if (updatedRow) {
+        if (clean.logoAssetId !== null) {
+          await tx
+            .insert(assetUsageTable)
+            .values({
+              assetId: clean.logoAssetId,
+              projectId: null,
+              consumer: `brand-profile:${updatedRow.id}`,
+            })
+            .onConflictDoNothing();
+        }
         await appendKnowledgeProvenanceReceipt(tx, {
           knowledgeEntryId: updatedRow.id,
           outcome: "reinforced",
@@ -975,6 +989,16 @@ router.put("/knowledge/brand-profile", async (req, res): Promise<void> => {
       .returning();
     const insertedRow = inserted[0];
     if (insertedRow) {
+      if (clean.logoAssetId !== null) {
+        await tx
+          .insert(assetUsageTable)
+          .values({
+            assetId: clean.logoAssetId,
+            projectId: null,
+            consumer: `brand-profile:${insertedRow.id}`,
+          })
+          .onConflictDoNothing();
+      }
       await appendKnowledgeProvenanceReceipt(tx, {
         knowledgeEntryId: insertedRow.id,
         outcome: "inserted",
@@ -998,15 +1022,32 @@ router.delete("/knowledge/brand-profile", async (req, res): Promise<void> => {
     return;
   }
 
-  await db
-    .delete(knowledgeEntriesTable)
-    .where(
-      and(
-        eq(knowledgeEntriesTable.userId, userId),
-        eq(knowledgeEntriesTable.type, "style_memory"),
-        eq(knowledgeEntriesTable.category, "brand_profile"),
-      ),
-    );
+  await db.transaction(async (tx) => {
+    const entries = await tx
+      .select({ id: knowledgeEntriesTable.id })
+      .from(knowledgeEntriesTable)
+      .where(
+        and(
+          eq(knowledgeEntriesTable.userId, userId),
+          eq(knowledgeEntriesTable.type, "style_memory"),
+          eq(knowledgeEntriesTable.category, "brand_profile"),
+        ),
+      );
+    for (const entry of entries) {
+      await tx
+        .delete(assetUsageTable)
+        .where(eq(assetUsageTable.consumer, `brand-profile:${entry.id}`));
+    }
+    await tx
+      .delete(knowledgeEntriesTable)
+      .where(
+        and(
+          eq(knowledgeEntriesTable.userId, userId),
+          eq(knowledgeEntriesTable.type, "style_memory"),
+          eq(knowledgeEntriesTable.category, "brand_profile"),
+        ),
+      );
+  });
 
   res.json({ deleted: true });
 });

@@ -267,11 +267,23 @@ router.post("/public-ai/generate-file", async (req, res) => {
   let FileGenerationErrorCtor:
     | (typeof import("../../lib/public-ai/file-builder"))["FileGenerationError"]
     | null = null;
+  let fileReservation: import("../../lib/ora-assets").OraGeneratedAssetReservation | null = null;
   try {
     const fileBuilder = await import("../../lib/public-ai/file-builder");
     const { tryApplyLayoutPreservingFileEdit } =
       await import("../../lib/public-ai/office-layout-edit");
     FileGenerationErrorCtor = fileBuilder.FileGenerationError;
+    if (authed) {
+      const { reserveOraGeneratedAsset } = await import("../../lib/ora-assets");
+      fileReservation = await reserveOraGeneratedAsset({
+        userId: authed.userId,
+        oraProjectId: libraryProjectId,
+        kind: "file",
+        source: "ora-explicit-file-generation",
+        fileName: `ora-generated.${format}`,
+        mimeType: "application/octet-stream",
+      });
+    }
     const layoutEditResult = await tryApplyLayoutPreservingFileEdit({
       message,
       format,
@@ -323,33 +335,33 @@ router.post("/public-ai/generate-file", async (req, res) => {
       };
     }
 
-    // Persist to the durable asset library for signed-in users so the file
-    // survives chat resets, reloads, and other devices. Best-effort — a library
-    // failure must never break generation. The returned asset id is surfaced on
-    // the response so the download card stays usable after reload.
+    // Signed-in generation only succeeds when its bytes have been durably
+    // admitted to the account asset registry. The reservation above happens
+    // before generation can spend provider resources or return bytes.
     let assetId: number | null = null;
-    if (authed) {
-      try {
-        const { persistOraAsset, getNextVersionLineage, getNextVersionLineageFromAssetId } =
-          await import("../../lib/ora-assets");
-        // Version lineage: Phase 10 active-asset revisions chain off the
-        // activeAssetId directly. Uploaded-file in-place edits chain via the
-        // editedFileRef session-store key. Plain generation is standalone v1.
-        const lineage =
-          activeAssetId && layoutEditResult
-            ? await getNextVersionLineageFromAssetId(authed.userId, activeAssetId)
-            : result.editedFileRef
-              ? await getNextVersionLineage(authed.userId, result.editedFileRef)
-              : null;
-        const isRevision = activeAssetId && layoutEditResult;
-        const editSummary =
-          isRevision || result.editedFileRef
-            ? (result.editQuality?.changes?.length
-                ? result.editQuality.changes.join("; ")
-                : `Revised: ${message}`
-              ).slice(0, 300)
+    if (authed && fileReservation) {
+      const { completeOraGeneratedAsset, getNextVersionLineage, getNextVersionLineageFromAssetId } =
+        await import("../../lib/ora-assets");
+      // Version lineage: Phase 10 active-asset revisions chain off the
+      // activeAssetId directly. Uploaded-file in-place edits chain via the
+      // editedFileRef session-store key. Plain generation is standalone v1.
+      const lineage =
+        activeAssetId && layoutEditResult
+          ? await getNextVersionLineageFromAssetId(authed.userId, activeAssetId)
+          : result.editedFileRef
+            ? await getNextVersionLineage(authed.userId, result.editedFileRef)
             : null;
-        assetId = await persistOraAsset({
+      const isRevision = activeAssetId && layoutEditResult;
+      const editSummary =
+        isRevision || result.editedFileRef
+          ? (result.editQuality?.changes?.length
+              ? result.editQuality.changes.join("; ")
+              : `Revised: ${message}`
+            ).slice(0, 300)
+          : null;
+      assetId = await completeOraGeneratedAsset({
+        reservation: fileReservation,
+        asset: {
           userId: authed.userId,
           // Chained versions inherit the parent's project via the lineage
           // spread below; only a standalone v1 uses this request's project.
@@ -359,39 +371,30 @@ router.post("/public-ai/generate-file", async (req, res) => {
           mimeType: result.mimeType,
           format,
           prompt: message,
-          base64: result.fileData,
           ...(lineage ?? {}),
           sourceFileRef: result.editedFileRef ?? null,
           editSummary,
+        },
+        base64: result.fileData,
+      });
+      fileReservation = null;
+      // Surface the persisted version on the quality card so clients can
+      // open revision history directly from it.
+      if (result.editQuality) {
+        result.editQuality.versionId = assetId;
+      }
+      // In-place Office edit on an uploaded file: repoint the durable
+      // file-context mirror at the edited asset so revisions after a
+      // restart/rotated session compound instead of reverting to the upload.
+      if (result.editedFileRef) {
+        const { relinkDurableFileContextBestEffort } =
+          await import("../../lib/public-ai/file-context-store");
+        relinkDurableFileContextBestEffort({
+          fileRef: result.editedFileRef,
+          sessionId: session.sessionId,
+          userId: authed.userId,
+          assetId,
         });
-        // Surface the persisted version on the quality card so clients can
-        // open revision history directly from it.
-        if (assetId != null && result.editQuality) {
-          result.editQuality.versionId = assetId;
-        }
-        // In-place Office edit on an uploaded file: repoint the durable
-        // file-context mirror at the edited asset so revisions after a
-        // restart/rotated session compound instead of reverting to the upload.
-        if (assetId != null && result.editedFileRef) {
-          const { relinkDurableFileContextBestEffort } =
-            await import("../../lib/public-ai/file-context-store");
-          relinkDurableFileContextBestEffort({
-            fileRef: result.editedFileRef,
-            sessionId: session.sessionId,
-            userId: authed.userId,
-            assetId,
-          });
-        }
-      } catch (assetErr) {
-        // Durable-library persistence is a bonus, not a requirement. A failure
-        // here (DB/R2/library outage) must never break file creation: keep
-        // assetId null and still return the freshly generated inline bytes, which
-        // remain downloadable for this session. Do NOT fall through to the outer
-        // catch (that refunds quota and 500s a file the user actually received).
-        logger.warn(
-          { component: "ora-generate-file", format, err: assetErr },
-          "Durable asset persistence failed; returning inline file without assetId",
-        );
       }
     }
 
@@ -432,12 +435,19 @@ router.post("/public-ai/generate-file", async (req, res) => {
       ...usage,
     });
   } catch (err) {
+    if (fileReservation && authed) {
+      const { cancelOraGeneratedAsset } = await import("../../lib/ora-assets");
+      await cancelOraGeneratedAsset(fileReservation, authed.userId);
+    }
     if (authed) await refundOraQuota(authed.userId, "message");
     logger.error({ component: "ora-generate-file", format, err }, "File generation failed");
     const failActivity = [oraActivityStep("file-generation", "fail")];
     // FileGenerationError carries a user-safe message (e.g. the model lost the
     // attached data) — surface it instead of the generic 500 fallback.
-    if (FileGenerationErrorCtor && err instanceof FileGenerationErrorCtor) {
+    const { AssetAdmissionError } = await import("../../lib/asset-registry");
+    if (err instanceof AssetAdmissionError) {
+      res.status(err.status).json({ error: err.message, code: err.code, activity: failActivity });
+    } else if (FileGenerationErrorCtor && err instanceof FileGenerationErrorCtor) {
       res.status(422).json({ error: err.message, activity: failActivity });
     } else {
       res

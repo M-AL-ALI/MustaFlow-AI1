@@ -272,6 +272,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /ora-behavior-qa/i,
       /professional-doc/i,
       /ora-chat-response-qa/i,
+      /ora-kill-switches\.test\.ts$/i,
       /phase2/i,
     ],
     manualWebsite:

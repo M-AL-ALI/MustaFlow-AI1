@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db, projectFilesTable } from "@workspace/db";
 import { runEslintFix } from "./checks/eslint-runner";
+import { reconcileProjectFileAssetUsage } from "./project-file-asset-usage";
 
 export type EslintFixAllPerFileResult = {
   fileId: number;
@@ -53,7 +54,8 @@ export async function applyProjectEslintFixes(
     .orderBy(asc(projectFilesTable.path));
 
   const results: EslintFixAllPerFileResult[] = [];
-  const updates: Array<{ id: number; output: string }> = [];
+  const updates: Array<{ id: number; artifactId: number | null; path: string; output: string }> =
+    [];
 
   for (const row of rows) {
     const before = runEslintFix({ path: row.path, content: row.content, ruleIds: [] });
@@ -88,18 +90,31 @@ export async function applyProjectEslintFixes(
     results.push(entry);
 
     if (after.changed && (fileIds === null || fileIds.has(row.id))) {
-      updates.push({ id: row.id, output: after.output });
+      updates.push({
+        id: row.id,
+        artifactId: row.artifactId,
+        path: row.path,
+        output: after.output,
+      });
     }
   }
 
   if (!dryRun && updates.length > 0) {
     const now = new Date();
-    for (const u of updates) {
-      await db
-        .update(projectFilesTable)
-        .set({ content: u.output, updatedAt: now })
-        .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, u.id)));
-    }
+    await db.transaction(async (tx) => {
+      for (const u of updates) {
+        await tx
+          .update(projectFilesTable)
+          .set({ content: u.output, updatedAt: now })
+          .where(and(eq(projectFilesTable.projectId, projectId), eq(projectFilesTable.id, u.id)));
+        await reconcileProjectFileAssetUsage(tx, {
+          projectId,
+          artifactId: u.artifactId,
+          filePath: u.path,
+          nextContent: u.output,
+        });
+      }
+    });
   }
 
   // Totals reflect the subset that was actually written (or would be written, on dry-run

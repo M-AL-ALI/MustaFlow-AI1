@@ -6,6 +6,9 @@ import {
   CloudflareSandboxBackend,
   NabuflowSandbox,
   RUNTIME_AVAILABILITY_TIMEOUT_MS,
+  runtimeSandboxConfiguration,
+  runtimeSandboxStub,
+  runtimeSandboxWebSocketConnect,
 } from "../src/runtime-backend";
 import { TEST_NOW_MS, fakeEnv } from "./helpers";
 
@@ -17,6 +20,26 @@ const setSandboxFactoryForTest = (
     ) => void;
   }
 ).setSandboxFactoryForTest;
+
+function sandboxConfigurationWriteSpies() {
+  return {
+    configure: vi.fn(async (_configuration: unknown): Promise<void> => undefined),
+    setSandboxName: vi.fn(async (_name: string): Promise<void> => undefined),
+    setSleepAfter: vi.fn(async (_sleepAfter: string): Promise<void> => undefined),
+    setKeepAlive: vi.fn(async (_keepAlive: boolean): Promise<void> => undefined),
+    setTransport: vi.fn(async (_transport: string): Promise<void> => undefined),
+  };
+}
+
+function expectNoSandboxConfigurationWrites(
+  writes: ReturnType<typeof sandboxConfigurationWriteSpies>,
+): void {
+  expect(writes.configure).not.toHaveBeenCalled();
+  expect(writes.setSandboxName).not.toHaveBeenCalled();
+  expect(writes.setSleepAfter).not.toHaveBeenCalled();
+  expect(writes.setKeepAlive).not.toHaveBeenCalled();
+  expect(writes.setTransport).not.toHaveBeenCalled();
+}
 
 function capturedRuntime(): StoredRuntime {
   return {
@@ -58,16 +81,50 @@ afterEach(() => {
 });
 
 describe("runtime availability", () => {
+  it.each([
+    { role: "preview" as const, expectedKeepAlive: false },
+    { role: "production" as const, expectedKeepAlive: false },
+  ])(
+    "starts $role runtimes with keepAlive=$expectedKeepAlive",
+    async ({ role, expectedKeepAlive }) => {
+      const runtime = capturedRuntime();
+      runtime.descriptor.role = role;
+      runtime.descriptor.slot = role === "preview" ? "primary" : "green";
+      const writes = sandboxConfigurationWriteSpies();
+      const waitForPort = vi.fn(async () => undefined);
+      const calls: Array<{ options: unknown }> = [];
+      setSandboxFactoryForTest((_namespace, _identity, options) => {
+        calls.push({ options });
+        return {
+          ...writes,
+          setOutboundByHost: vi.fn(async () => undefined),
+          killAllProcesses: vi.fn(async () => undefined),
+          startProcess: vi.fn(async () => ({ id: "tenant-service", waitForPort })),
+        } as never;
+      });
+
+      await new CloudflareSandboxBackend(fakeEnv()).start(runtime);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.options).toEqual({});
+      expect(writes.configure).toHaveBeenCalledWith(runtimeSandboxConfiguration(IDENTITY, "10m"));
+      expect(writes.setKeepAlive).toHaveBeenCalledWith(expectedKeepAlive);
+      expect(waitForPort).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("probes the captured identity at its manifest health path and port", async () => {
     const getStatus = vi.fn(async () => "running");
     const probeRuntimeHealth = vi.fn(
       async (_input: { servicePort: number; healthPath: string; timeoutMs: number }) =>
         Promise.resolve({ ready: true, stage: "health", cause: "ready", status: 204 } as const),
     );
+    const writes = sandboxConfigurationWriteSpies();
     const calls: Array<{ identity: string; options: unknown }> = [];
     setSandboxFactoryForTest((_namespace, identity, options) => {
       calls.push({ identity, options });
       return {
+        ...writes,
         getProcess: vi.fn(async () => ({ getStatus })),
         probeRuntimeHealth,
       } as never;
@@ -77,7 +134,8 @@ describe("runtime availability", () => {
 
     expect(result).toEqual({ ready: true, stage: "health", cause: "ready", status: 204 });
     expect(calls.map((call) => call.identity)).toEqual([IDENTITY, IDENTITY]);
-    expect(calls.at(-1)?.options).toMatchObject({ keepAlive: true, transport: "rpc" });
+    expect(calls.every((call) => JSON.stringify(call.options) === "{}")).toBe(true);
+    expectNoSandboxConfigurationWrites(writes);
     expect(probeRuntimeHealth).toHaveBeenCalledTimes(1);
     const [input] = probeRuntimeHealth.mock.calls[0];
     expect(input).toEqual({
@@ -87,6 +145,189 @@ describe("runtime availability", () => {
     });
     expect(JSON.parse(JSON.stringify(input))).toEqual(input);
     expect(input).not.toBeInstanceOf(Request);
+  });
+
+  it("does not force keepalive while probing a preview runtime", async () => {
+    const runtime = capturedRuntime();
+    runtime.descriptor.role = "preview";
+    runtime.descriptor.slot = "primary";
+    const writes = sandboxConfigurationWriteSpies();
+    const calls: Array<{ options: unknown }> = [];
+    setSandboxFactoryForTest((_namespace, _identity, options) => {
+      calls.push({ options });
+      return {
+        ...writes,
+        getProcess: vi.fn(async () => ({ getStatus: vi.fn(async () => "running") })),
+        probeRuntimeHealth: vi.fn(async () => ({
+          ready: true,
+          stage: "health",
+          cause: "ready",
+          status: 200,
+        })),
+      } as never;
+    });
+
+    await new CloudflareSandboxBackend(fakeEnv()).availability(runtime);
+
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => JSON.stringify(call.options) === "{}")).toBe(true);
+    expectNoSandboxConfigurationWrites(writes);
+  });
+
+  it("keeps status and availability reads configuration-free", async () => {
+    const writes = sandboxConfigurationWriteSpies();
+    const calls: Array<{ options: unknown }> = [];
+    setSandboxFactoryForTest((_namespace, _identity, options) => {
+      calls.push({ options });
+      return {
+        ...writes,
+        getProcess: vi.fn(async () => ({ getStatus: vi.fn(async () => "running") })),
+        probeRuntimeHealth: vi.fn(async () => ({
+          ready: true,
+          stage: "health",
+          cause: "ready",
+          status: 200,
+        })),
+      } as never;
+    });
+
+    const backend = new CloudflareSandboxBackend(fakeEnv());
+    await backend.status(capturedRuntime());
+    await backend.availability(capturedRuntime());
+
+    expect(calls).toHaveLength(3);
+    expect(calls.every((call) => JSON.stringify(call.options) === "{}")).toBe(true);
+    expectNoSandboxConfigurationWrites(writes);
+  });
+
+  it("keeps ordinary exec and log reads configuration-free", async () => {
+    const writes = sandboxConfigurationWriteSpies();
+    const calls: Array<{ operation: "exec" | "logs"; options: unknown }> = [];
+    setSandboxFactoryForTest((_namespace, _identity, options) => ({
+      ...writes,
+      exec: vi.fn(async () => {
+        calls.push({ operation: "exec", options });
+        return { success: true, stdout: "ok", stderr: "", exitCode: 0 };
+      }),
+      getProcessLogs: vi.fn(async () => {
+        calls.push({ operation: "logs", options });
+        return { stdout: "ready", stderr: "" };
+      }),
+    })) as never;
+
+    const backend = new CloudflareSandboxBackend(fakeEnv());
+    await backend.exec(capturedRuntime(), {
+      locator: { projectId: 51, role: "production", slot: "green" },
+      argv: ["true"],
+      cwd: "/workspace",
+      timeoutMs: 1_000,
+    });
+    await backend.logs(capturedRuntime());
+
+    expect(calls.map((call) => call.operation)).toEqual(["exec", "logs"]);
+    expect(calls.every((call) => JSON.stringify(call.options) === "{}")).toBe(true);
+    expectNoSandboxConfigurationWrites(writes);
+  });
+
+  it("awaits explicit configuration and keepalive policy through the governed setter", async () => {
+    const writes = sandboxConfigurationWriteSpies();
+    const calls: unknown[] = [];
+    let releaseConfiguration: () => void = () => undefined;
+    writes.configure.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseConfiguration = resolve;
+        }),
+    );
+    setSandboxFactoryForTest((_namespace, _identity, options) => {
+      calls.push(options);
+      return writes as never;
+    });
+
+    const pending = new CloudflareSandboxBackend(fakeEnv()).setKeepAlive(IDENTITY, true);
+    await Promise.resolve();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({});
+    expect(writes.configure).toHaveBeenCalledWith(runtimeSandboxConfiguration(IDENTITY, "10m"));
+    expect(writes.setKeepAlive).not.toHaveBeenCalled();
+    releaseConfiguration();
+    await pending;
+    expect(writes.setKeepAlive).toHaveBeenCalledWith(true);
+    expect(writes.configure.mock.invocationCallOrder[0]).toBeLessThan(
+      writes.setKeepAlive.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it.each(["stop", "destroy"] as const)(
+    "awaits configuration and sleep policy before %s",
+    async (operation) => {
+      const writes = sandboxConfigurationWriteSpies();
+      const killAllProcesses = vi.fn(async () => undefined);
+      const stop = vi.fn(async () => undefined);
+      const destroy = vi.fn(async () => undefined);
+      setSandboxFactoryForTest(() => ({ ...writes, killAllProcesses, stop, destroy }) as never);
+
+      await new CloudflareSandboxBackend(fakeEnv())[operation](capturedRuntime());
+
+      expect(writes.configure).toHaveBeenCalledWith(runtimeSandboxConfiguration(IDENTITY, "10m"));
+      expect(writes.setKeepAlive).toHaveBeenCalledTimes(1);
+      expect(writes.setKeepAlive).toHaveBeenCalledWith(false);
+      const terminal = operation === "stop" ? stop : destroy;
+      expect(writes.setKeepAlive.mock.invocationCallOrder[0]).toBeLessThan(
+        terminal.mock.invocationCallOrder[0]!,
+      );
+    },
+  );
+
+  it("pre-deactivation data-plane reads cannot asynchronously resurrect keepalive", async () => {
+    const writes = sandboxConfigurationWriteSpies();
+    const persistedKeepAlive: boolean[] = [];
+    writes.setKeepAlive.mockImplementation(async (keepAlive: boolean) => {
+      persistedKeepAlive.push(keepAlive);
+    });
+    setSandboxFactoryForTest(() => {
+      return {
+        ...writes,
+        getProcess: vi.fn(async () => null),
+      } as never;
+    });
+
+    const env = fakeEnv();
+    await runtimeSandboxStub(env, IDENTITY).getProcess("tenant-service");
+    expectNoSandboxConfigurationWrites(writes);
+    await new CloudflareSandboxBackend(env).setKeepAlive(IDENTITY, false);
+    await Promise.resolve();
+
+    expect(writes.configure).toHaveBeenCalledTimes(1);
+    expect(persistedKeepAlive).toEqual([false]);
+  });
+
+  it("preserves Sandbox WebSocket port routing without SDK stub configuration", async () => {
+    const fetch = vi.fn(async (_request: Request) => new Response(null, { status: 204 }));
+    const request = new Request("https://tenant.preview.invalid/socket", {
+      headers: { connection: "Upgrade", upgrade: "websocket" },
+    });
+
+    await runtimeSandboxWebSocketConnect({ fetch } as never, request, 8_080);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const forwarded = fetch.mock.calls[0]?.[0];
+    expect(forwarded?.headers.get("cf-container-target-port")).toBe("8080");
+    expect(forwarded?.headers.get("upgrade")).toBe("websocket");
+    expect(request.headers.has("cf-container-target-port")).toBe(false);
+  });
+
+  it("rejects invalid WebSocket ports before reaching the raw stub", async () => {
+    const fetch = vi.fn();
+    expect(() =>
+      runtimeSandboxWebSocketConnect(
+        { fetch } as never,
+        new Request("https://tenant.preview.invalid/socket"),
+        3_000,
+      ),
+    ).toThrow("The runtime WebSocket port is invalid");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("constructs the request and timeout inside the Sandbox RPC target", async () => {

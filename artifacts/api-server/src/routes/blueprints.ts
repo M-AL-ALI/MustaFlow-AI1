@@ -43,6 +43,10 @@ import { publishTaskEvent } from "../lib/event-bus";
 import { z } from "zod";
 import { BLUEPRINT_INSTALL_USER_ERROR } from "@workspace/ora-contracts";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
+import {
+  acquireProjectLifecycleSession,
+  registerProjectWorkController,
+} from "../lib/project-lifecycle";
 
 // ─── Async npm install helper ─────────────────────────────────────────────────
 
@@ -143,7 +147,15 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
   await emit("narration", `Installing blueprint packages for ${blueprintName}…`);
 
   void (async () => {
+    let lifecycleSession: Awaited<ReturnType<typeof acquireProjectLifecycleSession>> = null;
+    const controller = new AbortController();
+    let unregisterProjectWork: (() => void) | null = null;
     try {
+      unregisterProjectWork = registerProjectWorkController(projectId, controller);
+      lifecycleSession = await acquireProjectLifecycleSession(projectId);
+      if (!lifecycleSession) throw new Error("project_inactive");
+      if (controller.signal.aborted) throw new Error("project_inactive");
+
       const prodPkgs = packages
         .filter((p) => !p.dev)
         .map((p) => (p.version ? `${p.name}@${p.version}` : p.name));
@@ -152,6 +164,7 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
         .map((p) => (p.version ? `${p.name}@${p.version}` : p.name));
 
       if (prodPkgs.length > 0) {
+        if (controller.signal.aborted) throw new Error("project_inactive");
         const r = await execInContainer(
           containerId,
           ["npm", "install", "--prefix", "/app", ...prodPkgs],
@@ -163,9 +176,11 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
           await finishTask("failed");
           return;
         }
+        if (controller.signal.aborted) throw new Error("project_inactive");
       }
 
       if (devPkgs.length > 0) {
+        if (controller.signal.aborted) throw new Error("project_inactive");
         const r = await execInContainer(
           containerId,
           ["npm", "install", "--prefix", "/app", "--save-dev", ...devPkgs],
@@ -177,6 +192,7 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
           await finishTask("failed");
           return;
         }
+        if (controller.signal.aborted) throw new Error("project_inactive");
       }
 
       await emit("completed", `Blueprint packages for ${blueprintName} installed successfully.`);
@@ -185,6 +201,9 @@ async function triggerBlueprintNpmInstall(ctx: NpmInstallContext): Promise<numbe
       logger.warn({ err, blueprintId, projectId }, "blueprint npm install threw unexpectedly");
       await emit("failed", BLUEPRINT_INSTALL_USER_ERROR);
       await finishTask("failed");
+    } finally {
+      unregisterProjectWork?.();
+      await lifecycleSession?.release();
     }
   })();
 
