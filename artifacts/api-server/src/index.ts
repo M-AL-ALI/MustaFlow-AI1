@@ -3,6 +3,7 @@ import { request as httpsRequest } from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import app, { startProjectRetirementWorkerAfterMigrations } from "./app";
+import { isProjectRetirementExecutionEnabled } from "./lib/project-retirement-activation";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { createMultiplayerServer } from "./lib/multiplayer";
@@ -375,20 +376,26 @@ void runStartupMigrations()
       });
     }
     startAssetReservationSweeperAfterMigrations();
-    const retirementWorker = await startProjectRetirementWorkerAfterMigrations();
-    if (retirementWorker.status === "ready") {
-      await resumeProjectRetirementOperations().catch((error: unknown) => {
-        logger.error(
-          { error },
-          "project retirement resume failed; durable receipts remain pending",
-        );
-      });
-      const retirementResumeTimer = setInterval(() => {
-        void resumeProjectRetirementOperations().catch((error: unknown) => {
-          logger.error({ error }, "project retirement periodic resume failed");
+    if (isProjectRetirementExecutionEnabled()) {
+      const retirementWorker = await startProjectRetirementWorkerAfterMigrations();
+      if (retirementWorker.status === "ready") {
+        await resumeProjectRetirementOperations().catch((error: unknown) => {
+          logger.error(
+            { error },
+            "project retirement resume failed; durable receipts remain pending",
+          );
         });
-      }, 60_000);
-      retirementResumeTimer.unref?.();
+        const retirementResumeTimer = setInterval(() => {
+          void resumeProjectRetirementOperations().catch((error: unknown) => {
+            logger.error({ error }, "project retirement periodic resume failed");
+          });
+        }, 60_000);
+        retirementResumeTimer.unref?.();
+      }
+    } else {
+      logger.warn(
+        "Project retirement execution is disabled; Trash writes and provider cleanup remain fail closed",
+      );
     }
     return runContainerSelfCheck().catch((err: unknown) => {
       // Non-fatal: log and continue — a degraded container subsystem is better

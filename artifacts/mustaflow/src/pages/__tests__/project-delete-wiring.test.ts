@@ -32,4 +32,13 @@ describe("project delete wiring", () => {
     expect(src).toContain("bg-background/80");
     expect(src).not.toContain("opacity-0 transition-opacity");
   });
+
+  it("does not promise automatic permanent deletion before the purger exists", () => {
+    const src = readPage("trash.tsx");
+
+    expect(src).toContain("Automatic permanent deletion");
+    expect(src).toContain("is not active yet");
+    expect(src).toContain("Recovery available for");
+    expect(src).not.toContain("Permanently removed in");
+  });
 });

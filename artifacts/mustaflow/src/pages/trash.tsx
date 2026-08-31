@@ -58,8 +58,8 @@ export default function TrashPage() {
         <div>
           <h1 className="text-2xl font-semibold">Trash</h1>
           <p className="text-sm text-muted-foreground">
-            Deleted projects are kept for {RECOVERY_DAYS} days. After that they disappear from this
-            list.
+            Deleted projects can be restored for {RECOVERY_DAYS} days. Automatic permanent deletion
+            is not active yet.
           </p>
         </div>
       </header>
@@ -112,7 +112,7 @@ export default function TrashPage() {
                   )}
                   <p className="text-xs text-muted-foreground/70 mt-1">
                     {days > 0
-                      ? `Permanently removed in ${days} day${days === 1 ? "" : "s"}`
+                      ? `Recovery available for ${days} day${days === 1 ? "" : "s"}`
                       : "Recovery window expired"}
                   </p>
                 </div>

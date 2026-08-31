@@ -349,8 +349,9 @@ describe("required project-retirement durable worker", () => {
     expect(registration).toContain('queuePolicy: "exclusive"');
     expect(registration).toContain("registrationAttempts: 3");
     expect(indexSource).toContain("if (!migrationsPassed)");
+    expect(indexSource).toContain("if (isProjectRetirementExecutionEnabled())");
     expect(indexSource.indexOf("startProjectRetirementWorkerAfterMigrations()")).toBeGreaterThan(
-      indexSource.indexOf("if (!migrationsPassed)"),
+      indexSource.indexOf("if (isProjectRetirementExecutionEnabled())"),
     );
     expect(indexSource.indexOf("startProjectRetirementWorkerAfterMigrations()")).toBeLessThan(
       indexSource.indexOf("resumeProjectRetirementOperations()"),
