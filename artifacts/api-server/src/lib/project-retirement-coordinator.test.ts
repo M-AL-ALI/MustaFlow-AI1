@@ -354,6 +354,22 @@ describe("governed project retirement coordinator", () => {
     );
   });
 
+  it("retains the historical testing-workflow pointer instead of misrouting it to Cloudflare", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function destroyRuntimeTargets");
+    const end = source.indexOf("export async function enqueueProjectRetirementOperation", start);
+    const runtimes = source.slice(start, end);
+    const pointerUpdateStart = source.indexOf("const pointerUpdates =", end);
+    const pointerUpdateEnd = source.indexOf("await tx", pointerUpdateStart);
+    const pointerUpdates = source.slice(pointerUpdateStart, pointerUpdateEnd);
+
+    expect(runtimes).toContain("testContainerId: projectsTable.testContainerId");
+    expect(runtimes).toContain('pointer: "testContainerId"');
+    expect(runtimes).toContain('reason: "legacy_runtime_provider"');
+    expect(runtimes).not.toContain('{ pointer: "testContainerId" as const');
+    expect(pointerUpdates).not.toContain("testContainerId: null");
+  });
+
   it("fences stale-running crash recovery so an old worker cannot complete", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     expect(source).toContain('eq(projectRetirementOperationsTable.state, "running")');
@@ -378,19 +394,22 @@ describe("governed project retirement coordinator", () => {
     expect(source.slice(verified, pointerClear)).toContain("ProjectRetirementStepError");
     expect(source.slice(verified, pointerClear)).toContain("db.transaction(async (tx)");
     expect(source.slice(pointerClear)).toContain("progress,");
-    const purchasedDetach = source.slice(source.indexOf("async function detachPurchasedDomains"));
-    expect(purchasedDetach).toContain("delete(projectDomainsTable)");
-    expect(purchasedDetach).toContain("inArray(projectDomainsTable.id, associationIds)");
-    expect(purchasedDetach.indexOf("delete(projectDomainsTable)")).toBeLessThan(
-      purchasedDetach.indexOf("update(purchasedDomainsTable)"),
+    const purchasedRetention = source.slice(
+      source.indexOf("async function retainPurchasedDomainAssignments"),
     );
+    expect(purchasedRetention).toContain('receipt.state = "retained"');
+    expect(purchasedRetention).not.toContain("delete(projectDomainsTable)");
+    expect(purchasedRetention).not.toContain("update(purchasedDomainsTable)");
+    expect(source).toContain("WHEN ${projectsTable.customDomain} IS NULL THEN 'unconfigured'");
+    expect(source).toContain("ELSE 'pending_verification'");
+    expect(source).toContain("sslLastCheckedAt: null");
   });
 
   it("deduplicates legacy and multi-domain hostname pointers under one atomic receipt", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const release = source.slice(
       source.indexOf("async function releaseCustomHostnameCertificates"),
-      source.indexOf("async function detachPurchasedDomains"),
+      source.indexOf("async function retainPurchasedDomainAssignments"),
     );
 
     expect(release).toContain("projectsTable.cfHostnameId");
@@ -405,7 +424,7 @@ describe("governed project retirement coordinator", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const security = source.indexOf("await releaseTrackedDomainSecurityResources");
     const certificates = source.indexOf("await releaseCustomHostnameCertificates", security);
-    const purchased = source.indexOf("await detachPurchasedDomains", certificates);
+    const purchased = source.indexOf("await retainPurchasedDomainAssignments", certificates);
     const runtime = source.indexOf("await destroyRuntimeTargets", purchased);
 
     expect(security).toBeGreaterThan(-1);
@@ -429,6 +448,20 @@ describe("governed project retirement coordinator", () => {
     expect(source.slice(discovery, strictDelete)).toContain(
       "projectRetirementOperationsTable.leaseVersion",
     );
+  });
+
+  it("includes a legacy-only custom domain in strict security discovery", () => {
+    const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
+    const start = source.indexOf("async function releaseTrackedDomainSecurityResources");
+    const end = source.indexOf("async function releaseCustomHostnameCertificates", start);
+    const security = source.slice(start, end);
+
+    expect(security).toContain("hostname: projectsTable.customDomain");
+    expect(security).toContain("cfHostnameId: projectsTable.cfHostnameId");
+    expect(security).toContain("const securityDomains:");
+    expect(security).toContain("id: null");
+    expect(security).toContain("mapInBoundedBatches(securityDomains");
+    expect(security).toContain("if (discovered.domain.id === null)");
   });
 
   it("terminalizes an expired fourth-attempt crash with a retryable typed receipt", () => {

@@ -359,6 +359,65 @@ describe("project lifecycle mutation fences", () => {
     );
   });
 
+  it("reacquires lifecycle sessions for detached schedule and promotion callbacks", () => {
+    const scheduleTrigger = runtimeRoutesSource.slice(
+      runtimeRoutesSource.indexOf("// POST /api/projects/:id/schedules/:sid/trigger"),
+      runtimeRoutesSource.indexOf("// ─── Environments"),
+    );
+    const promotionRoute = runtimeRoutesSource.slice(
+      runtimeRoutesSource.indexOf("// POST /api/projects/:id/environments/:envId/promote"),
+      runtimeRoutesSource.indexOf("// ─── Usage / Metering"),
+    );
+    const scheduledJob = runtimeRoutesSource.slice(
+      runtimeRoutesSource.indexOf("async function executeScheduledJob("),
+      runtimeRoutesSource.indexOf("async function executeEnvironmentPromotion("),
+    );
+    const environmentPromotion = runtimeRoutesSource.slice(
+      runtimeRoutesSource.indexOf("async function executeEnvironmentPromotion("),
+      runtimeRoutesSource.indexOf("/**\n * Provision a managed add-on."),
+    );
+
+    expect(scheduleTrigger).toContain("setImmediate(() =>");
+    expect(scheduleTrigger).toContain(
+      "executeScheduledJob(runRow.id, scheduleId, projectId, schedule)",
+    );
+    expect(promotionRoute).toContain("setImmediate(() =>");
+    expect(promotionRoute).toContain("executeEnvironmentPromotion({");
+
+    expect(scheduledJob).toContain("acquireProjectLifecycleSession(projectId)");
+    expect(scheduledJob.indexOf("acquireProjectLifecycleSession(projectId)")).toBeLessThan(
+      scheduledJob.indexOf("execInContainer("),
+    );
+    expect(scheduledJob).toContain(
+      'errorMessage: "Project lifecycle unavailable before scheduled job started"',
+    );
+    expect(scheduledJob.indexOf("if (!lifecycleSession)")).toBeLessThan(
+      scheduledJob.indexOf("execInContainer("),
+    );
+    expect(
+      scheduledJob.slice(
+        scheduledJob.indexOf("if (!lifecycleSession)"),
+        scheduledJob.indexOf("\n  try {"),
+      ),
+    ).not.toContain("execInContainer(");
+    expect(scheduledJob).toContain("await lifecycleSession.release()");
+
+    expect(environmentPromotion).toContain("acquireProjectLifecycleSession(input.projectId)");
+    expect(environmentPromotion).toContain(
+      'notes: "Project lifecycle unavailable before environment promotion started"',
+    );
+    expect(environmentPromotion.indexOf("if (!lifecycleSession)")).toBeLessThan(
+      environmentPromotion.indexOf("const [targetEnv]"),
+    );
+    expect(
+      environmentPromotion.slice(
+        environmentPromotion.indexOf("if (!lifecycleSession)"),
+        environmentPromotion.indexOf("\n  try {"),
+      ),
+    ).not.toContain("execInContainer(");
+    expect(environmentPromotion).toContain("await lifecycleSession.release()");
+  });
+
   it("cancels queued project vision work and fences any claimed provider call", () => {
     expect(retirementSource).toContain(".update(assetAnalysisEventsTable)");
     expect(retirementSource).toContain(

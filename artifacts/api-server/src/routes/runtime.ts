@@ -40,7 +40,10 @@ import {
   type EnvironmentName,
 } from "@workspace/db";
 import { requireProjectOwnership } from "../lib/auth";
-import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
+import {
+  acquireProjectLifecycleSession,
+  requireActiveProjectLifecycleSession,
+} from "../lib/project-lifecycle";
 import { logger } from "../lib/logger";
 import { encryptionService } from "../lib/encryption";
 import { execInContainer } from "../lib/tenant-runtime";
@@ -465,65 +468,19 @@ router.post(
       .set({ status: "deploying", updatedAt: new Date() })
       .where(eq(projectEnvironmentsTable.id, envId));
 
-    // Background: update target env snapshot + mark promotion complete
-    setImmediate(async () => {
-      try {
-        // Upsert target environment
-        const [targetEnv] = await db
-          .select()
-          .from(projectEnvironmentsTable)
-          .where(
-            and(
-              eq(projectEnvironmentsTable.projectId, projectId),
-              eq(projectEnvironmentsTable.name, target),
-            ),
-          );
-
-        if (targetEnv) {
-          await db
-            .update(projectEnvironmentsTable)
-            .set({
-              snapshotVersionId: env.snapshotVersionId ?? null,
-              status: "deployed",
-              deployedBy: req.userId ?? null,
-              deployedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(projectEnvironmentsTable.id, targetEnv.id));
-        } else {
-          await db.insert(projectEnvironmentsTable).values({
-            projectId,
-            name: target,
-            snapshotVersionId: env.snapshotVersionId ?? null,
-            status: "deployed",
-            protected: target === "production",
-            deployedBy: req.userId ?? null,
-            deployedAt: new Date(),
-          });
-        }
-
-        // Complete promotion record
-        await db
-          .update(environmentPromotionsTable)
-          .set({ status: "succeeded", completedAt: new Date() })
-          .where(eq(environmentPromotionsTable.id, promotion.id));
-
-        // Mark source env as deployed
-        await db
-          .update(projectEnvironmentsTable)
-          .set({ status: "deployed", updatedAt: new Date() })
-          .where(eq(projectEnvironmentsTable.id, envId));
-      } catch (err) {
-        logger.error({ err, projectId, envId }, "Environment promotion failed");
-        await db
-          .update(environmentPromotionsTable)
-          .set({ status: "failed", completedAt: new Date() })
-          .where(eq(environmentPromotionsTable.id, promotion.id));
-        await db
-          .update(projectEnvironmentsTable)
-          .set({ status: "failed", updatedAt: new Date() })
-          .where(eq(projectEnvironmentsTable.id, envId));
-      }
+    // Background: independently reacquire the lifecycle lock before doing work.
+    // The request lock may have been released and Trash may have won the race.
+    setImmediate(() => {
+      executeEnvironmentPromotion({
+        promotionId: promotion.id,
+        projectId,
+        sourceEnvironmentId: envId,
+        target,
+        snapshotVersionId: env.snapshotVersionId ?? null,
+        triggeredBy: req.userId ?? null,
+      }).catch((err: unknown) => {
+        logger.error({ err, projectId, envId }, "Environment promotion terminalization failed");
+      });
     });
 
     res.status(202).json({
@@ -577,6 +534,24 @@ async function executeScheduledJob(
   schedule: { cronExpr: string; note: string | null },
 ): Promise<void> {
   const startTime = Date.now();
+  const lifecycleSession = await acquireProjectLifecycleSession(projectId);
+
+  if (!lifecycleSession) {
+    await db
+      .update(scheduledJobRunsTable)
+      .set({
+        status: "failed",
+        exitCode: null,
+        output: null,
+        errorMessage: "Project lifecycle unavailable before scheduled job started",
+        durationMs: Date.now() - startTime,
+        finishedAt: new Date(),
+      })
+      .where(
+        and(eq(scheduledJobRunsTable.id, runId), eq(scheduledJobRunsTable.projectId, projectId)),
+      );
+    return;
+  }
 
   try {
     const [project] = await db
@@ -638,6 +613,106 @@ async function executeScheduledJob(
         finishedAt: new Date(),
       })
       .where(eq(scheduledJobRunsTable.id, runId));
+  } finally {
+    await lifecycleSession.release();
+  }
+}
+
+async function executeEnvironmentPromotion(input: {
+  promotionId: number;
+  projectId: number;
+  sourceEnvironmentId: number;
+  target: EnvironmentName;
+  snapshotVersionId: number | null;
+  triggeredBy: string | null;
+}): Promise<void> {
+  const lifecycleSession = await acquireProjectLifecycleSession(input.projectId);
+
+  if (!lifecycleSession) {
+    const completedAt = new Date();
+    await db
+      .update(environmentPromotionsTable)
+      .set({
+        status: "failed",
+        notes: "Project lifecycle unavailable before environment promotion started",
+        completedAt,
+      })
+      .where(
+        and(
+          eq(environmentPromotionsTable.id, input.promotionId),
+          eq(environmentPromotionsTable.projectId, input.projectId),
+        ),
+      );
+    await db
+      .update(projectEnvironmentsTable)
+      .set({ status: "failed", updatedAt: completedAt })
+      .where(
+        and(
+          eq(projectEnvironmentsTable.id, input.sourceEnvironmentId),
+          eq(projectEnvironmentsTable.projectId, input.projectId),
+        ),
+      );
+    return;
+  }
+
+  try {
+    const [targetEnv] = await db
+      .select()
+      .from(projectEnvironmentsTable)
+      .where(
+        and(
+          eq(projectEnvironmentsTable.projectId, input.projectId),
+          eq(projectEnvironmentsTable.name, input.target),
+        ),
+      );
+
+    if (targetEnv) {
+      await db
+        .update(projectEnvironmentsTable)
+        .set({
+          snapshotVersionId: input.snapshotVersionId,
+          status: "deployed",
+          deployedBy: input.triggeredBy,
+          deployedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(projectEnvironmentsTable.id, targetEnv.id));
+    } else {
+      await db.insert(projectEnvironmentsTable).values({
+        projectId: input.projectId,
+        name: input.target,
+        snapshotVersionId: input.snapshotVersionId,
+        status: "deployed",
+        protected: input.target === "production",
+        deployedBy: input.triggeredBy,
+        deployedAt: new Date(),
+      });
+    }
+
+    await db
+      .update(environmentPromotionsTable)
+      .set({ status: "succeeded", completedAt: new Date() })
+      .where(eq(environmentPromotionsTable.id, input.promotionId));
+
+    await db
+      .update(projectEnvironmentsTable)
+      .set({ status: "deployed", updatedAt: new Date() })
+      .where(eq(projectEnvironmentsTable.id, input.sourceEnvironmentId));
+  } catch (err) {
+    logger.error(
+      { err, projectId: input.projectId, envId: input.sourceEnvironmentId },
+      "Environment promotion failed",
+    );
+    await db
+      .update(environmentPromotionsTable)
+      .set({ status: "failed", notes: "Environment promotion failed", completedAt: new Date() })
+      .where(eq(environmentPromotionsTable.id, input.promotionId));
+    await db
+      .update(projectEnvironmentsTable)
+      .set({ status: "failed", updatedAt: new Date() })
+      .where(eq(projectEnvironmentsTable.id, input.sourceEnvironmentId));
+  } finally {
+    await lifecycleSession.release();
   }
 }
 

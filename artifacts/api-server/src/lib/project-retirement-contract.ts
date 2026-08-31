@@ -34,6 +34,8 @@ export const PROJECT_RETIREMENT_FAILURE_CODES = [
   "project_retirement_domain_release_unverified",
   "project_retirement_domain_security_release_failed",
   "project_retirement_domain_security_release_unverified",
+  "project_retirement_legacy_r2_release_failed",
+  "project_retirement_legacy_r2_release_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
   "project_retirement_legacy_runtime_retained",
@@ -56,6 +58,8 @@ const RETRYABLE_TERMINAL_FAILURE_CODES = new Set<ProjectRetirementFailureCode>([
   "project_retirement_domain_release_unverified",
   "project_retirement_domain_security_release_failed",
   "project_retirement_domain_security_release_unverified",
+  "project_retirement_legacy_r2_release_failed",
+  "project_retirement_legacy_r2_release_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
   "project_retirement_attempts_exhausted",
@@ -222,6 +226,19 @@ export function initialProjectRetirementProgress(): ProjectRetirementProgress {
       creditsRefunded: 0,
       telemetryFlushed: 0,
     },
+    access: {
+      state: "pending",
+      shareLinksRevoked: 0,
+      previewSessionsRevoked: 0,
+      supportGrantsRevoked: 0,
+      supportSessionsInterrupted: 0,
+    },
+    legacyR2: {
+      state: "pending",
+      discoveredCount: 0,
+      deletedCount: 0,
+      failureCode: null,
+    },
     domains: [],
     hostnameCertificates: [],
     securityResources: [],
@@ -319,4 +336,23 @@ export async function classifyStoredRuntimePointer(input: {
     role: parsed.role,
     slot: parsed.slot,
   } as StoredRuntimePointerClassification;
+}
+
+/**
+ * Every known or observed hostname is a cache eviction target, even when the
+ * retired legacy KV registry is intentionally absent. A removed route can
+ * still have a stale Cache API entry, so route inventory alone is insufficient.
+ */
+export function projectRetirementCacheHostnames(input: {
+  knownHostnames: readonly string[];
+  legacyKvHostnames: readonly string[];
+  runtimeRouteHostnames: readonly string[];
+}): string[] {
+  return [
+    ...new Set([
+      ...input.knownHostnames,
+      ...input.legacyKvHostnames,
+      ...input.runtimeRouteHostnames,
+    ]),
+  ];
 }

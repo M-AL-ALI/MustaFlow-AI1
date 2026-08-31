@@ -30,6 +30,12 @@ const SECURITY_RECONCILIATION_MAX_PAGES = 20;
 const KV_INVENTORY_PAGE_SIZE = 1_000;
 const KV_INVENTORY_MAX_PAGES = 20;
 const KV_INVENTORY_MAX_PROJECT_ROUTES = 512;
+const CUSTOM_HOSTNAME_INVENTORY_PAGE_SIZE = 100;
+const CUSTOM_HOSTNAME_INVENTORY_MAX_PAGES = 20;
+const CUSTOM_HOSTNAME_INVENTORY_MAX_TARGETS = 100;
+const R2_RETIREMENT_LIST_PAGE_SIZE = 1_000;
+const R2_RETIREMENT_DELETE_BATCH_SIZE = 1_000;
+const R2_RETIREMENT_MAX_OBJECTS = 10_000;
 
 export function cfEnabled(): boolean {
   return Boolean(process.env.CF_ZONE_ID && process.env.CF_API_TOKEN);
@@ -1230,6 +1236,143 @@ export async function listCustomHostnames(): Promise<CfCustomHostname[]> {
   return results;
 }
 
+export type StrictCustomHostnameMatch = {
+  id: string;
+  hostname: string;
+};
+
+export type StrictCustomHostnameInventory =
+  | { state: "complete"; matches: StrictCustomHostnameMatch[] }
+  | { state: "unavailable"; stage: "input" | "config" | "read" | "parse" | "cap" };
+
+function normalizeInventoryHostname(hostname: string): string | null {
+  const normalized = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (normalized.length === 0 || normalized.length > 253 || /[\s/\\]/.test(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+/**
+ * Strict, bounded provider inventory for exact custom-hostname targets.
+ *
+ * Unlike listCustomHostnames(), this proof surface never converts an
+ * incomplete provider read into an empty result. A non-OK response,
+ * malformed page, pagination cap, or transport failure is unavailable.
+ * Only the matched provider id and hostname cross the boundary.
+ */
+export async function inventoryCustomHostnamesByHostname(
+  hostnames: readonly string[],
+): Promise<StrictCustomHostnameInventory> {
+  if (hostnames.length === 0) return { state: "complete", matches: [] };
+  if (hostnames.length > CUSTOM_HOSTNAME_INVENTORY_MAX_TARGETS) {
+    return { state: "unavailable", stage: "input" };
+  }
+
+  const normalizedTargets = hostnames.map(normalizeInventoryHostname);
+  if (normalizedTargets.some((hostname) => hostname === null)) {
+    return { state: "unavailable", stage: "input" };
+  }
+  if (!cfEnabled()) return { state: "unavailable", stage: "config" };
+
+  const targetSet = new Set(normalizedTargets as string[]);
+  const matches = new Map<string, StrictCustomHostnameMatch>();
+  let expectedTotal: number | null = null;
+  let observedCount = 0;
+
+  for (let page = 1; page <= CUSTOM_HOSTNAME_INVENTORY_MAX_PAGES; page++) {
+    try {
+      const resp = await fetch(
+        `${CF_API_BASE}/zones/${zoneId()}/custom_hostnames?page=${page}&per_page=${CUSTOM_HOSTNAME_INVENTORY_PAGE_SIZE}`,
+        {
+          headers: readHeaders(),
+          signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+        },
+      );
+      if (!resp.ok) return { state: "unavailable", stage: "read" };
+
+      let json: unknown;
+      try {
+        json = await resp.json();
+      } catch {
+        return { state: "unavailable", stage: "parse" };
+      }
+      if (!json || typeof json !== "object") {
+        return { state: "unavailable", stage: "parse" };
+      }
+      const pageResult = json as Partial<CfListResult<unknown>>;
+      if (pageResult.success !== true || !Array.isArray(pageResult.result)) {
+        return { state: "unavailable", stage: "parse" };
+      }
+      const info = pageResult.result_info;
+      if (
+        !info ||
+        !Number.isInteger(info.count) ||
+        info.count !== pageResult.result.length ||
+        !Number.isInteger(info.page) ||
+        info.page !== page ||
+        !Number.isInteger(info.per_page) ||
+        info.per_page !== CUSTOM_HOSTNAME_INVENTORY_PAGE_SIZE ||
+        !Number.isInteger(info.total_count) ||
+        info.total_count < 0
+      ) {
+        return { state: "unavailable", stage: "parse" };
+      }
+      if (expectedTotal === null) expectedTotal = info.total_count;
+      if (expectedTotal !== info.total_count) {
+        return { state: "unavailable", stage: "parse" };
+      }
+      if (
+        expectedTotal >
+        CUSTOM_HOSTNAME_INVENTORY_PAGE_SIZE * CUSTOM_HOSTNAME_INVENTORY_MAX_PAGES
+      ) {
+        return { state: "unavailable", stage: "cap" };
+      }
+
+      for (const candidate of pageResult.result) {
+        if (!candidate || typeof candidate !== "object") {
+          return { state: "unavailable", stage: "parse" };
+        }
+        const record = candidate as Record<string, unknown>;
+        if (
+          typeof record.id !== "string" ||
+          record.id.length === 0 ||
+          typeof record.hostname !== "string"
+        ) {
+          return { state: "unavailable", stage: "parse" };
+        }
+        const normalized = normalizeInventoryHostname(record.hostname);
+        if (!normalized) return { state: "unavailable", stage: "parse" };
+        if (targetSet.has(normalized)) {
+          matches.set(record.id, { id: record.id, hostname: normalized });
+        }
+      }
+
+      observedCount += pageResult.result.length;
+      if (observedCount > expectedTotal) {
+        return { state: "unavailable", stage: "parse" };
+      }
+      if (observedCount === expectedTotal) {
+        return {
+          state: "complete",
+          matches: [...matches.values()].sort(
+            (left, right) =>
+              left.hostname.localeCompare(right.hostname) || left.id.localeCompare(right.id),
+          ),
+        };
+      }
+      if (pageResult.result.length !== CUSTOM_HOSTNAME_INVENTORY_PAGE_SIZE) {
+        return { state: "unavailable", stage: "parse" };
+      }
+    } catch (err) {
+      logger.warn({ err, page }, "CF strict custom-hostname inventory threw");
+      return { state: "unavailable", stage: "read" };
+    }
+  }
+
+  return { state: "unavailable", stage: "cap" };
+}
+
 // ── DNS Record API methods ────────────────────────────────────────────────────
 
 /**
@@ -1657,6 +1800,299 @@ async function r2Request(opts: {
     logger.warn({ err, key: opts.key }, "R2 request threw");
     return { ok: false, status: 0 };
   }
+}
+
+type StrictR2ControlResult =
+  | { state: "complete"; status: number; body: string }
+  | { state: "unavailable"; status: number };
+
+function encodeAwsQueryComponent(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+}
+
+function canonicalAwsQuery(entries: ReadonlyArray<readonly [string, string]>): string {
+  const compare = (left: string, right: string): number =>
+    left < right ? -1 : left > right ? 1 : 0;
+  return entries
+    .map(([key, value]) => [encodeAwsQueryComponent(key), encodeAwsQueryComponent(value)] as const)
+    .sort(
+      ([leftKey, leftValue], [rightKey, rightValue]) =>
+        compare(leftKey, rightKey) || compare(leftValue, rightValue),
+    )
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
+}
+
+/** Strict S3 control request used only by bounded retirement proofs. */
+async function strictR2ControlRequest(opts: {
+  method: "GET" | "POST";
+  query: ReadonlyArray<readonly [string, string]>;
+  body?: Buffer;
+}): Promise<StrictR2ControlResult> {
+  const acctId = accountId();
+  const accessKeyId = process.env.CF_R2_ACCESS_KEY_ID!;
+  const secretKey = process.env.CF_R2_SECRET_ACCESS_KEY!;
+  const bucket = r2Bucket();
+  const region = "auto";
+  const service = "s3";
+  const host = `${acctId}.r2.cloudflarestorage.com`;
+  const path = encodeURI(`/${bucket}`);
+  const queryString = canonicalAwsQuery(opts.query);
+  const body = opts.body ?? Buffer.alloc(0);
+  const now = new Date();
+  // eslint-disable-next-line no-useless-escape
+  const datetime = now.toISOString().replace(/[:\-]/g, "").replace(/\.\d+/, "").slice(0, 15) + "Z";
+  const headersToSign: Record<string, string> = {
+    host,
+    "x-amz-content-sha256": sha256Hex(body),
+    "x-amz-date": datetime,
+  };
+  if (opts.method === "POST") {
+    headersToSign["content-type"] = "application/xml";
+    headersToSign["content-length"] = String(body.length);
+    headersToSign["content-md5"] = createHash("md5").update(body).digest("base64");
+  }
+  const authorization = buildSignatureV4({
+    method: opts.method,
+    host,
+    path,
+    queryString,
+    headers: headersToSign,
+    body,
+    accessKeyId,
+    secretKey,
+    region,
+    service,
+    datetime,
+  });
+
+  try {
+    const response = await fetch(`https://${host}${path}?${queryString}`, {
+      method: opts.method,
+      headers: { ...headersToSign, Authorization: authorization },
+      body: opts.method === "POST" ? body : undefined,
+      signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
+    });
+    if (!response.ok) return { state: "unavailable", status: response.status };
+    try {
+      return { state: "complete", status: response.status, body: await response.text() };
+    } catch {
+      return { state: "unavailable", status: response.status };
+    }
+  } catch (err) {
+    logger.warn({ err, method: opts.method }, "R2 strict retirement request threw");
+    return { state: "unavailable", status: 0 };
+  }
+}
+
+function decodeXmlText(value: string): string | null {
+  if (/[<>]/.test(value)) return null;
+  if (/&(?!(?:amp|quot|apos|lt|gt|#\d+|#x[0-9a-f]+);)/i.test(value)) return null;
+  try {
+    return value
+      .replace(/&#(\d+);/g, (_match, decimal: string) => String.fromCodePoint(Number(decimal)))
+      .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) =>
+        String.fromCodePoint(Number.parseInt(hex, 16)),
+      )
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");
+  } catch {
+    return null;
+  }
+}
+
+function xmlElementValues(xml: string, element: string): string[] | null {
+  const values: string[] = [];
+  const expression = new RegExp(`<${element}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${element}>`, "g");
+  for (const match of xml.matchAll(expression)) {
+    const decoded = decodeXmlText(match[1] ?? "");
+    if (decoded === null) return null;
+    values.push(decoded);
+  }
+  return values;
+}
+
+function isSingleXmlDocument(xml: string, root: string, allowSelfClosing = false): boolean {
+  const normalized = xml.trim().replace(/^<\?xml[^>]*>\s*/, "");
+  const openingCount = normalized.match(new RegExp(`<${root}(?:\\s[^>]*)?\\/?>`, "g"))?.length ?? 0;
+  const closingCount = normalized.match(new RegExp(`<\\/${root}>`, "g"))?.length ?? 0;
+  if (openingCount !== 1) return false;
+  if (allowSelfClosing && closingCount === 0) {
+    return new RegExp(`^<${root}(?:\\s[^>]*)?\\s*\\/>$`).test(normalized);
+  }
+  return (
+    closingCount === 1 &&
+    new RegExp(`^<${root}(?:\\s[^>]*)?>[\\s\\S]*<\\/${root}>$`).test(normalized)
+  );
+}
+
+type StrictR2ListPage =
+  | { state: "complete"; keys: string[]; truncated: false }
+  | { state: "complete"; keys: string[]; truncated: true; nextToken: string }
+  | { state: "unavailable" };
+
+async function listStrictR2PrefixPage(
+  prefix: string,
+  maxKeys: number,
+  continuationToken?: string,
+): Promise<StrictR2ListPage> {
+  const query: Array<readonly [string, string]> = [
+    ["list-type", "2"],
+    ["max-keys", String(maxKeys)],
+    ["prefix", prefix],
+  ];
+  if (continuationToken) query.push(["continuation-token", continuationToken]);
+  const response = await strictR2ControlRequest({ method: "GET", query });
+  if (response.state !== "complete") return { state: "unavailable" };
+  const xml = response.body;
+  if (!isSingleXmlDocument(xml, "ListBucketResult") || /<Error(?:\s[^>]*)?>/.test(xml)) {
+    return { state: "unavailable" };
+  }
+  const keys = xmlElementValues(xml, "Key");
+  const keyCount = xmlElementValues(xml, "KeyCount");
+  const truncated = xmlElementValues(xml, "IsTruncated");
+  if (
+    !keys ||
+    !keyCount ||
+    keyCount.length !== 1 ||
+    !/^\d+$/.test(keyCount[0] ?? "") ||
+    Number(keyCount[0]) !== keys.length ||
+    keys.length > maxKeys ||
+    keys.some((key) => !key.startsWith(prefix)) ||
+    !truncated ||
+    truncated.length !== 1 ||
+    !["true", "false"].includes(truncated[0] ?? "")
+  ) {
+    return { state: "unavailable" };
+  }
+  if (truncated[0] === "false") return { state: "complete", keys, truncated: false };
+  const tokens = xmlElementValues(xml, "NextContinuationToken");
+  if (!tokens || tokens.length !== 1 || !tokens[0]) return { state: "unavailable" };
+  return { state: "complete", keys, truncated: true, nextToken: tokens[0] };
+}
+
+function escapeXmlText(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+async function deleteStrictR2Keys(keys: readonly string[]): Promise<boolean> {
+  const body = Buffer.from(
+    `<?xml version="1.0" encoding="UTF-8"?><Delete>${keys
+      .map((key) => `<Object><Key>${escapeXmlText(key)}</Key></Object>`)
+      .join("")}<Quiet>true</Quiet></Delete>`,
+    "utf8",
+  );
+  const response = await strictR2ControlRequest({ method: "POST", query: [["delete", ""]], body });
+  if (response.state !== "complete") return false;
+  return (
+    isSingleXmlDocument(response.body, "DeleteResult", true) &&
+    !/<Error(?:\s[^>]*)?>/.test(response.body)
+  );
+}
+
+export type LegacyR2ProjectPrefixRetirement =
+  | { state: "not_configured"; discoveredCount: 0; deletedCount: 0 }
+  | { state: "absent"; discoveredCount: number; deletedCount: number }
+  | {
+      state: "unavailable";
+      stage: "input" | "config" | "list" | "cap" | "delete" | "verify";
+      discoveredCount: number;
+      deletedCount: number;
+    };
+
+/**
+ * Strictly retires legacy snapshot objects under the numeric `{projectId}/`
+ * prefix, with bounded inventory/deletion and an authoritative absence read.
+ * Object keys never cross this function's result boundary.
+ */
+export async function retireLegacyR2ProjectPrefix(
+  projectId: number,
+): Promise<LegacyR2ProjectPrefixRetirement> {
+  if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+    return { state: "unavailable", stage: "input", discoveredCount: 0, deletedCount: 0 };
+  }
+
+  const requiredConfig = [
+    process.env.CF_ACCOUNT_ID,
+    process.env.CF_R2_ACCESS_KEY_ID,
+    process.env.CF_R2_SECRET_ACCESS_KEY,
+  ];
+  const hasAnyConfig =
+    requiredConfig.some((value) => Boolean(value)) || process.env.CF_R2_BUCKET !== undefined;
+  if (!hasAnyConfig) return { state: "not_configured", discoveredCount: 0, deletedCount: 0 };
+  if (requiredConfig.some((value) => !value) || r2Bucket().trim().length === 0) {
+    return { state: "unavailable", stage: "config", discoveredCount: 0, deletedCount: 0 };
+  }
+
+  const prefix = `${projectId}/`;
+  const keys: string[] = [];
+  const seenKeys = new Set<string>();
+  const seenTokens = new Set<string>();
+  let continuationToken: string | undefined;
+  while (true) {
+    const page = await listStrictR2PrefixPage(
+      prefix,
+      R2_RETIREMENT_LIST_PAGE_SIZE,
+      continuationToken,
+    );
+    if (page.state !== "complete") {
+      return { state: "unavailable", stage: "list", discoveredCount: keys.length, deletedCount: 0 };
+    }
+    if (page.keys.some((key) => seenKeys.has(key))) {
+      return { state: "unavailable", stage: "list", discoveredCount: keys.length, deletedCount: 0 };
+    }
+    if (keys.length + page.keys.length > R2_RETIREMENT_MAX_OBJECTS) {
+      return { state: "unavailable", stage: "cap", discoveredCount: keys.length, deletedCount: 0 };
+    }
+    keys.push(...page.keys);
+    for (const key of page.keys) seenKeys.add(key);
+    if (!page.truncated) break;
+    if (keys.length === R2_RETIREMENT_MAX_OBJECTS || seenTokens.has(page.nextToken)) {
+      return { state: "unavailable", stage: "cap", discoveredCount: keys.length, deletedCount: 0 };
+    }
+    seenTokens.add(page.nextToken);
+    continuationToken = page.nextToken;
+  }
+
+  let deletedCount = 0;
+  for (let offset = 0; offset < keys.length; offset += R2_RETIREMENT_DELETE_BATCH_SIZE) {
+    const batch = keys.slice(offset, offset + R2_RETIREMENT_DELETE_BATCH_SIZE);
+    if (!(await deleteStrictR2Keys(batch))) {
+      return {
+        state: "unavailable",
+        stage: "delete",
+        discoveredCount: keys.length,
+        deletedCount,
+      };
+    }
+    deletedCount += batch.length;
+  }
+
+  const verification = await listStrictR2PrefixPage(prefix, 1);
+  if (
+    verification.state !== "complete" ||
+    verification.truncated ||
+    verification.keys.length !== 0
+  ) {
+    return {
+      state: "unavailable",
+      stage: "verify",
+      discoveredCount: keys.length,
+      deletedCount,
+    };
+  }
+  return { state: "absent", discoveredCount: keys.length, deletedCount };
 }
 
 /**

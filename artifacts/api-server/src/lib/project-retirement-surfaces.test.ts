@@ -16,7 +16,11 @@ describe("project retirement route and serving surfaces", () => {
     expect(retirement).toContain("inventoryHostnameKVRoutesByProject(operation.projectId)");
     expect(retirement).toContain("...observedByHostname.keys()");
     expect(retirement).toContain("retireObservedHostnameKV(observation)");
-    expect(retirement).toContain("purgeCacheForHostnames([");
+    expect(retirement).toContain("purgeCacheForHostnames(");
+    expect(retirement).toContain("projectRetirementCacheHostnames({");
+    expect(retirement).toContain("knownHostnames,");
+    expect(retirement).toContain("legacyKvHostnames: kvHostnames");
+    expect(retirement).toContain("runtimeRouteHostnames,");
     expect(retirement).toContain("if (!cachePurged)");
     expect(retirement).toContain("progress.route.hostnames = routeResults.map");
     expect(retirement).toContain('progress.route.cache = { state: "failed" }');

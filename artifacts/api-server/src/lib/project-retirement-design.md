@@ -42,7 +42,9 @@ cleanup for existing Trash projects; it does not restore or wake them.
    custom-domain reads independently reject a tombstoned project immediately.
 4. Strict-delete and authoritative-read every Cloudflare custom-hostname
    certificate. Only after absence is proven is its provider id cleared and SSL
-   marked pending; hostname/DNS configuration remains in Trash for restore.
+   marked pending; hostname/DNS configuration and purchased-domain assignment
+   remain in Trash for restore. Purchased-domain registration and billing also
+   continue during the recovery window.
 5. Derive, destroy, and status-verify absence for preview/primary.
 6. Derive, destroy, and status-verify absence for production/blue.
 7. Derive, destroy, and status-verify absence for production/green.

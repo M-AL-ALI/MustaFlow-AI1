@@ -26,11 +26,13 @@ import {
 import { CloudflareRuntimeControlError } from "./cloudflare-runtime-provider";
 import {
   discoverCloudflareSecurityResources,
+  inventoryCustomHostnamesByHostname,
   inventoryHostnameKVRoutesByProject,
   purgeCacheForHostnames,
   retireCloudflareSecurityResource,
   retireCustomHostname,
   retireHostnameKV,
+  retireLegacyR2ProjectPrefix,
   retireObservedHostnameKV,
 } from "./cloudflare";
 import {
@@ -45,6 +47,7 @@ import {
   initialProjectRetirementProgress,
   planLegacyProjectRetirementAdoptions,
   planHostnameCertificateRetirements,
+  projectRetirementCacheHostnames,
   PROJECT_LIFECYCLE_LOCK_NAMESPACE,
   PROJECT_RETIREMENT_LEASE_MINUTES,
   PROJECT_RETIREMENT_MAX_ATTEMPTS,
@@ -55,6 +58,7 @@ import {
   type ProjectRetirementRuntimeTarget,
 } from "./project-retirement-contract";
 import { resolveLegacyHostnameKvPosture } from "./project-retirement-activation";
+import { retireProjectAccessSurfaces } from "./project-retirement-access";
 
 export * from "./project-retirement-contract";
 
@@ -96,12 +100,17 @@ export async function acceptProjectRetirement(input: {
       .where(and(...predicates))
       .returning({ id: projectsTable.id });
     if (!project) return null;
+    const progress = await retireProjectAccessSurfaces(tx, {
+      projectId: project.id,
+      actorUserId: input.requestedBy,
+      progress: initialProjectRetirementProgress(),
+    });
     await tx.insert(projectRetirementOperationsTable).values({
       id: operationId,
       projectId: project.id,
       requestedBy: input.requestedBy,
       state: "accepted",
-      progress: initialProjectRetirementProgress(),
+      progress,
     });
     await tx.execute(disableProjectDeploymentSchedulesStatement(project.id));
     await tx
@@ -457,9 +466,13 @@ async function deactivatePublishedRoutes(
     }
   }
 
-  const cachePurged = await purgeCacheForHostnames([
-    ...new Set([...kvHostnames, ...runtimeRouteHostnames]),
-  ]);
+  const cachePurged = await purgeCacheForHostnames(
+    projectRetirementCacheHostnames({
+      knownHostnames,
+      legacyKvHostnames: kvHostnames,
+      runtimeRouteHostnames,
+    }),
+  );
   if (!cachePurged) {
     progress.route.state = "failed";
     progress.route.cache = { state: "failed" };
@@ -488,6 +501,52 @@ function securityResourceKey(resource: CloudflareSecurityResourceReceipt): strin
   return `${resource.kind}:${resource.rulesetId ?? ""}:${resource.id}`;
 }
 
+async function retireLegacyCdnObjects(
+  operation: ProjectRetirementOperation,
+  progress: ProjectRetirementProgress,
+  leaseVersion: number,
+): Promise<void> {
+  progress.legacyR2 ??= {
+    state: "pending",
+    discoveredCount: 0,
+    deletedCount: 0,
+    failureCode: null,
+  };
+  if (
+    progress.legacyR2.state === "verified_absent" ||
+    progress.legacyR2.state === "not_configured"
+  ) {
+    return;
+  }
+
+  progress.legacyR2.state = "deleting";
+  progress.legacyR2.failureCode = null;
+  await updateProgress(operation.id, progress, leaseVersion);
+
+  const outcome = await retireLegacyR2ProjectPrefix(operation.projectId);
+  progress.legacyR2.discoveredCount = outcome.discoveredCount;
+  progress.legacyR2.deletedCount = outcome.deletedCount;
+  if (outcome.state === "not_configured") {
+    progress.legacyR2.state = "not_configured";
+    await updateProgress(operation.id, progress, leaseVersion);
+    return;
+  }
+  if (outcome.state === "absent") {
+    progress.legacyR2.state = "verified_absent";
+    await updateProgress(operation.id, progress, leaseVersion);
+    return;
+  }
+
+  const code =
+    outcome.stage === "delete"
+      ? "project_retirement_legacy_r2_release_failed"
+      : "project_retirement_legacy_r2_release_unverified";
+  progress.legacyR2.state = "failed";
+  progress.legacyR2.failureCode = code;
+  await updateProgress(operation.id, progress, leaseVersion);
+  throw new ProjectRetirementStepError({ code, target: null, retryable: true });
+}
+
 async function releaseTrackedDomainSecurityResources(
   operation: ProjectRetirementOperation,
   progress: ProjectRetirementProgress,
@@ -503,8 +562,39 @@ async function releaseTrackedDomainSecurityResources(
     .from(projectDomainsTable)
     .where(eq(projectDomainsTable.projectId, operation.projectId));
 
+  // The legacy projects.custom_domain surface has no security_config column.
+  // Include it as a synthetic discovery target when no project_domains row
+  // shadows the hostname, so its deterministic WAF resources cannot escape.
+  const [legacyProject] = await db
+    .select({
+      hostname: projectsTable.customDomain,
+      cfHostnameId: projectsTable.cfHostnameId,
+    })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, operation.projectId))
+    .limit(1);
+  const securityDomains: Array<{
+    id: number | null;
+    hostname: string;
+    cfHostnameId: string | null;
+    securityConfig: DomainSecurityConfig | null;
+  }> = [
+    ...domains,
+    ...(legacyProject?.hostname &&
+    !domains.some((domain) => domain.hostname === legacyProject.hostname)
+      ? [
+          {
+            id: null,
+            hostname: legacyProject.hostname,
+            cfHostnameId: legacyProject.cfHostnameId,
+            securityConfig: null,
+          },
+        ]
+      : []),
+  ];
+
   progress.securityResources ??= [];
-  const discoveries = await mapInBoundedBatches(domains, (domain) =>
+  const discoveries = await mapInBoundedBatches(securityDomains, (domain) =>
     discoverCloudflareSecurityResources({
       hostname: domain.hostname,
       cfHostnameId: domain.cfHostnameId,
@@ -512,7 +602,7 @@ async function releaseTrackedDomainSecurityResources(
       existing: domain.securityConfig?.cloudflareResources ?? [],
     }),
   );
-  const discoveredConfigs = domains.map((domain, index) => {
+  const discoveredConfigs = securityDomains.map((domain, index) => {
     const resources = discoveries[index]!.resources;
     const securityConfig: DomainSecurityConfig = {
       ...((domain.securityConfig ?? {}) as DomainSecurityConfig),
@@ -543,6 +633,10 @@ async function releaseTrackedDomainSecurityResources(
   });
   await db.transaction(async (tx) => {
     for (const discovered of discoveredConfigs) {
+      if (discovered.domain.id === null) {
+        discovered.domain.securityConfig = discovered.securityConfig;
+        continue;
+      }
       const persisted = await tx
         .update(projectDomainsTable)
         .set({ securityConfig: discovered.securityConfig, updatedAt: sql`now()` })
@@ -587,10 +681,14 @@ async function releaseTrackedDomainSecurityResources(
     string,
     {
       resource: CloudflareSecurityResourceReceipt;
-      domains: Array<{ id: number; hostname: string; securityConfig: DomainSecurityConfig }>;
+      domains: Array<{
+        id: number | null;
+        hostname: string;
+        securityConfig: DomainSecurityConfig;
+      }>;
     }
   >();
-  for (const domain of domains) {
+  for (const domain of securityDomains) {
     const securityConfig = (domain.securityConfig ?? {}) as DomainSecurityConfig;
     for (const resource of securityConfig.cloudflareResources ?? []) {
       const key = securityResourceKey(resource);
@@ -658,6 +756,7 @@ async function releaseTrackedDomainSecurityResources(
     }));
     await db.transaction(async (tx) => {
       for (const next of nextConfigs) {
+        if (next.domain.id === null) continue;
         const cleared = await tx
           .update(projectDomainsTable)
           .set({ securityConfig: next.value, updatedAt: sql`now()` })
@@ -740,6 +839,34 @@ async function releaseCustomHostnameCertificates(
     legacyProject: { cfHostnameId: project.cfHostnameId, hostname: project.customDomain },
     domains,
   });
+  const hostnameInventory = await inventoryCustomHostnamesByHostname([
+    ...new Set(
+      [project.customDomain, ...domains.map((domain) => domain.hostname)].filter(
+        (hostname): hostname is string => Boolean(hostname),
+      ),
+    ),
+  ]);
+  if (hostnameInventory.state !== "complete") {
+    throw new ProjectRetirementStepError({
+      code: "project_retirement_domain_release_unverified",
+      target: null,
+      retryable: true,
+    });
+  }
+  for (const match of hostnameInventory.matches) {
+    const knownTarget = planned.find((target) => target.cfHostnameId === match.id);
+    if (knownTarget) {
+      if (!knownTarget.hostnames.includes(match.hostname))
+        knownTarget.hostnames.push(match.hostname);
+      continue;
+    }
+    planned.push({
+      cfHostnameId: match.id,
+      hostnames: [match.hostname],
+      projectDomainIds: [],
+      legacyProjectPointer: false,
+    });
+  }
 
   progress.hostnameCertificates ??= [];
   progress.domains ??= [];
@@ -773,7 +900,10 @@ async function releaseCustomHostnameCertificates(
     receipt.state = "releasing";
     receipt.failureCode = null;
     for (const domainReceipt of progress.domains) {
-      if (target.projectDomainIds.includes(domainReceipt.domainId)) {
+      if (
+        domainReceipt.domainId !== null &&
+        target.projectDomainIds.includes(domainReceipt.domainId)
+      ) {
         domainReceipt.state = "releasing";
         domainReceipt.failureCode = null;
       }
@@ -789,7 +919,10 @@ async function releaseCustomHostnameCertificates(
       receipt.state = "failed";
       receipt.failureCode = code;
       for (const domainReceipt of progress.domains) {
-        if (target.projectDomainIds.includes(domainReceipt.domainId)) {
+        if (
+          domainReceipt.domainId !== null &&
+          target.projectDomainIds.includes(domainReceipt.domainId)
+        ) {
           domainReceipt.state = "failed";
           domainReceipt.failureCode = code;
         }
@@ -801,7 +934,10 @@ async function releaseCustomHostnameCertificates(
     receipt.state = "verified_absent";
     receipt.failureCode = null;
     for (const domainReceipt of progress.domains) {
-      if (target.projectDomainIds.includes(domainReceipt.domainId)) {
+      if (
+        domainReceipt.domainId !== null &&
+        target.projectDomainIds.includes(domainReceipt.domainId)
+      ) {
         domainReceipt.state = "verified_absent";
         domainReceipt.failureCode = null;
       }
@@ -869,7 +1005,7 @@ async function releaseCustomHostnameCertificates(
   }
 }
 
-async function detachPurchasedDomains(
+async function retainPurchasedDomainAssignments(
   operation: ProjectRetirementOperation,
   progress: ProjectRetirementProgress,
   leaseVersion: number,
@@ -914,59 +1050,22 @@ async function detachPurchasedDomains(
     }
   }
   await updateProgress(operation.id, progress, leaseVersion);
-  for (const receipt of purchasedReceipts) {
-    if (domains.some((domain) => domain.id === receipt.purchasedDomainId)) {
-      receipt.state = "detached";
-    }
-  }
-  await db.transaction(async (tx) => {
-    const associationIds = associations.map((association) => association.id);
-    if (associationIds.length > 0) {
-      const removedAssociations = await tx
-        .delete(projectDomainsTable)
-        .where(
-          and(
-            eq(projectDomainsTable.projectId, operation.projectId),
-            inArray(projectDomainsTable.id, associationIds),
-          ),
-        )
-        .returning({ id: projectDomainsTable.id });
-      if (removedAssociations.length !== associationIds.length) {
-        throw new ProjectRetirementLeaseLostError();
-      }
-    }
-    const detached = await tx
-      .update(purchasedDomainsTable)
-      .set({ projectId: null, updatedAt: sql`now()` })
-      .where(eq(purchasedDomainsTable.projectId, operation.projectId))
-      .returning({ id: purchasedDomainsTable.id });
-    if (detached.length !== domains.length) throw new ProjectRetirementLeaseLostError();
-    const fenced = await tx
-      .update(projectRetirementOperationsTable)
-      .set({
-        progress,
-        leaseExpiresAt: sql`now() + interval '${sql.raw(
-          String(PROJECT_RETIREMENT_LEASE_MINUTES),
-        )} minutes'`,
-        updatedAt: sql`now()`,
-      })
-      .where(
-        and(
-          eq(projectRetirementOperationsTable.id, operation.id),
-          eq(projectRetirementOperationsTable.state, "running"),
-          eq(projectRetirementOperationsTable.leaseVersion, leaseVersion),
-        ),
-      )
-      .returning({ id: projectRetirementOperationsTable.id });
-    if (fenced.length !== 1) throw new ProjectRetirementLeaseLostError();
-  });
+  // Trash is recoverable. Registration ownership, billing, the project
+  // assignment, and its project_domains configuration therefore remain intact.
+  // Public serving is already disabled and absence-proven by the preceding
+  // route/certificate steps. Permanent deletion owns the later detach policy.
+  for (const receipt of purchasedReceipts) receipt.state = "retained";
+  await updateProgress(operation.id, progress, leaseVersion);
 }
 
 async function destroyRuntimeTargets(
   operation: ProjectRetirementOperation,
   progress: ProjectRetirementProgress,
   leaseVersion: number,
-): Promise<{ clearContainerPointer: boolean; clearProductionPointer: boolean }> {
+): Promise<{
+  clearContainerPointer: boolean;
+  clearProductionPointer: boolean;
+}> {
   const namespace = process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE;
   if (!namespace) {
     throw new ProjectRetirementStepError({
@@ -980,6 +1079,7 @@ async function destroyRuntimeTargets(
     .select({
       containerId: projectsTable.containerId,
       prodContainerId: projectsTable.prodContainerId,
+      testContainerId: projectsTable.testContainerId,
     })
     .from(projectsTable)
     .where(eq(projectsTable.id, operation.projectId));
@@ -994,6 +1094,22 @@ async function destroyRuntimeTargets(
   progress.retainedLegacyRuntimePointers ??= [];
   let clearContainerPointer = project.containerId === null;
   let clearProductionPointer = project.prodContainerId === null;
+  // testContainerId belongs to the historical Fly-backed testing workflow. It
+  // is not a Cloudflare preview identity and must never be sent to the current
+  // tenant-runtime provider or silently cleared. Retain it as explicit typed
+  // evidence so cleanup cannot complete until a separately governed Fly path
+  // has preserved any SQLite data and proven the machine absent.
+  if (
+    project.testContainerId &&
+    !progress.retainedLegacyRuntimePointers.some((item) => item.pointer === "testContainerId")
+  ) {
+    progress.retainedLegacyRuntimePointers.push({
+      pointer: "testContainerId",
+      identity: project.testContainerId,
+      reason: "legacy_runtime_provider",
+    });
+    await updateProgress(operation.id, progress, leaseVersion);
+  }
   for (const stored of [
     { pointer: "containerId" as const, identity: project.containerId },
     { pointer: "prodContainerId" as const, identity: project.prodContainerId },
@@ -1254,9 +1370,10 @@ export async function runProjectRetirementOperation(operationId: string): Promis
   try {
     await cancelQueuedTasks(claimed, progress, claimed.leaseVersion);
     await deactivatePublishedRoutes(claimed, progress, claimed.leaseVersion);
+    await retireLegacyCdnObjects(claimed, progress, claimed.leaseVersion);
     await releaseTrackedDomainSecurityResources(claimed, progress, claimed.leaseVersion);
     await releaseCustomHostnameCertificates(claimed, progress, claimed.leaseVersion);
-    await detachPurchasedDomains(claimed, progress, claimed.leaseVersion);
+    await retainPurchasedDomainAssignments(claimed, progress, claimed.leaseVersion);
     const pointerDisposition = await destroyRuntimeTargets(claimed, progress, claimed.leaseVersion);
     const hasRetainedLegacyPointers = progress.retainedLegacyRuntimePointers.length > 0;
     await db.transaction(async (tx) => {
@@ -1280,6 +1397,13 @@ export async function runProjectRetirementOperation(operationId: string): Promis
         publishedSnapshotId: null,
         stagingPublishedSnapshotId: null,
         activePreviewSessionId: null,
+        domainStatus: sql`CASE
+          WHEN ${projectsTable.customDomain} IS NULL THEN 'unconfigured'
+          ELSE 'pending_verification'
+        END`,
+        sslStatus: "pending",
+        sslVerifiedAt: null,
+        sslError: null,
         updatedAt: sql`now()`,
         ...(pointerDisposition.clearContainerPointer
           ? { containerId: null, containerUrl: null, containerStatus: "stopped" }
@@ -1288,6 +1412,15 @@ export async function runProjectRetirementOperation(operationId: string): Promis
           ? { prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" }
           : {}),
       };
+      await tx
+        .update(projectDomainsTable)
+        .set({
+          sslStatus: "pending",
+          sslLastCheckedAt: null,
+          sslExpiresAt: null,
+          updatedAt: sql`now()`,
+        })
+        .where(eq(projectDomainsTable.projectId, claimed.projectId));
       await tx
         .update(projectsTable)
         .set(pointerUpdates)

@@ -333,8 +333,9 @@ router.post("/billing/checkout", exportLimiter);
 
 // Every ordinary authenticated project mutation shares one lifecycle admission
 // fence. Route-local fences remain valid and reuse this exact session rather
-// than acquiring a second advisory lock. Trash and restore are excluded by the
-// boundary because they are the lifecycle transitions themselves.
+// than acquiring a second advisory lock. Trash, restore, and governed retirement
+// retry are excluded because they are lifecycle transitions with their own
+// tombstone-aware authority checks and lifecycle locks.
 router.use(requireActiveProjectMutationLifecycleSession);
 
 // ── Builder handoff exchange (auth-gated) ─────────────────────────────────────

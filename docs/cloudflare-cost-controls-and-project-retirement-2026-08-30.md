@@ -13,7 +13,8 @@ Kind: application, Worker, schema, and contract hardening
 Moving a project to Trash now means two different things by design:
 
 - User material remains recoverable: source, file history, versions, assets,
-  secrets, domain configuration, and database ownership rows are retained.
+  secrets, domain configuration, purchased-domain assignment, and database
+  ownership rows are retained.
 - Cost-bearing or traffic-serving state is retired: active tasks and schedules,
   published routes, edge cache entries, hostname certificates, and preview,
   blue, and green runtime slots are reconciled to proven absence.
@@ -21,6 +22,11 @@ Moving a project to Trash now means two different things by design:
 Restore returns the project as a draft. It does not silently republish, restart,
 rebind a public hostname, or claim that an old deployment is serving. The owner
 must explicitly build or publish again.
+
+Recoverable Trash is not a zero-cost state: purchased-domain registration and
+billing, retained databases, assets, snapshots, uploads, and project history
+continue during the 30-day recovery window. Permanent deletion owns their later
+destruction or detachment contract.
 
 Project 51 is not hard-coded as special. The authorized production batch is an
 exact caller-supplied set containing projects 1 through 50 and 52 through 55.

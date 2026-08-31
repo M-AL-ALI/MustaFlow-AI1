@@ -273,6 +273,16 @@ describe("project retirement foundation", () => {
     ).resolves.toEqual({ state: "valid", role: "production", slot: "green" });
   });
 
+  it("purges every known and observed hostname even when no legacy KV route exists", () => {
+    expect(
+      retirement.projectRetirementCacheHostnames({
+        knownHostnames: ["slug.mustaflow.app", "custom.example.test"],
+        legacyKvHostnames: [],
+        runtimeRouteHostnames: ["custom.example.test", "runtime.example.test"],
+      }),
+    ).toEqual(["slug.mustaflow.app", "custom.example.test", "runtime.example.test"]);
+  });
+
   it("retains malformed, cross-namespace, cross-project, and wrong-role pointers", async () => {
     const wrongNamespace = await deriveRuntimeIdentity({
       namespace: "legacy",

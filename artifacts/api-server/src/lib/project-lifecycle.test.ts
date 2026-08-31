@@ -132,6 +132,12 @@ describe("project lifecycle sessions", () => {
       projectMutationLifecycleProjectId({ method: "POST", path: "/projects/51/restore" }),
     ).toBe(null);
     expect(
+      projectMutationLifecycleProjectId({
+        method: "POST",
+        path: "/projects/51/retirement/retry",
+      }),
+    ).toBe(null);
+    expect(
       projectMutationLifecycleProjectId({ method: "POST", path: "/projects/0051/messages" }),
     ).toBe(51);
     expect(projectMutationLifecycleProjectId({ method: "DELETE", path: "/projects/0051" })).toBe(
@@ -140,9 +146,40 @@ describe("project lifecycle sessions", () => {
     expect(
       projectMutationLifecycleProjectId({ method: "POST", path: "/projects/51/RESTORE/" }),
     ).toBe(null);
+    expect(
+      projectMutationLifecycleProjectId({
+        method: "POST",
+        path: "/projects/0051/RETIREMENT/RETRY/",
+      }),
+    ).toBe(null);
+    expect(
+      projectMutationLifecycleProjectId({
+        method: "POST",
+        path: "/projects/51/retirement/retry-later",
+      }),
+    ).toBe(51);
     expect(projectMutationLifecycleProjectId({ method: "DELETE", path: "/projects/51/" })).toBe(
       null,
     );
+  });
+
+  it("leaves governed retirement retry to its tombstone-aware owner and admin boundary", async () => {
+    const response = responseHarness();
+    const next = vi.fn() as NextFunction;
+
+    await requireActiveProjectMutationLifecycleSession(
+      {
+        method: "POST",
+        path: "/projects/51/retirement/retry",
+      } as unknown as Request,
+      response,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(response.status).not.toHaveBeenCalled();
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("rejects an unauthenticated mutation before any project read or advisory-lock checkout", async () => {
