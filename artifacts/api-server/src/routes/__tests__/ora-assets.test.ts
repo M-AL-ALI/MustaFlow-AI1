@@ -226,25 +226,12 @@ describe("DELETE /ora/assets/:id", () => {
 });
 
 /**
- * Regression guard: the chat handler has heavy AI/session dependencies (the
- * repo convention is static source assertions for it). Both the file- and
- * image-generation branches must persist generated outputs to the durable
- * library for signed-in users — a previous version persisted images but not
- * files, silently breaking the durable-library promise for documents.
+ * Regression guard: image generation still uses the one-step persistence
+ * helper. File generation's stricter reserve/complete/cancel lifecycle is
+ * exercised through the routed behavioral tests in ora-smoke.test.ts.
  */
-describe("chat.ts persists generated outputs to the asset library", () => {
+describe("chat.ts persists generated images to the asset library", () => {
   const chatSrc = readFileSync(path.join(__dirname, "../public-ai/chat.ts"), "utf8");
-
-  it("the file_generation branch reserves, completes, and cancels generated files", () => {
-    const fileBranch = extractIfStatementByCondition(
-      chatSrc,
-      'decision.tool === "file_generation" && decision.fileFormat',
-    );
-    expect(fileBranch).toContain("reserveOraGeneratedAsset");
-    expect(fileBranch).toContain("completeOraGeneratedAsset");
-    expect(fileBranch).toContain("cancelOraGeneratedAsset");
-    expect(fileBranch).toContain('kind: "file"');
-  });
 
   it("the image_generation branch persists generated images", () => {
     const imageBranch = extractIfStatementByCondition(
@@ -253,13 +240,6 @@ describe("chat.ts persists generated outputs to the asset library", () => {
     );
     expect(imageBranch).toContain("persistOraAsset");
     expect(imageBranch).toContain('kind: "image"');
-  });
-
-  it("generate-file route reserves, completes, and cancels too", () => {
-    const genSrc = readFileSync(path.join(__dirname, "../public-ai/generate-file.ts"), "utf8");
-    expect(genSrc).toContain("reserveOraGeneratedAsset");
-    expect(genSrc).toContain("completeOraGeneratedAsset");
-    expect(genSrc).toContain("cancelOraGeneratedAsset");
   });
 });
 

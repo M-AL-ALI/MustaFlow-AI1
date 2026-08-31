@@ -552,7 +552,9 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
     expect(typeof res.body.msgCount).toBe("number");
   });
 
-  it("returns file fields when CSV is requested (file branch invoked)", async () => {
+  it("reserves before generation and completes before returning signed-in file bytes", async () => {
+    authState.user = { userId: "smoke-file-user-1", tier: "core", isPaid: true };
+
     const res = await request(app)
       .post("/public-ai/chat")
       .set("Cookie", `ora-session=${makeSession()}`)
@@ -562,8 +564,62 @@ describe("a) Chat reply shape — POST /public-ai/chat", () => {
     expect(res.body.fileName).toMatch(/\.csv$/);
     expect(res.body.fileData).toBeTruthy();
     expect(res.body.mimeType).toBe("text/csv");
+    expect(res.body.assetId).toBe(1);
     expect(res.body.imageUrl).toBeUndefined();
+    expect(assetsMock.reserveOraGeneratedAsset).toHaveBeenCalledTimes(1);
     expect(fileBuilderMock.generateFileFromPrompt).toHaveBeenCalledTimes(1);
+    expect(assetsMock.completeOraGeneratedAsset).toHaveBeenCalledTimes(1);
+    expect(assetsMock.reserveOraGeneratedAsset.mock.invocationCallOrder[0]).toBeLessThan(
+      fileBuilderMock.generateFileFromPrompt.mock.invocationCallOrder[0]!,
+    );
+    expect(fileBuilderMock.generateFileFromPrompt.mock.invocationCallOrder[0]).toBeLessThan(
+      assetsMock.completeOraGeneratedAsset.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("refuses chat file generation before provider work when storage is full", async () => {
+    authState.user = { userId: "smoke-file-full", tier: "core", isPaid: true };
+    const { AssetAdmissionError } = await import("../../../lib/asset-registry");
+    assetsMock.reserveOraGeneratedAsset.mockRejectedValueOnce(
+      new AssetAdmissionError(
+        "asset_quota_exceeded",
+        413,
+        "Your account storage is full (500 MB used of 500 MB).",
+      ),
+    );
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Create a CSV of my data", messages: [] });
+
+    expect(res.status).toBe(413);
+    expect(res.body).toMatchObject({
+      code: "asset_quota_exceeded",
+      error: "Your account storage is full (500 MB used of 500 MB).",
+    });
+    expect(fileBuilderMock.generateFileFromPrompt).not.toHaveBeenCalled();
+    expect(res.body.fileData).toBeUndefined();
+    expect(usageMock.refundOraQuota).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the reservation and returns no bytes when chat persistence fails", async () => {
+    authState.user = { userId: "smoke-file-user-2", tier: "core", isPaid: true };
+    assetsMock.completeOraGeneratedAsset.mockRejectedValueOnce(new Error("R2/library outage"));
+
+    const res = await request(app)
+      .post("/public-ai/chat")
+      .set("Cookie", `ora-session=${makeSession()}`)
+      .send({ message: "Create a CSV of my data", messages: [] });
+
+    expect(res.status).toBe(500);
+    expect(res.body.fileName).toBeUndefined();
+    expect(res.body.fileData).toBeUndefined();
+    expect(res.body.assetId).toBeUndefined();
+    expect(res.body.error).toBe("Failed to generate file. Please try again.");
+    expect(assetsMock.completeOraGeneratedAsset).toHaveBeenCalledTimes(1);
+    expect(assetsMock.cancelOraGeneratedAsset).toHaveBeenCalledTimes(1);
+    expect(usageMock.refundOraQuota).toHaveBeenCalledTimes(1);
   });
 
   it("returns imageUrl for a signed-in user requesting an image", async () => {
