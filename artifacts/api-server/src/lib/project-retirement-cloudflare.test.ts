@@ -1,11 +1,13 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 let cloudflare: typeof import("./cloudflare");
+let appLogger: (typeof import("./logger"))["logger"];
 const originalEnv = { ...process.env };
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:1/test";
   cloudflare = await import("./cloudflare");
+  appLogger = (await import("./logger")).logger;
 });
 
 beforeEach(() => {
@@ -20,6 +22,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   process.env = { ...originalEnv };
 });
 
@@ -495,18 +498,28 @@ describe("strict Cloudflare retirement proofs", () => {
   });
 
   it("bounds cache purge payloads and sends chunks sequentially", async () => {
-    const fetchMock = vi.fn().mockImplementation(
-      async () =>
-        new Response(JSON.stringify({ success: true, result: {} }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-    );
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      activeRequests++;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await Promise.resolve();
+      activeRequests--;
+      return new Response(JSON.stringify({ success: true, result: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const hostnames = Array.from({ length: 31 }, (_, index) => `host-${index}.example.test`);
-    await expect(cloudflare.purgeCacheForHostnames(hostnames)).resolves.toBe(true);
+    await expect(cloudflare.purgeCacheForHostnamesDetailed(hostnames)).resolves.toEqual({
+      state: "purged",
+      hostnameCount: 31,
+      tagCount: 31,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(maxActiveRequests).toBe(1);
     for (const call of fetchMock.mock.calls) {
       const init = call[1] as RequestInit;
       const payload = JSON.parse(String(init.body)) as { tags: string[] };
@@ -516,21 +529,48 @@ describe("strict Cloudflare retirement proofs", () => {
   });
 
   it("fails cache purge closed when the provider denies the purge permission", async () => {
+    const warnSpy = vi.spyOn(appLogger, "warn").mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(appLogger, "info").mockImplementation(() => undefined);
     const fetchMock = vi.fn().mockResolvedValue(
       Response.json(
         {
           success: false,
-          errors: [{ code: 10000, message: "Authentication error" }],
+          errors: [
+            {
+              code: 10000,
+              message: "token test-token cannot purge published.example.test",
+            },
+          ],
         },
         { status: 403 },
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(cloudflare.purgeCacheForHostnames(["published.example.test"])).resolves.toBe(
-      false,
-    );
+    await expect(
+      cloudflare.purgeCacheForHostnamesDetailed(["published.example.test"]),
+    ).resolves.toEqual({
+      state: "failed",
+      reason: "provider_denied",
+      httpStatus: 403,
+      providerErrorCodes: [10000],
+      hostnameCount: 1,
+      tagCount: 1,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      {
+        httpStatus: 403,
+        providerErrorCodes: [10000],
+        hostnameCount: 1,
+        tagCount: 1,
+      },
+      "CF hostname cache purge provider denied",
+    );
+    const renderedLogs = JSON.stringify([...warnSpy.mock.calls, ...infoSpy.mock.calls]);
+    expect(renderedLogs).not.toContain("test-token");
+    expect(renderedLogs).not.toContain("published.example.test");
+    expect(renderedLogs).not.toContain("cannot purge");
   });
 
   it("fails cache purge closed when an HTTP success does not carry provider success", async () => {
@@ -539,10 +579,104 @@ describe("strict Cloudflare retirement proofs", () => {
       .mockResolvedValue(Response.json({ success: false, result: null }, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(cloudflare.purgeCacheForHostnames(["published.example.test"])).resolves.toBe(
-      false,
-    );
+    await expect(
+      cloudflare.purgeCacheForHostnamesDetailed(["published.example.test"]),
+    ).resolves.toEqual({
+      state: "failed",
+      reason: "provider_response_invalid",
+      httpStatus: 200,
+      providerErrorCodes: [],
+      hostnameCount: 1,
+      tagCount: 1,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the boolean cache-purge wrapper", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ success: true, result: {} }, { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ success: false, errors: [] }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cloudflare.purgeCacheForHostnames(["first.example.test"])).resolves.toBe(true);
+    await expect(cloudflare.purgeCacheForHostnames(["second.example.test"])).resolves.toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies missing configuration without provider access", async () => {
+    process.env.CF_ZONE_ID = "   ";
+    delete process.env.CF_API_TOKEN;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      cloudflare.purgeCacheForHostnamesDetailed(["published.example.test"]),
+    ).resolves.toEqual({
+      state: "failed",
+      reason: "missing_configuration",
+      missingBindings: ["CF_ZONE_ID", "CF_API_TOKEN"],
+      hostnameCount: 1,
+      tagCount: 1,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("classifies invalid hostnames without logging or returning their text", async () => {
+    const warnSpy = vi.spyOn(appLogger, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await cloudflare.purgeCacheForHostnamesDetailed([
+      "valid.example.test",
+      "secret invalid hostname",
+    ]);
+    expect(result).toEqual({
+      state: "failed",
+      reason: "invalid_hostname",
+      invalidHostnameCount: 1,
+      hostnameCount: 2,
+      tagCount: 1,
+    });
+    expect(JSON.stringify([result, ...warnSpy.mock.calls])).not.toContain(
+      "secret invalid hostname",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("classifies provider transport and HTTP availability failures", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("socket carried a secret")));
+    await expect(
+      cloudflare.purgeCacheForHostnamesDetailed(["published.example.test"]),
+    ).resolves.toEqual({
+      state: "failed",
+      reason: "provider_unavailable",
+      providerErrorCodes: [],
+      hostnameCount: 1,
+      tagCount: 1,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json(
+            { success: false, errors: [{ code: 9100, message: "provider maintenance" }] },
+            { status: 503 },
+          ),
+        ),
+    );
+    await expect(
+      cloudflare.purgeCacheForHostnamesDetailed(["published.example.test"]),
+    ).resolves.toEqual({
+      state: "failed",
+      reason: "provider_unavailable",
+      httpStatus: 503,
+      providerErrorCodes: [9100],
+      hostnameCount: 1,
+      tagCount: 1,
+    });
   });
 
   it("inventories overwritten hostname history by project id", async () => {

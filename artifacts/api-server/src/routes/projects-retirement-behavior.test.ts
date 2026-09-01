@@ -313,6 +313,8 @@ function assertNoProviderCall() {
 
 describe("project retirement route behavior", () => {
   beforeEach(() => {
+    process.env.CF_ZONE_ID = "test-zone";
+    process.env.CF_API_TOKEN = "test-token";
     vi.clearAllMocks();
     mocks.selectResults = [];
     mocks.updateReturningResults = [];
@@ -402,6 +404,43 @@ describe("project retirement route behavior", () => {
     );
     expect(mocks.retireAccess).toHaveBeenCalledTimes(1);
     expect(mocks.durableEnqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains a configuration-blocked reconciliation without exposing its code", async () => {
+    delete process.env.CF_ZONE_ID;
+    delete process.env.CF_API_TOKEN;
+    const progress = initialProjectRetirementProgress();
+    progress.reconciliation = {
+      generation: 2,
+      parentOperationId: "retirement-76",
+      requestedBy: "staff-owner",
+      reason: "retryable_terminal",
+    };
+    mocks.selectResults = [
+      [],
+      [{ id: 77 }],
+      [
+        {
+          id: "retirement-77",
+          projectId: 77,
+          state: "failed",
+          completedAt: NOW,
+          failureCode: "project_retirement_route_deactivation_unverified",
+          progress,
+        },
+      ],
+    ];
+
+    const response = await request(appAs("staff-owner")).post("/projects/77/retirement/retry");
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      code: "project_retirement_provider_configuration_unavailable",
+      error:
+        "This project's public routes cannot be retired safely right now. Please try again after platform configuration is restored.",
+    });
+    expect(response.body.error).not.toContain(response.body.code);
+    expect(mocks.durableEnqueue).not.toHaveBeenCalled();
   });
 
   it("preserves retry self-service for an ordinary project owner", async () => {

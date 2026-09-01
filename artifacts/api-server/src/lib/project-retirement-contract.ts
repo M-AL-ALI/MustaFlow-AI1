@@ -14,6 +14,7 @@ export const PROJECT_RETIREMENT_PREFLIGHT_REFUSAL_CODES = [
   "project_retirement_managed_addon_unverified",
   "project_retirement_remote_build_in_progress",
   "project_retirement_provider_provisioning_in_progress",
+  "project_retirement_provider_configuration_unavailable",
   "project_retirement_sqlite_recovery_unverified",
   "project_retirement_receipt_upgrade_in_progress",
   "project_retirement_reconciliation_required",
@@ -37,6 +38,8 @@ const PROJECT_RETIREMENT_PREFLIGHT_MESSAGES: Readonly<
     "This project has a mobile build in progress. Wait for it to finish before moving the project to Trash.",
   project_retirement_provider_provisioning_in_progress:
     "This project is still setting up its runtime or database. Wait for setup to finish before moving it to Trash.",
+  project_retirement_provider_configuration_unavailable:
+    "This project's public routes cannot be retired safely right now. Please try again after platform configuration is restored.",
   project_retirement_sqlite_recovery_unverified:
     "This project's database cannot be preserved and restored safely yet.",
   project_retirement_receipt_upgrade_in_progress:
@@ -56,6 +59,7 @@ export function decideProjectRetirementPreflight(input: {
   hasUnverifiedManagedAddon: boolean;
   hasInFlightRemoteBuild: boolean;
   hasInFlightProviderProvisioning: boolean;
+  hasUnavailableCloudflareCachePurge?: boolean;
   hasUnverifiedSqliteRecovery: boolean;
 }): ProjectRetirementPreflightDecision {
   if (input.hasLegacyRuntime) {
@@ -63,6 +67,12 @@ export function decideProjectRetirementPreflight(input: {
   }
   if (input.hasInFlightProviderProvisioning) {
     return { allowed: false, code: "project_retirement_provider_provisioning_in_progress" };
+  }
+  if (input.hasUnavailableCloudflareCachePurge) {
+    return {
+      allowed: false,
+      code: "project_retirement_provider_configuration_unavailable",
+    };
   }
   if (input.hasUnverifiedSqliteRecovery) {
     return { allowed: false, code: "project_retirement_sqlite_recovery_unverified" };
@@ -105,6 +115,8 @@ export const PROJECT_RETIREMENT_FAILURE_CODES = [
   "project_retirement_legacy_r2_release_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
+  "project_retirement_legacy_runtime_provider_unavailable",
+  "project_retirement_legacy_runtime_absence_unverified",
   "project_retirement_legacy_runtime_retained",
   "project_retirement_attempts_exhausted",
   "project_retirement_completion_evidence_incomplete",
@@ -130,17 +142,23 @@ const RETRYABLE_TERMINAL_FAILURE_CODES = new Set<ProjectRetirementFailureCode>([
   "project_retirement_legacy_r2_release_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
+  "project_retirement_legacy_runtime_provider_unavailable",
+  "project_retirement_legacy_runtime_absence_unverified",
   "project_retirement_attempts_exhausted",
   "project_retirement_operation_unavailable",
 ]);
 
 export type ProjectRetirementReconciliationDecision =
-  | { allowed: true; reason: "retryable_terminal" | "legacy_admin_reconciliation" }
+  | {
+      allowed: true;
+      reason: "retryable_terminal" | "legacy_admin_reconciliation" | "configuration_recovery";
+    }
   | {
       allowed: false;
       code:
         | "project_retirement_not_terminal"
         | "project_retirement_retry_not_allowed"
+        | "project_retirement_provider_configuration_unavailable"
         | "project_retirement_reconciliation_limit_reached";
     };
 
@@ -150,11 +168,28 @@ export function decideProjectRetirementReconciliation(input: {
   failureCode: string | null;
   generation: number;
   allowLegacyAdminReconciliation: boolean;
+  allowConfigurationRecovery?: boolean;
+  currentCloudflareCachePurgeConfigured?: boolean;
+  configurationRecoveryUsed?: boolean;
 }): ProjectRetirementReconciliationDecision {
   if (input.state !== "failed" || input.completedAt === null) {
     return { allowed: false, code: "project_retirement_not_terminal" };
   }
+  const isRouteOrCacheFailure =
+    input.failureCode === "project_retirement_route_deactivation_failed" ||
+    input.failureCode === "project_retirement_route_deactivation_unverified";
+  if (isRouteOrCacheFailure && input.currentCloudflareCachePurgeConfigured === false) {
+    return { allowed: false, code: "project_retirement_provider_configuration_unavailable" };
+  }
   if (input.generation >= PROJECT_RETIREMENT_MAX_RECONCILIATIONS) {
+    if (
+      isRouteOrCacheFailure &&
+      input.allowConfigurationRecovery === true &&
+      input.currentCloudflareCachePurgeConfigured === true &&
+      input.configurationRecoveryUsed !== true
+    ) {
+      return { allowed: true, reason: "configuration_recovery" };
+    }
     return { allowed: false, code: "project_retirement_reconciliation_limit_reached" };
   }
   if (
@@ -538,6 +573,7 @@ export function initialProjectRetirementProgress(): ProjectRetirementProgress {
     securityResources: [],
     purchasedDomains: [],
     retainedLegacyRuntimePointers: [],
+    legacyRuntimeResolutions: [],
     runtimes: PROJECT_RETIREMENT_RUNTIME_TARGETS.map((target) => ({
       ...target,
       state: "pending",

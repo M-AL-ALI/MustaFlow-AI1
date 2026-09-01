@@ -197,6 +197,21 @@ describe("project retirement foundation", () => {
     });
   });
 
+  it.each([
+    "project_retirement_legacy_runtime_provider_unavailable",
+    "project_retirement_legacy_runtime_absence_unverified",
+  ])("allows terminal reconciliation for retryable legacy Fly failure %s", (failureCode) => {
+    expect(
+      retirement.decideProjectRetirementReconciliation({
+        state: "failed",
+        completedAt: new Date(),
+        failureCode,
+        generation: 0,
+        allowLegacyAdminReconciliation: false,
+      }),
+    ).toEqual({ allowed: true, reason: "retryable_terminal" });
+  });
+
   it("reclaims only a stale running lease after a crash and caps attempts", () => {
     const now = new Date("2026-08-30T12:00:00.000Z");
     expect(
@@ -272,6 +287,69 @@ describe("project retirement foundation", () => {
         failureCode: "project_retirement_route_deactivation_failed",
         generation: retirement.PROJECT_RETIREMENT_MAX_RECONCILIATIONS,
         allowLegacyAdminReconciliation: true,
+      }),
+    ).toEqual({
+      allowed: false,
+      code: "project_retirement_reconciliation_limit_reached",
+    });
+  });
+
+  it("permits exactly one owner-governed recovery after cache configuration is restored", () => {
+    const terminal = {
+      state: "failed",
+      completedAt: new Date(),
+      failureCode: "project_retirement_route_deactivation_unverified",
+      generation: retirement.PROJECT_RETIREMENT_MAX_RECONCILIATIONS,
+      allowLegacyAdminReconciliation: true,
+    };
+    expect(
+      retirement.decideProjectRetirementReconciliation({
+        ...terminal,
+        allowConfigurationRecovery: true,
+        currentCloudflareCachePurgeConfigured: false,
+        configurationRecoveryUsed: false,
+      }),
+    ).toEqual({
+      allowed: false,
+      code: "project_retirement_provider_configuration_unavailable",
+    });
+    expect(
+      retirement.decideProjectRetirementReconciliation({
+        ...terminal,
+        allowConfigurationRecovery: false,
+        currentCloudflareCachePurgeConfigured: true,
+        configurationRecoveryUsed: false,
+      }),
+    ).toEqual({
+      allowed: false,
+      code: "project_retirement_reconciliation_limit_reached",
+    });
+    expect(
+      retirement.decideProjectRetirementReconciliation({
+        ...terminal,
+        allowConfigurationRecovery: true,
+        currentCloudflareCachePurgeConfigured: true,
+        configurationRecoveryUsed: false,
+      }),
+    ).toEqual({ allowed: true, reason: "configuration_recovery" });
+    expect(
+      retirement.decideProjectRetirementReconciliation({
+        ...terminal,
+        allowConfigurationRecovery: true,
+        currentCloudflareCachePurgeConfigured: true,
+        configurationRecoveryUsed: true,
+      }),
+    ).toEqual({
+      allowed: false,
+      code: "project_retirement_reconciliation_limit_reached",
+    });
+    expect(
+      retirement.decideProjectRetirementReconciliation({
+        ...terminal,
+        failureCode: "project_retirement_runtime_destroy_unverified",
+        allowConfigurationRecovery: true,
+        currentCloudflareCachePurgeConfigured: true,
+        configurationRecoveryUsed: false,
       }),
     ).toEqual({
       allowed: false,

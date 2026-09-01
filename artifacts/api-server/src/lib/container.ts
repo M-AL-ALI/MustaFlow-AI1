@@ -377,6 +377,28 @@ async function flyFetch(
 }
 
 /**
+ * Narrow Fly Machines request surface for legacy retirement reconciliation.
+ *
+ * The caller must still validate the returned machine document before issuing
+ * DELETE. Keeping URL construction and authentication here ensures retirement
+ * never handles or exposes the Fly token itself.
+ */
+export async function requestLegacyFlyMachineForRetirement(input: {
+  machineId: string;
+  method: "GET" | "DELETE";
+}): Promise<Response> {
+  if (!isConfigured()) {
+    throw new ContainerUnavailableError();
+  }
+  const machinePath = `/apps/${encodeURIComponent(FLY_APP)}/machines/${encodeURIComponent(
+    input.machineId,
+  )}`;
+  return flyFetch(input.method === "DELETE" ? `${machinePath}?force=true` : machinePath, {
+    method: input.method,
+  });
+}
+
+/**
  * Derive the Fly.io internal DNS hostname for a machine.
  * Format: <machineId>.vm.<appName>.internal
  * Accessible via the Fly.io proxy at https://<appName>.fly.dev/<path> when routing is configured.

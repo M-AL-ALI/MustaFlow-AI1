@@ -620,6 +620,50 @@ describe("ProjectRetirementPanel", () => {
     ).toBeVisible();
   });
 
+  it("shows a completed historical-runtime absence proof without raw provider identity", async () => {
+    const user = userEvent.setup();
+    const rawProviderIdentity = "9080e521b67587";
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          operationId: "retirement-27-reconciled",
+          projectId: 27,
+          state: "completed",
+          attemptCount: 1,
+          failureCode: null,
+          completedAt: "2026-09-01T12:05:00.000Z",
+          reconciliationEligible: false,
+          progress: {
+            route: {
+              state: "verified_absent",
+              legacyHostnameKv: { state: "verified_absent" },
+              hostnames: { total: 0, states: {}, stages: {} },
+              runtimeRoutes: { total: 0, states: {} },
+              cache: { state: "purged" },
+            },
+            retainedLegacyRuntimePointers: { total: 0, reasons: {} },
+            legacyRuntimeResolutions: {
+              total: 1,
+              states: { verified_absent: 1 },
+              proofs: { delete_then_get_404: 1 },
+              reasons: {},
+              retryable: 0,
+              raw: rawProviderIdentity,
+            },
+          },
+        },
+        200,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "27");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(await screen.findByText("Cleanup completed successfully.")).toBeVisible();
+    expect(screen.getByText("A historical runtime was removed and verified absent.")).toBeVisible();
+    expect(screen.queryByText(rawProviderIdentity)).not.toBeInTheDocument();
+  });
+
   it("offers only the governed reconciliation retry, locks duplicate clicks, and renders its accepted receipt", async () => {
     const user = userEvent.setup();
     let resolveRetry!: (response: Response) => void;

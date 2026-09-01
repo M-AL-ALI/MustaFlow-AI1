@@ -252,3 +252,65 @@ under `A:/NabuFlowLab/evidence/cloudflare-cost-controls-2026-08-30/`.
     `legacyHostnameKv` receipt, zero-provider-call empty-cache test, and coordinator
     ordering guard prevent this retired call site from blocking or weakening the
     authoritative route cleanup again.
+
+## Retirement convergence implementation (2026-09-01)
+
+This is a branch-tree implementation record, not a rollout receipt. It does not
+attest to a commit, push, merge, publication, live convergence, or full-suite run.
+
+- **Cloudflare cache-purge preflight is fail closed before mutation.** Current
+  hostname eviction requires nonblank `CF_ZONE_ID` and `CF_API_TOKEN`; startup
+  diagnostics expose only missing binding names. With either binding missing,
+  any database hostname fact (public slug, custom domain, project-domain or
+  purchased-domain row, or stored production release) produces the typed
+  `project_retirement_provider_configuration_unavailable` refusal. If those
+  facts are empty, preflight reads both the legacy KV and current runtime route
+  inventories. Only complete, empty inventories permit retirement; a
+  `not_configured` or blocked legacy posture, an incomplete or unsupported
+  inventory, a provider error, or any observed hostname is unavailable rather
+  than inferred empty.
+- **Stored release hostnames remain eviction targets.** The referenced published
+  version's non-null `productionRelease` counts as hostname inventory during
+  preflight. During cleanup, a string `productionRelease.hostname` is included
+  in the normalized, deduplicated cache-purge set after release rollback, so a
+  hostname retained only in release history is not lost. Purge responses now
+  distinguish missing configuration, invalid input, provider denial, malformed
+  success, and provider unavailability; no route reaches `verified_absent` when
+  exact tag eviction is unverified.
+- **Configuration recovery has one exact platform-owner exception.** Ordinary
+  terminal reconciliation remains capped at two generations. After that cap,
+  only a platform `owner` may mint one additional `configuration_recovery`
+  receipt, only for terminal route-deactivation failed/unverified evidence,
+  only after the current Cloudflare binding pair is restored, and only when a
+  prior configuration recovery was not recorded. The consumed flag is persisted;
+  missing bindings, other failure classes, Operators, project owners using the
+  ordinary self-service path, and a second exception remain refused.
+- **Historical Fly cleanup requires identity, storage, and absence proofs.** A
+  legacy `containerId` or `prodContainerId` is first syntax-checked, then read
+  from Fly. An initial 404 is an absence proof; otherwise DELETE is possible
+  only when the provider document exactly matches the machine id,
+  `project-<id>` name, and `PROJECT_ID`, contains no contradictory nested
+  identity marker, and explicitly proves an empty mount inventory with no other
+  mount or volume marker. DELETE must be followed by a GET 404 before the pointer
+  is cleared. Ambiguous identity or storage is retained without DELETE;
+  provider and post-delete ambiguity remains typed and retryable. Cross-project
+  current-runtime identities are never sent to Fly, and `testContainerId`
+  remains retained behind the separate SQLite-preservation boundary.
+- **Security-review boundaries remain non-leaking.** The related findings were
+  the risk of a stale Fly pointer authorizing deletion of another or mounted
+  machine, and cache/provider details escaping through logs or historical
+  receipts. Cache purge logs and results now carry only bounded counts, status,
+  missing binding names, and numeric provider error codes. Persisted legacy Fly
+  evidence is projected to closed counts, pointer kinds, states, proofs, reasons,
+  and retryability; the status API and admin UI never render raw machine ids,
+  hostnames, provider bodies, credentials, actor ids, or resource identifiers.
+  The UI presents plain-language retained, already-absent, and
+  deleted-then-verified-absent evidence for failed and completed history.
+- **Preventive regression coverage is present in the branch.** The added cases
+  pin missing-binding refusal before writes, provider-only and stored-release
+  hostname discovery, incomplete-inventory refusal, bounded sanitized cache
+  purge outcomes, the single owner recovery exception, malformed/cross-project/
+  mounted Fly retention, exact GET-DELETE-GET absence, pointer clearing only
+  after proof, `testContainerId` isolation, sanitized status projection, and
+  plain-language UI rendering without raw provider identity. These are coverage
+  additions, not test-execution claims in this section.

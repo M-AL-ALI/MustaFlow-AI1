@@ -2781,37 +2781,190 @@ export function cloudflareHostnameCacheTag(hostname: string): string | null {
   return `nabuflow-host-${normalized}`;
 }
 
-/** Exact eviction for every cached path and regional Cache API key of a hostname. */
-export async function purgeCacheForHostnames(hostnames: string[]): Promise<boolean> {
-  if (hostnames.length === 0) return true;
-  if (!cfEnabled()) return false;
+export type CloudflareHostnameCachePurgeFailureReason =
+  | "missing_configuration"
+  | "invalid_hostname"
+  | "provider_denied"
+  | "provider_response_invalid"
+  | "provider_unavailable";
 
-  const tags = [...new Set(hostnames.map(cloudflareHostnameCacheTag))];
-  if (tags.some((tag) => tag === null)) return false;
-  const exactTags = tags as string[];
+type CloudflareHostnameCachePurgeCounts = {
+  hostnameCount: number;
+  tagCount: number;
+};
 
-  try {
-    for (let offset = 0; offset < exactTags.length; offset += CACHE_PURGE_TAGS_PER_REQUEST) {
-      const batch = exactTags.slice(offset, offset + CACHE_PURGE_TAGS_PER_REQUEST);
-      const resp = await fetch(`${CF_API_BASE}/zones/${zoneId()}/purge_cache`, {
+export type CloudflareHostnameCachePurgeResult =
+  | ({ state: "purged" } & CloudflareHostnameCachePurgeCounts)
+  | ({
+      state: "failed";
+      reason: "missing_configuration";
+      missingBindings: Array<"CF_ZONE_ID" | "CF_API_TOKEN">;
+    } & CloudflareHostnameCachePurgeCounts)
+  | ({
+      state: "failed";
+      reason: "invalid_hostname";
+      invalidHostnameCount: number;
+    } & CloudflareHostnameCachePurgeCounts)
+  | ({
+      state: "failed";
+      reason: "provider_denied" | "provider_response_invalid";
+      httpStatus: number;
+      providerErrorCodes: number[];
+    } & CloudflareHostnameCachePurgeCounts)
+  | ({
+      state: "failed";
+      reason: "provider_unavailable";
+      httpStatus?: number;
+      providerErrorCodes: number[];
+    } & CloudflareHostnameCachePurgeCounts);
+
+const CLOUDFLARE_AUTH_ERROR_CODES = new Set([9_103, 9_109, 10_000]);
+
+function providerErrorCodes(payload: unknown): number[] {
+  if (!payload || typeof payload !== "object" || !("errors" in payload)) return [];
+  const errors = (payload as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return [];
+  return [
+    ...new Set(
+      errors
+        .map((error) =>
+          error && typeof error === "object" && "code" in error
+            ? (error as { code?: unknown }).code
+            : undefined,
+        )
+        .filter((code): code is number => Number.isSafeInteger(code)),
+    ),
+  ].slice(0, 16);
+}
+
+function isProviderDenied(httpStatus: number, errorCodes: number[]): boolean {
+  return (
+    httpStatus === 401 ||
+    httpStatus === 403 ||
+    errorCodes.some((code) => CLOUDFLARE_AUTH_ERROR_CODES.has(code))
+  );
+}
+
+function isProviderTemporarilyUnavailable(httpStatus: number): boolean {
+  return httpStatus === 408 || httpStatus === 429 || httpStatus >= 500;
+}
+
+/**
+ * Exact eviction with a closed, sanitized receipt. Hostnames and provider
+ * messages never travel into logs or the returned receipt.
+ */
+export async function purgeCacheForHostnamesDetailed(
+  hostnames: string[],
+): Promise<CloudflareHostnameCachePurgeResult> {
+  const hostnameCount = hostnames.length;
+  if (hostnameCount === 0) return { state: "purged", hostnameCount: 0, tagCount: 0 };
+
+  const resolvedTags = hostnames.map(cloudflareHostnameCacheTag);
+  const exactTags = [...new Set(resolvedTags.filter((tag): tag is string => tag !== null))];
+  const tagCount = exactTags.length;
+  const invalidHostnameCount = resolvedTags.length - resolvedTags.filter(Boolean).length;
+  if (invalidHostnameCount > 0) {
+    logger.warn({ hostnameCount, tagCount }, "CF hostname cache purge rejected invalid hostname");
+    return {
+      state: "failed",
+      reason: "invalid_hostname",
+      hostnameCount,
+      tagCount,
+      invalidHostnameCount,
+    };
+  }
+
+  const missingBindings = (["CF_ZONE_ID", "CF_API_TOKEN"] as const).filter(
+    (binding) => (process.env[binding]?.trim().length ?? 0) === 0,
+  );
+  if (missingBindings.length > 0) {
+    logger.warn(
+      { missingBindings, hostnameCount, tagCount },
+      "CF hostname cache purge missing configuration",
+    );
+    return {
+      state: "failed",
+      reason: "missing_configuration",
+      hostnameCount,
+      tagCount,
+      missingBindings: [...missingBindings],
+    };
+  }
+
+  for (let offset = 0; offset < exactTags.length; offset += CACHE_PURGE_TAGS_PER_REQUEST) {
+    const batch = exactTags.slice(offset, offset + CACHE_PURGE_TAGS_PER_REQUEST);
+    let response: Response;
+    try {
+      response = await fetch(`${CF_API_BASE}/zones/${zoneId()}/purge_cache`, {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({ tags: batch }),
         signal: AbortSignal.timeout(RETIREMENT_CONTROL_TIMEOUT_MS),
       });
-      const json = (await resp.json()) as CfApiResult<unknown>;
-      if (!resp.ok || !json.success) {
-        const msg = json.errors?.map((e) => e.message).join("; ") ?? "CF purge failed";
-        logger.warn({ hostnames, msg }, "CF purgeCacheForHostnames failed");
-        return false;
-      }
+    } catch {
+      logger.warn({ hostnameCount, tagCount }, "CF hostname cache purge provider unavailable");
+      return {
+        state: "failed",
+        reason: "provider_unavailable",
+        hostnameCount,
+        tagCount,
+        providerErrorCodes: [],
+      };
     }
-    logger.info({ hostnames, tagCount: exactTags.length }, "CF hostname cache tags purged");
-    return true;
-  } catch (err) {
-    logger.warn({ err, hostnames }, "CF purgeCacheForHostnames threw");
-    return false;
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = undefined;
+    }
+    const errorCodes = providerErrorCodes(payload);
+    const logReceipt = {
+      httpStatus: response.status,
+      providerErrorCodes: errorCodes,
+      hostnameCount,
+      tagCount,
+    };
+
+    if (isProviderDenied(response.status, errorCodes)) {
+      logger.warn(logReceipt, "CF hostname cache purge provider denied");
+      return {
+        state: "failed",
+        reason: "provider_denied",
+        ...logReceipt,
+      };
+    }
+    if (isProviderTemporarilyUnavailable(response.status)) {
+      logger.warn(logReceipt, "CF hostname cache purge provider unavailable");
+      return {
+        state: "failed",
+        reason: "provider_unavailable",
+        ...logReceipt,
+      };
+    }
+    if (
+      !response.ok ||
+      !payload ||
+      typeof payload !== "object" ||
+      !("success" in payload) ||
+      (payload as { success?: unknown }).success !== true
+    ) {
+      logger.warn(logReceipt, "CF hostname cache purge provider response invalid");
+      return {
+        state: "failed",
+        reason: "provider_response_invalid",
+        ...logReceipt,
+      };
+    }
   }
+
+  logger.info({ hostnameCount, tagCount }, "CF hostname cache tags purged");
+  return { state: "purged", hostnameCount, tagCount };
+}
+
+/** Exact eviction for every cached path and regional Cache API key of a hostname. */
+export async function purgeCacheForHostnames(hostnames: string[]): Promise<boolean> {
+  return (await purgeCacheForHostnamesDetailed(hostnames)).state === "purged";
 }
 
 /**

@@ -14,6 +14,10 @@ describe("project retirement route and serving surfaces", () => {
     expect(retirement).toContain("...customHostnames");
     expect(retirement).not.toContain('eq(projectDomainsTable.verificationStatus, "verified")');
     expect(retirement).toContain("inventoryHostnameKVRoutesByProject(operation.projectId)");
+    expect(retirement).toContain("storedReleaseHostname");
+    expect(retirement).toContain(
+      "...(storedReleaseHostname === null ? [] : [storedReleaseHostname])",
+    );
     expect(retirement).toContain("...observedByHostname.keys()");
     expect(retirement).toContain("retireObservedHostnameKV(observation)");
     expect(retirement).toContain("purgeCacheForHostnames(");

@@ -3,7 +3,10 @@ import { request as httpsRequest } from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import app, { startProjectRetirementWorkerAfterMigrations } from "./app";
-import { isProjectRetirementExecutionEnabled } from "./lib/project-retirement-activation";
+import {
+  isProjectRetirementExecutionEnabled,
+  resolveCurrentCloudflareRetirementPosture,
+} from "./lib/project-retirement-activation";
 import { logger } from "./lib/logger";
 import { createTerminalServer } from "./lib/terminal";
 import { createMultiplayerServer } from "./lib/multiplayer";
@@ -377,6 +380,13 @@ void runStartupMigrations()
     }
     startAssetReservationSweeperAfterMigrations();
     if (isProjectRetirementExecutionEnabled()) {
+      const currentCloudflareRetirement = resolveCurrentCloudflareRetirementPosture();
+      if (currentCloudflareRetirement.state === "blocked") {
+        logger.warn(
+          { missingBindings: currentCloudflareRetirement.missingBindings },
+          "Project retirement cache eviction is unavailable; projects with public hostnames will be refused before mutation",
+        );
+      }
       const retirementWorker = await startProjectRetirementWorkerAfterMigrations();
       if (retirementWorker.status === "ready") {
         await resumeProjectRetirementOperations().catch((error: unknown) => {

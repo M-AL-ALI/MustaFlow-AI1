@@ -8,6 +8,8 @@ const LEGACY_HOSTNAME_KV_BINDINGS = [
   "CF_ZONE_ID",
 ] as const;
 
+export const CURRENT_CLOUDFLARE_RETIREMENT_BINDINGS = ["CF_ZONE_ID", "CF_API_TOKEN"] as const;
+
 type LegacyHostnameKvBinding = (typeof LEGACY_HOSTNAME_KV_BINDINGS)[number];
 type RetirementActivationKey =
   | typeof PROJECT_RETIREMENT_EXECUTION_FLAG
@@ -24,6 +26,29 @@ export type LegacyHostnameKvPosture =
       missingBindings: LegacyHostnameKvBinding[];
       invalidInputs: Array<typeof EDGE_SERVING_FLAG>;
     };
+
+export type CurrentCloudflareRetirementPosture =
+  | { state: "configured"; missingBindings: [] }
+  | {
+      state: "blocked";
+      missingBindings: Array<(typeof CURRENT_CLOUDFLARE_RETIREMENT_BINDINGS)[number]>;
+    };
+
+/**
+ * Current hostname cache eviction uses the zone-scoped Cloudflare API. Binding
+ * names may be recorded in boot diagnostics; values must never leave the
+ * process environment.
+ */
+export function resolveCurrentCloudflareRetirementPosture(
+  environment: RetirementActivationEnvironment = process.env,
+): CurrentCloudflareRetirementPosture {
+  const missingBindings = CURRENT_CLOUDFLARE_RETIREMENT_BINDINGS.filter(
+    (name) => (environment[name]?.trim().length ?? 0) === 0,
+  );
+  return missingBindings.length === 0
+    ? { state: "configured", missingBindings: [] }
+    : { state: "blocked", missingBindings };
+}
 
 /**
  * The retired Snapshot Worker used Workers KV for hostname routing. Current

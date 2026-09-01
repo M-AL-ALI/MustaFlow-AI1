@@ -3,6 +3,7 @@ import {
   EDGE_SERVING_FLAG,
   isProjectRetirementExecutionEnabled,
   PROJECT_RETIREMENT_EXECUTION_FLAG,
+  resolveCurrentCloudflareRetirementPosture,
   resolveLegacyHostnameKvPosture,
 } from "./project-retirement-activation";
 
@@ -38,6 +39,31 @@ describe("project retirement activation", () => {
         CF_ZONE_ID: "shared-zone",
       }),
     ).toEqual({ state: "not_configured", missingBindings: [], invalidInputs: [] });
+  });
+
+  it("classifies current cache-purge bindings without exposing their values", () => {
+    expect(resolveCurrentCloudflareRetirementPosture({})).toEqual({
+      state: "blocked",
+      missingBindings: ["CF_ZONE_ID", "CF_API_TOKEN"],
+    });
+    expect(resolveCurrentCloudflareRetirementPosture({ CF_ZONE_ID: "zone" })).toEqual({
+      state: "blocked",
+      missingBindings: ["CF_API_TOKEN"],
+    });
+    expect(
+      resolveCurrentCloudflareRetirementPosture({
+        CF_ZONE_ID: "zone-secret",
+        CF_API_TOKEN: "token-secret",
+      }),
+    ).toEqual({ state: "configured", missingBindings: [] });
+    expect(
+      JSON.stringify(
+        resolveCurrentCloudflareRetirementPosture({
+          CF_ZONE_ID: "zone-secret",
+          CF_API_TOKEN: "token-secret",
+        }),
+      ),
+    ).not.toMatch(/zone-secret|token-secret/u);
   });
 
   it("fails closed when legacy edge routing is required but KV is incomplete", () => {

@@ -64,6 +64,13 @@ type ProjectRetirementProgress = {
     total: number;
     reasons: Readonly<Record<string, number>>;
   };
+  legacyRuntimeResolutions: {
+    total: number;
+    states: Readonly<Record<string, number>>;
+    proofs: Readonly<Record<string, number>>;
+    reasons: Readonly<Record<string, number>>;
+    retryable: number;
+  };
 };
 
 type ProjectRetirementStatus = {
@@ -90,6 +97,8 @@ const REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
     "This project has a mobile build in progress. Wait for it to finish before moving the project to Trash.",
   project_retirement_provider_provisioning_in_progress:
     "This project is still setting up its runtime or database. Wait for setup to finish before moving it to Trash.",
+  project_retirement_provider_configuration_unavailable:
+    "This project's public routes cannot be retired safely right now. Please try again after platform configuration is restored.",
   project_retirement_sqlite_recovery_unverified:
     "This project's database cannot be preserved and restored safely yet.",
   project_retirement_receipt_upgrade_in_progress:
@@ -115,6 +124,10 @@ const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
     "Legacy published-file removal could not be verified.",
   project_retirement_runtime_destroy_failed: "A project runtime could not be removed safely.",
   project_retirement_runtime_destroy_unverified: "A project runtime removal could not be verified.",
+  project_retirement_legacy_runtime_provider_unavailable:
+    "The earlier project runtime could not be checked right now.",
+  project_retirement_legacy_runtime_absence_unverified:
+    "The earlier project runtime removal could not be verified.",
   project_retirement_legacy_runtime_retained:
     "An older project runtime was retained because safe removal could not be verified.",
   project_retirement_attempts_exhausted: "Governed cleanup exhausted its automatic attempts.",
@@ -212,8 +225,23 @@ function parseProjectRetirementProgress(value: unknown): ProjectRetirementProgre
   const retained = isRecord(value.retainedLegacyRuntimePointers)
     ? value.retainedLegacyRuntimePointers
     : null;
+  const legacyResolutions = isRecord(value.legacyRuntimeResolutions)
+    ? value.legacyRuntimeResolutions
+    : null;
   const retainedTotal = retained ? safeCount(retained.total) : null;
-  if (!hostnames || !runtimeRoutes || !cache || !retained || retainedTotal === null) return null;
+  const legacyResolutionTotal = legacyResolutions ? safeCount(legacyResolutions.total) : 0;
+  const legacyResolutionRetryable = legacyResolutions ? safeCount(legacyResolutions.retryable) : 0;
+  if (
+    !hostnames ||
+    !runtimeRoutes ||
+    !cache ||
+    !retained ||
+    retainedTotal === null ||
+    legacyResolutionTotal === null ||
+    legacyResolutionRetryable === null
+  ) {
+    return null;
+  }
   const legacyHostnameKv = isRecord(route.legacyHostnameKv) ? route.legacyHostnameKv : null;
   return {
     route: {
@@ -240,6 +268,23 @@ function parseProjectRetirementProgress(value: unknown): ProjectRetirementProgre
         "runtime_role_slot_mismatch",
         "legacy_runtime_provider",
       ]),
+    },
+    legacyRuntimeResolutions: {
+      total: legacyResolutionTotal,
+      states: parseCountMap(legacyResolutions?.states, ["verified_absent", "retained"]),
+      proofs: parseCountMap(legacyResolutions?.proofs, ["initial_get_404", "delete_then_get_404"]),
+      reasons: parseCountMap(legacyResolutions?.reasons, [
+        "legacy_pointer_malformed",
+        "provider_observation_unavailable",
+        "provider_response_invalid",
+        "machine_identity_mismatch",
+        "project_identity_mismatch",
+        "contradictory_identity_marker",
+        "storage_ownership_ambiguous",
+        "provider_delete_unavailable",
+        "absence_unverified",
+      ]),
+      retryable: legacyResolutionRetryable,
     },
   };
 }
@@ -364,6 +409,8 @@ function retryFailureSummary(code: string): string {
     case "project_retirement_retry_not_allowed":
     case "project_retirement_reconciliation_limit_reached":
       return "This retirement receipt is not eligible for another governed cleanup.";
+    case "project_retirement_provider_configuration_unavailable":
+      return "This project's public routes cannot be retired safely right now. Try again after platform configuration is restored.";
     default:
       return "Governed cleanup could not be retried. Try again shortly.";
   }
@@ -424,6 +471,12 @@ function retirementProgressEvidence(status: ProjectRetirementStatus): string[] {
         ? "A historical runtime from the previous provider is retained for separate governed cleanup."
         : "A historical runtime reference is retained because its ownership could not be verified.",
     );
+  }
+  if ((progress.legacyRuntimeResolutions.proofs.delete_then_get_404 ?? 0) > 0) {
+    evidence.push("A historical runtime was removed and verified absent.");
+  }
+  if ((progress.legacyRuntimeResolutions.proofs.initial_get_404 ?? 0) > 0) {
+    evidence.push("A historical runtime was already absent when checked.");
   }
   return [...new Set(evidence)];
 }
@@ -794,6 +847,12 @@ export function ProjectRetirementPanel() {
                     ))}
                   </div>
                 )}
+                {singleProjectResult.status.state === "completed" &&
+                  retirementProgressEvidence(singleProjectResult.status).map((evidence) => (
+                    <p key={evidence} className="text-xs text-muted-foreground">
+                      {evidence}
+                    </p>
+                  ))}
                 {singleProjectResult.status.reconciliationEligible &&
                   governedRetryControl(singleProjectResult.status.projectId)}
               </div>

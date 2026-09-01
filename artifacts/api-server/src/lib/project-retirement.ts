@@ -64,8 +64,15 @@ import {
   type ProjectRetirementRuntimeTarget,
   type ProjectRetirementSchedulingReceipt,
 } from "./project-retirement-contract";
-import { resolveLegacyHostnameKvPosture } from "./project-retirement-activation";
+import {
+  resolveCurrentCloudflareRetirementPosture,
+  resolveLegacyHostnameKvPosture,
+} from "./project-retirement-activation";
 import { retireProjectAccessSurfaces } from "./project-retirement-access";
+import {
+  reconcileLegacyFlyRuntime,
+  type LegacyFlyRuntimeReconciliation,
+} from "./project-retirement-legacy-fly";
 import { readProjectRetirementPreflight } from "./project-retirement-preflight";
 
 export * from "./project-retirement-contract";
@@ -137,6 +144,9 @@ export async function preflightProjectRetirement(input: {
         dbProvider: projectsTable.dbProvider,
         provisioningStatus: projectsTable.provisioningStatus,
         previewDbStatus: projectsTable.previewDbStatus,
+        publicSlug: projectsTable.publicSlug,
+        customDomain: projectsTable.customDomain,
+        publishedSnapshotId: projectsTable.publishedSnapshotId,
         deletedAt: projectsTable.deletedAt,
       })
       .from(projectsTable)
@@ -206,6 +216,9 @@ export async function acceptProjectRetirement(input: {
         dbProvider: projectsTable.dbProvider,
         provisioningStatus: projectsTable.provisioningStatus,
         previewDbStatus: projectsTable.previewDbStatus,
+        publicSlug: projectsTable.publicSlug,
+        customDomain: projectsTable.customDomain,
+        publishedSnapshotId: projectsTable.publishedSnapshotId,
         deletedAt: projectsTable.deletedAt,
       })
       .from(projectsTable)
@@ -601,6 +614,7 @@ async function deactivatePublishedRoutes(
     }
   }
 
+  let storedReleaseHostname: string | null = null;
   if (project.publishedSnapshotId !== null) {
     const [version] = await db
       .select({ productionRelease: projectVersionsTable.productionRelease })
@@ -608,6 +622,7 @@ async function deactivatePublishedRoutes(
       .where(eq(projectVersionsTable.id, project.publishedSnapshotId))
       .limit(1);
     const release = version?.productionRelease as ProductionArtifactRelease | null | undefined;
+    storedReleaseHostname = typeof release?.hostname === "string" ? release.hostname : null;
     if (!release && project.builderMode === "agentic" && !routeInventoryProvider) {
       throw new ProjectRetirementStepError({
         code: "project_retirement_route_deactivation_unverified",
@@ -642,7 +657,10 @@ async function deactivatePublishedRoutes(
 
   const cachePurged = await purgeCacheForHostnames(
     projectRetirementCacheHostnames({
-      knownHostnames,
+      knownHostnames: [
+        ...knownHostnames,
+        ...(storedReleaseHostname === null ? [] : [storedReleaseHostname]),
+      ],
       legacyKvHostnames: kvHostnames,
       runtimeRouteHostnames,
     }),
@@ -1298,8 +1316,13 @@ async function destroyRuntimeTargets(
   }
 
   progress.retainedLegacyRuntimePointers ??= [];
+  progress.legacyRuntimeResolutions ??= [];
   let clearContainerPointer = project.containerId === null;
   let clearProductionPointer = project.prodContainerId === null;
+  const malformedLegacyPointers: Array<{
+    pointer: "containerId" | "prodContainerId";
+    identity: string;
+  }> = [];
   // testContainerId belongs to the historical Fly-backed testing workflow. It
   // is not a Cloudflare preview identity and must never be sent to the current
   // tenant-runtime provider or silently cleared. Retain it as explicit typed
@@ -1331,6 +1354,9 @@ async function destroyRuntimeTargets(
       if (stored.pointer === "containerId") clearContainerPointer = true;
       else clearProductionPointer = true;
       continue;
+    }
+    if (classification.reason === "runtime_identity_malformed") {
+      malformedLegacyPointers.push({ pointer: stored.pointer, identity: stored.identity });
     }
     if (!progress.retainedLegacyRuntimePointers.some((item) => item.pointer === stored.pointer)) {
       progress.retainedLegacyRuntimePointers.push({
@@ -1395,6 +1421,43 @@ async function destroyRuntimeTargets(
     runtime.failureCode = null;
     await updateProgress(operation.id, progress, leaseVersion);
   }
+
+  const persistLegacyResolution = (
+    pointer: "containerId" | "prodContainerId",
+    resolution: LegacyFlyRuntimeReconciliation,
+  ): void => {
+    progress.legacyRuntimeResolutions = [
+      ...(progress.legacyRuntimeResolutions ?? []).filter((item) => item.pointer !== pointer),
+      { pointer, ...resolution },
+    ];
+  };
+  for (const stored of malformedLegacyPointers) {
+    const resolution = await reconcileLegacyFlyRuntime({
+      machineId: stored.identity,
+      projectId: operation.projectId,
+    });
+    persistLegacyResolution(stored.pointer, resolution);
+    if (resolution.state === "verified_absent") {
+      progress.retainedLegacyRuntimePointers = progress.retainedLegacyRuntimePointers.filter(
+        (item) => item.pointer !== stored.pointer,
+      );
+      if (stored.pointer === "containerId") clearContainerPointer = true;
+      else clearProductionPointer = true;
+      await updateProgress(operation.id, progress, leaseVersion);
+      continue;
+    }
+    await updateProgress(operation.id, progress, leaseVersion);
+    if (resolution.retryable) {
+      throw new ProjectRetirementStepError({
+        code:
+          resolution.reason === "absence_unverified"
+            ? "project_retirement_legacy_runtime_absence_unverified"
+            : "project_retirement_legacy_runtime_provider_unavailable",
+        target: null,
+        retryable: true,
+      });
+    }
+  }
   return { clearContainerPointer, clearProductionPointer };
 }
 
@@ -1423,6 +1486,7 @@ export type ProjectRetirementReconciliationRequest =
         | "project_retirement_not_found"
         | "project_retirement_not_terminal"
         | "project_retirement_retry_not_allowed"
+        | "project_retirement_provider_configuration_unavailable"
         | "project_retirement_reconciliation_limit_reached";
     };
 
@@ -1431,7 +1495,8 @@ type ReconciliableRetirementProgress = ProjectRetirementProgress & {
     generation: number;
     parentOperationId: string;
     requestedBy: string;
-    reason: "retryable_terminal" | "legacy_admin_reconciliation";
+    reason: "retryable_terminal" | "legacy_admin_reconciliation" | "configuration_recovery";
+    configurationRecoveryUsed?: boolean;
   };
 };
 
@@ -1445,6 +1510,7 @@ export async function requestProjectRetirementReconciliation(input: {
   requestedBy: string;
   ownerId?: string;
   allowLegacyAdminReconciliation: boolean;
+  allowConfigurationRecovery?: boolean;
 }): Promise<ProjectRetirementReconciliationRequest> {
   const operationId = crypto.randomUUID();
   return db.transaction(async (tx) => {
@@ -1472,12 +1538,19 @@ export async function requestProjectRetirementReconciliation(input: {
     if (!latest) return { code: "project_retirement_not_found" as const };
     const latestProgress = latest.progress as ReconciliableRetirementProgress;
     const generation = latestProgress.reconciliation?.generation ?? 0;
+    const currentCloudflareCachePurgeConfigured =
+      resolveCurrentCloudflareRetirementPosture().state === "configured";
+    const configurationRecoveryUsed =
+      latestProgress.reconciliation?.configurationRecoveryUsed === true;
     const decision = decideProjectRetirementReconciliation({
       state: latest.state,
       completedAt: latest.completedAt,
       failureCode: latest.failureCode,
       generation,
       allowLegacyAdminReconciliation: input.allowLegacyAdminReconciliation,
+      allowConfigurationRecovery: input.allowConfigurationRecovery === true,
+      currentCloudflareCachePurgeConfigured,
+      configurationRecoveryUsed,
     });
     if (!decision.allowed) return { code: decision.code };
 
@@ -1487,6 +1560,8 @@ export async function requestProjectRetirementReconciliation(input: {
       parentOperationId: latest.id,
       requestedBy: input.requestedBy,
       reason: decision.reason,
+      configurationRecoveryUsed:
+        configurationRecoveryUsed || decision.reason === "configuration_recovery",
     };
     progress = (await retireProjectAccessSurfaces(tx, {
       projectId: input.projectId,

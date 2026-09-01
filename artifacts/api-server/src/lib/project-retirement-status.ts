@@ -29,12 +29,26 @@ const SECURITY_KINDS = [
   "mtls_certificate",
 ] as const;
 const POINTERS = ["containerId", "prodContainerId", "testContainerId"] as const;
+const LEGACY_RUNTIME_POINTERS = ["containerId", "prodContainerId"] as const;
 const POINTER_REASONS = [
   "runtime_identity_malformed",
   "runtime_namespace_mismatch",
   "runtime_project_mismatch",
   "runtime_role_slot_mismatch",
   "legacy_runtime_provider",
+] as const;
+const LEGACY_RUNTIME_RESOLUTION_STATES = ["verified_absent", "retained"] as const;
+const LEGACY_RUNTIME_PROOFS = ["initial_get_404", "delete_then_get_404"] as const;
+const LEGACY_RUNTIME_RETENTION_REASONS = [
+  "legacy_pointer_malformed",
+  "provider_observation_unavailable",
+  "provider_response_invalid",
+  "machine_identity_mismatch",
+  "project_identity_mismatch",
+  "contradictory_identity_marker",
+  "storage_ownership_ambiguous",
+  "provider_delete_unavailable",
+  "absence_unverified",
 ] as const;
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -174,6 +188,58 @@ function summarizeRetainedRuntimePointers(value: unknown): {
   return summary;
 }
 
+function summarizeLegacyRuntimeResolutions(value: unknown): {
+  total: number;
+  unrecognized: number;
+  pointers: Record<string, number>;
+  states: Record<string, number>;
+  proofs: Record<string, number>;
+  reasons: Record<string, number>;
+  retryable: number;
+} {
+  const receipts = Array.isArray(value) ? value : [];
+  const summary = {
+    total: receipts.length,
+    unrecognized: 0,
+    pointers: {} as Record<string, number>,
+    states: {} as Record<string, number>,
+    proofs: {} as Record<string, number>,
+    reasons: {} as Record<string, number>,
+    retryable: 0,
+  };
+  for (const receipt of receipts) {
+    if (!isRecord(receipt)) {
+      summary.unrecognized += 1;
+      continue;
+    }
+    const pointer = closedValue(receipt.pointer, LEGACY_RUNTIME_POINTERS);
+    const state = closedValue(receipt.state, LEGACY_RUNTIME_RESOLUTION_STATES);
+    if (!pointer || !state) {
+      summary.unrecognized += 1;
+      continue;
+    }
+    if (state === "verified_absent") {
+      const proof = closedValue(receipt.proof, LEGACY_RUNTIME_PROOFS);
+      if (!proof || receipt.reason !== undefined || receipt.retryable !== undefined) {
+        summary.unrecognized += 1;
+        continue;
+      }
+      summary.proofs[proof] = (summary.proofs[proof] ?? 0) + 1;
+    } else {
+      const reason = closedValue(receipt.reason, LEGACY_RUNTIME_RETENTION_REASONS);
+      if (!reason || typeof receipt.retryable !== "boolean" || receipt.proof !== undefined) {
+        summary.unrecognized += 1;
+        continue;
+      }
+      summary.reasons[reason] = (summary.reasons[reason] ?? 0) + 1;
+      if (receipt.retryable) summary.retryable += 1;
+    }
+    summary.pointers[pointer] = (summary.pointers[pointer] ?? 0) + 1;
+    summary.states[state] = (summary.states[state] ?? 0) + 1;
+  }
+  return summary;
+}
+
 function sanitizeRuntimeReceipts(value: unknown): {
   total: number;
   unrecognized: number;
@@ -247,7 +313,9 @@ export function sanitizeProjectRetirementProgress(value: unknown): Record<string
           reason: closedValue(reconciliation.reason, [
             "retryable_terminal",
             "legacy_admin_reconciliation",
+            "configuration_recovery",
           ]),
+          configurationRecoveryUsed: reconciliation.configurationRecoveryUsed === true,
           hasParent: typeof reconciliation.parentOperationId === "string",
         }
       : null,
@@ -303,6 +371,7 @@ export function sanitizeProjectRetirementProgress(value: unknown): Record<string
     retainedLegacyRuntimePointers: summarizeRetainedRuntimePointers(
       progress.retainedLegacyRuntimePointers,
     ),
+    legacyRuntimeResolutions: summarizeLegacyRuntimeResolutions(progress.legacyRuntimeResolutions),
     runtimes: sanitizeRuntimeReceipts(progress.runtimes),
   };
 }

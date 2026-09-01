@@ -25,7 +25,8 @@ export type ProjectRetirementProgress = {
     generation: number;
     parentOperationId: string;
     requestedBy: string;
-    reason: "retryable_terminal" | "legacy_admin_reconciliation";
+    reason: "retryable_terminal" | "legacy_admin_reconciliation" | "configuration_recovery";
+    configurationRecoveryUsed?: boolean;
   };
   route: {
     state: "pending" | "deactivating" | "verified_absent" | "failed";
@@ -117,6 +118,29 @@ export type ProjectRetirementProgress = {
       | "runtime_role_slot_mismatch"
       | "legacy_runtime_provider";
   }>;
+  /** Sanitized Fly reconciliation evidence; raw machine identities remain internal. */
+  legacyRuntimeResolutions?: Array<
+    | {
+        pointer: "containerId" | "prodContainerId";
+        state: "verified_absent";
+        proof: "initial_get_404" | "delete_then_get_404";
+      }
+    | {
+        pointer: "containerId" | "prodContainerId";
+        state: "retained";
+        reason:
+          | "legacy_pointer_malformed"
+          | "provider_observation_unavailable"
+          | "provider_response_invalid"
+          | "machine_identity_mismatch"
+          | "project_identity_mismatch"
+          | "contradictory_identity_marker"
+          | "storage_ownership_ambiguous"
+          | "provider_delete_unavailable"
+          | "absence_unverified";
+        retryable: boolean;
+      }
+  >;
   runtimes: ProjectRetirementTargetProgress[];
 };
 

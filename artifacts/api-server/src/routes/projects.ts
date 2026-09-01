@@ -76,6 +76,7 @@ import {
   sanitizeProjectRetirementProgress,
   sanitizeProjectRetirementState,
 } from "../lib/project-retirement-status";
+import { resolveCurrentCloudflareRetirementPosture } from "../lib/project-retirement-activation";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1712,12 +1713,22 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
     (persistedReconciliationGeneration as number) >= 0
       ? (persistedReconciliationGeneration as number)
       : PROJECT_RETIREMENT_MAX_RECONCILIATIONS;
+  const configurationRecoveryUsed = Boolean(
+    persistedReconciliation &&
+    typeof persistedReconciliation === "object" &&
+    !Array.isArray(persistedReconciliation) &&
+    (persistedReconciliation as Record<string, unknown>).configurationRecoveryUsed === true,
+  );
   const reconciliation = decideProjectRetirementReconciliation({
     state: operationState,
     completedAt: operation.completedAt,
     failureCode: operation.failureCode,
     generation: reconciliationGeneration,
     allowLegacyAdminReconciliation: staffPrincipal?.role === "owner",
+    allowConfigurationRecovery: staffPrincipal?.role === "owner",
+    currentCloudflareCachePurgeConfigured:
+      resolveCurrentCloudflareRetirementPosture().state === "configured",
+    configurationRecoveryUsed,
   });
   res.json({
     operationId: operation.id,
@@ -1769,12 +1780,16 @@ router.post("/projects/:id/retirement/retry", async (req, res): Promise<void> =>
     requestedBy: req.userId,
     ownerId: isPlatformOwner ? undefined : req.userId,
     allowLegacyAdminReconciliation: isPlatformOwner,
+    allowConfigurationRecovery: isPlatformOwner,
   });
   if (!("operationId" in reconciliation)) {
     const status = reconciliation.code === "project_retirement_not_found" ? 404 : 409;
     res.status(status).json({
       code: reconciliation.code,
-      error: "This terminal retirement receipt is not eligible for another reconciliation.",
+      error:
+        reconciliation.code === "project_retirement_provider_configuration_unavailable"
+          ? presentProjectRetirementPreflightRefusal(reconciliation.code)
+          : "This terminal retirement receipt is not eligible for another reconciliation.",
     });
     return;
   }
