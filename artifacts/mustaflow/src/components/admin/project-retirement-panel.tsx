@@ -44,6 +44,28 @@ type RetirementRetryResult =
   | { kind: "accepted"; receipt: AcceptedRetirementReceipt }
   | { kind: "refused"; code: string };
 
+type ReceiptStateSummary = {
+  total: number;
+  states: Readonly<Record<string, number>>;
+  stages: Readonly<Record<string, number>>;
+};
+
+type ProjectRetirementProgress = {
+  route: {
+    state: "pending" | "deactivating" | "verified_absent" | "failed" | null;
+    legacyHostnameKv: {
+      state: "not_configured" | "verified_absent" | "failed" | null;
+    } | null;
+    hostnames: ReceiptStateSummary;
+    runtimeRoutes: ReceiptStateSummary;
+    cache: { state: "pending" | "purged" | "failed" | null };
+  };
+  retainedLegacyRuntimePointers: {
+    total: number;
+    reasons: Readonly<Record<string, number>>;
+  };
+};
+
 type ProjectRetirementStatus = {
   operationId: string;
   projectId: number;
@@ -52,6 +74,7 @@ type ProjectRetirementStatus = {
   failureCode: string | null;
   completedAt: string | null;
   reconciliationEligible: boolean;
+  progress: ProjectRetirementProgress | null;
 };
 
 type SingleProjectRetirementResult =
@@ -126,6 +149,99 @@ function isRetirementReceipt(value: unknown): value is RetirementReceipt {
       receipt.state === "accepted" ||
       receipt.state === "completed")
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeCount(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
+}
+
+function closedValue<T extends string>(value: unknown, allowed: readonly T[]): T | null {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : null;
+}
+
+function parseCountMap(
+  value: unknown,
+  allowedKeys: readonly string[],
+): Readonly<Record<string, number>> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, number> = {};
+  for (const key of allowedKeys) {
+    const count = safeCount(value[key]);
+    if (count !== null) result[key] = count;
+  }
+  return result;
+}
+
+function parseReceiptStateSummary(
+  value: unknown,
+  allowedStates: readonly string[],
+  allowedStages: readonly string[] = [],
+): ReceiptStateSummary | null {
+  if (!isRecord(value)) return null;
+  const total = safeCount(value.total);
+  if (total === null) return null;
+  return {
+    total,
+    states: parseCountMap(value.states, allowedStates),
+    stages: parseCountMap(value.stages, allowedStages),
+  };
+}
+
+function parseProjectRetirementProgress(value: unknown): ProjectRetirementProgress | null {
+  if (value === undefined) return null;
+  if (!isRecord(value) || !isRecord(value.route)) return null;
+  const route = value.route;
+  const hostnames = parseReceiptStateSummary(
+    route.hostnames,
+    ["absent", "present", "unavailable"],
+    ["delete", "read"],
+  );
+  const runtimeRoutes = parseReceiptStateSummary(route.runtimeRoutes, [
+    "releasing",
+    "verified_absent",
+    "present",
+    "unavailable",
+  ]);
+  const cache = isRecord(route.cache) ? route.cache : null;
+  const retained = isRecord(value.retainedLegacyRuntimePointers)
+    ? value.retainedLegacyRuntimePointers
+    : null;
+  const retainedTotal = retained ? safeCount(retained.total) : null;
+  if (!hostnames || !runtimeRoutes || !cache || !retained || retainedTotal === null) return null;
+  const legacyHostnameKv = isRecord(route.legacyHostnameKv) ? route.legacyHostnameKv : null;
+  return {
+    route: {
+      state: closedValue(route.state, ["pending", "deactivating", "verified_absent", "failed"]),
+      legacyHostnameKv: legacyHostnameKv
+        ? {
+            state: closedValue(legacyHostnameKv.state, [
+              "not_configured",
+              "verified_absent",
+              "failed",
+            ]),
+          }
+        : null,
+      hostnames,
+      runtimeRoutes,
+      cache: { state: closedValue(cache.state, ["pending", "purged", "failed"]) },
+    },
+    retainedLegacyRuntimePointers: {
+      total: retainedTotal,
+      reasons: parseCountMap(retained.reasons, [
+        "runtime_identity_malformed",
+        "runtime_namespace_mismatch",
+        "runtime_project_mismatch",
+        "runtime_role_slot_mismatch",
+        "legacy_runtime_provider",
+      ]),
+    },
+  };
 }
 
 function parseRetirementBatchResponse(value: unknown): RetirementBatchResponse | null {
@@ -233,6 +349,7 @@ function parseProjectRetirementStatus(
     failureCode: response.failureCode,
     completedAt,
     reconciliationEligible: response.reconciliationEligible,
+    progress: parseProjectRetirementProgress(response.progress),
   };
 }
 
@@ -272,6 +389,43 @@ function statusSummary(status: ProjectRetirementStatus): string {
 function failureEvidenceSummary(failureCode: string | null): string {
   if (!failureCode) return "Failure evidence was recorded without a specific safe explanation.";
   return FAILURE_MESSAGES[failureCode] ?? "Failure evidence is recorded for this cleanup.";
+}
+
+function retirementProgressEvidence(status: ProjectRetirementStatus): string[] {
+  const progress = status.progress;
+  if (!progress) return [];
+  const evidence: string[] = [];
+  const route = progress.route;
+  if (route.cache.state === "failed") {
+    evidence.push("Cache clearing could not be verified.");
+  }
+  if ((route.hostnames.states.present ?? 0) > 0) {
+    evidence.push("At least one legacy route still appeared in the route registry.");
+  }
+  if ((route.hostnames.states.unavailable ?? 0) > 0) {
+    evidence.push(
+      (route.hostnames.stages.delete ?? 0) > 0
+        ? "At least one legacy route could not be removed."
+        : "At least one legacy route could not be checked after removal.",
+    );
+  }
+  if ((route.runtimeRoutes.states.present ?? 0) > 0) {
+    evidence.push("At least one production route still appeared in the runtime inventory.");
+  }
+  if ((route.runtimeRoutes.states.unavailable ?? 0) > 0) {
+    evidence.push("The production route inventory could not be verified.");
+  }
+  if (route.legacyHostnameKv?.state === "failed") {
+    evidence.push("The legacy route registry could not be verified.");
+  }
+  if (progress.retainedLegacyRuntimePointers.total > 0) {
+    evidence.push(
+      (progress.retainedLegacyRuntimePointers.reasons.legacy_runtime_provider ?? 0) > 0
+        ? "A historical runtime from the previous provider is retained for separate governed cleanup."
+        : "A historical runtime reference is retained because its ownership could not be verified.",
+    );
+  }
+  return [...new Set(evidence)];
 }
 
 function batchSummary(response: RetirementBatchResponse): string {
@@ -633,9 +787,12 @@ export function ProjectRetirementPanel() {
                   Attempt count: {singleProjectResult.status.attemptCount}.
                 </p>
                 {singleProjectResult.status.state === "failed" && (
-                  <p className="text-xs text-muted-foreground">
-                    {failureEvidenceSummary(singleProjectResult.status.failureCode)}
-                  </p>
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    <p>{failureEvidenceSummary(singleProjectResult.status.failureCode)}</p>
+                    {retirementProgressEvidence(singleProjectResult.status).map((evidence) => (
+                      <p key={evidence}>{evidence}</p>
+                    ))}
+                  </div>
                 )}
                 {singleProjectResult.status.reconciliationEligible &&
                   governedRetryControl(singleProjectResult.status.projectId)}

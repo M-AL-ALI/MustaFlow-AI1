@@ -543,6 +543,83 @@ describe("ProjectRetirementPanel", () => {
     expect(screen.queryByText("must not render")).not.toBeInTheDocument();
   });
 
+  it("renders the allowlisted cache substage without exposing raw provider detail", async () => {
+    const user = userEvent.setup();
+    const rawProviderDetail = "Cloudflare response body and token scope must not render";
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          operationId: "retirement-5",
+          projectId: 5,
+          state: "failed",
+          attemptCount: 4,
+          failureCode: "project_retirement_route_deactivation_unverified",
+          completedAt: "2026-08-31T12:05:00.000Z",
+          reconciliationEligible: false,
+          progress: {
+            route: {
+              state: "failed",
+              legacyHostnameKv: { state: "verified_absent" },
+              hostnames: { total: 0, states: {}, stages: {}, raw: rawProviderDetail },
+              runtimeRoutes: { total: 0, states: {}, raw: rawProviderDetail },
+              cache: { state: "failed", raw: rawProviderDetail },
+            },
+            retainedLegacyRuntimePointers: { total: 0, reasons: {}, raw: rawProviderDetail },
+            internal: rawProviderDetail,
+          },
+        },
+        200,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "5");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(await screen.findByText("Cache clearing could not be verified.")).toBeVisible();
+    expect(screen.queryByText(rawProviderDetail)).not.toBeInTheDocument();
+    expect(screen.queryByText(/project_retirement_/u)).not.toBeInTheDocument();
+  });
+
+  it("renders an allowlisted historical-runtime receipt in plain language", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          operationId: "retirement-27",
+          projectId: 27,
+          state: "failed",
+          attemptCount: 1,
+          failureCode: "project_retirement_legacy_runtime_retained",
+          completedAt: "2026-08-31T12:05:00.000Z",
+          reconciliationEligible: false,
+          progress: {
+            route: {
+              state: "verified_absent",
+              legacyHostnameKv: { state: "verified_absent" },
+              hostnames: { total: 0, states: {}, stages: {} },
+              runtimeRoutes: { total: 0, states: {} },
+              cache: { state: "purged" },
+            },
+            retainedLegacyRuntimePointers: {
+              total: 1,
+              reasons: { legacy_runtime_provider: 1 },
+            },
+          },
+        },
+        200,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+    await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "27");
+    await user.click(screen.getByRole("button", { name: "Check retirement status" }));
+
+    expect(
+      await screen.findByText(
+        "A historical runtime from the previous provider is retained for separate governed cleanup.",
+      ),
+    ).toBeVisible();
+  });
+
   it("offers only the governed reconciliation retry, locks duplicate clicks, and renders its accepted receipt", async () => {
     const user = userEvent.setup();
     let resolveRetry!: (response: Response) => void;
