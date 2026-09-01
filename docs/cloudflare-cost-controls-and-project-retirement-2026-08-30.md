@@ -312,6 +312,11 @@ attest to a commit, push, merge, publication, live convergence, or full-suite ru
   its sole direct dependency to the narrow
   `requestLegacyFlyMachineForRetirement` request wrapper; a second direct
   container import or a broadened import shape fails the structural test.
+- **The first exact-head release gate found one candidate lint defect.** The
+  provider-inventory accumulator was initialized before being unconditionally
+  assigned from the authoritative legacy scan. It is now declared without a
+  redundant value, so every use remains definitely assigned and the workspace
+  lint gate prevents the dead initialization from returning.
 - **Preventive regression coverage is present in the branch.** The added cases
   pin missing-binding refusal before writes, provider-only and stored-release
   hostname discovery, incomplete-inventory refusal, bounded sanitized cache

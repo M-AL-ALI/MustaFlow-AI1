@@ -84,7 +84,7 @@ export async function readProjectRetirementProviderHostnameInventory(
   const legacyPosture = dependencies.readLegacyPosture();
   if (legacyPosture.state !== "configured") return { state: "unavailable" };
 
-  let hasHostnameInventory = false;
+  let hasHostnameInventory: boolean;
   try {
     const inventory = await dependencies.readLegacyInventory(projectId);
     if (inventory.state !== "complete") return { state: "unavailable" };
