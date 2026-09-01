@@ -306,6 +306,12 @@ attest to a commit, push, merge, publication, live convergence, or full-suite ru
   hostnames, provider bodies, credentials, actor ids, or resource identifiers.
   The UI presents plain-language retained, already-absent, and
   deleted-then-verified-absent evidence for failed and completed history.
+- **The runtime-seam census initially rejected the explicit legacy retirement
+  adapter.** That was a candidate-only full-suite failure, so the branch stopped
+  before push. The census now declares this one compatibility adapter and pins
+  its sole direct dependency to the narrow
+  `requestLegacyFlyMachineForRetirement` request wrapper; a second direct
+  container import or a broadened import shape fails the structural test.
 - **Preventive regression coverage is present in the branch.** The added cases
   pin missing-binding refusal before writes, provider-only and stored-release
   hostname discovery, incomplete-inventory refusal, bounded sanitized cache

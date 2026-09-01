@@ -376,13 +376,22 @@ describe("TenantRuntimeProvider Fly adapter", () => {
     fetchSpy.mockRestore();
   });
 
-  it("keeps production consumers behind the tenant runtime seam", () => {
+  it("keeps production consumers behind the tenant runtime seam except the narrow legacy retirement adapter", () => {
     const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
     const scriptsRoot = join(sourceRoot, "../../../scripts/src");
+    const legacyRetirementAdapter = readFileSync(
+      join(sourceRoot, "lib/project-retirement-legacy-fly.ts"),
+      "utf8",
+    );
+    expect(legacyRetirementAdapter).toContain(
+      'const { requestLegacyFlyMachineForRetirement } = await import("./container");',
+    );
+    expect(legacyRetirementAdapter.match(/import\(["']\.\/container["']\)/gu)).toHaveLength(1);
     const allowed = new Set([
       "lib/container.ts",
       "lib/container-logs.ts",
       "lib/fly-runtime-provider.ts",
+      "lib/project-retirement-legacy-fly.ts",
     ]);
     const violations: string[] = [];
 
