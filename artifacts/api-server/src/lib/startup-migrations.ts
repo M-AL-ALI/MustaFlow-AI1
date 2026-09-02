@@ -1302,6 +1302,8 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         reference_user_id TEXT;
         asset_project_id INTEGER;
         asset_owner_user_id TEXT;
+        asset_kind TEXT;
+        asset_context JSONB;
         existing_reference BOOLEAN;
       BEGIN
         row_json := to_jsonb(NEW);
@@ -1341,12 +1343,41 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             FROM public.resolve_durable_asset_ids(row_json) resolved(asset_id)
            ORDER BY resolved.asset_id
         LOOP
-          SELECT state, project_id, owner_user_id
-            INTO current_state, asset_project_id, asset_owner_user_id
+          SELECT state, project_id, owner_user_id, kind, context
+            INTO current_state, asset_project_id, asset_owner_user_id, asset_kind, asset_context
             FROM public.assets
            WHERE id = candidate_id
            FOR SHARE;
-          IF current_state IS DISTINCT FROM 'ready' THEN
+          IF current_state IS DISTINCT FROM 'ready'
+             AND NOT (
+               TG_TABLE_NAME = 'generated_images'
+               AND TG_OP = 'UPDATE'
+               AND candidate_id = NULLIF(row_json ->> 'asset_id', '')::integer
+               AND asset_kind = 'generated'
+               AND asset_owner_user_id IS NOT DISTINCT FROM reference_user_id
+               AND asset_project_id IS NOT DISTINCT FROM reference_project_id
+               AND asset_context ->> 'generatedImageId' = row_json ->> 'id'
+               AND NULLIF(row_json ->> 'storage_key', '') IS NULL
+               AND NULLIF(row_json ->> 'file_url', '') IS NULL
+               AND NULLIF(row_json ->> 'thumbnail_url', '') IS NULL
+               AND (
+                 (
+                   current_state = 'reserved'
+                   AND NULLIF(to_jsonb(OLD) ->> 'asset_id', '') IS NULL
+                   AND row_json ->> 'status' = 'pending'
+                   AND (row_json - 'asset_id' - 'updated_at') =
+                       (to_jsonb(OLD) - 'asset_id' - 'updated_at')
+                 )
+                 OR (
+                   current_state = 'uploading'
+                   AND NULLIF(to_jsonb(OLD) ->> 'asset_id', '')::integer = candidate_id
+                   AND to_jsonb(OLD) ->> 'status' = 'pending'
+                   AND row_json ->> 'status' = 'generating'
+                   AND (row_json - 'status' - 'updated_at') =
+                       (to_jsonb(OLD) - 'status' - 'updated_at')
+                 )
+               )
+             ) THEN
             RAISE EXCEPTION 'asset_not_ready' USING ERRCODE = '55000';
           END IF;
           existing_reference := FALSE;
@@ -1431,7 +1462,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             ('task_events', 'task_id, message, data'),
             ('project_activity', 'project_id, metadata'),
             ('visual_edit_changes', 'project_id, before_content, after_content'),
-            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')
           ) AS guards(table_name, column_list)
         LOOP
           EXECUTE format(
@@ -1484,7 +1515,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             ('task_events', 'task_id, message, data'),
             ('project_activity', 'project_id, metadata'),
             ('visual_edit_changes', 'project_id, before_content, after_content'),
-            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')
           ) AS expected(table_name, column_list)
           JOIN pg_catalog.pg_class relation ON relation.relname = expected.table_name
           JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid = relation.oid
@@ -1515,6 +1546,24 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
               )),
               '[[:space:]]+', ' ', 'g'
             ) LIKE '%from public.durable_asset_deletion_claims%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+              )),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%asset_context ->> ''generatedimageid'' = row_json ->> ''id''%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+              )),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%row_json - ''asset_id'' - ''updated_at''%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+              )),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%row_json - ''status'' - ''updated_at''%'
         AND to_regprocedure(
               'public.durable_asset_reference_exists(integer,integer,integer)'
             ) IS NOT NULL
@@ -8709,6 +8758,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
   },
   {
     name: "migrate-durable-asset-reference-guards-v2",
+    async run(client) {
+      await applyUnifiedAssetRegistryMigration(client);
+    },
+  },
+  {
+    name: "migrate-durable-asset-reference-guards-v3",
     async run(client) {
       await applyUnifiedAssetRegistryMigration(client);
     },

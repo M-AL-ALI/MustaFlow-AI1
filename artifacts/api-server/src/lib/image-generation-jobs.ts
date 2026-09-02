@@ -414,15 +414,37 @@ export async function enqueueImageJob(
   });
 
   // Step 5: Deduct credits atomically
-  const deduction = await deductCreditsAtomic(userId, creditCost, {
-    type: "creative",
-    description: `Image generation (${resolvedQuality} quality) — image #${imageId}`,
-  });
+  let deduction: Awaited<ReturnType<typeof deductCreditsAtomic>>;
+  try {
+    deduction = await deductCreditsAtomic(userId, creditCost, {
+      type: "creative",
+      description: `Image generation (${resolvedQuality} quality) — image #${imageId}`,
+    });
+  } catch (error) {
+    await db
+      .update(generatedImagesTable)
+      .set({
+        assetId: null,
+        status: "failed",
+        errorMessage: "Credit service unavailable",
+        errorCategory: "credits",
+        updatedAt: sql`now()`,
+      })
+      .where(eq(generatedImagesTable.id, imageId));
+    await rejectReservedAsset({
+      assetId: reservedAsset.id,
+      ownerUserId: userId,
+      actorUserId: userId,
+      code: "asset_cancelled",
+    });
+    throw error;
+  }
 
   if ("insufficient" in deduction) {
     await db
       .update(generatedImagesTable)
       .set({
+        assetId: null,
         status: "failed",
         errorMessage: "Insufficient credits",
         errorCategory: "credits",
@@ -585,15 +607,37 @@ export async function enqueueImageEditJob(
   let creditsWereDeducted = false;
   if (billingMode === "credits") {
     // Deduct credits atomically
-    const deduction = await deductCreditsAtomic(userId, creditCost, {
-      type: "creative",
-      description: `Image edit (${resolvedQuality} quality) — image #${imageId}`,
-    });
+    let deduction: Awaited<ReturnType<typeof deductCreditsAtomic>>;
+    try {
+      deduction = await deductCreditsAtomic(userId, creditCost, {
+        type: "creative",
+        description: `Image edit (${resolvedQuality} quality) — image #${imageId}`,
+      });
+    } catch (error) {
+      await db
+        .update(generatedImagesTable)
+        .set({
+          assetId: null,
+          status: "failed",
+          errorMessage: "Credit service unavailable",
+          errorCategory: "credits",
+          updatedAt: sql`now()`,
+        })
+        .where(eq(generatedImagesTable.id, imageId));
+      await rejectReservedAsset({
+        assetId: reservedAsset.id,
+        ownerUserId: userId,
+        actorUserId: userId,
+        code: "asset_cancelled",
+      });
+      throw error;
+    }
 
     if ("insufficient" in deduction) {
       await db
         .update(generatedImagesTable)
         .set({
+          assetId: null,
           status: "failed",
           errorMessage: "Insufficient credits",
           errorCategory: "credits",
@@ -773,6 +817,7 @@ async function runImageEditJob(
     await db
       .update(generatedImagesTable)
       .set({
+        assetId: null,
         status: "failed",
         errorMessage: message,
         errorCategory,
@@ -961,6 +1006,7 @@ async function runImageJob(
     await db
       .update(generatedImagesTable)
       .set({
+        assetId: null,
         status: "failed",
         errorMessage: message,
         errorCategory,

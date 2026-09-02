@@ -28,7 +28,7 @@ function migrationClient(observation = readyObservation) {
 }
 
 describe("project purge operations migration", () => {
-  it("records the durable asset guard hardening as startup migration 154", () => {
+  it("records the generated-image reservation guard correction as startup migration 155", () => {
     const source = readFileSync(new URL("./startup-migrations.ts", import.meta.url), "utf8");
     const migrationSteps = source.slice(
       source.indexOf("const MIGRATION_STEPS"),
@@ -38,12 +38,18 @@ describe("project purge operations migration", () => {
       (match) => match[1],
     );
 
-    expect(names).toHaveLength(154);
+    expect(names).toHaveLength(155);
     expect(
       names.filter((name) => name === "migrate-durable-asset-reference-guards-v2"),
     ).toHaveLength(1);
     expect(migrationSteps).toContain(
       'name: "migrate-durable-asset-reference-guards-v2",\n    async run(client) {\n      await applyUnifiedAssetRegistryMigration(client);',
+    );
+    expect(
+      names.filter((name) => name === "migrate-durable-asset-reference-guards-v3"),
+    ).toHaveLength(1);
+    expect(migrationSteps).toContain(
+      'name: "migrate-durable-asset-reference-guards-v3",\n    async run(client) {\n      await applyUnifiedAssetRegistryMigration(client);',
     );
   });
 

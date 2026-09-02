@@ -31,6 +31,18 @@ import { CREDITS_ENFORCEMENT_ENABLED } from "../credits";
 const USER_A = `test-img-edit-a-${Date.now()}`;
 const USER_B = `test-img-edit-b-${Date.now()}`;
 const USER_C = `test-img-edit-c-${Date.now()}`;
+const ORIGINAL_OPENAI_IMAGE_API_KEY = process.env.OPENAI_IMAGE_API_KEY;
+
+// The route checks provider availability before ownership and lineage. These
+// tests deliberately fail on the bogus parent URL before provider work, so own
+// a non-secret presence fixture instead of depending on a developer/production
+// credential being inherited by the test process.
+process.env.OPENAI_IMAGE_API_KEY ??= "ora-image-edit-test-placeholder";
+
+afterAll(() => {
+  if (ORIGINAL_OPENAI_IMAGE_API_KEY === undefined) delete process.env.OPENAI_IMAGE_API_KEY;
+  else process.env.OPENAI_IMAGE_API_KEY = ORIGINAL_OPENAI_IMAGE_API_KEY;
+});
 
 function appAs(userId: string) {
   const app = express();
@@ -191,6 +203,7 @@ describe("POST /images/:id/edit — inline image editing", () => {
     expect(res.body.imageCount).toBe(1);
 
     const jobId = res.body.jobId as string;
+    const childId = res.body.imageId as number;
 
     // Poll the status route until the async job lands in a terminal "failed"
     // state. The refund runs inside the catch *before* status flips to failed,
@@ -205,6 +218,12 @@ describe("POST /images/:id/edit — inline image editing", () => {
       }
     }
     expect(status).toBe("failed");
+
+    const [failedChild] = await db
+      .select({ assetId: generatedImagesTable.assetId })
+      .from(generatedImagesTable)
+      .where(eq(generatedImagesTable.id, childId));
+    expect(failedChild?.assetId).toBeNull();
 
     // The reserved slot was refunded — the window image count is back to 0.
     const [usage] = await db

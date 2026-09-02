@@ -47,7 +47,7 @@ describe("unified asset registry migration", () => {
     expect(sql).toContain("('agent_tasks', 'project_id, attachments, report, staging_snapshot')");
     expect(sql).toContain("('task_events', 'task_id, message, data')");
     expect(sql).toContain(
-      "('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')",
+      "('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')",
     );
     expect(sql).toContain("JOIN public.asset_storage_objects storage_row");
     expect(sql).toContain("storage_row.storage_key = matched.storage_match[1]");
@@ -58,6 +58,25 @@ describe("unified asset registry migration", () => {
     expect(sql).toContain("trigger_row.tgtype = 23");
     expect(sql).toContain("trigger_row.tgqual IS NULL");
     expect(sql).toContain("current_state IS DISTINCT FROM 'ready'");
+    expect(sql).toContain("NULLIF(to_jsonb(OLD) ->> 'asset_id', '') IS NULL");
+    expect(sql).toContain("current_state = 'reserved'");
+    expect(sql).toContain("asset_kind = 'generated'");
+    expect(sql).toContain("asset_owner_user_id IS NOT DISTINCT FROM reference_user_id");
+    expect(sql).toContain("asset_project_id IS NOT DISTINCT FROM reference_project_id");
+    expect(sql).toContain("asset_context ->> 'generatedImageId' = row_json ->> 'id'");
+    expect(sql).toContain("row_json ->> 'status' = 'pending'");
+    expect(sql).toContain(
+      "(row_json - 'asset_id' - 'updated_at') =\n                       (to_jsonb(OLD) - 'asset_id' - 'updated_at')",
+    );
+    expect(sql).toContain("current_state = 'uploading'");
+    expect(sql).toContain("to_jsonb(OLD) ->> 'status' = 'pending'");
+    expect(sql).toContain("row_json ->> 'status' = 'generating'");
+    expect(sql).toContain(
+      "(row_json - 'status' - 'updated_at') =\n                       (to_jsonb(OLD) - 'status' - 'updated_at')",
+    );
+    expect(sql).toContain("NULLIF(row_json ->> 'storage_key', '') IS NULL");
+    expect(sql).toContain("NULLIF(row_json ->> 'file_url', '') IS NULL");
+    expect(sql).toContain("NULLIF(row_json ->> 'thumbnail_url', '') IS NULL");
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS artifact_id");
     expect(sql).toContain("COALESCE(artifact_id, -1)");
     expect(sql).toContain("SELECT indexdef");

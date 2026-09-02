@@ -28,4 +28,10 @@ describe("generated images share the unified asset registry", () => {
     expect(source).toContain("await bindGeneratedImageAsset({");
     expect(source).toContain("assetId: reservedAsset.id");
   });
+
+  it("detaches every bound asset before recording a terminal job failure", () => {
+    expect(source.match(/assetId: null,\s+status: "failed"/gu)).toHaveLength(6);
+    expect(source.match(/try \{\s+deduction = await deductCreditsAtomic/gu)).toHaveLength(2);
+    expect(source.match(/errorMessage: "Credit service unavailable"/gu)).toHaveLength(2);
+  });
 });
