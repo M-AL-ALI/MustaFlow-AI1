@@ -19,6 +19,9 @@ describe("project delete wiring", () => {
     expect(src).toContain("getGetRecentActivityQueryKey");
     expect(src).toContain("getListTrashedProjectsQueryKey");
     expect(src).toContain("Trash2");
+    expect(src).toContain('href="/trash"');
+    expect(src).toContain("Open Trash");
+    expect(src).not.toContain('href="/projects/all"');
   });
 
   it("exposes recoverable project deletion from developer project cards", () => {

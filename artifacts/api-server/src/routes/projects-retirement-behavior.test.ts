@@ -1060,7 +1060,10 @@ describe("project retirement route behavior", () => {
   });
 
   it("keeps an expired tombstone visible until its purge actually completes", async () => {
-    const expired = project({ deletedAt: new Date("2025-01-01T00:00:00.000Z") });
+    const expired = {
+      ...project({ deletedAt: new Date("2025-01-01T00:00:00.000Z") }),
+      serverNow: "2025-01-02T00:00:00.000Z",
+    };
     const purge = {
       id: "purge-77",
       projectId: 77,
@@ -1070,8 +1073,8 @@ describe("project retirement route behavior", () => {
       attemptCount: 2,
       failureCode: "project_purge_runtime_release_failed",
       failureRetryable: true,
-      nextAttemptAt: new Date("2025-02-01T00:00:00.000Z"),
-      dueAt: new Date("2025-01-31T00:00:00.000Z"),
+      nextAttemptAt: "2025-02-01T00:00:00.000Z",
+      dueAt: "2025-01-31T00:00:00.000Z",
       createdAt: NOW,
     };
     const retirement = {
@@ -1088,6 +1091,7 @@ describe("project retirement route behavior", () => {
     expect(response.body).toEqual([
       expect.objectContaining({
         id: 77,
+        serverNow: "2025-01-02T00:00:00.000Z",
         purgeDueAt: "2025-01-31T00:00:00.000Z",
         purgeState: "failed",
         purgeOperationId: "purge-77",

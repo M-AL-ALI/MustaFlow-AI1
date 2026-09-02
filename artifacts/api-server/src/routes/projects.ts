@@ -1519,6 +1519,11 @@ router.post(
 // IMPORTANT: these routes are declared BEFORE "/projects/:id" so the literal
 // "/projects/trash" path is not shadowed by the parameterized route. Likewise
 // "/projects/:id/restore" must be declared before any conflicting handlers.
+function trashTimestampToIso(value: Date | string | null | undefined): string | null {
+  if (value == null) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
 router.get("/projects/trash", async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Unauthenticated" });
@@ -1564,8 +1569,8 @@ router.get("/projects/trash", async (req, res): Promise<void> => {
       const purge = latestPurge.get(project.id);
       return {
         ...project,
-        serverNow: rows[0]?.serverNow?.toISOString() ?? null,
-        purgeDueAt: purge?.dueAt.toISOString() ?? null,
+        serverNow: trashTimestampToIso(rows[0]?.serverNow),
+        purgeDueAt: trashTimestampToIso(purge?.dueAt),
         restoreAllowed: !purge || purge.state === "scheduled",
         retirementState: latestRetirement.get(project.id)?.state ?? "not_started",
         purgeState: purge?.state ?? null,
@@ -1579,7 +1584,7 @@ router.get("/projects/trash", async (req, res): Promise<void> => {
           purge?.state === "failed" &&
           purge.failureRetryable === true &&
           purge.attemptCount < PROJECT_PURGE_MAX_ATTEMPTS,
-        purgeNextAttemptAt: purge?.nextAttemptAt?.toISOString() ?? null,
+        purgeNextAttemptAt: trashTimestampToIso(purge?.nextAttemptAt),
       };
     }),
   );

@@ -531,9 +531,9 @@ export default function ProjectsPage() {
 
           <div className="text-center pt-2">
             <Button asChild variant="outline" size="sm" className="gap-2">
-              <Link href="/projects/all">
-                <FolderKanban className="h-4 w-4" />
-                View all projects
+              <Link href="/trash">
+                <Trash2 className="h-4 w-4" />
+                Open Trash
               </Link>
             </Button>
           </div>
