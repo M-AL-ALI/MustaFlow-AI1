@@ -374,7 +374,7 @@ describe("Trash permanent deletion", () => {
     await waitFor(() => expect(onStateRefresh).toHaveBeenCalledTimes(1));
   });
 
-  it("offers a fresh, reverified retry only for a retryable failed receipt", async () => {
+  it("offers a fresh, reverified retry only when the server authorizes readmission", async () => {
     const user = userEvent.setup();
     const operationId = "purge-retry-72";
     vi.mocked(authFetch)
@@ -400,7 +400,7 @@ describe("Trash permanent deletion", () => {
           dueAt: null,
           attemptCount: 5,
           failureCode: "project_purge_attempts_exhausted",
-          failureRetryable: true,
+          failureRetryable: false,
           retryAllowed: true,
           nextAttemptAt: null,
           terminalEvidence: {
@@ -408,7 +408,7 @@ describe("Trash permanent deletion", () => {
             outcome: "failed",
             stage: "inventory",
             failureCode: "project_purge_attempts_exhausted",
-            retryable: true,
+            retryable: false,
           },
         }),
       )

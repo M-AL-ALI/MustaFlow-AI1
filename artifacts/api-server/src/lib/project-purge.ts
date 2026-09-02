@@ -208,9 +208,25 @@ type ProjectPurgeReadmissionAudit = {
 };
 
 export function canOwnerReadmitProjectPurge(
-  operation: { state: string; failureRetryable: boolean | null | undefined } | null | undefined,
+  operation:
+    | {
+        state: string;
+        attemptCount: number;
+        failureCode: string | null | undefined;
+        failureRetryable: boolean | null | undefined;
+      }
+    | null
+    | undefined,
 ): boolean {
-  return operation?.state === "failed" && operation.failureRetryable === true;
+  if (operation?.state !== "failed") return false;
+  if (operation.failureRetryable === true) return true;
+  // Legacy exhausted rows deliberately disabled automatic retry and discarded the
+  // underlying failure classification. A fresh owner-verified cycle is still safe:
+  // it resets the bounded attempt counter and repeats every absence proof.
+  return (
+    operation.failureCode === "project_purge_attempts_exhausted" &&
+    operation.attemptCount >= PROJECT_PURGE_MAX_ATTEMPTS
+  );
 }
 
 function parseProjectPurgeReadmissionAudit(
@@ -406,7 +422,10 @@ export async function acceptManualProjectPurge(input: {
           and(
             eq(projectPurgeOperationsTable.id, existing.id),
             eq(projectPurgeOperationsTable.state, "failed"),
-            eq(projectPurgeOperationsTable.failureRetryable, true),
+            or(
+              eq(projectPurgeOperationsTable.failureRetryable, true),
+              eq(projectPurgeOperationsTable.failureCode, "project_purge_attempts_exhausted"),
+            ),
             exhausted
               ? eq(projectPurgeOperationsTable.attemptCount, existing.attemptCount)
               : lt(projectPurgeOperationsTable.attemptCount, PROJECT_PURGE_MAX_ATTEMPTS),

@@ -311,7 +311,7 @@ function parseOperation(
   if (
     (value.state === "failed" && typeof value.failureRetryable !== "boolean") ||
     (value.state !== "failed" && value.failureRetryable !== null) ||
-    (value.retryAllowed && (value.state !== "failed" || value.failureRetryable !== true))
+    (value.retryAllowed && value.state !== "failed")
   ) {
     return null;
   }

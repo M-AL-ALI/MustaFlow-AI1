@@ -222,8 +222,20 @@ vi.mock("../lib/provisioning", () => ({
 vi.mock("../lib/project-purge", () => ({
   PROJECT_PURGE_MAX_ATTEMPTS: 5,
   canOwnerReadmitProjectPurge: (
-    operation: { state?: string; failureRetryable?: boolean | null } | null | undefined,
-  ) => operation?.state === "failed" && operation.failureRetryable === true,
+    operation:
+      | {
+          state?: string;
+          attemptCount?: number;
+          failureCode?: string | null;
+          failureRetryable?: boolean | null;
+        }
+      | null
+      | undefined,
+  ) =>
+    operation?.state === "failed" &&
+    (operation.failureRetryable === true ||
+      (operation.failureCode === "project_purge_attempts_exhausted" &&
+        Number(operation.attemptCount) >= 5)),
   cancelScheduledProjectPurgeForRestore: mocks.cancelPurgeForRestore,
   scheduleProjectPurgeAfterRetirement: mocks.schedulePurgeAfterRetirement,
 }));
@@ -1075,7 +1087,7 @@ describe("project retirement route behavior", () => {
       stage: "runtime",
       attemptCount: 5,
       failureCode: "project_purge_attempts_exhausted",
-      failureRetryable: true,
+      failureRetryable: false,
       nextAttemptAt: null,
       dueAt: "2025-01-31T00:00:00.000Z",
       createdAt: NOW,
@@ -1102,7 +1114,7 @@ describe("project retirement route behavior", () => {
         purgeStage: "runtime",
         purgeAttemptCount: 5,
         purgeFailureCode: "project_purge_attempts_exhausted",
-        purgeFailureRetryable: true,
+        purgeFailureRetryable: false,
         purgeRetryAllowed: true,
         purgeNextAttemptAt: null,
         retirementState: "completed",
