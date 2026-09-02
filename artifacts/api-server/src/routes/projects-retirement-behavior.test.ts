@@ -221,6 +221,9 @@ vi.mock("../lib/provisioning", () => ({
 
 vi.mock("../lib/project-purge", () => ({
   PROJECT_PURGE_MAX_ATTEMPTS: 5,
+  canOwnerReadmitProjectPurge: (
+    operation: { state?: string; failureRetryable?: boolean | null } | null | undefined,
+  ) => operation?.state === "failed" && operation.failureRetryable === true,
   cancelScheduledProjectPurgeForRestore: mocks.cancelPurgeForRestore,
   scheduleProjectPurgeAfterRetirement: mocks.schedulePurgeAfterRetirement,
 }));
@@ -1070,10 +1073,10 @@ describe("project retirement route behavior", () => {
       state: "failed",
       trigger: "expiry",
       stage: "runtime",
-      attemptCount: 2,
-      failureCode: "project_purge_runtime_release_failed",
+      attemptCount: 5,
+      failureCode: "project_purge_attempts_exhausted",
       failureRetryable: true,
-      nextAttemptAt: "2025-02-01T00:00:00.000Z",
+      nextAttemptAt: null,
       dueAt: "2025-01-31T00:00:00.000Z",
       createdAt: NOW,
     };
@@ -1097,11 +1100,11 @@ describe("project retirement route behavior", () => {
         purgeOperationId: "purge-77",
         purgeTrigger: "expiry",
         purgeStage: "runtime",
-        purgeAttemptCount: 2,
-        purgeFailureCode: "project_purge_runtime_release_failed",
+        purgeAttemptCount: 5,
+        purgeFailureCode: "project_purge_attempts_exhausted",
         purgeFailureRetryable: true,
         purgeRetryAllowed: true,
-        purgeNextAttemptAt: "2025-02-01T00:00:00.000Z",
+        purgeNextAttemptAt: null,
         retirementState: "completed",
         restoreAllowed: false,
       }),

@@ -108,6 +108,7 @@ vi.mock("./project-purge-notifications", () => ({
 
 import {
   acceptManualProjectPurge,
+  canOwnerReadmitProjectPurge,
   ensureInitialProjectPurgeNotification,
   hashProjectPurgeIdempotency,
   hashProjectPurgeRequester,
@@ -427,7 +428,36 @@ describe("owner-governed project purge admission", () => {
     expect(mocks.enqueue).not.toHaveBeenCalled();
   });
 
-  it("refuses an exhausted failed operation without mutating or enqueueing", async () => {
+  it("re-admits an exhausted retryable operation with a fresh bounded cycle and audit chain", async () => {
+    const failed = {
+      ...operation,
+      state: "failed",
+      stage: "inventory",
+      failureCode: "project_purge_attempts_exhausted",
+      failureRetryable: true,
+      attemptCount: 5,
+      terminalEvidence: {
+        schema: "project-purge-terminal-v1",
+        outcome: "failed",
+        stage: "inventory",
+        failureCode: "project_purge_attempts_exhausted",
+        retryable: true,
+      },
+      terminalAt: createdAt,
+      resourceProgress: {},
+    };
+    const readmitted = {
+      ...failed,
+      trigger: "manual",
+      state: "accepted",
+      stage: "verify",
+      attemptCount: 0,
+      failureCode: null,
+      failureRetryable: null,
+      terminalEvidence: null,
+      terminalAt: null,
+      startedAt: null,
+    };
     mocks.selectResults.push(
       [],
       [{ id: 51, ownerId: "owner-user", name: "Project 51" }],
@@ -439,23 +469,44 @@ describe("owner-governed project purge admission", () => {
           progress: { current: true },
         },
       ],
-      [
-        {
-          ...operation,
-          state: "failed",
-          failureRetryable: true,
-          attemptCount: 5,
-        },
-      ],
+      [failed],
     );
+    mocks.updateResults.push([readmitted]);
     await expect(
       acceptManualProjectPurge({ ...request, idempotencyKey: "another-delete-key-51" }),
     ).resolves.toEqual({
-      accepted: false,
-      code: "project_purge_attempts_exhausted",
+      accepted: true,
+      operation: readmitted,
     });
-    expect(tx.update).not.toHaveBeenCalled();
-    expect(mocks.enqueue).not.toHaveBeenCalled();
+    expect(canOwnerReadmitProjectPurge(failed)).toBe(true);
+    expect(mocks.updateCalls).toContainEqual(
+      expect.objectContaining({
+        state: "accepted",
+        stage: "verify",
+        attemptCount: 0,
+        startedAt: null,
+        resourceProgress: {
+          readmissionAudit: expect.objectContaining({
+            schema: "project-purge-readmission-audit-v1",
+            cycleCount: 1,
+            chainDigestSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+            latest: expect.objectContaining({
+              attemptCount: 5,
+              stage: "inventory",
+              failureCode: "project_purge_attempts_exhausted",
+              terminalAt: createdAt.toISOString(),
+              terminalEvidenceDigestSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+            }),
+          }),
+        },
+      }),
+    );
+    expect(mocks.enqueue).toHaveBeenCalledWith(
+      "project-purge",
+      { operationId: failed.id },
+      failed.id,
+      expect.any(Object),
+    );
   });
 
   it("reports a retry compare-and-set race instead of admitting duplicate work", async () => {

@@ -395,19 +395,19 @@ describe("Trash permanent deletion", () => {
           id: operationId,
           projectId: PROJECT.id,
           state: "failed",
-          stage: "runtime",
+          stage: "inventory",
           trigger: "manual",
           dueAt: null,
-          attemptCount: 1,
-          failureCode: "project_purge_runtime_release_failed",
+          attemptCount: 5,
+          failureCode: "project_purge_attempts_exhausted",
           failureRetryable: true,
           retryAllowed: true,
           nextAttemptAt: null,
           terminalEvidence: {
             schema: "project-purge-terminal-v1",
             outcome: "failed",
-            stage: "runtime",
-            failureCode: "project_purge_runtime_release_failed",
+            stage: "inventory",
+            failureCode: "project_purge_attempts_exhausted",
             retryable: true,
           },
         }),
@@ -432,7 +432,7 @@ describe("Trash permanent deletion", () => {
     await user.click(screen.getByRole("button", { name: "Verify and delete permanently" }));
     expect(
       await screen.findByText(
-        "Permanent deletion paused safely. You can retry it now.",
+        "The retry limit was reached safely. Verify again to start a fresh bounded deletion cycle.",
         undefined,
         {
           timeout: 4_000,

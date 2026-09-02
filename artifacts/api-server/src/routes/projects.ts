@@ -80,8 +80,8 @@ import {
 } from "../lib/project-retirement-status";
 import { resolveCurrentCloudflareRetirementPosture } from "../lib/project-retirement-activation";
 import {
+  canOwnerReadmitProjectPurge,
   cancelScheduledProjectPurgeForRestore,
-  PROJECT_PURGE_MAX_ATTEMPTS,
 } from "../lib/project-purge";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
@@ -1580,10 +1580,7 @@ router.get("/projects/trash", async (req, res): Promise<void> => {
         purgeAttemptCount: purge?.attemptCount ?? 0,
         purgeFailureCode: purge?.failureCode ?? null,
         purgeFailureRetryable: purge?.failureRetryable ?? null,
-        purgeRetryAllowed:
-          purge?.state === "failed" &&
-          purge.failureRetryable === true &&
-          purge.attemptCount < PROJECT_PURGE_MAX_ATTEMPTS,
+        purgeRetryAllowed: canOwnerReadmitProjectPurge(purge),
         purgeNextAttemptAt: trashTimestampToIso(purge?.nextAttemptAt),
       };
     }),

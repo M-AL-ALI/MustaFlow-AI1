@@ -130,6 +130,13 @@ export function describePurgeState(
       };
     case "failed": {
       if (project.purgeRetryAllowed) {
+        if (project.purgeFailureCode === "project_purge_attempts_exhausted") {
+          return {
+            message:
+              "Permanent deletion paused safely after its retry limit. Open progress to verify and try again.",
+            tone: "warning",
+          };
+        }
         const retryAt = formatWhen(project.purgeNextAttemptAt);
         return {
           message: retryAt
@@ -356,7 +363,7 @@ function failureMessage(code: unknown): string {
     case "project_purge_operation_unavailable":
       return "Permanent deletion paused safely. The project is not reported deleted. Try again.";
     case "project_purge_attempts_exhausted":
-      return "Permanent deletion stopped after its retry limit. Contact support for help.";
+      return "The previous retry cycle ended safely. Confirm the project name again to start another verified cycle.";
     default:
       return "We could not confirm whether permanent deletion started. Try again to check the same request safely.";
   }
@@ -365,6 +372,9 @@ function failureMessage(code: unknown): string {
 function progressMessage(operation: PurgeOperation): string {
   if (operation.state === "failed") {
     if (operation.retryAllowed) {
+      if (operation.failureCode === "project_purge_attempts_exhausted") {
+        return "The retry limit was reached safely. Verify again to start a fresh bounded deletion cycle.";
+      }
       const retryAt = formatWhen(operation.nextAttemptAt);
       return retryAt
         ? `Permanent deletion paused safely and will retry automatically around ${retryAt}.`

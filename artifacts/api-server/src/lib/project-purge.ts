@@ -194,6 +194,95 @@ function validCompletedRetirement(
   );
 }
 
+type ProjectPurgeReadmissionAudit = {
+  schema: "project-purge-readmission-audit-v1";
+  cycleCount: number;
+  chainDigestSha256: string;
+  latest: {
+    attemptCount: number;
+    stage: string;
+    failureCode: string | null;
+    terminalAt: string | null;
+    terminalEvidenceDigestSha256: string;
+  };
+};
+
+export function canOwnerReadmitProjectPurge(
+  operation: { state: string; failureRetryable: boolean | null | undefined } | null | undefined,
+): boolean {
+  return operation?.state === "failed" && operation.failureRetryable === true;
+}
+
+function parseProjectPurgeReadmissionAudit(
+  resourceProgress: unknown,
+): { ok: true; value?: ProjectPurgeReadmissionAudit } | { ok: false } {
+  if (
+    !resourceProgress ||
+    typeof resourceProgress !== "object" ||
+    Array.isArray(resourceProgress)
+  ) {
+    return { ok: true };
+  }
+  const value = (resourceProgress as Record<string, unknown>).readmissionAudit;
+  if (value === undefined) return { ok: true };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { ok: false };
+  const candidate = value as Partial<ProjectPurgeReadmissionAudit>;
+  const latest = candidate.latest;
+  const digest = /^[0-9a-f]{64}$/u;
+  if (
+    candidate.schema !== "project-purge-readmission-audit-v1" ||
+    !Number.isSafeInteger(candidate.cycleCount) ||
+    Number(candidate.cycleCount) < 1 ||
+    typeof candidate.chainDigestSha256 !== "string" ||
+    !digest.test(candidate.chainDigestSha256) ||
+    !latest ||
+    !Number.isSafeInteger(latest.attemptCount) ||
+    latest.attemptCount < 0 ||
+    typeof latest.stage !== "string" ||
+    latest.stage.length < 1 ||
+    latest.stage.length > 100 ||
+    (latest.failureCode !== null &&
+      (typeof latest.failureCode !== "string" || latest.failureCode.length > 120)) ||
+    (latest.terminalAt !== null &&
+      (typeof latest.terminalAt !== "string" ||
+        !Number.isFinite(new Date(latest.terminalAt).getTime()))) ||
+    typeof latest.terminalEvidenceDigestSha256 !== "string" ||
+    !digest.test(latest.terminalEvidenceDigestSha256)
+  ) {
+    return { ok: false };
+  }
+  return { ok: true, value: candidate as ProjectPurgeReadmissionAudit };
+}
+
+function nextProjectPurgeReadmissionAudit(operation: {
+  attemptCount: number;
+  stage: string;
+  failureCode: string | null;
+  terminalAt: Date | null;
+  terminalEvidence: unknown;
+  resourceProgress: unknown;
+}): ProjectPurgeReadmissionAudit | null {
+  const previous = parseProjectPurgeReadmissionAudit(operation.resourceProgress);
+  if (!previous.ok) return null;
+  const latest = {
+    attemptCount: operation.attemptCount,
+    stage: operation.stage,
+    failureCode: operation.failureCode,
+    terminalAt: operation.terminalAt?.toISOString() ?? null,
+    terminalEvidenceDigestSha256: sha256(JSON.stringify(operation.terminalEvidence ?? null)),
+  };
+  const previousChain =
+    previous.value?.chainDigestSha256 ?? sha256("project-purge-readmission-audit-root-v1");
+  return {
+    schema: "project-purge-readmission-audit-v1",
+    cycleCount: (previous.value?.cycleCount ?? 0) + 1,
+    chainDigestSha256: sha256(
+      `project-purge-readmission-audit-v1\u0000${previousChain}\u0000${JSON.stringify(latest)}`,
+    ),
+    latest,
+  };
+}
+
 export async function acceptManualProjectPurge(input: {
   projectId: number;
   userId: string;
@@ -280,11 +369,13 @@ export async function acceptManualProjectPurge(input: {
       .orderBy(desc(projectPurgeOperationsTable.createdAt))
       .limit(1);
     if (existing?.state === "failed") {
-      if (existing.failureRetryable !== true) {
+      if (!canOwnerReadmitProjectPurge(existing)) {
         return { accepted: false, code: "project_purge_retry_unavailable" };
       }
-      if (existing.attemptCount >= PROJECT_PURGE_MAX_ATTEMPTS) {
-        return { accepted: false, code: "project_purge_attempts_exhausted" };
+      const exhausted = existing.attemptCount >= PROJECT_PURGE_MAX_ATTEMPTS;
+      const readmissionAudit = exhausted ? nextProjectPurgeReadmissionAudit(existing) : null;
+      if (exhausted && !readmissionAudit) {
+        return { accepted: false, code: "project_purge_operation_conflict" };
       }
       const [operation] = await tx
         .update(projectPurgeOperationsTable)
@@ -301,6 +392,14 @@ export async function acceptManualProjectPurge(input: {
           failureRetryable: null,
           terminalEvidence: null,
           terminalAt: null,
+          ...(exhausted
+            ? {
+                attemptCount: 0,
+                leaseVersion: sql`${projectPurgeOperationsTable.leaseVersion} + 1`,
+                resourceProgress: { readmissionAudit },
+                startedAt: null,
+              }
+            : {}),
           updatedAt: sql`now()`,
         })
         .where(
@@ -308,7 +407,9 @@ export async function acceptManualProjectPurge(input: {
             eq(projectPurgeOperationsTable.id, existing.id),
             eq(projectPurgeOperationsTable.state, "failed"),
             eq(projectPurgeOperationsTable.failureRetryable, true),
-            lt(projectPurgeOperationsTable.attemptCount, PROJECT_PURGE_MAX_ATTEMPTS),
+            exhausted
+              ? eq(projectPurgeOperationsTable.attemptCount, existing.attemptCount)
+              : lt(projectPurgeOperationsTable.attemptCount, PROJECT_PURGE_MAX_ATTEMPTS),
           ),
         )
         .returning();
@@ -591,13 +692,23 @@ type DurableProjectPurgeResourceProgress = {
   providerRemoved: number;
   providerDetached: number;
   databaseComplete: boolean;
+  readmissionAudit?: ProjectPurgeReadmissionAudit;
 };
 
 export function parseDurableProjectPurgeResourceProgress(
   value: unknown,
   inventoryDigestSha256: string,
 ): DurableProjectPurgeResourceProgress {
-  if (value && typeof value === "object" && Object.keys(value).length === 0) {
+  const readmissionAudit = parseProjectPurgeReadmissionAudit(value);
+  if (!readmissionAudit.ok) {
+    throw new Error("project_purge_resource_progress_invalid");
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).every((key) => key === "readmissionAudit")
+  ) {
     return {
       schema: "project-purge-resource-progress-v1",
       inventoryDigestSha256,
@@ -606,6 +717,7 @@ export function parseDurableProjectPurgeResourceProgress(
       providerRemoved: 0,
       providerDetached: 0,
       databaseComplete: false,
+      ...(readmissionAudit.value ? { readmissionAudit: readmissionAudit.value } : {}),
     };
   }
   if (!value || typeof value !== "object") {

@@ -262,7 +262,7 @@ const defaultDependencies: ProjectPurgeRouteDependencies = {
   },
 
   async serializeOperation(operation) {
-    const { parseStoredProjectPurgeOperation, PROJECT_PURGE_MAX_ATTEMPTS } =
+    const { canOwnerReadmitProjectPurge, parseStoredProjectPurgeOperation } =
       await import("../lib/project-purge");
     const parsed = parseStoredProjectPurgeOperation(operation);
     if (!parsed.ok) return null;
@@ -276,10 +276,7 @@ const defaultDependencies: ProjectPurgeRouteDependencies = {
       attemptCount: parsed.value.attemptCount,
       failureCode: parsed.value.failureCode,
       failureRetryable: parsed.value.failureRetryable,
-      retryAllowed:
-        parsed.value.state === "failed" &&
-        parsed.value.failureRetryable === true &&
-        parsed.value.attemptCount < PROJECT_PURGE_MAX_ATTEMPTS,
+      retryAllowed: canOwnerReadmitProjectPurge(parsed.value),
       nextAttemptAt: operation.nextAttemptAt?.toISOString() ?? null,
       terminalEvidence: parsed.value.terminalEvidence,
     };
