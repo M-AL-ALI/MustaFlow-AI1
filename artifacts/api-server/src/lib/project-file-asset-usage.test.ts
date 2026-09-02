@@ -154,13 +154,27 @@ describe("project-file asset usage reconciliation", () => {
     harness.operations = [];
   });
 
-  it("replaces only the exact file consumers with same-project ready URL references", async () => {
+  it("rejects the whole file write when any asset URL is missing or belongs to another project", async () => {
+    await expect(
+      reconcileProjectFileAssetUsage(fakeTransaction() as never, {
+        projectId: 10,
+        artifactId: 21,
+        filePath: "src/app.tsx",
+        nextContent:
+          '<img src="/api/assets/2/content"><img src="https://app.test/api/assets/2/content?x=1"><img src="/api/assets/3/content"><img src="/api/assets/4/content">',
+      }),
+    ).rejects.toThrow("project_file_asset_reference_unavailable");
+
+    expect(harness.operations).toEqual(["delete-usage", "select-assets", "select-history"]);
+  });
+
+  it("records every authorized same-project asset URL in one atomic reconciliation", async () => {
     await reconcileProjectFileAssetUsage(fakeTransaction() as never, {
       projectId: 10,
       artifactId: 21,
       filePath: "src/app.tsx",
       nextContent:
-        '<img src="/api/assets/2/content"><img src="https://app.test/api/assets/2/content?x=1"><img src="/api/assets/3/content"><img src="/api/assets/4/content">',
+        '<img src="/api/assets/2/content"><img src="https://app.test/api/assets/2/content?x=1">',
     });
 
     expect(harness.operations).toEqual([
@@ -169,45 +183,20 @@ describe("project-file asset usage reconciliation", () => {
       "select-history",
       "insert-usage",
     ]);
-    expect(harness.usages).toEqual(
-      expect.arrayContaining([
-        {
-          assetId: 2,
-          projectId: 10,
-          artifactId: 21,
-          filePath: "src/app.tsx",
-          consumer: "project-file",
-        },
-        {
-          assetId: 1,
-          projectId: 10,
-          artifactId: 21,
-          filePath: "src/other.tsx",
-          consumer: "project-file",
-        },
-        {
-          assetId: 1,
-          projectId: 10,
-          artifactId: 21,
-          filePath: "src/app.tsx",
-          consumer: "chat-message:9",
-        },
-        {
-          assetId: 1,
-          projectId: 11,
-          artifactId: 21,
-          filePath: "src/app.tsx",
-          consumer: "project-file",
-        },
-      ]),
-    );
-    expect(harness.usages).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ assetId: 3, consumer: "project-file" }),
-        expect.objectContaining({ assetId: 4, projectId: 10, consumer: "project-file" }),
-        expect.objectContaining({ assetId: 7, consumer: "project-file:src/app.tsx" }),
-      ]),
-    );
+    expect(harness.usages).toContainEqual({
+      assetId: 2,
+      projectId: 10,
+      artifactId: 21,
+      filePath: "src/app.tsx",
+      consumer: "project-file",
+    });
+    expect(harness.usages).toContainEqual({
+      assetId: 2,
+      projectId: 10,
+      artifactId: null,
+      filePath: null,
+      consumer: "project-asset-history",
+    });
   });
 
   it("removes an exact deleted file consumer without reading or mutating other consumers", async () => {

@@ -425,8 +425,8 @@ describe("governed project retirement coordinator", () => {
     expect(restore).toContain("pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}");
     expect(restore).toContain("jsonb_set(");
     expect(restore).toContain("jsonb_build_object('state', 'restored', 'restoredAt', now())");
-    expect(restore).toContain("isNull(projectsTable.deletedAt)");
-    expect(restore).toContain("recovery window expired");
+    expect(restore).toContain("sql`${projectsTable.deletedAt} IS NOT NULL`");
+    expect(restore).toContain("cancelScheduledProjectPurgeForRestore(tx, params.data.id)");
     expect(restore).not.toMatch(
       /shareLinksTable|supportAccessGrantsTable|supportAccessSessionsTable|canvasVariantsTable|canvasAbTestsTable/,
     );

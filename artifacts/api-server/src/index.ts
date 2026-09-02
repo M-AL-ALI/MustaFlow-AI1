@@ -2,7 +2,10 @@ import { createServer, request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import app, { startProjectRetirementWorkerAfterMigrations } from "./app";
+import app, {
+  startProjectPurgeWorkerAfterMigrations,
+  startProjectRetirementWorkerAfterMigrations,
+} from "./app";
 import {
   isProjectRetirementExecutionEnabled,
   resolveCurrentCloudflareRetirementPosture,
@@ -47,6 +50,7 @@ import {
 } from "./lib/schema-contract-state";
 import { resumeProjectRetirementOperations } from "./lib/project-retirement";
 import { startAssetReservationSweeperAfterMigrations } from "./lib/asset-reservation-sweeper";
+import { startProjectPurgeRuntimeAfterMigrations } from "./lib/project-purge-bootstrap";
 
 const execFileAsync = promisify(execFile);
 
@@ -401,6 +405,20 @@ void runStartupMigrations()
           });
         }, 60_000);
         retirementResumeTimer.unref?.();
+
+        const purgeWorker = await startProjectPurgeWorkerAfterMigrations();
+        if (purgeWorker.status === "ready") {
+          const purgeRuntime = startProjectPurgeRuntimeAfterMigrations();
+          const initialPurgePass = await purgeRuntime.initialPass;
+          logger.info(
+            initialPurgePass ?? { skipped: true },
+            "project purge resume, expiry, and notification startup pass complete",
+          );
+        } else {
+          logger.error(
+            "Project purge runtime remains stopped because its durable worker is unavailable",
+          );
+        }
       }
     } else {
       logger.warn(

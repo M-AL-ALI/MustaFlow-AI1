@@ -8,7 +8,11 @@ import { applyUnifiedAssetRegistryMigration } from "./startup-migrations";
 
 describe("unified asset registry migration", () => {
   it("is additive and safe to run twice", async () => {
-    const query = vi.fn(async (_statement: unknown) => ({ rows: [], rowCount: 0 }));
+    const query = vi.fn(async (statement: unknown) =>
+      String(statement).includes("AS guard_ready")
+        ? { rows: [{ guard_ready: true }], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
+    );
     const client = { query };
     await applyUnifiedAssetRegistryMigration(client as never);
     await applyUnifiedAssetRegistryMigration(client as never);
@@ -21,6 +25,39 @@ describe("unified asset registry migration", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS asset_analysis_events");
     expect(sql).toContain("require_attachable_asset_for_usage");
     expect(sql).toContain("asset_usage_requires_ready_asset");
+    expect(sql).toContain("extract_durable_asset_ids");
+    expect(sql).toContain("resolve_durable_asset_ids");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS durable_asset_deletion_claims");
+    expect(sql).toContain("resolve_durable_storage_keys");
+    expect(sql).toContain("pg_advisory_xact_lock_shared");
+    expect(sql).toContain("FROM public.durable_asset_deletion_claims");
+    expect(sql).toContain("nabuflow:durable-object:");
+    expect(sql).toContain("PERFORM 1 FROM public.generated_images image");
+    expect(sql).toContain("FOR KEY SHARE");
+    expect(sql).toContain("IF NOT FOUND THEN");
+    expect(sql).toContain("row_json - 'deleted_at' - 'updated_at'");
+    expect(sql).toContain("durable_asset_reference_exists");
+    expect(sql).toContain("SELECT tool_call.project_id, NULL::integer, to_jsonb(tool_call)");
+    expect(sql).toContain("SELECT image.project_id, image.id, to_jsonb(image)");
+    expect(sql).toContain("AND image.deleted_at IS NULL");
+    expect(sql).toContain("/api/images/([1-9][0-9]{0,9})/file");
+    expect(sql).toContain("/api/projects/([1-9][0-9]{0,9})/uploads/");
+    expect(sql).toContain("require_attachable_assets_in_durable_reference");
+    expect(sql).toContain("durable_asset_reference_guard_");
+    expect(sql).toContain("('agent_tasks', 'project_id, attachments, report, staging_snapshot')");
+    expect(sql).toContain("('task_events', 'task_id, message, data')");
+    expect(sql).toContain(
+      "('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')",
+    );
+    expect(sql).toContain("JOIN public.asset_storage_objects storage_row");
+    expect(sql).toContain("storage_row.storage_key = matched.storage_match[1]");
+    expect(sql).toContain("storage_row.state <> 'deleted'");
+    expect(sql).toContain("legacy_object_reference_unavailable");
+    expect(sql).toContain("asset_reference_forbidden");
+    expect(sql).toContain("'lax $.**.asset_ids[*]'");
+    expect(sql).toContain("trigger_row.tgtype = 23");
+    expect(sql).toContain("trigger_row.tgqual IS NULL");
+    expect(sql).toContain("current_state IS DISTINCT FROM 'ready'");
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS artifact_id");
     expect(sql).toContain("COALESCE(artifact_id, -1)");
     expect(sql).toContain("SELECT indexdef");
@@ -28,6 +65,7 @@ describe("unified asset registry migration", () => {
     expect(sql).toContain("position('coalesce(artifact_id,' IN normalized_definition) = 0");
     expect(sql).toContain("generated-image:");
     expect(sql).toContain("UPDATE generated_images image");
+    expect(sql).toContain("asset.storage_backend <> 'legacy-url'");
     expect(sql).toMatch(
       /INSERT INTO account_asset_quota \(user_id, used_bytes, reserved_bytes\)[\s\S]*?ON CONFLICT \(user_id\) DO NOTHING/u,
     );

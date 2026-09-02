@@ -26,6 +26,7 @@ import {
   orgMembersTable,
   userPreferencesTable,
   userSubscriptionsTable,
+  storageAddonSubscriptionsTable,
   oraTranscriptsTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
@@ -34,6 +35,10 @@ import { sendGdprDeletionConfirmation } from "../lib/emailClient";
 import { getClerkUserById, deleteClerkUser } from "../lib/clerk-users";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { SUPPORT_EMAIL_ADDRESS } from "../lib/support-contact";
+import {
+  AccountErasureProjectRetirementError,
+  acceptOwnedProjectsForAccountErasure,
+} from "../lib/account-erasure-project-retirement";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -423,7 +428,7 @@ router.get("/me/export", async (req, res): Promise<void> => {
 
 // ── DELETE /api/me ────────────────────────────────────────────────────────────
 // 1. Checks that the durable erasure queue is available before proceeding.
-// 2. Soft-deletes all user-owned entities in a single transaction.
+// 2. Accepts every owned project through the governed Trash retirement coordinator.
 // 3. Enqueues a durable pg-boss job (mustaflow.gdpr-erasure) to hard-delete
 //    everything 30 days from now (GDPR Art. 17 — allowing 30-day cancellation window).
 // 4. Persists the job ID and request timestamp to user_preferences.
@@ -442,14 +447,66 @@ router.delete("/me", async (req, res): Promise<void> => {
       return;
     }
 
-    // ── Soft-delete all owned data in one transaction ──────────────────────
-    await db.transaction(async (tx) => {
-      // Projects — soft-delete (cascade children remain until hard-erasure job)
-      await tx
-        .update(projectsTable)
-        .set({ deletedAt: new Date() })
-        .where(and(eq(projectsTable.ownerId, userId), isNull(projectsTable.deletedAt)));
+    // Account deletion must never erase the local receipt for a provider-side
+    // recurring charge. The user can cancel paid subscriptions through the
+    // governed billing surfaces and retry once those receipts are terminal.
+    const [accountSubscriptions, storageSubscriptions] = await Promise.all([
+      db
+        .select({
+          tier: userSubscriptionsTable.tier,
+          status: userSubscriptionsTable.status,
+          stripeSubscriptionId: userSubscriptionsTable.stripeSubscriptionId,
+        })
+        .from(userSubscriptionsTable)
+        .where(eq(userSubscriptionsTable.userId, userId)),
+      db
+        .select({ status: storageAddonSubscriptionsTable.status })
+        .from(storageAddonSubscriptionsTable)
+        .where(eq(storageAddonSubscriptionsTable.userId, userId)),
+    ]);
+    const hasPaidAccountSubscription = accountSubscriptions.some(
+      (subscription) =>
+        subscription.tier !== "free" &&
+        Boolean(subscription.stripeSubscriptionId) &&
+        !["canceled", "incomplete_expired"].includes(subscription.status),
+    );
+    const hasPaidStorageSubscription = storageSubscriptions.some(
+      (subscription) => !["canceled", "incomplete_expired"].includes(subscription.status),
+    );
+    if (hasPaidAccountSubscription || hasPaidStorageSubscription) {
+      res.status(409).json({
+        error:
+          "Cancel your active paid subscription and storage add-ons before deleting your account.",
+      });
+      return;
+    }
 
+    // Every project, including a legacy Trash row, goes through the same
+    // receipt-bearing retirement path as the project UI. The helper preflights
+    // all projects before accepting the first one and durably schedules every
+    // accepted receipt before this route minimizes account data.
+    const retirement = await acceptOwnedProjectsForAccountErasure({
+      userId,
+      requestedBy: userId,
+    });
+
+    // Enqueue before personal-data minimization. A queue race therefore cannot
+    // leave a user locked out while no durable account-erasure job exists.
+    const erasureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const jobId = await enqueueGdprErasure(userId);
+    if (!jobId) {
+      logger.error(
+        { userId, retirementOperationIds: retirement.operationIds },
+        "GDPR erasure job enqueue failed; identity and personal data left intact",
+      );
+      res.status(503).json({
+        error: "Account deletion could not be scheduled. Please try again in a few minutes.",
+      });
+      return;
+    }
+
+    // ── Minimize account data only after governed project retirement ───────
+    await db.transaction(async (tx) => {
       // Knowledge vault entries — soft-delete via archivedAt
       await tx
         .update(knowledgeEntriesTable)
@@ -467,30 +524,18 @@ router.delete("/me", async (req, res): Promise<void> => {
       // Org memberships — no soft-delete column; remove immediately
       await tx.delete(orgMembersTable).where(eq(orgMembersTable.userId, userId));
 
-      // Chat messages — no soft-delete column; remove now for immediate data minimisation
-      // (they will also be cascade-deleted when the hard-erasure job removes the projects)
-      const userProjectRows = await tx
-        .select({ id: projectsTable.id })
-        .from(projectsTable)
-        .where(eq(projectsTable.ownerId, userId));
-
-      if (userProjectRows.length > 0) {
-        const ids = userProjectRows.map((p) => p.id);
+      // Chat messages — remove now for immediate data minimisation. Project
+      // ownership and retirement receipts remain intact for durable cleanup.
+      if (retirement.projectIds.length > 0) {
+        const ids = retirement.projectIds;
         await tx.delete(chatMessagesTable).where(inArray(chatMessagesTable.projectId, ids));
       }
     });
 
-    logger.info({ userId }, "GDPR account deletion requested — soft-delete complete");
-
-    // ── Enqueue durable 30-day hard-erasure job ────────────────────────────
-    const erasureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    const jobId = await enqueueGdprErasure(userId);
-
-    if (!jobId) {
-      // Queue was ready at check time but failed to enqueue — log and continue.
-      // The soft-delete has already happened; the user should contact support.
-      logger.error({ userId }, "GDPR erasure job enqueue failed after soft-delete was committed");
-    }
+    logger.info(
+      { userId, retirementOperationIds: retirement.operationIds },
+      "GDPR account deletion requested — governed project retirement accepted",
+    );
 
     // ── Persist job ID and timestamp to user_preferences ──────────────────
     // Allows future cancellation and audit without a separate table.
@@ -499,13 +544,13 @@ router.delete("/me", async (req, res): Promise<void> => {
         .insert(userPreferencesTable)
         .values({
           userId,
-          erasureJobId: jobId ?? "unavailable",
+          erasureJobId: jobId,
           erasureRequestedAt: new Date(),
         })
         .onConflictDoUpdate({
           target: userPreferencesTable.userId,
           set: {
-            erasureJobId: jobId ?? "unavailable",
+            erasureJobId: jobId,
             erasureRequestedAt: new Date(),
           },
         });
@@ -539,7 +584,7 @@ router.delete("/me", async (req, res): Promise<void> => {
       );
     }
 
-    res.json({
+    res.status(202).json({
       deleted: true,
       credentialsDeleted: clerkDeleted,
       erasureScheduledFor: erasureDate.toISOString(),
@@ -548,6 +593,12 @@ router.delete("/me", async (req, res): Promise<void> => {
     });
   } catch (err) {
     logger.error({ err, userId }, "GDPR account deletion failed");
+    if (err instanceof AccountErasureProjectRetirementError) {
+      res.status(503).json({
+        error: "Your projects could not be safely retired. Please try again in a few minutes.",
+      });
+      return;
+    }
     res.status(500).json({
       error: "Deletion request failed. Report this issue at /help?mode=report.",
     });

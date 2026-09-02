@@ -25,7 +25,13 @@ import {
   generateAssetDerivatives,
   type AssetDerivativePreset,
 } from "../lib/asset-derivatives";
-import { acceptsDeclaredAsset, ASSET_ERROR_MESSAGES, sniffAsset } from "../lib/asset-contract";
+import {
+  acceptsDeclaredAsset,
+  ASSET_ERROR_MESSAGES,
+  isCanonicalAssetContentRequest,
+  parseCanonicalAssetId,
+  sniffAsset,
+} from "../lib/asset-contract";
 import {
   AssetAdmissionError,
   beginAssetUpload,
@@ -774,7 +780,11 @@ router.get("/assets/:assetId/content", async (req, res) => {
     res.status(401).json({ error: "Unauthenticated" });
     return;
   }
-  const assetId = Number(req.params.assetId);
+  if (!isCanonicalAssetContentRequest(req.originalUrl, req.params.assetId)) {
+    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+    return;
+  }
+  const assetId = parseCanonicalAssetId(req.params.assetId)!;
   const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, assetId));
   if (!asset || asset.state !== "ready") {
     res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });

@@ -20,6 +20,7 @@ import {
 } from "./project-retirement-activation";
 import type { HostnameRouteInventoryResult } from "./cloudflare";
 import { supportsProductionRouteInventory } from "./tenant-runtime-provider";
+import { classifyManagedAddonRetirement } from "./project-retirement-owned-resources";
 
 type ProjectRetirementTransaction = NodePgTransaction<
   typeof DatabaseSchema,
@@ -136,15 +137,10 @@ async function hasLegacyRuntimePointer(
 }
 
 /**
- * A database row is not a provider-absence receipt. The current managed-add-on
- * implementation can mark a row removed without calling or inventorying its
- * provider, so the only state we can prove safe from existing durable facts is
- * that no add-on row has ever existed for this project.
- *
- * SQLite data lives inside the runtime at /data/db.sqlite. Existing snapshots
- * are point-in-time, best-effort captures and are not bound to retirement or
- * automatic restore. Until that binding exists, every SQLite project is
- * conservatively refused before any runtime can be destroyed.
+ * Project-fact hazards remain a read-only gate. SQLite recovery and known
+ * binding-only add-ons are now governed worker phases, so their mere presence
+ * is not a refusal. Unknown add-on provider families still fail closed before
+ * the project enters Trash.
  */
 export async function readProjectRetirementPreflight(
   tx: ProjectRetirementTransaction,
@@ -156,17 +152,26 @@ export async function readProjectRetirementPreflight(
     hasLegacyRuntime,
     hasInFlightProviderProvisioning:
       project.provisioningStatus === "provisioning" || project.previewDbStatus === "provisioning",
-    hasUnverifiedSqliteRecovery: project.dbProvider === "sqlite",
+    hasUnverifiedSqliteRecovery: false,
     hasUnverifiedManagedAddon: false,
     hasInFlightRemoteBuild: false,
   });
   if (!projectOnlyDecision.allowed) return projectOnlyDecision;
 
-  const managedAddon = await tx
-    .select({ id: managedAddonsTable.id })
+  const managedAddons = await tx
+    .select({
+      id: managedAddonsTable.id,
+      kind: managedAddonsTable.kind,
+      status: managedAddonsTable.status,
+      externalId: managedAddonsTable.externalId,
+      connectionInfo: managedAddonsTable.connectionInfo,
+      injectedEnvKeys: managedAddonsTable.injectedEnvKeys,
+      removedAt: managedAddonsTable.removedAt,
+    })
     .from(managedAddonsTable)
     .where(eq(managedAddonsTable.projectId, project.id))
-    .limit(1);
+    .limit(4);
+  const managedAddonDecision = classifyManagedAddonRetirement(managedAddons);
 
   const [projectDomain, purchasedDomain, publishedVersion] = await Promise.all([
     tx
@@ -224,7 +229,7 @@ export async function readProjectRetirementPreflight(
     hasInFlightProviderProvisioning: false,
     hasUnavailableCloudflareCachePurge: providerCachePurgeUnavailable,
     hasUnverifiedSqliteRecovery: false,
-    hasUnverifiedManagedAddon: managedAddon.length > 0,
+    hasUnverifiedManagedAddon: !managedAddonDecision.allowed,
     hasInFlightRemoteBuild: inFlightRemoteBuild.length > 0,
   });
 }

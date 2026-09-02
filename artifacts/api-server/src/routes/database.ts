@@ -30,8 +30,9 @@ import { restorePostgresDump, restoreSQLiteSnapshot } from "../lib/db-snapshot-r
 import {
   uploadSnapshotBlob,
   downloadSnapshotBlob,
-  deleteSnapshotBlob,
+  deleteSnapshotBlobAndProveAbsent as deleteSnapshotBlob,
 } from "../lib/snapshot-storage";
+import { deleteNeonProjectAndProveAbsent as deleteNeonDatabase } from "../lib/neon-project-lifecycle";
 import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
@@ -149,21 +150,6 @@ async function provisionNeonDatabase(
 
   if (!connectionString || !neonProjectId) return null;
   return { connectionString, neonProjectId };
-}
-
-async function deleteNeonDatabase(neonProjectId: string): Promise<boolean> {
-  const apiKey = process.env.NEON_API_KEY;
-  if (!apiKey) return false;
-  try {
-    const response = await fetch(`https://console.neon.tech/api/v2/projects/${neonProjectId}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    return response.ok || response.status === 404;
-  } catch (err) {
-    logger.warn({ err, neonProjectId }, "Failed to delete Neon project");
-    return false;
-  }
 }
 
 // ── Postgres structured snapshot ──────────────────────────────────────────────

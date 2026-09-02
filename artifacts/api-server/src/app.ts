@@ -20,6 +20,7 @@ import {
   stopDurableQueue,
   registerGdprErasureWorker,
   registerRequiredWorker,
+  QUEUE_PROJECT_PURGE,
   QUEUE_PROJECT_RETIREMENT,
 } from "./lib/durable-queue";
 import { runJob, registerJobWorkers } from "./lib/jobs";
@@ -31,6 +32,11 @@ import { generalLimiter } from "./lib/rateLimit";
 import { clerkSignupAdmissionLimiter } from "./lib/signup-admission";
 import { registerAssetAltTextWorker } from "./lib/asset-alt-text-analysis";
 import { runProjectRetirementOperation } from "./lib/project-retirement";
+import { runProjectPurgeOperation } from "./lib/project-purge";
+import {
+  dispatchProjectPurgeNotificationsOnce,
+  stopProjectPurgeRuntime,
+} from "./lib/project-purge-bootstrap";
 
 // Initialise Sentry before anything else so uncaught exceptions are captured.
 initSentry();
@@ -66,6 +72,7 @@ export const durableQueueWorkerStartup = startDurableQueue(async (payload) => {
   });
 
 let projectRetirementWorkerStartup: ReturnType<typeof registerRequiredWorker> | null = null;
+let projectPurgeWorkerStartup: ReturnType<typeof registerRequiredWorker> | null = null;
 
 /**
  * Register the destructive-cleanup worker only after startup migrations report
@@ -82,6 +89,12 @@ export function startProjectRetirementWorkerAfterMigrations(): ReturnType<
         const operationId = typeof payload.operationId === "string" ? payload.operationId : "";
         if (!operationId) throw new Error("project_retirement_operation_id_missing");
         await runProjectRetirementOperation(operationId);
+        await dispatchProjectPurgeNotificationsOnce().catch((error: unknown) => {
+          logger.error(
+            { errorClass: error instanceof Error ? error.name : "unknown" },
+            "project purge Trash notification dispatch failed; periodic retry remains active",
+          );
+        });
       },
       {
         retryLimit: 3,
@@ -98,6 +111,48 @@ export function startProjectRetirementWorkerAfterMigrations(): ReturnType<
     return receipt;
   });
   return projectRetirementWorkerStartup;
+}
+
+/**
+ * Permanent deletion is registered only after its schema migration and the
+ * retirement worker are ready. Notification failure never retries deletion;
+ * the bounded notification poller owns that independent recovery path.
+ */
+export function startProjectPurgeWorkerAfterMigrations(): ReturnType<
+  typeof registerRequiredWorker
+> {
+  projectPurgeWorkerStartup ??= durableQueueWorkerStartup.then(async () => {
+    const receipt = await registerRequiredWorker(
+      QUEUE_PROJECT_PURGE,
+      async (payload) => {
+        const operationId = typeof payload.operationId === "string" ? payload.operationId : "";
+        if (!operationId) throw new Error("project_purge_operation_id_missing");
+        await runProjectPurgeOperation(operationId);
+        await dispatchProjectPurgeNotificationsOnce().catch((error: unknown) => {
+          logger.error(
+            { errorClass: error instanceof Error ? error.name : "unknown" },
+            "project purge completion notification dispatch failed; periodic retry remains active",
+          );
+        });
+      },
+      {
+        retryLimit: 4,
+        retryDelay: 30,
+        retryBackoff: true,
+        queuePolicy: "exclusive",
+        registrationAttempts: 3,
+        registrationDelayMs: 250,
+      },
+    );
+    if (receipt.status !== "ready") {
+      logger.error(
+        receipt,
+        "Project purge worker is unavailable; permanent deletion remains fail closed",
+      );
+    }
+    return receipt;
+  });
+  return projectPurgeWorkerStartup;
 }
 
 // Kick off the domain renewal scheduler (Task #559).
@@ -241,6 +296,7 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
 // Graceful shutdown — drain pg-boss before the process exits.
 process.on("SIGTERM", () => {
   logger.info("SIGTERM received — stopping durable queue");
+  stopProjectPurgeRuntime();
   void stopDurableQueue().then(() => process.exit(0));
 });
 

@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 
-export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v3" as const;
+export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v6" as const;
 
 export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "admin_authority_missing",
@@ -14,6 +14,13 @@ export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "project_retirement_operations_columns_missing",
   "project_retirement_operations_constraints_missing",
   "project_retirement_operations_indexes_missing",
+  "project_purge_operations_missing",
+  "project_purge_operations_columns_missing",
+  "project_purge_operations_constraints_missing",
+  "project_purge_operations_indexes_missing",
+  "project_purge_notification_index_missing",
+  "asset_usage_attachment_guard_missing",
+  "durable_asset_reference_guards_missing",
 ] as const;
 
 export type DeploymentRuntimeSchemaViolation =
@@ -50,6 +57,13 @@ type RuntimeSchemaObservation = {
   projectRetirementOperationsColumnsReady: boolean;
   projectRetirementOperationsConstraintsReady: boolean;
   projectRetirementOperationsIndexesReady: boolean;
+  projectPurgeOperationsReady: boolean;
+  projectPurgeOperationsColumnsReady: boolean;
+  projectPurgeOperationsConstraintsReady: boolean;
+  projectPurgeOperationsIndexesReady: boolean;
+  projectPurgeNotificationIndexReady: boolean;
+  assetUsageAttachmentGuardReady: boolean;
+  durableAssetReferenceGuardsReady: boolean;
 };
 
 /**
@@ -116,7 +130,7 @@ export async function assessDeploymentRuntimeSchema(
       to_regclass('public.project_retirement_operations') IS NOT NULL
         AS "projectRetirementOperationsReady",
       (
-        SELECT COUNT(*) = 14
+        SELECT COUNT(*) = 15
           FROM information_schema.columns column_row
          WHERE column_row.table_schema = 'public'
            AND column_row.table_name = 'project_retirement_operations'
@@ -192,7 +206,357 @@ export async function assessDeploymentRuntimeSchema(
                AND pg_get_indexdef(index_row.indexrelid) LIKE '%(project_id)%'
                AND pg_get_expr(index_row.indpred, index_row.indrelid) LIKE '%accepted%running%failed%completed_at%')
            )
-      ) AS "projectRetirementOperationsIndexesReady"
+      ) AS "projectRetirementOperationsIndexesReady",
+      to_regclass('public.project_purge_operations') IS NOT NULL
+        AS "projectPurgeOperationsReady",
+      (
+        SELECT COUNT(*) = 21
+          FROM information_schema.columns column_row
+         WHERE column_row.table_schema = 'public'
+           AND column_row.table_name = 'project_purge_operations'
+           AND (column_row.column_name, column_row.data_type, column_row.is_nullable) IN (
+             ('id', 'text', 'NO'), ('project_id', 'integer', 'NO'),
+             ('retirement_operation_id_hash', 'text', 'NO'),
+             ('trigger', 'text', 'NO'), ('state', 'text', 'NO'),
+             ('stage', 'text', 'NO'), ('idempotency_key_hash', 'text', 'NO'),
+             ('requested_by_hash', 'text', 'YES'), ('attempt_count', 'integer', 'NO'),
+             ('lease_version', 'integer', 'NO'),
+             ('lease_expires_at', 'timestamp with time zone', 'YES'),
+             ('due_at', 'timestamp with time zone', 'NO'),
+              ('next_attempt_at', 'timestamp with time zone', 'YES'),
+              ('failure_code', 'text', 'YES'), ('failure_retryable', 'boolean', 'YES'),
+              ('resource_progress', 'jsonb', 'NO'),
+              ('terminal_evidence', 'jsonb', 'YES'),
+             ('created_at', 'timestamp with time zone', 'NO'),
+             ('updated_at', 'timestamp with time zone', 'NO'),
+             ('started_at', 'timestamp with time zone', 'YES'),
+             ('terminal_at', 'timestamp with time zone', 'YES')
+           )
+      ) AS "projectPurgeOperationsColumnsReady",
+      (
+        SELECT COUNT(*) = 10
+           AND bool_and(
+             CASE constraint_row.conname
+               WHEN 'project_purge_operations_pkey' THEN
+                 constraint_row.contype = 'p'
+                 AND pg_get_constraintdef(constraint_row.oid) = 'PRIMARY KEY (id)'
+               WHEN 'project_purge_operations_trigger_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%trigger%manual%expiry%'
+               WHEN 'project_purge_operations_state_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%state%scheduled%accepted%running%failed%completed%canceled%'
+               WHEN 'project_purge_operations_stage_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%stage%verify%inventory%assets%snapshots%database%addons%runtime%relational%absence%'
+               WHEN 'project_purge_operations_failure_code_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%failure_code%project_purge_absence_unverified%project_purge_operation_unavailable%'
+               WHEN 'project_purge_operations_attempt_count_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%attempt_count%>= 0%'
+               WHEN 'project_purge_operations_lease_version_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%lease_version%>= 0%'
+               WHEN 'project_purge_operations_hashes_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%retirement_operation_id_hash%idempotency_key_hash%requested_by_hash%'
+               WHEN 'project_purge_operations_requester_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%trigger%expiry%requested_by_hash%IS NOT NULL%'
+               WHEN 'project_purge_operations_terminal_check' THEN
+                 constraint_row.contype = 'c'
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%terminal_evidence%terminal_at%'
+               ELSE FALSE
+             END
+           )
+          FROM pg_catalog.pg_constraint constraint_row
+          JOIN pg_catalog.pg_class relation ON relation.oid = constraint_row.conrelid
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = 'public'
+           AND relation.relname = 'project_purge_operations'
+           AND constraint_row.conname = ANY(ARRAY[
+             'project_purge_operations_pkey',
+             'project_purge_operations_trigger_check',
+             'project_purge_operations_state_check',
+             'project_purge_operations_stage_check',
+             'project_purge_operations_failure_code_check',
+             'project_purge_operations_attempt_count_check',
+             'project_purge_operations_lease_version_check',
+             'project_purge_operations_hashes_check',
+             'project_purge_operations_requester_check',
+             'project_purge_operations_terminal_check'
+           ])
+           AND constraint_row.convalidated
+           AND NOT EXISTS (
+             SELECT 1
+               FROM pg_catalog.pg_constraint foreign_key
+              WHERE foreign_key.conrelid = relation.oid
+                AND foreign_key.contype = 'f'
+           )
+      ) AS "projectPurgeOperationsConstraintsReady",
+      (
+        SELECT COUNT(*) = 6
+           AND bool_and(index_row.indisvalid AND index_row.indisready)
+           AND bool_and(
+             CASE index_relation.relname
+               WHEN 'project_purge_operations_pkey' THEN index_row.indisunique
+               WHEN 'project_purge_operations_project_idx' THEN
+                 pg_get_indexdef(index_row.indexrelid) LIKE '%(project_id, created_at)%'
+               WHEN 'project_purge_operations_due_idx' THEN
+                 pg_get_indexdef(index_row.indexrelid) LIKE '%(state, due_at, next_attempt_at)%'
+               WHEN 'project_purge_operations_idempotency_uq' THEN
+                 index_row.indisunique
+                 AND pg_get_indexdef(index_row.indexrelid) LIKE '%(idempotency_key_hash)%'
+               WHEN 'project_purge_operations_retirement_uq' THEN
+                 index_row.indisunique
+                 AND pg_get_indexdef(index_row.indexrelid) LIKE '%(project_id, retirement_operation_id_hash)%'
+               WHEN 'project_purge_operations_active_project_uq' THEN
+                 index_row.indisunique
+                 AND pg_get_indexdef(index_row.indexrelid) LIKE '%(project_id)%'
+                 AND pg_get_expr(index_row.indpred, index_row.indrelid) LIKE '%scheduled%accepted%running%failed%'
+               ELSE FALSE
+             END
+           )
+          FROM pg_catalog.pg_index index_row
+          JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_row.indexrelid
+          JOIN pg_catalog.pg_class table_relation ON table_relation.oid = index_row.indrelid
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid = table_relation.relnamespace
+         WHERE namespace.nspname = 'public'
+           AND table_relation.relname = 'project_purge_operations'
+           AND index_relation.relname = ANY(ARRAY[
+             'project_purge_operations_pkey',
+             'project_purge_operations_project_idx',
+             'project_purge_operations_due_idx',
+             'project_purge_operations_idempotency_uq',
+             'project_purge_operations_retirement_uq',
+             'project_purge_operations_active_project_uq'
+           ])
+      ) AS "projectPurgeOperationsIndexesReady",
+      EXISTS (
+        SELECT 1
+          FROM pg_catalog.pg_index index_row
+          JOIN pg_catalog.pg_class index_relation ON index_relation.oid=index_row.indexrelid
+          JOIN pg_catalog.pg_class table_relation ON table_relation.oid=index_row.indrelid
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid=table_relation.relnamespace
+         WHERE namespace.nspname='public'
+           AND table_relation.relname='notifications'
+           AND index_relation.relname='notifications_project_purge_milestone_uq'
+           AND index_row.indisunique AND index_row.indisvalid AND index_row.indisready
+           AND pg_get_indexdef(index_row.indexrelid)
+                 LIKE '%(resource_type, resource_id, recipient_id)%'
+           AND pg_get_expr(index_row.indpred, index_row.indrelid)
+                 LIKE '%resource_type%project_purge%'
+      ) AS "projectPurgeNotificationIndexReady",
+      EXISTS (
+        SELECT 1
+          FROM pg_catalog.pg_trigger trigger_row
+          JOIN pg_catalog.pg_class relation ON relation.oid = trigger_row.tgrelid
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+          JOIN pg_catalog.pg_proc procedure_row ON procedure_row.oid = trigger_row.tgfoid
+         WHERE namespace.nspname = 'public'
+           AND relation.relname = 'asset_usage'
+           AND trigger_row.tgname = 'asset_usage_requires_ready_asset'
+           AND NOT trigger_row.tgisinternal
+           AND trigger_row.tgenabled = ANY(ARRAY['O', 'A']::"char"[])
+           AND regexp_replace(
+                 lower(pg_get_triggerdef(trigger_row.oid)),
+                 '[[:space:]]+',
+                 ' ',
+                 'g'
+               ) LIKE '%before insert or update of asset_id, project_id on public.asset_usage%'
+           AND regexp_replace(
+                 lower(pg_get_functiondef(procedure_row.oid)),
+                 '[[:space:]]+',
+                 ' ',
+                 'g'
+               ) LIKE '%current_state is distinct from ''ready''%'
+           AND regexp_replace(
+                 lower(pg_get_functiondef(procedure_row.oid)),
+                 '[[:space:]]+',
+                 ' ',
+                 'g'
+               ) LIKE '%for share%'
+      ) AS "assetUsageAttachmentGuardReady",
+      (
+        SELECT COUNT(*) = 15
+           AND bool_and(NOT trigger_row.tgisinternal)
+           AND bool_and(trigger_row.tgenabled = ANY(ARRAY['O', 'A']::"char"[]))
+           AND bool_and(trigger_row.tgtype = 23)
+           AND bool_and(trigger_row.tgqual IS NULL)
+           AND bool_and(
+             trigger_row.tgfoid =
+               to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+           )
+           AND bool_and(
+             (SELECT string_agg(attribute.attname, ', ' ORDER BY trigger_column.ordinality)
+                FROM unnest(trigger_row.tgattr::smallint[]) WITH ORDINALITY
+                     AS trigger_column(attnum, ordinality)
+                JOIN pg_catalog.pg_attribute attribute
+                  ON attribute.attrelid=relation.oid
+                 AND attribute.attnum=trigger_column.attnum) = expected.column_list
+           )
+           AND bool_and(
+             regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
+               LIKE '%if current_state is distinct from ''ready'' then%'
+           )
+           AND bool_and(
+             regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
+               LIKE '%for share%'
+           )
+           AND bool_and(
+             regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
+               LIKE '%legacy_object_reference_unavailable%'
+           )
+           AND bool_and(
+             regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
+               LIKE '%public.resolve_durable_asset_ids(row_json)%'
+           )
+           AND bool_and(
+             regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
+               LIKE '%asset_reference_forbidden%'
+           )
+           AND bool_and(
+             regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
+               LIKE '%from public.asset_usage%'
+           )
+           AND bool_and(
+             EXISTS (
+               SELECT 1 FROM unnest(COALESCE(procedure_row.proconfig, ARRAY[]::text[])) setting
+                WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
+                      'search_path=pg_catalog,public'
+             )
+           )
+          FROM (VALUES
+            ('chat_messages', 'project_id, attachments'),
+            ('agent_tasks', 'project_id, attachments, report, staging_snapshot'),
+            ('agent_tool_calls', 'project_id, stdout_preview, args_summary'),
+            ('zero_prompt_queue_items', 'project_id, asset_ids, current_text'),
+            ('knowledge_entries', 'project_id, annotation'),
+            ('project_files', 'project_id, content'),
+            ('project_versions', 'project_id, files_snapshot'),
+            ('canvas_variants', 'project_id, files'),
+            ('canvas_variant_library', 'source_project_id, files'),
+            ('gallery_templates', 'source_project_id, files_snapshot'),
+            ('agent_inbox', 'project_id, screenshot_url'),
+            ('task_events', 'task_id, message, data'),
+            ('project_activity', 'project_id, metadata'),
+            ('visual_edit_changes', 'project_id, before_content, after_content'),
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')
+          ) AS expected(table_name, column_list)
+          JOIN pg_catalog.pg_class relation ON relation.relname = expected.table_name
+          JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid = relation.oid
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+          JOIN pg_catalog.pg_proc procedure_row ON procedure_row.oid = trigger_row.tgfoid
+         WHERE namespace.nspname = 'public'
+           AND relation.relname = ANY(ARRAY[
+             'chat_messages', 'agent_tasks', 'agent_tool_calls',
+             'zero_prompt_queue_items', 'knowledge_entries', 'project_files',
+             'project_versions', 'canvas_variants', 'canvas_variant_library',
+             'gallery_templates', 'agent_inbox', 'task_events',
+             'project_activity', 'visual_edit_changes', 'generated_images'
+           ])
+           AND trigger_row.tgname = 'durable_asset_reference_guard_' || relation.relname
+           AND trigger_row.tgfoid =
+               to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+           AND to_regprocedure('public.extract_durable_asset_ids(jsonb)') IS NOT NULL
+           AND to_regclass('public.durable_asset_deletion_claims') IS NOT NULL
+           AND to_regprocedure('public.resolve_durable_storage_keys(jsonb)') IS NOT NULL
+           AND regexp_replace(
+                 lower(pg_get_functiondef(procedure_row.oid)),
+                 '[[:space:]]+', ' ', 'g'
+               ) LIKE '%pg_advisory_xact_lock_shared%'
+           AND regexp_replace(
+                 lower(pg_get_functiondef(procedure_row.oid)),
+                 '[[:space:]]+', ' ', 'g'
+               ) LIKE '%from public.durable_asset_deletion_claims%'
+           AND regexp_replace(
+                 lower(pg_get_functiondef(
+                   to_regprocedure('public.extract_durable_asset_ids(jsonb)')
+                 )),
+                 '[[:space:]]+', ' ', 'g'
+               ) LIKE '%/api/assets/([1-9][0-9]{0,9})/content%'
+           AND EXISTS (
+             SELECT 1
+              WHERE to_regprocedure('public.resolve_durable_asset_ids(jsonb)') IS NOT NULL
+                AND regexp_replace(
+                      lower(pg_get_functiondef(
+                        to_regprocedure('public.resolve_durable_asset_ids(jsonb)')
+                      )),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%/api/images/([1-9][0-9]{0,9})/file%'
+                 AND regexp_replace(
+                       lower(pg_get_functiondef(
+                         to_regprocedure('public.resolve_durable_asset_ids(jsonb)')
+                       )),
+                       '[[:space:]]+', ' ', 'g'
+                     ) LIKE '%/api/projects/([1-9][0-9]{0,9})/uploads/([1-9][0-9]{0,9})/content%'
+                 AND regexp_replace(
+                       lower(pg_get_functiondef(
+                         to_regprocedure('public.resolve_durable_asset_ids(jsonb)')
+                       )),
+                       '[[:space:]]+', ' ', 'g'
+                     ) LIKE '%join public.asset_storage_objects storage_row on storage_row.storage_key = matched.storage_match[1]%'
+                 AND EXISTS (
+                  SELECT 1
+                    FROM unnest(COALESCE(
+                      (SELECT proconfig FROM pg_catalog.pg_proc
+                        WHERE oid=to_regprocedure('public.resolve_durable_asset_ids(jsonb)')),
+                      ARRAY[]::text[]
+                    )) setting
+                   WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
+                         'search_path=pg_catalog,public'
+                )
+           )
+           AND EXISTS (
+             SELECT 1
+              WHERE to_regprocedure(
+                      'public.durable_asset_reference_exists(integer,integer,integer)'
+                    ) IS NOT NULL
+                AND regexp_replace(
+                      lower(pg_get_functiondef(to_regprocedure(
+                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                      ))),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%from public.canvas_variant_library%'
+                AND regexp_replace(
+                      lower(pg_get_functiondef(to_regprocedure(
+                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                      ))),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%from public.gallery_templates%'
+                AND regexp_replace(
+                      lower(pg_get_functiondef(to_regprocedure(
+                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                      ))),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%select tool_call.project_id, null::integer, to_jsonb(tool_call)%'
+                AND regexp_replace(
+                      lower(pg_get_functiondef(to_regprocedure(
+                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                      ))),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%select image.project_id, image.id, to_jsonb(image)%'
+                AND regexp_replace(
+                      lower(pg_get_functiondef(to_regprocedure(
+                        'public.resolve_durable_asset_ids(jsonb)'
+                      ))),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%and image.deleted_at is null%'
+                AND EXISTS (
+                  SELECT 1
+                    FROM unnest(COALESCE(
+                      (SELECT proconfig FROM pg_catalog.pg_proc
+                        WHERE oid=to_regprocedure(
+                          'public.durable_asset_reference_exists(integer,integer,integer)'
+                        )),
+                      ARRAY[]::text[]
+                    )) setting
+                   WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
+                         'search_path=pg_catalog,public'
+                )
+           )
+      ) AS "durableAssetReferenceGuardsReady"
   `);
 
   const observation = result.rows[0];
@@ -227,6 +591,20 @@ export async function assessDeploymentRuntimeSchema(
     violations.push("project_retirement_operations_constraints_missing");
   if (observation?.projectRetirementOperationsIndexesReady !== true)
     violations.push("project_retirement_operations_indexes_missing");
+  if (observation?.projectPurgeOperationsReady !== true)
+    violations.push("project_purge_operations_missing");
+  if (observation?.projectPurgeOperationsColumnsReady !== true)
+    violations.push("project_purge_operations_columns_missing");
+  if (observation?.projectPurgeOperationsConstraintsReady !== true)
+    violations.push("project_purge_operations_constraints_missing");
+  if (observation?.projectPurgeOperationsIndexesReady !== true)
+    violations.push("project_purge_operations_indexes_missing");
+  if (observation?.projectPurgeNotificationIndexReady !== true)
+    violations.push("project_purge_notification_index_missing");
+  if (observation?.assetUsageAttachmentGuardReady !== true)
+    violations.push("asset_usage_attachment_guard_missing");
+  if (observation?.durableAssetReferenceGuardsReady !== true)
+    violations.push("durable_asset_reference_guards_missing");
 
   return violations.length === 0
     ? {

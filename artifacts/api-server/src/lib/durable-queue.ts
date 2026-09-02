@@ -34,6 +34,7 @@ export const QUEUE_APP_TESTING = "mustaflow.app-testing";
 export const QUEUE_CVE_AUTOPROTECT = "mustaflow.cve-autoprotect";
 export const QUEUE_GDPR_ERASURE = "mustaflow.gdpr-erasure";
 export const QUEUE_PROJECT_RETIREMENT = "mustaflow.project-retirement";
+export const QUEUE_PROJECT_PURGE = "mustaflow.project-purge";
 
 const RETRY_LIMIT = 2;
 const RETRY_DELAY_SECONDS = 30;

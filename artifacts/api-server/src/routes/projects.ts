@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -7,6 +7,7 @@ import {
   chatMessagesTable,
   agentTasksTable,
   projectRetirementOperationsTable,
+  projectPurgeOperationsTable,
 } from "@workspace/db";
 import {
   listAccessibleProjectIds,
@@ -67,6 +68,7 @@ import {
 import {
   getDurableWorkerReadiness,
   isDurableWorkerReady,
+  QUEUE_PROJECT_PURGE,
   QUEUE_PROJECT_RETIREMENT,
 } from "../lib/durable-queue";
 import { requireAdmin, requireOwner, resolveStaffPrincipal } from "../lib/adminAuth";
@@ -77,6 +79,10 @@ import {
   sanitizeProjectRetirementState,
 } from "../lib/project-retirement-status";
 import { resolveCurrentCloudflareRetirementPosture } from "../lib/project-retirement-activation";
+import {
+  cancelScheduledProjectPurgeForRestore,
+  PROJECT_PURGE_MAX_ATTEMPTS,
+} from "../lib/project-purge";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1506,16 +1512,13 @@ router.post(
 );
 
 // ── Trash / soft-delete recovery ──────────────────────────────────────────────
-// Soft-deleted projects (deletedAt IS NOT NULL) remain in the DB for a 30-day
-// recovery window. After 30 days they're still retained server-side (no purger
-// runs in v1) but the Trash UI hides them as "expired" so users don't expect
-// recovery.
+// A tombstone remains visible until its governed purge actually removes the
+// project row. Age alone is never evidence of deletion: overdue, failed, or
+// pending purges must remain visible and honest in Trash.
 //
 // IMPORTANT: these routes are declared BEFORE "/projects/:id" so the literal
 // "/projects/trash" path is not shadowed by the parameterized route. Likewise
 // "/projects/:id/restore" must be declared before any conflicting handlers.
-const TRASH_RECOVERY_DAYS = 30;
-
 router.get("/projects/trash", async (req, res): Promise<void> => {
   if (!req.userId) {
     res.status(401).json({ error: "Unauthenticated" });
@@ -1523,18 +1526,63 @@ router.get("/projects/trash", async (req, res): Promise<void> => {
   }
   const userId = req.userId;
   const rows = await db
-    .select()
+    .select({
+      ...getTableColumns(projectsTable),
+      serverNow: sql<Date>`now()`,
+    })
     .from(projectsTable)
-    .where(
-      and(
-        eq(projectsTable.ownerId, userId),
-        sql`${projectsTable.deletedAt} IS NOT NULL`,
-        sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
-      ),
-    )
+    .where(and(eq(projectsTable.ownerId, userId), sql`${projectsTable.deletedAt} IS NOT NULL`))
     .orderBy(desc(projectsTable.deletedAt));
   const parsed = ListProjectsResponse.parse(rows);
-  res.json(parsed);
+  if (parsed.length === 0) {
+    res.json(parsed);
+    return;
+  }
+  const projectIds = parsed.map((project) => project.id);
+  const purgeOperations = await db
+    .select()
+    .from(projectPurgeOperationsTable)
+    .where(inArray(projectPurgeOperationsTable.projectId, projectIds))
+    .orderBy(desc(projectPurgeOperationsTable.createdAt));
+  const retirementOperations = await db
+    .select()
+    .from(projectRetirementOperationsTable)
+    .where(inArray(projectRetirementOperationsTable.projectId, projectIds))
+    .orderBy(desc(projectRetirementOperationsTable.createdAt));
+  const latestPurge = new Map<number, (typeof purgeOperations)[number]>();
+  for (const operation of purgeOperations) {
+    if (!latestPurge.has(operation.projectId)) latestPurge.set(operation.projectId, operation);
+  }
+  const latestRetirement = new Map<number, (typeof retirementOperations)[number]>();
+  for (const operation of retirementOperations) {
+    if (!latestRetirement.has(operation.projectId)) {
+      latestRetirement.set(operation.projectId, operation);
+    }
+  }
+  res.json(
+    parsed.map((project) => {
+      const purge = latestPurge.get(project.id);
+      return {
+        ...project,
+        serverNow: rows[0]?.serverNow?.toISOString() ?? null,
+        purgeDueAt: purge?.dueAt.toISOString() ?? null,
+        restoreAllowed: !purge || purge.state === "scheduled",
+        retirementState: latestRetirement.get(project.id)?.state ?? "not_started",
+        purgeState: purge?.state ?? null,
+        purgeOperationId: purge?.id ?? null,
+        purgeTrigger: purge?.trigger ?? null,
+        purgeStage: purge?.stage ?? null,
+        purgeAttemptCount: purge?.attemptCount ?? 0,
+        purgeFailureCode: purge?.failureCode ?? null,
+        purgeFailureRetryable: purge?.failureRetryable ?? null,
+        purgeRetryAllowed:
+          purge?.state === "failed" &&
+          purge.failureRetryable === true &&
+          purge.attemptCount < PROJECT_PURGE_MAX_ATTEMPTS,
+        purgeNextAttemptAt: purge?.nextAttemptAt?.toISOString() ?? null,
+      };
+    }),
+  );
 });
 
 router.post("/projects/:id/restore", async (req, res): Promise<void> => {
@@ -1558,16 +1606,7 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
     const [ownedProject] = await tx
       .select()
       .from(projectsTable)
-      .where(
-        and(
-          eq(projectsTable.id, params.data.id),
-          eq(projectsTable.ownerId, userId),
-          or(
-            isNull(projectsTable.deletedAt),
-            sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
-          ),
-        ),
-      )
+      .where(and(eq(projectsTable.id, params.data.id), eq(projectsTable.ownerId, userId)))
       .limit(1);
     if (!ownedProject) return { kind: "not_found" as const };
 
@@ -1593,6 +1632,10 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
     const restoreAdmission = decideProjectRestoreAdmission(retirementEvidence);
     if (!restoreAdmission.allowed) {
       return { kind: "blocked" as const, operation: latestRetirement ?? null };
+    }
+    const purgeRestore = await cancelScheduledProjectPurgeForRestore(tx, params.data.id);
+    if (!purgeRestore.allowed) {
+      return { kind: "purge_in_progress" as const };
     }
     const [restoreReceipt] = await tx
       .update(projectRetirementOperationsTable)
@@ -1634,7 +1677,6 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
           eq(projectsTable.id, params.data.id),
           eq(projectsTable.ownerId, userId),
           sql`${projectsTable.deletedAt} IS NOT NULL`,
-          sql`${projectsTable.deletedAt} > now() - interval '${sql.raw(String(TRASH_RECOVERY_DAYS))} days'`,
         ),
       )
       .returning();
@@ -1649,10 +1691,15 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
     });
     return;
   }
+  if (restoreResult.kind === "purge_in_progress") {
+    res.status(409).json({
+      code: "project_purge_in_progress",
+      error: "Permanent deletion has started, so this project can no longer be restored.",
+    });
+    return;
+  }
   if (restoreResult.kind === "not_found") {
-    res
-      .status(404)
-      .json({ error: "Project not found, not owned by you, or recovery window expired" });
+    res.status(404).json({ error: "Project not found" });
     return;
   }
   res.json(GetProjectResponse.parse(restoreResult.project));
@@ -1841,6 +1888,15 @@ router.post(
         error: "Projects cannot be moved to Trash right now. Please try again shortly.",
         retryable: true,
         worker: getDurableWorkerReadiness(QUEUE_PROJECT_RETIREMENT),
+      });
+      return;
+    }
+    if (!isDurableWorkerReady(QUEUE_PROJECT_PURGE)) {
+      res.status(503).json({
+        code: "project_purge_worker_unavailable",
+        error: "Projects cannot be moved to Trash right now. Please try again shortly.",
+        retryable: true,
+        worker: getDurableWorkerReadiness(QUEUE_PROJECT_PURGE),
       });
       return;
     }
@@ -2062,6 +2118,18 @@ router.delete("/projects/:id", requireProjectOwnership, async (req, res): Promis
     const readiness = getDurableWorkerReadiness(QUEUE_PROJECT_RETIREMENT);
     res.status(503).json({
       code: "project_retirement_worker_unavailable",
+      error: "This project cannot be moved to Trash right now. Please try again shortly.",
+      retryable: true,
+      deleted: false,
+      cleanupScheduled: false,
+      worker: readiness,
+    });
+    return;
+  }
+  if (!isDurableWorkerReady(QUEUE_PROJECT_PURGE)) {
+    const readiness = getDurableWorkerReadiness(QUEUE_PROJECT_PURGE);
+    res.status(503).json({
+      code: "project_purge_worker_unavailable",
       error: "This project cannot be moved to Trash right now. Please try again shortly.",
       retryable: true,
       deleted: false,

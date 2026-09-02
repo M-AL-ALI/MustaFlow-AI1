@@ -322,15 +322,6 @@ describe("project retirement fail-closed preflight", () => {
         previewDbStatus: "none",
       },
       {
-        id: 8,
-        containerId: null,
-        prodContainerId: null,
-        testContainerId: null,
-        dbProvider: "sqlite",
-        provisioningStatus: "idle",
-        previewDbStatus: "none",
-      },
-      {
         id: 9,
         containerId: null,
         prodContainerId: null,
@@ -354,6 +345,27 @@ describe("project retirement fail-closed preflight", () => {
       expect(result.allowed).toBe(false);
       expect(harness.reads).toEqual([]);
     }
+  });
+
+  it("admits a SQLite project so the governed worker can preserve it before runtime release", async () => {
+    const harness = readOnlyTransaction(new Map());
+    await expect(
+      readProjectRetirementPreflight(harness.tx as never, {
+        id: 8,
+        containerId: null,
+        prodContainerId: null,
+        testContainerId: null,
+        dbProvider: "sqlite",
+        provisioningStatus: "idle",
+        previewDbStatus: "none",
+      }),
+    ).resolves.toEqual({ allowed: true });
+    expect(harness.reads.map((read) => read.table)).toEqual([
+      managedAddonsTable,
+      projectDomainsTable,
+      purchasedDomainsTable,
+      deploymentLogsTable,
+    ]);
   });
 
   it("admits only current-namespace preview and production pointer roles", async () => {
@@ -485,9 +497,24 @@ describe("project retirement fail-closed preflight", () => {
     });
   });
 
-  it("treats every managed add-on row as unverified because no provider absence receipt exists", async () => {
+  it("admits a previously removed add-on whose binding and injected-secret list are absent", async () => {
     const harness = readOnlyTransaction(
-      new Map([[managedAddonsTable, [{ id: 91, status: "removed", removedAt: new Date() }]]]),
+      new Map([
+        [
+          managedAddonsTable,
+          [
+            {
+              id: 91,
+              kind: "redis_kv",
+              status: "removed",
+              externalId: null,
+              connectionInfo: null,
+              injectedEnvKeys: [],
+              removedAt: new Date(),
+            },
+          ],
+        ],
+      ]),
     );
     await expect(
       readProjectRetirementPreflight(harness.tx as never, {
@@ -499,16 +526,74 @@ describe("project retirement fail-closed preflight", () => {
         provisioningStatus: "idle",
         previewDbStatus: "none",
       }),
-    ).resolves.toEqual({
-      allowed: false,
-      code: "project_retirement_managed_addon_unverified",
-    });
+    ).resolves.toEqual({ allowed: true });
     expect(harness.reads.map((read) => read.table)).toEqual([
       managedAddonsTable,
       projectDomainsTable,
       purchasedDomainsTable,
       deploymentLogsTable,
     ]);
+  });
+
+  it("admits current binding-only add-ons but refuses an unknown provider before mutation", async () => {
+    const baseProject = {
+      id: 191,
+      containerId: null,
+      prodContainerId: null,
+      testContainerId: null,
+      dbProvider: "none",
+      provisioningStatus: "idle",
+      previewDbStatus: "none",
+    };
+    const known = readOnlyTransaction(
+      new Map([
+        [
+          managedAddonsTable,
+          [
+            {
+              id: 92,
+              kind: "object_storage",
+              status: "active",
+              externalId: "binding-only",
+              connectionInfo: { provider: "cloudflare-r2" },
+              injectedEnvKeys: ["OBJECT_STORAGE_BUCKET"],
+              removedAt: null,
+            },
+          ],
+        ],
+      ]),
+    );
+    await expect(readProjectRetirementPreflight(known.tx as never, baseProject)).resolves.toEqual({
+      allowed: true,
+    });
+
+    const unknown = readOnlyTransaction(
+      new Map([
+        [
+          managedAddonsTable,
+          [
+            {
+              id: 93,
+              kind: "object_storage",
+              status: "active",
+              externalId: "provider-owned",
+              connectionInfo: { provider: "future-provider" },
+              injectedEnvKeys: ["OBJECT_STORAGE_BUCKET"],
+              removedAt: null,
+            },
+          ],
+        ],
+      ]),
+    );
+    await expect(readProjectRetirementPreflight(unknown.tx as never, baseProject)).resolves.toEqual(
+      {
+        allowed: false,
+        code: "project_retirement_managed_addon_unverified",
+      },
+    );
+    expect(unknown.tx).not.toHaveProperty("insert");
+    expect(unknown.tx).not.toHaveProperty("update");
+    expect(unknown.tx).not.toHaveProperty("delete");
   });
 
   it("refuses a public slug when Cloudflare retirement bindings are missing without writes", async () => {
@@ -701,7 +786,7 @@ describe("project retirement fail-closed preflight", () => {
       purchasedDomainsTable,
       deploymentLogsTable,
     ]);
-    expect(allowed.reads.every((read) => read.limit === 1)).toBe(true);
+    expect(allowed.reads.map((read) => read.limit)).toEqual([4, 1, 1, 1]);
     expect(allowed.tx).not.toHaveProperty("insert");
     expect(allowed.tx).not.toHaveProperty("update");
     expect(allowed.tx).not.toHaveProperty("delete");

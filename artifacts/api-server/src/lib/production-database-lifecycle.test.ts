@@ -6,6 +6,7 @@ import type {
 import {
   ensureDeclaredProductionDatabaseCapability,
   ProductionDatabasePublishUnavailableError,
+  ProductionDatabaseReleaseUnavailableError,
   releaseProductionDatabasesForHardDelete,
 } from "./production-database-lifecycle";
 
@@ -41,9 +42,37 @@ describe("production database hard-delete fence", () => {
     expect(release.mock.calls.map(([input]) => input.projectId)).toEqual([41, 42]);
   });
 
-  it("leaves Fly and other legacy providers byte-behavior untouched", async () => {
+  it("passes the caller cancellation fence and provider timeout to every release", async () => {
+    const controller = new AbortController();
+    const release = vi.fn(async () => ({
+      allocationIdentity: "a".repeat(64),
+      providerProjectId: "provider-42",
+      verifiedGone: true as const,
+    }));
+    await releaseProductionDatabasesForHardDelete(provider(release), [42], {
+      signal: controller.signal,
+      operationTimeoutMs: 30_000,
+    });
+    expect(release).toHaveBeenCalledExactlyOnceWith({
+      projectId: 42,
+      signal: controller.signal,
+      operationTimeoutMs: 30_000,
+    });
+
+    controller.abort(new Error("lease_lost"));
+    await expect(
+      releaseProductionDatabasesForHardDelete(provider(release), [43], {
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("lease_lost");
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when the active provider cannot release and prove database absence", async () => {
     const legacy = { providerId: "fly" } as TenantRuntimeProvider;
-    await expect(releaseProductionDatabasesForHardDelete(legacy, [42])).resolves.toBeUndefined();
+    await expect(releaseProductionDatabasesForHardDelete(legacy, [42])).rejects.toBeInstanceOf(
+      ProductionDatabaseReleaseUnavailableError,
+    );
   });
 
   it("fails closed on a provider error before callers delete ownership rows", async () => {
@@ -54,6 +83,17 @@ describe("production database hard-delete fence", () => {
       "typed provider terminal",
     );
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when a capable provider cannot prove absence", async () => {
+    const release = vi.fn(async () => ({
+      allocationIdentity: "a".repeat(64),
+      providerProjectId: "provider-42",
+      verifiedGone: false as const,
+    }));
+    await expect(
+      releaseProductionDatabasesForHardDelete(provider(release as never), [42]),
+    ).rejects.toThrow("Production database release did not verify provider deletion");
   });
 });
 

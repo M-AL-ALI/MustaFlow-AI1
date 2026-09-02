@@ -35,6 +35,10 @@ const mocks = vi.hoisted(() => {
     providerDestroy: vi.fn(),
     providerDeploy: vi.fn(),
     resolveStaff: vi.fn(),
+    cancelPurgeForRestore: vi.fn(),
+    schedulePurgeAfterRetirement: vi.fn(),
+    retirementWorkerReady: true,
+    purgeWorkerReady: true,
   };
 });
 
@@ -163,9 +167,15 @@ vi.mock("../lib/deployment-scheduler", () => ({
 
 vi.mock("../lib/durable-queue", () => ({
   QUEUE_PROJECT_RETIREMENT: "project-retirement",
+  QUEUE_PROJECT_PURGE: "project-purge",
   durableEnqueueRawResult: mocks.durableEnqueue,
-  isDurableWorkerReady: vi.fn(() => true),
-  getDurableWorkerReadiness: vi.fn(() => ({ ready: true })),
+  isDurableWorkerReady: vi.fn((queueName: string) =>
+    queueName === "project-purge" ? mocks.purgeWorkerReady : mocks.retirementWorkerReady,
+  ),
+  getDurableWorkerReadiness: vi.fn((queueName: string) => ({
+    ready: queueName === "project-purge" ? mocks.purgeWorkerReady : mocks.retirementWorkerReady,
+    queueName,
+  })),
 }));
 
 vi.mock("../lib/auth", () => ({
@@ -207,6 +217,12 @@ vi.mock("../lib/provisioning", () => ({
   enqueueProvisionProjectJob: vi.fn(),
   provisionPreviewDb: vi.fn(),
   getRollingAverageMs: vi.fn(() => null),
+}));
+
+vi.mock("../lib/project-purge", () => ({
+  PROJECT_PURGE_MAX_ATTEMPTS: 5,
+  cancelScheduledProjectPurgeForRestore: mocks.cancelPurgeForRestore,
+  scheduleProjectPurgeAfterRetirement: mocks.schedulePurgeAfterRetirement,
 }));
 
 vi.mock("../lib/tenant-runtime", () => ({
@@ -296,6 +312,21 @@ function completedProgress() {
     deletedCount: 0,
     failureCode: null,
   };
+  progress.managedAddons = {
+    state: "verified_detached",
+    discoveredCount: 0,
+    detachedCount: 0,
+    secretsRemoved: 0,
+    bindingsRemaining: 0,
+    failureCode: null,
+  };
+  progress.sqliteRecovery = {
+    state: "not_applicable",
+    snapshotId: null,
+    sizeBytes: 0,
+    storage: null,
+    failureCode: null,
+  };
   progress.runtimes = progress.runtimes.map((runtime) => ({
     ...runtime,
     state: "verified_absent",
@@ -324,6 +355,8 @@ describe("project retirement route behavior", () => {
     mocks.insertCalls = [];
     mocks.deleteCalls = [];
     mocks.events = [];
+    mocks.retirementWorkerReady = true;
+    mocks.purgeWorkerReady = true;
     mocks.readPreflight.mockImplementation(async () => {
       mocks.events.push("preflight");
       return { allowed: true };
@@ -347,6 +380,8 @@ describe("project retirement route behavior", () => {
     });
     mocks.cancelLocalJobs.mockReturnValue({ canceled: 0 });
     mocks.cancelProvisioning.mockReturnValue({ canceled: false });
+    mocks.cancelPurgeForRestore.mockResolvedValue({ allowed: true });
+    mocks.schedulePurgeAfterRetirement.mockResolvedValue(undefined);
     mocks.resolveStaff.mockImplementation(async (userId: string) => ({
       userId,
       role: "owner",
@@ -354,6 +389,45 @@ describe("project retirement route behavior", () => {
       grantedBy: "platform-owner",
     }));
   });
+
+  it.each([
+    [
+      "owner Trash",
+      (app: express.Express) => request(app).delete("/projects/77"),
+      "This project cannot be moved to Trash right now. Please try again shortly.",
+    ],
+    [
+      "admin retirement batch",
+      (app: express.Express) =>
+        request(app)
+          .post("/admin/projects/retirement/batch")
+          .send({ projectIds: [77] }),
+      "Projects cannot be moved to Trash right now. Please try again shortly.",
+    ],
+  ])(
+    "fails closed with plain copy when only the retirement worker is ready for %s",
+    async (_label, invoke, expectedError) => {
+      mocks.retirementWorkerReady = true;
+      mocks.purgeWorkerReady = false;
+
+      const response = await invoke(appAs("owner-77"));
+
+      expect(response.status).toBe(503);
+      expect(response.body).toEqual(
+        expect.objectContaining({
+          code: "project_purge_worker_unavailable",
+          error: expectedError,
+          retryable: true,
+        }),
+      );
+      expect(response.body.error).not.toContain("project_purge");
+      expect(mocks.readPreflight).not.toHaveBeenCalled();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.insert).not.toHaveBeenCalled();
+      expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+    },
+  );
 
   it("denies a non-owner Operator retry override before reconciliation", async () => {
     mocks.resolveStaff.mockResolvedValueOnce({
@@ -985,6 +1059,80 @@ describe("project retirement route behavior", () => {
     assertNoProviderCall();
   });
 
+  it("keeps an expired tombstone visible until its purge actually completes", async () => {
+    const expired = project({ deletedAt: new Date("2025-01-01T00:00:00.000Z") });
+    const purge = {
+      id: "purge-77",
+      projectId: 77,
+      state: "failed",
+      trigger: "expiry",
+      stage: "runtime",
+      attemptCount: 2,
+      failureCode: "project_purge_runtime_release_failed",
+      failureRetryable: true,
+      nextAttemptAt: new Date("2025-02-01T00:00:00.000Z"),
+      dueAt: new Date("2025-01-31T00:00:00.000Z"),
+      createdAt: NOW,
+    };
+    const retirement = {
+      id: "retirement-77",
+      projectId: 77,
+      state: "completed",
+      createdAt: NOW,
+    };
+    mocks.selectResults = [[expired], [purge], [retirement]];
+
+    const response = await request(appAs("owner-77")).get("/projects/trash");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual([
+      expect.objectContaining({
+        id: 77,
+        purgeDueAt: "2025-01-31T00:00:00.000Z",
+        purgeState: "failed",
+        purgeOperationId: "purge-77",
+        purgeTrigger: "expiry",
+        purgeStage: "runtime",
+        purgeAttemptCount: 2,
+        purgeFailureCode: "project_purge_runtime_release_failed",
+        purgeFailureRetryable: true,
+        purgeRetryAllowed: true,
+        purgeNextAttemptAt: "2025-02-01T00:00:00.000Z",
+        retirementState: "completed",
+        restoreAllowed: false,
+      }),
+    ]);
+    const rendered = new PgDialect().sqlToQuery(mocks.selectCalls[0]!.predicate as SQL);
+    expect(rendered.sql).toContain('"projects"."deleted_at" IS NOT NULL');
+    expect(rendered.sql).not.toContain("interval '30 days'");
+  });
+
+  it("refuses restore atomically after permanent deletion has started", async () => {
+    const deleted = project();
+    const operation = {
+      id: "retirement-77",
+      projectId: 77,
+      state: "completed",
+      completedAt: NOW,
+      progress: completedProgress(),
+    };
+    mocks.selectResults = [[deleted], [operation]];
+    mocks.cancelPurgeForRestore.mockResolvedValue({
+      allowed: false,
+      code: "project_purge_in_progress",
+    });
+
+    const response = await request(appAs("owner-77")).post("/projects/77/restore");
+
+    expect(response.status).toBe(409);
+    expect(response.body).toEqual({
+      code: "project_purge_in_progress",
+      error: "Permanent deletion has started, so this project can no longer be restored.",
+    });
+    expect(mocks.cancelPurgeForRestore).toHaveBeenCalledOnce();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
   it("refuses old or incomplete completion evidence without any restore write", async () => {
     const deleted = project();
     mocks.selectResults = [
@@ -1009,7 +1157,7 @@ describe("project retirement route behavior", () => {
     assertNoProviderCall();
   });
 
-  it.each(["another-owner", "owner-after-recovery-window"])(
+  it.each(["another-owner", "missing-project"])(
     "returns a non-revealing 404 for %s",
     async (userId) => {
       mocks.selectResults = [[]];
@@ -1022,8 +1170,7 @@ describe("project retirement route behavior", () => {
       const predicate = mocks.selectCalls[0]!.predicate as SQL;
       const rendered = new PgDialect().sqlToQuery(predicate);
       expect(rendered.sql).toContain('"projects"."owner_id"');
-      expect(rendered.sql).toContain('"projects"."deleted_at"');
-      expect(rendered.sql).toContain("interval '30 days'");
+      expect(rendered.sql).not.toContain("interval '30 days'");
       expect(rendered.params).toContain(userId);
       expect(mocks.update).not.toHaveBeenCalled();
       expect(mocks.delete).not.toHaveBeenCalled();

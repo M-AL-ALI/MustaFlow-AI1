@@ -20,7 +20,13 @@ import multer from "multer";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import sharp from "sharp";
-import { assetStorageObjectsTable, assetUsageTable, db, generatedImagesTable } from "@workspace/db";
+import {
+  assetStorageObjectsTable,
+  assetUsageTable,
+  db,
+  generatedImagesTable,
+  pool,
+} from "@workspace/db";
 import { EnqueueImageGenerationBody } from "@workspace/api-zod";
 import { isImageProviderConfigured } from "../lib/image-provider";
 import {
@@ -52,6 +58,12 @@ import {
   reserveAsset,
 } from "../lib/asset-registry";
 import { deleteTrackedAssetStorageObjects } from "../lib/asset-storage-cleanup";
+import {
+  isCanonicalImageFileRequest,
+  isCanonicalImageMetadataRequest,
+  parseCanonicalAssetId,
+} from "../lib/asset-contract";
+import { canonicalizeSurvivingAssetAliases } from "../lib/project-purge-resources";
 
 const router: IRouter = Router();
 
@@ -361,8 +373,9 @@ router.post(
 
       res.status(201).json({
         imageId,
-        fileUrl: `/api/images/${imageId}/file`,
-        thumbnailUrl: `/api/images/${imageId}/file?role=thumbnail`,
+        assetId: reservation.id,
+        fileUrl: `/api/assets/${reservation.id}/content`,
+        thumbnailUrl: `/api/assets/${reservation.id}/content`,
         creditCost: 0,
         image: presentPrivateImage(updated),
       });
@@ -438,10 +451,10 @@ router.get("/images/status/:jobId", async (req, res): Promise<void> => {
   res.json({
     jobId: job.jobId,
     imageId: job.imageId,
+    assetId: job.assetId,
     status: job.status,
-    fileUrl: job.status === "completed" ? `/api/images/${job.imageId}/file` : null,
-    thumbnailUrl:
-      job.status === "completed" ? `/api/images/${job.imageId}/file?role=thumbnail` : null,
+    fileUrl: job.status === "completed" ? `/api/assets/${job.assetId}/content` : null,
+    thumbnailUrl: job.status === "completed" ? `/api/assets/${job.assetId}/content` : null,
     error: job.status === "failed" ? (job.error ?? null) : null,
   });
 });
@@ -518,11 +531,11 @@ router.get("/images/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const imageId = Number(req.params.id);
-  if (!Number.isFinite(imageId)) {
-    res.status(400).json({ error: "Invalid image id" });
+  if (!isCanonicalImageMetadataRequest(req.originalUrl, req.params.id)) {
+    res.status(404).json({ error: "Image not found" });
     return;
   }
+  const imageId = parseCanonicalAssetId(req.params.id)!;
 
   const [row] = await db
     .select()
@@ -554,11 +567,11 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
     return;
   }
 
-  const imageId = Number(req.params.id);
-  if (!Number.isFinite(imageId)) {
-    res.status(400).json({ error: "Invalid image id" });
+  if (!isCanonicalImageFileRequest(req.originalUrl, req.params.id)) {
+    res.status(404).json({ error: "Image not found" });
     return;
   }
+  const imageId = parseCanonicalAssetId(req.params.id)!;
 
   const [row] = await db
     .select({
@@ -836,11 +849,11 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const imageId = Number(req.params.id);
-  if (!Number.isFinite(imageId)) {
-    res.status(400).json({ error: "Invalid image id" });
+  if (!isCanonicalImageMetadataRequest(req.originalUrl, req.params.id)) {
+    res.status(404).json({ error: "Image not found" });
     return;
   }
+  const imageId = Number(req.params.id);
 
   const [existing] = await db
     .select({
@@ -864,7 +877,39 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
 
   if (!(await admitGeneratedImageProjectLifecycle(existing.projectId, res))) return;
 
-  const softDeleteGeneratedImage = async (): Promise<void> => {
+  const softDeleteGeneratedImage = async (rewriteAssetId?: number): Promise<void> => {
+    if (rewriteAssetId !== undefined) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+        const locked = await client.query(
+          `SELECT id FROM assets
+            WHERE id=$1 AND owner_user_id=$2 AND state='ready'
+            FOR UPDATE`,
+          [rewriteAssetId, userId],
+        );
+        if (locked.rowCount !== 1) throw new Error("image_delete_claim_lost");
+        await canonicalizeSurvivingAssetAliases(client, null, rewriteAssetId);
+        const removed = await client.query(
+          `UPDATE generated_images
+              SET deleted_at=NOW(), updated_at=NOW()
+            WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL
+            RETURNING id`,
+          [imageId, userId],
+        );
+        if (removed.rowCount !== 1) throw new Error("image_delete_claim_lost");
+        await client.query(`DELETE FROM asset_usage WHERE consumer=$1`, [
+          `generated-image:${imageId}`,
+        ]);
+        await client.query("COMMIT");
+        return;
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
     await db.transaction(async (tx) => {
       const removed = await tx
         .update(generatedImagesTable)
@@ -919,7 +964,7 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
       }
       // The image disappeared from the library, but another durable project or
       // history receipt still owns its bytes.  Keeping those bytes is required.
-      await softDeleteGeneratedImage();
+      await softDeleteGeneratedImage(existing.assetId);
       res.json({ success: true, storageCleanup: "retained-while-referenced" });
       return;
     }

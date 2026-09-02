@@ -7,6 +7,7 @@ import {
   boolean,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -43,6 +44,9 @@ export const notificationsTable = pgTable(
     index("notifications_unread_idx")
       .on(t.recipientId, t.read)
       .where(sql`read = false`),
+    uniqueIndex("notifications_project_purge_milestone_uq")
+      .on(t.resourceType, t.resourceId, t.recipientId)
+      .where(sql`resource_type = 'project_purge'`),
   ],
 );
 

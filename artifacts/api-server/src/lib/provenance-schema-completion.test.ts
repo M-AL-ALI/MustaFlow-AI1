@@ -30,7 +30,7 @@ function countProjectSummaryWriterFields(text: string, field: string): number {
 describe("Zero provenance schema completion", () => {
   it("adds the four named memory-truth boot steps and keeps both historical usage step names", () => {
     const migration = source("./startup-migrations.ts");
-    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(172);
+    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(173);
     expect(migration).toContain('name: "knowledge_usage_events"');
     expect(migration).toContain('name: "migrate-knowledge-usage-events"');
     expect(migration).toContain('name: "migrate-knowledge-provenance"');

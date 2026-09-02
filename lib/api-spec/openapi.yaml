@@ -778,11 +778,34 @@ paths:
     delete:
       operationId: deleteProject
       tags: [projects]
+      summary: Move an owned project to recoverable Trash and begin governed retirement
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
-        "204":
-          description: Deleted
+        "202":
+          description: Project accepted into Trash; poll the returned retirement receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRetirementAccepted"
+        "404":
+          description: Project not found or not owned by the caller
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Project retirement was refused before mutation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Durable retirement execution is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /projects/trash:
     get:
@@ -815,6 +838,119 @@ paths:
                 $ref: "#/components/schemas/Project"
         "404":
           description: Not found or recovery window expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/permanent-deletion-impact:
+    get:
+      operationId: getProjectPermanentDeletionImpact
+      tags: [projects]
+      summary: Preview the exact consequences of permanently deleting an owned Trash project
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Owner-visible impact and server-clock deletion schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPurgeImpact"
+        "404":
+          description: Project not found, not owned, or not in Trash
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: The durable purge schedule is not yet available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /projects/{id}/permanent:
+    delete:
+      operationId: permanentlyDeleteProject
+      tags: [projects]
+      summary: Permanently delete an owned Trash project after recent first-factor reverification
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [projectName]
+              properties:
+                projectName: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        "202":
+          description: Permanent deletion accepted; success is reported only by the terminal receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPurgeAccepted"
+        "400":
+          description: Invalid exact-name or idempotency input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Recent direct first-factor reverification is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClerkReverificationHint"
+        "404":
+          description: Project not found, not owned, or not in Trash
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "409":
+          description: Retirement is incomplete, the exact name differs, or deletion already owns the project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: The durable purge worker is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /project-purge-operations/{operationId}:
+    get:
+      operationId: getProjectPurgeOperation
+      tags: [projects]
+      summary: Read a sanitized permanent-deletion receipt owned by the caller
+      parameters:
+        - { name: operationId, in: path, required: true, schema: { type: string, maxLength: 200 } }
+      responses:
+        "200":
+          description: Current durable deletion receipt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPurgeOperation"
+        "404":
+          description: Deletion receipt not found or not owned by the caller
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Receipt shape cannot be verified safely
           content:
             application/json:
               schema:
@@ -8536,6 +8672,53 @@ components:
             format: date-time,
             description: "Soft-delete timestamp. Present only on /projects/trash responses; null/omitted for active projects.",
           }
+        purgeDueAt:
+          {
+            type: ["string", "null"],
+            format: date-time,
+            description: "Database-clock automatic-purge deadline. Present on /projects/trash responses.",
+          }
+        serverNow:
+          {
+            type: ["string", "null"],
+            format: date-time,
+            description: "Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.",
+          }
+        restoreAllowed:
+          {
+            type: "boolean",
+            description: "True only while the owner can atomically cancel the scheduled purge and restore this Trash project.",
+          }
+        retirementState:
+          {
+            type: ["string", "null"],
+            description: "Latest governed provider-retirement state for a Trash project.",
+          }
+        purgeState:
+          allOf:
+            - $ref: "#/components/schemas/ProjectPurgeState"
+          nullable: true
+          description: "Latest permanent-deletion state for a Trash project."
+        purgeOperationId:
+          {
+            type: ["string", "null"],
+            maxLength: 200,
+            description: "Owner-scoped durable purge receipt identity for progress recovery after refresh.",
+          }
+        purgeTrigger: { type: ["string", "null"], enum: [manual, expiry, null] }
+        purgeStage:
+          allOf:
+            - $ref: "#/components/schemas/ProjectPurgeStage"
+          nullable: true
+        purgeAttemptCount: { type: integer, minimum: 0 }
+        purgeFailureCode: { type: ["string", "null"], maxLength: 120 }
+        purgeFailureRetryable: { type: ["boolean", "null"] }
+        purgeRetryAllowed:
+          {
+            type: boolean,
+            description: "True only when the same failed operation may be safely re-admitted below its retry ceiling.",
+          }
+        purgeNextAttemptAt: { type: ["string", "null"], format: date-time }
         lastTaskSummary: { type: ["string", "null"] }
         summary: { type: ["string", "null"] }
         publicSlug: { type: ["string", "null"] }
@@ -8709,6 +8892,169 @@ components:
         objectPath: { type: string }
         hasTextPreview: { type: boolean }
         createdAt: { type: string, format: date-time }
+
+    ClerkReverificationHint:
+      type: object
+      additionalProperties: false
+      required: [clerk_error]
+      properties:
+        clerk_error:
+          type: object
+          additionalProperties: false
+          required: [type, reason, metadata]
+          properties:
+            type: { type: string, enum: [forbidden] }
+            reason: { type: string, enum: [reverification-error] }
+            metadata:
+              type: object
+              additionalProperties: false
+              required: [reverification]
+              properties:
+                reverification:
+                  type: object
+                  additionalProperties: false
+                  required: [level, afterMinutes]
+                  properties:
+                    level: { type: string, enum: [first_factor] }
+                    afterMinutes: { type: integer, enum: [10] }
+
+    ProjectPurgeState:
+      type: string
+      enum: [scheduled, accepted, running, failed, completed, canceled]
+
+    ProjectPurgeStage:
+      type: string
+      enum: [verify, inventory, assets, snapshots, database, addons, runtime, relational, absence]
+
+    ProjectRetirementAccepted:
+      type: object
+      required:
+        [
+          code,
+          deleted,
+          projectId,
+          operationId,
+          state,
+          cleanupScheduled,
+          cleanupScheduleState,
+          localCancellation,
+          provisioningCancellation,
+          statusUrl,
+        ]
+      properties:
+        code: { type: string, enum: [project_retirement_accepted] }
+        deleted: { type: boolean, enum: [true] }
+        projectId: { type: integer }
+        operationId: { type: string }
+        state: { type: string, enum: [accepted] }
+        cleanupScheduled: { type: boolean, enum: [true] }
+        cleanupScheduleState: { type: string, enum: [enqueued, already_scheduled] }
+        queueJobId: { type: ["string", "null"] }
+        localCancellation:
+          type: object
+          additionalProperties: false
+          required: [abortedTaskIds, evictedPendingTaskIds, abortedAuxiliaryWorkCount]
+          properties:
+            abortedTaskIds:
+              type: array
+              items: { type: integer }
+            evictedPendingTaskIds:
+              type: array
+              items: { type: integer }
+            abortedAuxiliaryWorkCount: { type: integer, minimum: 0 }
+        provisioningCancellation: { type: boolean }
+        statusUrl: { type: string }
+
+    ProjectPurgeImpact:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          projectId,
+          name,
+          deletedAt,
+          purgeDueAt,
+          restoreAllowed,
+          retirementState,
+          purgeState,
+          willDelete,
+          willDetach,
+          requiresReverification,
+        ]
+      properties:
+        projectId: { type: integer }
+        name: { type: string }
+        deletedAt: { type: string, format: date-time }
+        purgeDueAt: { type: string, format: date-time }
+        restoreAllowed: { type: boolean }
+        retirementState: { type: string }
+        purgeState:
+          allOf:
+            - $ref: "#/components/schemas/ProjectPurgeState"
+          nullable: true
+        willDelete:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items: { type: string, maxLength: 160 }
+        willDetach:
+          type: array
+          maxItems: 32
+          items: { type: string, maxLength: 160 }
+        requiresReverification: { type: boolean, enum: [true] }
+
+    ProjectPurgeAccepted:
+      type: object
+      additionalProperties: false
+      required: [code, operationId, state, statusUrl]
+      properties:
+        code: { type: string, enum: [project_purge_accepted] }
+        operationId: { type: string, maxLength: 200 }
+        state: { type: string, enum: [accepted] }
+        statusUrl: { type: string }
+
+    ProjectPurgeTerminalEvidence:
+      type: object
+      additionalProperties: true
+      required: [schema, outcome]
+      properties:
+        schema: { type: string, enum: [project-purge-terminal-v1] }
+        outcome: { type: string, enum: [completed, failed, canceled] }
+
+    ProjectPurgeOperation:
+      type: object
+      additionalProperties: false
+      required:
+        [
+          id,
+          projectId,
+          state,
+          stage,
+          trigger,
+          dueAt,
+          attemptCount,
+          failureCode,
+          failureRetryable,
+          retryAllowed,
+          nextAttemptAt,
+          terminalEvidence,
+        ]
+      properties:
+        id: { type: string, maxLength: 200 }
+        projectId: { type: integer }
+        state: { $ref: "#/components/schemas/ProjectPurgeState" }
+        stage: { $ref: "#/components/schemas/ProjectPurgeStage" }
+        trigger: { type: string, enum: [manual, expiry] }
+        dueAt: { type: string, format: date-time }
+        attemptCount: { type: integer, minimum: 0 }
+        failureCode: { type: ["string", "null"] }
+        failureRetryable: { type: ["boolean", "null"] }
+        retryAllowed: { type: boolean }
+        nextAttemptAt: { type: ["string", "null"], format: date-time }
+        terminalEvidence:
+          allOf:
+            - $ref: "#/components/schemas/ProjectPurgeTerminalEvidence"
+          nullable: true
 
     ProjectInput:
       type: object

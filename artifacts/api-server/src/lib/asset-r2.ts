@@ -8,6 +8,12 @@ import {
 } from "@aws-sdk/client-s3";
 
 type R2Config = { client: S3Client; bucket: string };
+const ASSET_R2_PROVIDER_TIMEOUT_MS = 30_000;
+
+function boundedProviderSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(ASSET_R2_PROVIDER_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
 
 function config(): R2Config | null {
   const accountId = process.env.CF_ACCOUNT_ID;
@@ -112,16 +118,25 @@ export async function readAssetBuffer(key: string, maxBytes: number): Promise<Bu
   return Buffer.concat(chunks, received);
 }
 
-export async function deleteAssetObject(key: string): Promise<void> {
+export async function deleteAssetObject(key: string, signal?: AbortSignal): Promise<void> {
   const { client, bucket } = requireConfig();
-  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }), {
+    abortSignal: boundedProviderSignal(signal),
+    requestTimeout: ASSET_R2_PROVIDER_TIMEOUT_MS,
+  });
 }
 
 /** Read provider metadata without downloading or exposing object bytes. */
-export async function headAssetObject(key: string): Promise<{ sizeBytes: number } | null> {
+export async function headAssetObject(
+  key: string,
+  signal?: AbortSignal,
+): Promise<{ sizeBytes: number } | null> {
   const { client, bucket } = requireConfig();
   try {
-    const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), {
+      abortSignal: boundedProviderSignal(signal),
+      requestTimeout: ASSET_R2_PROVIDER_TIMEOUT_MS,
+    });
     const sizeBytes = Number(response.ContentLength ?? 0);
     if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
       throw new Error("asset_storage_size_invalid");

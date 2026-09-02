@@ -113,6 +113,10 @@ export const PROJECT_RETIREMENT_FAILURE_CODES = [
   "project_retirement_domain_security_release_unverified",
   "project_retirement_legacy_r2_release_failed",
   "project_retirement_legacy_r2_release_unverified",
+  "project_retirement_managed_addon_release_failed",
+  "project_retirement_managed_addon_release_unverified",
+  "project_retirement_sqlite_snapshot_failed",
+  "project_retirement_sqlite_snapshot_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
   "project_retirement_legacy_runtime_provider_unavailable",
@@ -140,6 +144,10 @@ const RETRYABLE_TERMINAL_FAILURE_CODES = new Set<ProjectRetirementFailureCode>([
   "project_retirement_domain_security_release_unverified",
   "project_retirement_legacy_r2_release_failed",
   "project_retirement_legacy_r2_release_unverified",
+  "project_retirement_managed_addon_release_failed",
+  "project_retirement_managed_addon_release_unverified",
+  "project_retirement_sqlite_snapshot_failed",
+  "project_retirement_sqlite_snapshot_unverified",
   "project_retirement_runtime_destroy_failed",
   "project_retirement_runtime_destroy_unverified",
   "project_retirement_legacy_runtime_provider_unavailable",
@@ -327,6 +335,41 @@ export function hasCurrentProjectRetirementCompletionEvidence(progress: unknown)
     return false;
   }
 
+  const managedAddons = progress.managedAddons;
+  if (
+    !isRecord(managedAddons) ||
+    managedAddons.state !== "verified_detached" ||
+    managedAddons.failureCode !== null ||
+    !isNonnegativeInteger(managedAddons.discoveredCount) ||
+    !isNonnegativeInteger(managedAddons.detachedCount) ||
+    !isNonnegativeInteger(managedAddons.secretsRemoved) ||
+    managedAddons.bindingsRemaining !== 0 ||
+    managedAddons.detachedCount !== managedAddons.discoveredCount
+  ) {
+    return false;
+  }
+
+  const sqliteRecovery = progress.sqliteRecovery;
+  if (!isRecord(sqliteRecovery) || sqliteRecovery.failureCode !== null) return false;
+  if (sqliteRecovery.state === "preserved") {
+    if (
+      !Number.isInteger(sqliteRecovery.snapshotId) ||
+      Number(sqliteRecovery.snapshotId) <= 0 ||
+      !Number.isInteger(sqliteRecovery.sizeBytes) ||
+      Number(sqliteRecovery.sizeBytes) <= 0 ||
+      !["inline", "object"].includes(String(sqliteRecovery.storage))
+    ) {
+      return false;
+    }
+  } else if (
+    !["not_applicable", "not_present"].includes(String(sqliteRecovery.state)) ||
+    sqliteRecovery.snapshotId !== null ||
+    sqliteRecovery.sizeBytes !== 0 ||
+    sqliteRecovery.storage !== null
+  ) {
+    return false;
+  }
+
   const allTerminal = (value: unknown, terminal: string): boolean =>
     Array.isArray(value) &&
     value.every(
@@ -490,6 +533,12 @@ export function decideProjectRetirementReceiptMode(input: {
   if (active) return currentSemantics ? "reuse_in_flight" : "refuse_incompatible_active";
   if (operation.state === "failed") return "refuse_terminal_reconciliation_required";
   if (operation.state === "completed") {
+    // A completed receipt that has already been used to restore the project
+    // describes an earlier lifecycle. A later tombstone must earn a fresh
+    // retirement and new absence proofs; it may never reuse stale evidence.
+    if (hasProjectRestoreReplayReceipt({ state: operation.state, progress: operation.progress })) {
+      return "replace_incompatible_terminal";
+    }
     return decideProjectRestoreAdmission({ state: operation.state, progress: operation.progress })
       .allowed
       ? "reuse_completed"
@@ -566,6 +615,21 @@ export function initialProjectRetirementProgress(): ProjectRetirementProgress {
       state: "pending",
       discoveredCount: 0,
       deletedCount: 0,
+      failureCode: null,
+    },
+    managedAddons: {
+      state: "pending",
+      discoveredCount: 0,
+      detachedCount: 0,
+      secretsRemoved: 0,
+      bindingsRemaining: 0,
+      failureCode: null,
+    },
+    sqliteRecovery: {
+      state: "pending",
+      snapshotId: null,
+      sizeBytes: 0,
+      storage: null,
       failureCode: null,
     },
     domains: [],

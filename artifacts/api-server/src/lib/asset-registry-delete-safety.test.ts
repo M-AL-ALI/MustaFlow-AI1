@@ -42,44 +42,22 @@ describe("asset deletion reference proof", () => {
       status: 409,
     } satisfies Partial<AssetAdmissionError>);
 
-    const proof = String(query.mock.calls[2]?.[0]);
-    for (const durableStore of [
-      "asset_usage",
-      "generated_images",
-      "chat_messages",
-      "agent_tasks",
-      "agent_tool_calls",
-      "zero_prompt_queue_items",
-      "knowledge_entries",
-      "project_files",
-      "project_versions",
-      "canvas_variants",
-      "canvas_variant_library",
-      "gallery_templates",
-      "agent_inbox",
-      "task_events",
-      "project_activity",
-      "visual_edit_changes",
-      "asset_analysis_events",
-      "derivativeOfAssetId",
-    ]) {
-      expect(proof).toContain(durableStore);
-    }
-    expect(proof).toContain("WITH candidate AS");
-    expect(proof).toContain("project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)");
-    expect(proof).toContain("owner_user_id = (SELECT owner_user_id FROM candidate)");
-    expect(query.mock.calls[2]?.[1]).toEqual([17, "owner", null]);
+    expect(query.mock.calls[0]?.[0]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED");
+    expect(String(query.mock.calls[2]?.[0])).toContain(
+      "public.durable_asset_reference_exists($1, NULL, $2)",
+    );
+    expect(query.mock.calls[2]?.[1]).toEqual([17, null]);
     expect(query.mock.calls.at(-1)?.[0]).toBe("ROLLBACK");
   });
 
-  it("treats an asset's version, task, or message binding as a durable reference", async () => {
+  it("fails closed when the shared durable-reference predicate returns no proof", async () => {
     query
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({
         rowCount: 1,
-        rows: [{ ...readyRow, version_id: 149 }],
+        rows: [readyRow],
       })
-      .mockResolvedValueOnce({ rows: [{ referenced: false }] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({});
 
     await expect(
@@ -104,6 +82,8 @@ describe("asset deletion reference proof", () => {
           },
         ],
       })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ rowCount: 1 })
       .mockResolvedValueOnce({});
 
     await expect(
@@ -115,6 +95,10 @@ describe("asset deletion reference proof", () => {
       storageObjects: [{ storageKey: readyRow.storage_key, storageBackend: "r2", sizeBytes: 42 }],
     });
     expect(String(query.mock.calls[3]?.[0])).toContain("SET state='deleting'");
+    expect(String(query.mock.calls.at(-3)?.[0])).toContain("pg_advisory_xact_lock");
+    expect(String(query.mock.calls.at(-2)?.[0])).toContain(
+      "INSERT INTO durable_asset_deletion_claims",
+    );
     expect(query.mock.calls.at(-1)?.[0]).toBe("COMMIT");
   });
 
@@ -136,6 +120,8 @@ describe("asset deletion reference proof", () => {
           },
         ],
       })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ rowCount: 1 })
       .mockResolvedValueOnce({});
 
     await expect(
@@ -191,10 +177,9 @@ describe("asset deletion reference proof", () => {
       userId: "owner",
       generatedImageIdBeingDeleted: 91,
     });
-    expect(String(query.mock.calls[2]?.[0])).toContain("image.id <> COALESCE($3, -1)");
     expect(String(query.mock.calls[2]?.[0])).toContain(
-      "($3::integer IS NULL OR consumer <> 'generated-image:' || $3::text)",
+      "public.durable_asset_reference_exists($1, NULL, $2)",
     );
-    expect(query.mock.calls[2]?.[1]).toEqual([17, "owner", 91]);
+    expect(query.mock.calls[2]?.[1]).toEqual([17, 91]);
   });
 });

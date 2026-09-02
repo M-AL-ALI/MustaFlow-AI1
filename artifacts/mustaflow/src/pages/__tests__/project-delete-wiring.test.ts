@@ -33,12 +33,13 @@ describe("project delete wiring", () => {
     expect(src).not.toContain("opacity-0 transition-opacity");
   });
 
-  it("does not promise automatic permanent deletion before the purger exists", () => {
+  it("wires scheduled and owner-triggered permanent deletion into Trash", () => {
     const src = readPage("trash.tsx");
+    const control = readPage("trash-permanent-deletion.tsx");
 
-    expect(src).toContain("Automatic permanent deletion");
-    expect(src).toContain("is not active yet");
-    expect(src).toContain("Recovery available for");
-    expect(src).not.toContain("Permanently removed in");
+    expect(src).toContain("then are permanently deleted");
+    expect(src).toContain("ProjectPermanentDeletionControl");
+    expect(control).toContain("Automatic permanent deletion is scheduled.");
+    expect(src).not.toContain("is not active yet");
   });
 });

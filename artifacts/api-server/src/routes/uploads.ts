@@ -13,6 +13,7 @@ import { ObjectStorageService } from "../lib/objectStorage";
 import { requireProjectOwnership } from "../lib/auth";
 import { deleteReadyAsset, recordAssetDeleted } from "../lib/asset-registry";
 import { deleteTrackedAssetStorageObjects } from "../lib/asset-storage-cleanup";
+import { isCanonicalProjectUploadContentRequest } from "../lib/asset-contract";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -180,6 +181,12 @@ router.get(
   "/projects/:id/uploads/:uploadId/content",
   requireProjectOwnership,
   async (req: Request, res: Response) => {
+    if (
+      !isCanonicalProjectUploadContentRequest(req.originalUrl, req.params.id, req.params.uploadId)
+    ) {
+      res.status(400).json({ error: "Invalid upload id" });
+      return;
+    }
     const uploadId = Number(req.params.uploadId);
     const [row] = await db
       .select()

@@ -1,6 +1,7 @@
 import { Router, type IRouter, type RequestHandler } from "express";
 import healthRouter from "./health";
 import projectsRouter from "./projects";
+import projectPurgeRouter from "./project-purge";
 import messagesRouter from "./messages";
 import tasksRouter from "./tasks";
 import taskSteeringRouter from "./task-steering";
@@ -219,6 +220,7 @@ const KNOWN_PREFIXES = [
   "/share",
   "/workspaces",
   "/projects",
+  "/project-purge-operations",
   "/audit",
   "/messages",
   "/tasks",
@@ -314,7 +316,6 @@ router.post("/projects/:id/plans/clarify", requireBuilderAccess);
 router.post("/projects/:id/queue", requireBuilderAccess);
 router.post("/projects/:id/queue/resume-paused", requireBuilderAccess);
 router.delete("/projects/:id/queue/:batchId", requireBuilderAccess);
-router.post("/projects/:id/restore", requireBuilderAccess);
 router.post("/projects/:id/checkpoints/:checkpointId/restore", requireBuilderAccess);
 router.post("/projects/:id/versions/:versionId/rollback", requireBuilderAccess);
 
@@ -344,6 +345,7 @@ router.use(builderHandoffRouter);
 
 router.use(workspacesRouter);
 router.use(workspaceDomainsRouter);
+router.use(projectPurgeRouter);
 router.use(projectsRouter);
 router.use(projectCollaborationRouter);
 router.use(messagesRouter);

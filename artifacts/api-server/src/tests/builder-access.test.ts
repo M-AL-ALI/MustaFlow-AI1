@@ -118,7 +118,6 @@ describe("AI Builder cohort access", () => {
       ["post", "/projects/:id/queue"],
       ["post", "/projects/:id/queue/resume-paused"],
       ["delete", "/projects/:id/queue/:batchId"],
-      ["post", "/projects/:id/restore"],
       ["post", "/projects/:id/checkpoints/:checkpointId/restore"],
       ["post", "/projects/:id/versions/:versionId/rollback"],
     ] as const;
@@ -126,6 +125,7 @@ describe("AI Builder cohort access", () => {
     for (const [method, path] of guardedRoutes) {
       expect(routes).toContain(`router.${method}("${path}", requireBuilderAccess);`);
     }
+    expect(routes).not.toContain('router.post("/projects/:id/restore", requireBuilderAccess);');
     expect(routes).toContain(
       'router.post("/projects/:id/messages", requireBuilderOrApprovedSupportOperator);',
     );

@@ -13,6 +13,15 @@ export class ProductionDatabasePublishUnavailableError extends Error {
   }
 }
 
+export class ProductionDatabaseReleaseUnavailableError extends Error {
+  readonly code = "production_database_release_unavailable";
+
+  constructor() {
+    super("Production database release capability is unavailable");
+    this.name = "ProductionDatabaseReleaseUnavailableError";
+  }
+}
+
 export async function ensureDeclaredProductionDatabaseCapability(input: {
   provider: ProductionDatabaseCapabilityTenantRuntimeProvider | null;
   projectId: number;
@@ -30,10 +39,19 @@ export async function ensureDeclaredProductionDatabaseCapability(input: {
 export async function releaseProductionDatabasesForHardDelete(
   provider: TenantRuntimeProvider,
   projectIds: readonly number[],
+  options: { signal?: AbortSignal; operationTimeoutMs?: number } = {},
 ): Promise<void> {
-  if (!supportsProductionDatabaseCapability(provider)) return;
+  if (!supportsProductionDatabaseCapability(provider)) {
+    throw new ProductionDatabaseReleaseUnavailableError();
+  }
   for (const projectId of projectIds) {
-    const released = await provider.releaseProductionDatabaseCapability({ projectId });
+    options.signal?.throwIfAborted();
+    const released = await provider.releaseProductionDatabaseCapability({
+      projectId,
+      signal: options.signal,
+      operationTimeoutMs: options.operationTimeoutMs,
+    });
+    options.signal?.throwIfAborted();
     if (!released.verifiedGone) {
       throw new Error("Production database release did not verify provider deletion");
     }

@@ -639,6 +639,17 @@ export const ProjectPolicyStrictness = {
 } as const;
 
 /**
+ * @nullable
+ */
+export type ProjectPurgeTrigger = typeof ProjectPurgeTrigger[keyof typeof ProjectPurgeTrigger] | null;
+
+
+export const ProjectPurgeTrigger = {
+  manual: 'manual',
+  expiry: 'expiry',
+} as const;
+
+/**
  * Current dev container lifecycle state.
  */
 export type ProjectContainerStatus = typeof ProjectContainerStatus[keyof typeof ProjectContainerStatus];
@@ -808,6 +819,33 @@ export const ProjectProjectMode = {
   developer: 'developer',
 } as const;
 
+export type ProjectPurgeState = typeof ProjectPurgeState[keyof typeof ProjectPurgeState];
+
+
+export const ProjectPurgeState = {
+  scheduled: 'scheduled',
+  accepted: 'accepted',
+  running: 'running',
+  failed: 'failed',
+  completed: 'completed',
+  canceled: 'canceled',
+} as const;
+
+export type ProjectPurgeStage = typeof ProjectPurgeStage[keyof typeof ProjectPurgeStage];
+
+
+export const ProjectPurgeStage = {
+  verify: 'verify',
+  inventory: 'inventory',
+  assets: 'assets',
+  snapshots: 'snapshots',
+  database: 'database',
+  addons: 'addons',
+  runtime: 'runtime',
+  relational: 'relational',
+  absence: 'absence',
+} as const;
+
 export type PreviewAccess = typeof PreviewAccess[keyof typeof PreviewAccess];
 
 
@@ -835,6 +873,47 @@ export interface Project {
      * @nullable
      */
   deletedAt?: string | null;
+  /**
+     * Database-clock automatic-purge deadline. Present on /projects/trash responses.
+     * @nullable
+     */
+  purgeDueAt?: string | null;
+  /**
+     * Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.
+     * @nullable
+     */
+  serverNow?: string | null;
+  /** True only while the owner can atomically cancel the scheduled purge and restore this Trash project. */
+  restoreAllowed?: boolean;
+  /**
+     * Latest governed provider-retirement state for a Trash project.
+     * @nullable
+     */
+  retirementState?: string | null;
+  /** Latest permanent-deletion state for a Trash project. */
+  purgeState?: ProjectPurgeState | null;
+  /**
+     * Owner-scoped durable purge receipt identity for progress recovery after refresh.
+     * @maxLength 200
+     * @nullable
+     */
+  purgeOperationId?: string | null;
+  /** @nullable */
+  purgeTrigger?: ProjectPurgeTrigger;
+  purgeStage?: ProjectPurgeStage | null;
+  /** @minimum 0 */
+  purgeAttemptCount?: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  purgeFailureCode?: string | null;
+  /** @nullable */
+  purgeFailureRetryable?: boolean | null;
+  /** True only when the same failed operation may be safely re-admitted below its retry ceiling. */
+  purgeRetryAllowed?: boolean;
+  /** @nullable */
+  purgeNextAttemptAt?: string | null;
   /** @nullable */
   lastTaskSummary?: string | null;
   /** @nullable */
@@ -995,6 +1074,187 @@ export interface ProjectUpload {
   objectPath?: string;
   hasTextPreview?: boolean;
   createdAt: string;
+}
+
+export type ClerkReverificationHintClerkErrorType = typeof ClerkReverificationHintClerkErrorType[keyof typeof ClerkReverificationHintClerkErrorType];
+
+
+export const ClerkReverificationHintClerkErrorType = {
+  forbidden: 'forbidden',
+} as const;
+
+export type ClerkReverificationHintClerkErrorReason = typeof ClerkReverificationHintClerkErrorReason[keyof typeof ClerkReverificationHintClerkErrorReason];
+
+
+export const ClerkReverificationHintClerkErrorReason = {
+  'reverification-error': 'reverification-error',
+} as const;
+
+export type ClerkReverificationHintClerkErrorMetadataReverificationLevel = typeof ClerkReverificationHintClerkErrorMetadataReverificationLevel[keyof typeof ClerkReverificationHintClerkErrorMetadataReverificationLevel];
+
+
+export const ClerkReverificationHintClerkErrorMetadataReverificationLevel = {
+  first_factor: 'first_factor',
+} as const;
+
+export type ClerkReverificationHintClerkErrorMetadataReverificationAfterMinutes = typeof ClerkReverificationHintClerkErrorMetadataReverificationAfterMinutes[keyof typeof ClerkReverificationHintClerkErrorMetadataReverificationAfterMinutes];
+
+
+export const ClerkReverificationHintClerkErrorMetadataReverificationAfterMinutes = {
+  NUMBER_10: 10,
+} as const;
+
+export type ClerkReverificationHintClerkErrorMetadataReverification = {
+  level: ClerkReverificationHintClerkErrorMetadataReverificationLevel;
+  afterMinutes: ClerkReverificationHintClerkErrorMetadataReverificationAfterMinutes;
+};
+
+export type ClerkReverificationHintClerkErrorMetadata = {
+  reverification: ClerkReverificationHintClerkErrorMetadataReverification;
+};
+
+export type ClerkReverificationHintClerkError = {
+  type: ClerkReverificationHintClerkErrorType;
+  reason: ClerkReverificationHintClerkErrorReason;
+  metadata: ClerkReverificationHintClerkErrorMetadata;
+};
+
+export interface ClerkReverificationHint {
+  clerk_error: ClerkReverificationHintClerkError;
+}
+
+export type ProjectRetirementAcceptedCode = typeof ProjectRetirementAcceptedCode[keyof typeof ProjectRetirementAcceptedCode];
+
+
+export const ProjectRetirementAcceptedCode = {
+  project_retirement_accepted: 'project_retirement_accepted',
+} as const;
+
+export type ProjectRetirementAcceptedState = typeof ProjectRetirementAcceptedState[keyof typeof ProjectRetirementAcceptedState];
+
+
+export const ProjectRetirementAcceptedState = {
+  accepted: 'accepted',
+} as const;
+
+export type ProjectRetirementAcceptedCleanupScheduleState = typeof ProjectRetirementAcceptedCleanupScheduleState[keyof typeof ProjectRetirementAcceptedCleanupScheduleState];
+
+
+export const ProjectRetirementAcceptedCleanupScheduleState = {
+  enqueued: 'enqueued',
+  already_scheduled: 'already_scheduled',
+} as const;
+
+export type ProjectRetirementAcceptedLocalCancellation = {
+  abortedTaskIds: number[];
+  evictedPendingTaskIds: number[];
+  /** @minimum 0 */
+  abortedAuxiliaryWorkCount: number;
+};
+
+export interface ProjectRetirementAccepted {
+  code: ProjectRetirementAcceptedCode;
+  deleted: true;
+  projectId: number;
+  operationId: string;
+  state: ProjectRetirementAcceptedState;
+  cleanupScheduled: true;
+  cleanupScheduleState: ProjectRetirementAcceptedCleanupScheduleState;
+  /** @nullable */
+  queueJobId?: string | null;
+  localCancellation: ProjectRetirementAcceptedLocalCancellation;
+  provisioningCancellation: boolean;
+  statusUrl: string;
+}
+
+export interface ProjectPurgeImpact {
+  projectId: number;
+  name: string;
+  deletedAt: string;
+  purgeDueAt: string;
+  restoreAllowed: boolean;
+  retirementState: string;
+  purgeState: ProjectPurgeState | null;
+  /**
+     * @minItems 1
+     * @maxItems 32
+     */
+  willDelete: string[];
+  /** @maxItems 32 */
+  willDetach: string[];
+  requiresReverification: true;
+}
+
+export type ProjectPurgeAcceptedCode = typeof ProjectPurgeAcceptedCode[keyof typeof ProjectPurgeAcceptedCode];
+
+
+export const ProjectPurgeAcceptedCode = {
+  project_purge_accepted: 'project_purge_accepted',
+} as const;
+
+export type ProjectPurgeAcceptedState = typeof ProjectPurgeAcceptedState[keyof typeof ProjectPurgeAcceptedState];
+
+
+export const ProjectPurgeAcceptedState = {
+  accepted: 'accepted',
+} as const;
+
+export interface ProjectPurgeAccepted {
+  code: ProjectPurgeAcceptedCode;
+  /** @maxLength 200 */
+  operationId: string;
+  state: ProjectPurgeAcceptedState;
+  statusUrl: string;
+}
+
+export type ProjectPurgeTerminalEvidenceSchema = typeof ProjectPurgeTerminalEvidenceSchema[keyof typeof ProjectPurgeTerminalEvidenceSchema];
+
+
+export const ProjectPurgeTerminalEvidenceSchema = {
+  'project-purge-terminal-v1': 'project-purge-terminal-v1',
+} as const;
+
+export type ProjectPurgeTerminalEvidenceOutcome = typeof ProjectPurgeTerminalEvidenceOutcome[keyof typeof ProjectPurgeTerminalEvidenceOutcome];
+
+
+export const ProjectPurgeTerminalEvidenceOutcome = {
+  completed: 'completed',
+  failed: 'failed',
+  canceled: 'canceled',
+} as const;
+
+export interface ProjectPurgeTerminalEvidence {
+  schema: ProjectPurgeTerminalEvidenceSchema;
+  outcome: ProjectPurgeTerminalEvidenceOutcome;
+  [key: string]: unknown;
+ }
+
+export type ProjectPurgeOperationTrigger = typeof ProjectPurgeOperationTrigger[keyof typeof ProjectPurgeOperationTrigger];
+
+
+export const ProjectPurgeOperationTrigger = {
+  manual: 'manual',
+  expiry: 'expiry',
+} as const;
+
+export interface ProjectPurgeOperation {
+  /** @maxLength 200 */
+  id: string;
+  projectId: number;
+  state: ProjectPurgeState;
+  stage: ProjectPurgeStage;
+  trigger: ProjectPurgeOperationTrigger;
+  dueAt: string;
+  /** @minimum 0 */
+  attemptCount: number;
+  /** @nullable */
+  failureCode: string | null;
+  /** @nullable */
+  failureRetryable: boolean | null;
+  retryAllowed: boolean;
+  /** @nullable */
+  nextAttemptAt: string | null;
+  terminalEvidence: ProjectPurgeTerminalEvidence | null;
 }
 
 export type ProjectInputKind = typeof ProjectInputKind[keyof typeof ProjectInputKind];
@@ -5578,6 +5838,14 @@ export const ListProjectsMode = {
   builder: 'builder',
   developer: 'developer',
 } as const;
+
+export type PermanentlyDeleteProjectBody = {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  projectName: string;
+};
 
 export type ResumeStreamParams = {
 /**

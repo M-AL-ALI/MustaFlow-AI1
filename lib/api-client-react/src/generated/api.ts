@@ -77,6 +77,7 @@ import type {
   CheckRunTrendsResponse,
   Checkpoint,
   CheckpointRestoreResponse,
+  ClerkReverificationHint,
   ConfirmPurchaseInput,
   ConfirmPurchasedDomainRenewalBody,
   ConfirmTransferInput,
@@ -229,6 +230,7 @@ import type {
   PageMapData,
   PageMapResponse,
   PatchVersionBody,
+  PermanentlyDeleteProjectBody,
   Project,
   ProjectAnalyticsResponse,
   ProjectAuditResult,
@@ -242,6 +244,10 @@ import type {
   ProjectHealthResponse,
   ProjectInput,
   ProjectPreviewState,
+  ProjectPurgeAccepted,
+  ProjectPurgeImpact,
+  ProjectPurgeOperation,
+  ProjectRetirementAccepted,
   ProjectSuggestion,
   ProjectUpdate,
   ProjectUpload,
@@ -3139,9 +3145,12 @@ export const getDeleteProjectUrl = (id: number,) => {
   return `/api/projects/${id}`
 }
 
-export const deleteProject = async (id: number, options?: RequestInit): Promise<void> => {
+/**
+ * @summary Move an owned project to recoverable Trash and begin governed retirement
+ */
+export const deleteProject = async (id: number, options?: RequestInit): Promise<ProjectRetirementAccepted> => {
 
-  return customFetch<void>(getDeleteProjectUrl(id),
+  return customFetch<ProjectRetirementAccepted>(getDeleteProjectUrl(id),
   {
     ...options,
     method: 'DELETE'
@@ -3153,7 +3162,7 @@ export const deleteProject = async (id: number, options?: RequestInit): Promise<
 
 
 
-export const getDeleteProjectMutationOptions = <TError = ErrorType<unknown>,
+export const getDeleteProjectMutationOptions = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteProject>>, TError,{id: number}, TContext> => {
 
@@ -3182,9 +3191,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteProjectMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProject>>>
 
-    export type DeleteProjectMutationError = ErrorType<unknown>
+    export type DeleteProjectMutationError = ErrorType<ApiError>
 
-    export const useDeleteProject = <TError = ErrorType<unknown>,
+    /**
+ * @summary Move an owned project to recoverable Trash and begin governed retirement
+ */
+export const useDeleteProject = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProject>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deleteProject>>,
@@ -3341,6 +3353,232 @@ export const useRestoreProject = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getRestoreProjectMutationOptions(options));
     }
+
+export const getGetProjectPermanentDeletionImpactUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/permanent-deletion-impact`
+}
+
+/**
+ * @summary Preview the exact consequences of permanently deleting an owned Trash project
+ */
+export const getProjectPermanentDeletionImpact = async (id: number, options?: RequestInit): Promise<ProjectPurgeImpact> => {
+
+  return customFetch<ProjectPurgeImpact>(getGetProjectPermanentDeletionImpactUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectPermanentDeletionImpactQueryKey = (id: number,) => {
+    return [
+    `/api/projects/${id}/permanent-deletion-impact`
+    ] as const;
+    }
+
+
+export const getGetProjectPermanentDeletionImpactQueryOptions = <TData = Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>, TError = ErrorType<ApiError>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectPermanentDeletionImpactQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>> = ({ signal }) => getProjectPermanentDeletionImpact(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectPermanentDeletionImpactQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>>
+export type GetProjectPermanentDeletionImpactQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Preview the exact consequences of permanently deleting an owned Trash project
+ */
+
+export function useGetProjectPermanentDeletionImpact<TData = Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>, TError = ErrorType<ApiError>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectPermanentDeletionImpactQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getPermanentlyDeleteProjectUrl = (id: number,) => {
+
+
+
+
+  return `/api/projects/${id}/permanent`
+}
+
+/**
+ * @summary Permanently delete an owned Trash project after recent first-factor reverification
+ */
+export const permanentlyDeleteProject = async (id: number,
+    permanentlyDeleteProjectBody: PermanentlyDeleteProjectBody, options?: RequestInit): Promise<ProjectPurgeAccepted> => {
+
+  return customFetch<ProjectPurgeAccepted>(getPermanentlyDeleteProjectUrl(id),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      permanentlyDeleteProjectBody,)
+  }
+);}
+
+
+
+
+export const getPermanentlyDeleteProjectMutationOptions = <TError = ErrorType<ApiError | ClerkReverificationHint>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof permanentlyDeleteProject>>, TError,{id: number;data: BodyType<PermanentlyDeleteProjectBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof permanentlyDeleteProject>>, TError,{id: number;data: BodyType<PermanentlyDeleteProjectBody>}, TContext> => {
+
+const mutationKey = ['permanentlyDeleteProject'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof permanentlyDeleteProject>>, {id: number;data: BodyType<PermanentlyDeleteProjectBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  permanentlyDeleteProject(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PermanentlyDeleteProjectMutationResult = NonNullable<Awaited<ReturnType<typeof permanentlyDeleteProject>>>
+    export type PermanentlyDeleteProjectMutationBody = BodyType<PermanentlyDeleteProjectBody>
+    export type PermanentlyDeleteProjectMutationError = ErrorType<ApiError | ClerkReverificationHint>
+
+    /**
+ * @summary Permanently delete an owned Trash project after recent first-factor reverification
+ */
+export const usePermanentlyDeleteProject = <TError = ErrorType<ApiError | ClerkReverificationHint>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof permanentlyDeleteProject>>, TError,{id: number;data: BodyType<PermanentlyDeleteProjectBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof permanentlyDeleteProject>>,
+        TError,
+        {id: number;data: BodyType<PermanentlyDeleteProjectBody>},
+        TContext
+      > => {
+      return useMutation(getPermanentlyDeleteProjectMutationOptions(options));
+    }
+
+export const getGetProjectPurgeOperationUrl = (operationId: string,) => {
+
+
+
+
+  return `/api/project-purge-operations/${operationId}`
+}
+
+/**
+ * @summary Read a sanitized permanent-deletion receipt owned by the caller
+ */
+export const getProjectPurgeOperation = async (operationId: string, options?: RequestInit): Promise<ProjectPurgeOperation> => {
+
+  return customFetch<ProjectPurgeOperation>(getGetProjectPurgeOperationUrl(operationId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectPurgeOperationQueryKey = (operationId: string,) => {
+    return [
+    `/api/project-purge-operations/${operationId}`
+    ] as const;
+    }
+
+
+export const getGetProjectPurgeOperationQueryOptions = <TData = Awaited<ReturnType<typeof getProjectPurgeOperation>>, TError = ErrorType<ApiError>>(operationId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPurgeOperation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectPurgeOperationQueryKey(operationId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectPurgeOperation>>> = ({ signal }) => getProjectPurgeOperation(operationId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(operationId), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectPurgeOperation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectPurgeOperationQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectPurgeOperation>>>
+export type GetProjectPurgeOperationQueryError = ErrorType<ApiError>
+
+
+/**
+ * @summary Read a sanitized permanent-deletion receipt owned by the caller
+ */
+
+export function useGetProjectPurgeOperation<TData = Awaited<ReturnType<typeof getProjectPurgeOperation>>, TError = ErrorType<ApiError>>(
+ operationId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPurgeOperation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectPurgeOperationQueryOptions(operationId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getGetProjectsSummaryUrl = () => {
 
@@ -23429,4 +23667,3 @@ export const useEscalateSupport = <TError = ErrorType<ApiError>,
       > => {
       return useMutation(getEscalateSupportMutationOptions(options));
     }
-

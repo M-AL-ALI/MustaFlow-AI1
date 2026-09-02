@@ -4,9 +4,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
+  class AssetAdmissionError extends Error {
+    constructor(
+      public readonly code: string,
+      public readonly status: number,
+    ) {
+      super(code);
+    }
+  }
   return {
+    AssetAdmissionError,
     select: vi.fn(),
     transaction: vi.fn(),
+    poolConnect: vi.fn(),
+    poolQuery: vi.fn(),
+    poolRelease: vi.fn(),
+    canonicalizeSurvivingAssetAliases: vi.fn(async () => undefined),
     txUpdateReturning: vi.fn(async () => [{ id: 7 }]),
     txDeleteWhere: vi.fn(async () => []),
     deleteReadyAsset: vi.fn(),
@@ -23,6 +36,7 @@ vi.mock("@workspace/db", async (importOriginal) => {
       select: mocks.select,
       transaction: mocks.transaction,
     },
+    pool: { connect: mocks.poolConnect },
   };
 });
 vi.mock("../lib/auth", () => ({ checkProjectAccess: vi.fn() }));
@@ -47,16 +61,8 @@ vi.mock("../lib/project-lifecycle", () => ({
   requireActiveProjectLifecycleFor: vi.fn(),
 }));
 vi.mock("../lib/asset-registry", () => {
-  class AssetAdmissionError extends Error {
-    constructor(
-      public readonly code: string,
-      public readonly status: number,
-    ) {
-      super(code);
-    }
-  }
   return {
-    AssetAdmissionError,
+    AssetAdmissionError: mocks.AssetAdmissionError,
     beginAssetUpload: vi.fn(),
     completeAsset: vi.fn(),
     deleteReadyAsset: mocks.deleteReadyAsset,
@@ -65,6 +71,9 @@ vi.mock("../lib/asset-registry", () => {
     reserveAsset: vi.fn(),
   };
 });
+vi.mock("../lib/project-purge-resources", () => ({
+  canonicalizeSurvivingAssetAliases: mocks.canonicalizeSurvivingAssetAliases,
+}));
 vi.mock("../lib/asset-storage-cleanup", () => ({
   deleteTrackedAssetStorageObjects: mocks.deleteTrackedAssetStorageObjects,
 }));
@@ -94,7 +103,7 @@ function appAsOwner() {
     req.userId = "owner";
     next();
   });
-  app.use(imageGenRouter);
+  app.use("/api", imageGenRouter);
   return app;
 }
 
@@ -127,10 +136,19 @@ describe("DELETE /images/:id physical storage", () => {
     });
     mocks.recordAssetDeleted.mockResolvedValue(undefined);
     mocks.deleteTrackedAssetStorageObjects.mockResolvedValue(undefined);
+    mocks.poolQuery.mockImplementation(async (statement: string) => {
+      if (statement.includes("SELECT id FROM assets")) return { rows: [{ id: 71 }], rowCount: 1 };
+      if (statement.includes("UPDATE generated_images")) return { rows: [{ id: 7 }], rowCount: 1 };
+      return { rows: [], rowCount: 1 };
+    });
+    mocks.poolConnect.mockResolvedValue({
+      query: mocks.poolQuery,
+      release: mocks.poolRelease,
+    });
   });
 
   it("deletes every tracked physical object before completing the asset receipt", async () => {
-    const response = await request(appAsOwner()).delete("/images/7");
+    const response = await request(appAsOwner()).delete("/api/images/7");
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ success: true, storageCleanup: "complete" });
@@ -158,7 +176,7 @@ describe("DELETE /images/:id physical storage", () => {
       new Error("provider temporarily unavailable"),
     );
 
-    const response = await request(appAsOwner()).delete("/images/7");
+    const response = await request(appAsOwner()).delete("/api/images/7");
 
     expect(response.status).toBe(202);
     expect(response.body).toEqual({ success: true, storageCleanup: "pending" });
@@ -170,4 +188,41 @@ describe("DELETE /images/:id physical storage", () => {
     expect(mocks.deleteTrackedAssetStorageObjects).toHaveBeenCalledWith(storageObjects);
     expect(mocks.recordAssetDeleted).not.toHaveBeenCalled();
   });
+
+  it("rewrites every surviving legacy alias under the asset lock before hiding the gallery row", async () => {
+    mocks.deleteReadyAsset.mockRejectedValueOnce(
+      new mocks.AssetAdmissionError("asset_referenced", 409),
+    );
+
+    const response = await request(appAsOwner()).delete("/api/images/7");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      success: true,
+      storageCleanup: "retained-while-referenced",
+    });
+    expect(mocks.poolQuery.mock.calls[0]?.[0]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED");
+    expect(String(mocks.poolQuery.mock.calls[1]?.[0])).toContain("FOR UPDATE");
+    expect(mocks.canonicalizeSurvivingAssetAliases).toHaveBeenCalledWith(
+      expect.any(Object),
+      null,
+      71,
+    );
+    expect(mocks.canonicalizeSurvivingAssetAliases.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.poolQuery.mock.invocationCallOrder.find((_order, index) =>
+        String(mocks.poolQuery.mock.calls[index]?.[0]).includes("UPDATE generated_images"),
+      )!,
+    );
+    expect(mocks.poolQuery.mock.calls.at(-1)?.[0]).toBe("COMMIT");
+  });
+
+  it.each(["007", "+7", "7e0", "7.0"])(
+    "denies non-canonical image id %s without reading storage",
+    async (id) => {
+      const response = await request(appAsOwner()).delete(`/api/images/${encodeURIComponent(id)}`);
+      expect(response.status).toBe(404);
+      expect(mocks.select).not.toHaveBeenCalled();
+      expect(mocks.deleteReadyAsset).not.toHaveBeenCalled();
+    },
+  );
 });

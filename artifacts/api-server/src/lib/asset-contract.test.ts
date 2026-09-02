@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   acceptsDeclaredAsset,
   BASE_ASSET_ALLOWANCE_BYTES,
+  isCanonicalAssetContentRequest,
+  isCanonicalImageFileRequest,
+  isCanonicalImageMetadataRequest,
+  isCanonicalProjectUploadContentRequest,
+  parseCanonicalAssetId,
   quotaMessage,
   sniffAsset,
 } from "./asset-contract";
@@ -12,6 +17,39 @@ describe("unified asset contract", () => {
     expect(
       quotaMessage({ usedBytes: 125 * 1024 * 1024, limitBytes: BASE_ASSET_ALLOWANCE_BYTES }),
     ).toBe("This upload would exceed your 500.0 MB storage allowance. You are using 125.0 MB.");
+  });
+
+  it("defines one canonical asset URL language for delivery and durable-reference scans", () => {
+    expect(parseCanonicalAssetId("51")).toBe(51);
+    expect(isCanonicalAssetContentRequest("/api/assets/51/content?download=1", "51")).toBe(true);
+    for (const [rawUrl, decoded] of [
+      ["/api/assets/0051/content", "0051"],
+      ["/api/assets/%35%31/content", "51"],
+      ["/API/ASSETS/51/CONTENT", "51"],
+      ["/api/assets/+51/content", "+51"],
+      ["/api/assets/51e0/content", "51e0"],
+    ]) {
+      expect(isCanonicalAssetContentRequest(rawUrl, decoded)).toBe(false);
+    }
+    expect(isCanonicalImageFileRequest("/api/images/51/file?role=thumbnail", "51")).toBe(true);
+    expect(isCanonicalImageFileRequest("/api/images/%35%31/file", "51")).toBe(false);
+    expect(isCanonicalImageMetadataRequest("/api/images/51", "51")).toBe(true);
+    expect(isCanonicalImageMetadataRequest("/api/images/051", "051")).toBe(false);
+    expect(
+      isCanonicalProjectUploadContentRequest(
+        "/api/projects/51/uploads/7/content?download=1",
+        "51",
+        "7",
+      ),
+    ).toBe(true);
+    for (const [rawUrl, projectId, uploadId] of [
+      ["/api/projects/051/uploads/7/content", "051", "7"],
+      ["/api/projects/51/uploads/007/content", "51", "007"],
+      ["/API/PROJECTS/51/UPLOADS/7/CONTENT", "51", "7"],
+      ["/api/projects/%35%31/uploads/7/content", "51", "7"],
+    ]) {
+      expect(isCanonicalProjectUploadContentRequest(rawUrl, projectId, uploadId)).toBe(false);
+    }
   });
 
   it("sniffs content instead of trusting an extension", () => {

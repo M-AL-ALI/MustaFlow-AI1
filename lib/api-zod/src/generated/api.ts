@@ -770,6 +770,12 @@ export const ListProjectsQueryParams = zod.object({
   "mode": zod.enum(['builder', 'developer']).optional().describe('Filter by project mode. \'builder\' = AI Build Mode projects; \'developer\' = Developer Mode cloud IDE projects.')
 })
 
+export const listProjectsResponsePurgeOperationIdMax = 200;
+
+export const listProjectsResponsePurgeAttemptCountMin = 0;
+
+export const listProjectsResponsePurgeFailureCodeMax = 120;
+
 export const listProjectsResponseHealthScoreMin = 0;
 export const listProjectsResponseHealthScoreMax = 100;
 
@@ -786,6 +792,19 @@ export const ListProjectsResponseItem = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "policyStrictness": zod.enum(['safe', 'standard', 'permissive']).optional().describe('Controls the agent loop\'s command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist.'),
   "deletedAt": zod.coerce.date().nullish().describe('Soft-delete timestamp. Present only on \/projects\/trash responses; null\/omitted for active projects.'),
+  "purgeDueAt": zod.coerce.date().nullish().describe('Database-clock automatic-purge deadline. Present on \/projects\/trash responses.'),
+  "serverNow": zod.coerce.date().nullish().describe('Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.'),
+  "restoreAllowed": zod.boolean().optional().describe('True only while the owner can atomically cancel the scheduled purge and restore this Trash project.'),
+  "retirementState": zod.string().nullish().describe('Latest governed provider-retirement state for a Trash project.'),
+  "purgeState": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']).nullish().describe('Latest permanent-deletion state for a Trash project.'),
+  "purgeOperationId": zod.string().max(listProjectsResponsePurgeOperationIdMax).nullish().describe('Owner-scoped durable purge receipt identity for progress recovery after refresh.'),
+  "purgeTrigger": zod.union([zod.literal('manual'),zod.literal('expiry'),zod.literal(null)]).nullish(),
+  "purgeStage": zod.enum(['verify', 'inventory', 'assets', 'snapshots', 'database', 'addons', 'runtime', 'relational', 'absence']).nullish(),
+  "purgeAttemptCount": zod.number().min(listProjectsResponsePurgeAttemptCountMin).optional(),
+  "purgeFailureCode": zod.string().max(listProjectsResponsePurgeFailureCodeMax).nullish(),
+  "purgeFailureRetryable": zod.boolean().nullish(),
+  "purgeRetryAllowed": zod.boolean().optional().describe('True only when the same failed operation may be safely re-admitted below its retry ceiling.'),
+  "purgeNextAttemptAt": zod.coerce.date().nullish(),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
   "publicSlug": zod.string().nullish(),
@@ -868,6 +887,12 @@ export const GetProjectParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getProjectResponsePurgeOperationIdMax = 200;
+
+export const getProjectResponsePurgeAttemptCountMin = 0;
+
+export const getProjectResponsePurgeFailureCodeMax = 120;
+
 export const getProjectResponseHealthScoreMin = 0;
 export const getProjectResponseHealthScoreMax = 100;
 
@@ -884,6 +909,19 @@ export const GetProjectResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "policyStrictness": zod.enum(['safe', 'standard', 'permissive']).optional().describe('Controls the agent loop\'s command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist.'),
   "deletedAt": zod.coerce.date().nullish().describe('Soft-delete timestamp. Present only on \/projects\/trash responses; null\/omitted for active projects.'),
+  "purgeDueAt": zod.coerce.date().nullish().describe('Database-clock automatic-purge deadline. Present on \/projects\/trash responses.'),
+  "serverNow": zod.coerce.date().nullish().describe('Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.'),
+  "restoreAllowed": zod.boolean().optional().describe('True only while the owner can atomically cancel the scheduled purge and restore this Trash project.'),
+  "retirementState": zod.string().nullish().describe('Latest governed provider-retirement state for a Trash project.'),
+  "purgeState": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']).nullish().describe('Latest permanent-deletion state for a Trash project.'),
+  "purgeOperationId": zod.string().max(getProjectResponsePurgeOperationIdMax).nullish().describe('Owner-scoped durable purge receipt identity for progress recovery after refresh.'),
+  "purgeTrigger": zod.union([zod.literal('manual'),zod.literal('expiry'),zod.literal(null)]).nullish(),
+  "purgeStage": zod.enum(['verify', 'inventory', 'assets', 'snapshots', 'database', 'addons', 'runtime', 'relational', 'absence']).nullish(),
+  "purgeAttemptCount": zod.number().min(getProjectResponsePurgeAttemptCountMin).optional(),
+  "purgeFailureCode": zod.string().max(getProjectResponsePurgeFailureCodeMax).nullish(),
+  "purgeFailureRetryable": zod.boolean().nullish(),
+  "purgeRetryAllowed": zod.boolean().optional().describe('True only when the same failed operation may be safely re-admitted below its retry ceiling.'),
+  "purgeNextAttemptAt": zod.coerce.date().nullish(),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
   "publicSlug": zod.string().nullish(),
@@ -966,6 +1004,12 @@ export const UpdateProjectBody = zod.object({
   "requireCommandApproval": zod.boolean().optional().describe('When true, the agent pauses before run_command or pkg_install and asks for user approval. Default false.')
 })
 
+export const updateProjectResponsePurgeOperationIdMax = 200;
+
+export const updateProjectResponsePurgeAttemptCountMin = 0;
+
+export const updateProjectResponsePurgeFailureCodeMax = 120;
+
 export const updateProjectResponseHealthScoreMin = 0;
 export const updateProjectResponseHealthScoreMax = 100;
 
@@ -982,6 +1026,19 @@ export const UpdateProjectResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "policyStrictness": zod.enum(['safe', 'standard', 'permissive']).optional().describe('Controls the agent loop\'s command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist.'),
   "deletedAt": zod.coerce.date().nullish().describe('Soft-delete timestamp. Present only on \/projects\/trash responses; null\/omitted for active projects.'),
+  "purgeDueAt": zod.coerce.date().nullish().describe('Database-clock automatic-purge deadline. Present on \/projects\/trash responses.'),
+  "serverNow": zod.coerce.date().nullish().describe('Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.'),
+  "restoreAllowed": zod.boolean().optional().describe('True only while the owner can atomically cancel the scheduled purge and restore this Trash project.'),
+  "retirementState": zod.string().nullish().describe('Latest governed provider-retirement state for a Trash project.'),
+  "purgeState": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']).nullish().describe('Latest permanent-deletion state for a Trash project.'),
+  "purgeOperationId": zod.string().max(updateProjectResponsePurgeOperationIdMax).nullish().describe('Owner-scoped durable purge receipt identity for progress recovery after refresh.'),
+  "purgeTrigger": zod.union([zod.literal('manual'),zod.literal('expiry'),zod.literal(null)]).nullish(),
+  "purgeStage": zod.enum(['verify', 'inventory', 'assets', 'snapshots', 'database', 'addons', 'runtime', 'relational', 'absence']).nullish(),
+  "purgeAttemptCount": zod.number().min(updateProjectResponsePurgeAttemptCountMin).optional(),
+  "purgeFailureCode": zod.string().max(updateProjectResponsePurgeFailureCodeMax).nullish(),
+  "purgeFailureRetryable": zod.boolean().nullish(),
+  "purgeRetryAllowed": zod.boolean().optional().describe('True only when the same failed operation may be safely re-admitted below its retry ceiling.'),
+  "purgeNextAttemptAt": zod.coerce.date().nullish(),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
   "publicSlug": zod.string().nullish(),
@@ -1036,6 +1093,9 @@ export const UpdateProjectResponse = zod.object({
 })
 
 
+/**
+ * @summary Move an owned project to recoverable Trash and begin governed retirement
+ */
 export const DeleteProjectParams = zod.object({
   "id": zod.coerce.number()
 })
@@ -1044,6 +1104,12 @@ export const DeleteProjectParams = zod.object({
 /**
  * @summary List soft-deleted projects for the current user (within 30-day recovery window)
  */
+export const listTrashedProjectsResponsePurgeOperationIdMax = 200;
+
+export const listTrashedProjectsResponsePurgeAttemptCountMin = 0;
+
+export const listTrashedProjectsResponsePurgeFailureCodeMax = 120;
+
 export const listTrashedProjectsResponseHealthScoreMin = 0;
 export const listTrashedProjectsResponseHealthScoreMax = 100;
 
@@ -1060,6 +1126,19 @@ export const ListTrashedProjectsResponseItem = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "policyStrictness": zod.enum(['safe', 'standard', 'permissive']).optional().describe('Controls the agent loop\'s command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist.'),
   "deletedAt": zod.coerce.date().nullish().describe('Soft-delete timestamp. Present only on \/projects\/trash responses; null\/omitted for active projects.'),
+  "purgeDueAt": zod.coerce.date().nullish().describe('Database-clock automatic-purge deadline. Present on \/projects\/trash responses.'),
+  "serverNow": zod.coerce.date().nullish().describe('Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.'),
+  "restoreAllowed": zod.boolean().optional().describe('True only while the owner can atomically cancel the scheduled purge and restore this Trash project.'),
+  "retirementState": zod.string().nullish().describe('Latest governed provider-retirement state for a Trash project.'),
+  "purgeState": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']).nullish().describe('Latest permanent-deletion state for a Trash project.'),
+  "purgeOperationId": zod.string().max(listTrashedProjectsResponsePurgeOperationIdMax).nullish().describe('Owner-scoped durable purge receipt identity for progress recovery after refresh.'),
+  "purgeTrigger": zod.union([zod.literal('manual'),zod.literal('expiry'),zod.literal(null)]).nullish(),
+  "purgeStage": zod.enum(['verify', 'inventory', 'assets', 'snapshots', 'database', 'addons', 'runtime', 'relational', 'absence']).nullish(),
+  "purgeAttemptCount": zod.number().min(listTrashedProjectsResponsePurgeAttemptCountMin).optional(),
+  "purgeFailureCode": zod.string().max(listTrashedProjectsResponsePurgeFailureCodeMax).nullish(),
+  "purgeFailureRetryable": zod.boolean().nullish(),
+  "purgeRetryAllowed": zod.boolean().optional().describe('True only when the same failed operation may be safely re-admitted below its retry ceiling.'),
+  "purgeNextAttemptAt": zod.coerce.date().nullish(),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
   "publicSlug": zod.string().nullish(),
@@ -1122,6 +1201,12 @@ export const RestoreProjectParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const restoreProjectResponsePurgeOperationIdMax = 200;
+
+export const restoreProjectResponsePurgeAttemptCountMin = 0;
+
+export const restoreProjectResponsePurgeFailureCodeMax = 120;
+
 export const restoreProjectResponseHealthScoreMin = 0;
 export const restoreProjectResponseHealthScoreMax = 100;
 
@@ -1138,6 +1223,19 @@ export const RestoreProjectResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "policyStrictness": zod.enum(['safe', 'standard', 'permissive']).optional().describe('Controls the agent loop\'s command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist.'),
   "deletedAt": zod.coerce.date().nullish().describe('Soft-delete timestamp. Present only on \/projects\/trash responses; null\/omitted for active projects.'),
+  "purgeDueAt": zod.coerce.date().nullish().describe('Database-clock automatic-purge deadline. Present on \/projects\/trash responses.'),
+  "serverNow": zod.coerce.date().nullish().describe('Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.'),
+  "restoreAllowed": zod.boolean().optional().describe('True only while the owner can atomically cancel the scheduled purge and restore this Trash project.'),
+  "retirementState": zod.string().nullish().describe('Latest governed provider-retirement state for a Trash project.'),
+  "purgeState": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']).nullish().describe('Latest permanent-deletion state for a Trash project.'),
+  "purgeOperationId": zod.string().max(restoreProjectResponsePurgeOperationIdMax).nullish().describe('Owner-scoped durable purge receipt identity for progress recovery after refresh.'),
+  "purgeTrigger": zod.union([zod.literal('manual'),zod.literal('expiry'),zod.literal(null)]).nullish(),
+  "purgeStage": zod.enum(['verify', 'inventory', 'assets', 'snapshots', 'database', 'addons', 'runtime', 'relational', 'absence']).nullish(),
+  "purgeAttemptCount": zod.number().min(restoreProjectResponsePurgeAttemptCountMin).optional(),
+  "purgeFailureCode": zod.string().max(restoreProjectResponsePurgeFailureCodeMax).nullish(),
+  "purgeFailureRetryable": zod.boolean().nullish(),
+  "purgeRetryAllowed": zod.boolean().optional().describe('True only when the same failed operation may be safely re-admitted below its retry ceiling.'),
+  "purgeNextAttemptAt": zod.coerce.date().nullish(),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
   "publicSlug": zod.string().nullish(),
@@ -1193,8 +1291,106 @@ export const RestoreProjectResponse = zod.object({
 
 
 /**
+ * @summary Preview the exact consequences of permanently deleting an owned Trash project
+ */
+export const GetProjectPermanentDeletionImpactParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const getProjectPermanentDeletionImpactResponseWillDeleteItemMax = 160;
+
+export const getProjectPermanentDeletionImpactResponseWillDeleteMax = 32;
+
+export const getProjectPermanentDeletionImpactResponseWillDetachItemMax = 160;
+
+export const getProjectPermanentDeletionImpactResponseWillDetachMax = 32;
+
+
+
+export const GetProjectPermanentDeletionImpactResponse = zod.object({
+  "projectId": zod.number(),
+  "name": zod.string(),
+  "deletedAt": zod.coerce.date(),
+  "purgeDueAt": zod.coerce.date(),
+  "restoreAllowed": zod.boolean(),
+  "retirementState": zod.string(),
+  "purgeState": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']).nullable(),
+  "willDelete": zod.array(zod.string().max(getProjectPermanentDeletionImpactResponseWillDeleteItemMax)).min(1).max(getProjectPermanentDeletionImpactResponseWillDeleteMax),
+  "willDetach": zod.array(zod.string().max(getProjectPermanentDeletionImpactResponseWillDetachItemMax)).max(getProjectPermanentDeletionImpactResponseWillDetachMax),
+  "requiresReverification": zod.literal(true)
+})
+
+
+/**
+ * @summary Permanently delete an owned Trash project after recent first-factor reverification
+ */
+export const PermanentlyDeleteProjectParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const permanentlyDeleteProjectHeaderIdempotencyKeyMin = 16;
+export const permanentlyDeleteProjectHeaderIdempotencyKeyMax = 200;
+
+
+
+export const PermanentlyDeleteProjectHeader = zod.object({
+  "Idempotency-Key": zod.string().min(permanentlyDeleteProjectHeaderIdempotencyKeyMin).max(permanentlyDeleteProjectHeaderIdempotencyKeyMax)
+})
+
+export const permanentlyDeleteProjectBodyProjectNameMax = 200;
+
+
+
+export const PermanentlyDeleteProjectBody = zod.object({
+  "projectName": zod.string().min(1).max(permanentlyDeleteProjectBodyProjectNameMax)
+})
+
+
+/**
+ * @summary Read a sanitized permanent-deletion receipt owned by the caller
+ */
+export const getProjectPurgeOperationPathOperationIdMax = 200;
+
+
+
+export const GetProjectPurgeOperationParams = zod.object({
+  "operationId": zod.coerce.string().max(getProjectPurgeOperationPathOperationIdMax)
+})
+
+export const getProjectPurgeOperationResponseIdMax = 200;
+
+export const getProjectPurgeOperationResponseAttemptCountMin = 0;
+
+
+
+export const GetProjectPurgeOperationResponse = zod.object({
+  "id": zod.string().max(getProjectPurgeOperationResponseIdMax),
+  "projectId": zod.number(),
+  "state": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']),
+  "stage": zod.enum(['verify', 'inventory', 'assets', 'snapshots', 'database', 'addons', 'runtime', 'relational', 'absence']),
+  "trigger": zod.enum(['manual', 'expiry']),
+  "dueAt": zod.coerce.date(),
+  "attemptCount": zod.number().min(getProjectPurgeOperationResponseAttemptCountMin),
+  "failureCode": zod.string().nullable(),
+  "failureRetryable": zod.boolean().nullable(),
+  "retryAllowed": zod.boolean(),
+  "nextAttemptAt": zod.coerce.date().nullable(),
+  "terminalEvidence": zod.object({
+  "schema": zod.enum(['project-purge-terminal-v1']),
+  "outcome": zod.enum(['completed', 'failed', 'canceled'])
+}).nullable()
+})
+
+
+/**
  * @summary Dashboard aggregate counts
  */
+export const getProjectsSummaryResponseRecentItemPurgeOperationIdMax = 200;
+
+export const getProjectsSummaryResponseRecentItemPurgeAttemptCountMin = 0;
+
+export const getProjectsSummaryResponseRecentItemPurgeFailureCodeMax = 120;
+
 export const getProjectsSummaryResponseRecentItemHealthScoreMin = 0;
 export const getProjectsSummaryResponseRecentItemHealthScoreMax = 100;
 
@@ -1215,6 +1411,19 @@ export const GetProjectsSummaryResponse = zod.object({
   "agentMode": zod.enum(['lite', 'eco', 'power', 'pro']),
   "policyStrictness": zod.enum(['safe', 'standard', 'permissive']).optional().describe('Controls the agent loop\'s command policy. safe = legacy whitelist; standard (default) = broad allow + deny-list; permissive = admin-only, skips registry allowlist.'),
   "deletedAt": zod.coerce.date().nullish().describe('Soft-delete timestamp. Present only on \/projects\/trash responses; null\/omitted for active projects.'),
+  "purgeDueAt": zod.coerce.date().nullish().describe('Database-clock automatic-purge deadline. Present on \/projects\/trash responses.'),
+  "serverNow": zod.coerce.date().nullish().describe('Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.'),
+  "restoreAllowed": zod.boolean().optional().describe('True only while the owner can atomically cancel the scheduled purge and restore this Trash project.'),
+  "retirementState": zod.string().nullish().describe('Latest governed provider-retirement state for a Trash project.'),
+  "purgeState": zod.enum(['scheduled', 'accepted', 'running', 'failed', 'completed', 'canceled']).nullish().describe('Latest permanent-deletion state for a Trash project.'),
+  "purgeOperationId": zod.string().max(getProjectsSummaryResponseRecentItemPurgeOperationIdMax).nullish().describe('Owner-scoped durable purge receipt identity for progress recovery after refresh.'),
+  "purgeTrigger": zod.union([zod.literal('manual'),zod.literal('expiry'),zod.literal(null)]).nullish(),
+  "purgeStage": zod.enum(['verify', 'inventory', 'assets', 'snapshots', 'database', 'addons', 'runtime', 'relational', 'absence']).nullish(),
+  "purgeAttemptCount": zod.number().min(getProjectsSummaryResponseRecentItemPurgeAttemptCountMin).optional(),
+  "purgeFailureCode": zod.string().max(getProjectsSummaryResponseRecentItemPurgeFailureCodeMax).nullish(),
+  "purgeFailureRetryable": zod.boolean().nullish(),
+  "purgeRetryAllowed": zod.boolean().optional().describe('True only when the same failed operation may be safely re-admitted below its retry ceiling.'),
+  "purgeNextAttemptAt": zod.coerce.date().nullish(),
   "lastTaskSummary": zod.string().nullish(),
   "summary": zod.string().nullish(),
   "publicSlug": zod.string().nullish(),

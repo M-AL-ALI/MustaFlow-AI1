@@ -1,4 +1,5 @@
 import { defineConfig, InputTransformerFn } from "orval";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "path";
 
 const root = path.resolve(__dirname, "..", "..");
@@ -13,8 +14,24 @@ const titleTransformer: InputTransformerFn = (config) => {
   return config;
 };
 
+const normalizeGeneratedEof = (filePaths: string[]) => {
+  const normalizePath = (filePath: string): void => {
+    if (statSync(filePath).isDirectory()) {
+      for (const child of readdirSync(filePath)) normalizePath(path.join(filePath, child));
+      return;
+    }
+    const source = readFileSync(filePath, "utf8");
+    const normalized = source.replace(/(?:\r?\n)+$/u, "\n");
+    if (normalized !== source) writeFileSync(filePath, normalized, "utf8");
+  };
+  for (const filePath of filePaths) normalizePath(filePath);
+};
+
 export default defineConfig({
   "api-client-react": {
+    hooks: {
+      afterAllFilesWrite: normalizeGeneratedEof,
+    },
     input: {
       target: "./openapi.yaml",
       override: {
@@ -41,6 +58,9 @@ export default defineConfig({
     },
   },
   zod: {
+    hooks: {
+      afterAllFilesWrite: normalizeGeneratedEof,
+    },
     input: {
       target: "./openapi.yaml",
       override: {

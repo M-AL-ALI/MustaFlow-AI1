@@ -770,7 +770,7 @@ export async function deleteReadyAsset(input: {
 }> {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const found = await client.query<{
       storage_key: string;
       storage_backend: string;
@@ -793,160 +793,11 @@ export async function deleteReadyAsset(input: {
     );
     if (!found.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
     const references = await client.query<{ referenced: boolean }>(
-      `WITH candidate AS (
-         SELECT id, owner_user_id, project_id, storage_key
-           FROM assets
-          WHERE id=$1 AND owner_user_id=$2
-       )
-       SELECT (
-          EXISTS (
-            SELECT 1 FROM asset_usage
-             WHERE asset_id=$1
-               AND ($3::integer IS NULL OR consumer <> 'generated-image:' || $3::text)
-          )
-          OR EXISTS (
-            SELECT 1
-              FROM generated_images image
-              JOIN candidate ON TRUE
-             WHERE image.deleted_at IS NULL
-               AND image.id <> COALESCE($3, -1)
-               AND image.user_id = candidate.owner_user_id
-               AND image.project_id IS NOT DISTINCT FROM candidate.project_id
-               AND (
-                 image.asset_id = $1
-                 OR (
-                   image.user_id = candidate.owner_user_id
-                   AND COALESCE(image.storage_key, 'legacy-generated/' || image.id::text) =
-                       candidate.storage_key
-                 )
-               )
-          )
-          OR EXISTS (
-            SELECT 1 FROM chat_messages
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND (attachments @> jsonb_build_array(jsonb_build_object('assetId', $1::integer))
-                OR attachments @> jsonb_build_array(
-                     jsonb_build_object('url', '/api/assets/' || $1::text || '/content')
-                   ))
-          )
-          OR EXISTS (
-            SELECT 1 FROM agent_tasks
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND (attachments @> jsonb_build_array(
-                     jsonb_build_object('url', '/api/assets/' || $1::text || '/content')
-                   )
-                OR report::text LIKE '%/api/assets/' || $1::text || '/content%'
-                 OR report::text ~ (
-                      '"assetId"[[:space:]]*:[[:space:]]*' || $1::text || '([^0-9]|$)'
-                    )
-                 OR staging_snapshot::text LIKE '%/api/assets/' || $1::text || '/content%'
-                 OR staging_snapshot::text ~ (
-                      '"assetId"[[:space:]]*:[[:space:]]*' || $1::text || '([^0-9]|$)'
-                    ))
-          )
-          OR EXISTS (
-            SELECT 1 FROM agent_tool_calls
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND (stdout_preview LIKE '%/api/assets/' || $1::text || '/content%'
-                OR args_summary LIKE '%/api/assets/' || $1::text || '/content%'
-                OR stdout_preview ~ (
-                     '"assetId"[[:space:]]*:[[:space:]]*' || $1::text || '([^0-9]|$)'
-                   )
-                 OR args_summary ~ (
-                     '"assetId"[[:space:]]*:[[:space:]]*' || $1::text || '([^0-9]|$)'
-                   ))
-          )
-          OR EXISTS (
-            SELECT 1 FROM zero_prompt_queue_items
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND asset_ids @> to_jsonb(ARRAY[$1::integer])
-          )
-          OR EXISTS (
-            SELECT 1 FROM knowledge_entries
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND user_id IS NOT DISTINCT FROM (SELECT owner_user_id FROM candidate)
-               AND annotation ~ (
-               '"logoAssetId"[[:space:]]*:[[:space:]]*' || $1::text || '([^0-9]|$)'
-             )
-          )
-          OR EXISTS (
-            SELECT 1 FROM project_files
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND content LIKE '%/api/assets/' || $1::text || '/content%'
-          )
-          OR EXISTS (
-            SELECT 1 FROM project_versions
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND files_snapshot::text LIKE '%/api/assets/' || $1::text || '/content%'
-          )
-          OR EXISTS (
-            SELECT 1 FROM canvas_variants
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND files::text LIKE '%/api/assets/' || $1::text || '/content%'
-          )
-          OR EXISTS (
-            SELECT 1 FROM canvas_variant_library
-             WHERE source_project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND user_id = (SELECT owner_user_id FROM candidate)
-               AND files::text LIKE '%/api/assets/' || $1::text || '/content%'
-          )
-          OR EXISTS (
-            SELECT 1 FROM gallery_templates
-             WHERE source_project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND author_id IS NOT DISTINCT FROM (SELECT owner_user_id FROM candidate)
-               AND files_snapshot::text LIKE '%/api/assets/' || $1::text || '/content%'
-          )
-          OR EXISTS (
-            SELECT 1 FROM agent_inbox
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND user_id IS NOT DISTINCT FROM (SELECT owner_user_id FROM candidate)
-               AND screenshot_url = '/api/assets/' || $1::text || '/content'
-          )
-          OR EXISTS (
-            SELECT 1 FROM task_events event
-              JOIN agent_tasks task ON task.id=event.task_id
-             WHERE task.project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND (event.message LIKE '%/api/assets/' || $1::text || '/content%'
-                OR event.data::text LIKE '%/api/assets/' || $1::text || '/content%')
-          )
-          OR EXISTS (
-            SELECT 1 FROM project_activity
-             WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND (metadata::text LIKE '%/api/assets/' || $1::text || '/content%'
-                OR metadata @> jsonb_build_object(
-                     'assetIds', to_jsonb(ARRAY[$1::integer])
-                   )
-                OR metadata @> jsonb_build_object(
-                     'originalAssetIds', to_jsonb(ARRAY[$1::integer])
-                   ))
-          )
-           OR EXISTS (
-             SELECT 1 FROM visual_edit_changes
-              WHERE project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-                AND (before_content LIKE '%/api/assets/' || $1::text || '/content%'
-                 OR after_content LIKE '%/api/assets/' || $1::text || '/content%')
-           )
-           OR EXISTS (
-             SELECT 1 FROM asset_analysis_events
-              WHERE asset_id=$1
-                AND user_id = (SELECT owner_user_id FROM candidate)
-                AND project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-                AND status IN ('queued', 'started')
-           )
-           OR EXISTS (
-             SELECT 1 FROM assets
-             WHERE state IN ('reserved', 'uploading', 'ready', 'deleting')
-               AND owner_user_id = (SELECT owner_user_id FROM candidate)
-               AND project_id IS NOT DISTINCT FROM (SELECT project_id FROM candidate)
-               AND context ->> 'derivativeOfAssetId' = $1::text
-          )
-        ) AS referenced`,
-      [input.assetId, input.userId, input.generatedImageIdBeingDeleted ?? null],
+      `SELECT public.durable_asset_reference_exists($1, NULL, $2) AS referenced`,
+      [input.assetId, input.generatedImageIdBeingDeleted ?? null],
     );
     const row = found.rows[0]!;
-    const directlyBound =
-      row.version_id !== null || row.task_id !== null || row.message_id !== null;
-    if (directlyBound || references.rows[0]?.referenced === true) {
+    if (references.rows[0]?.referenced !== false) {
       if (row.state === "deleting") {
         await client.query(`UPDATE assets SET state='ready' WHERE id=$1 AND state='deleting'`, [
           input.assetId,
@@ -983,12 +834,12 @@ export async function deleteReadyAsset(input: {
       `SELECT storage_key, storage_backend, size_bytes
          FROM asset_storage_objects
         WHERE asset_id=$1 AND state='deleting'
-        ORDER BY id`,
+        ORDER BY storage_key`,
       [input.assetId],
     );
-    await client.query("COMMIT");
-    // Historical URL-only rows have no provider object owned by NabuFlow. Their
-    // deletion is a metadata transition, not an endlessly retrying provider job.
+    // Persist the non-attachable claim before provider work. Writers lock the
+    // asset first and then these keys in the same order, so neither a raw key
+    // nor an image alias can be attached after this transaction commits.
     const storageObjects = physicalObjects.rows.length
       ? physicalObjects.rows.map((object) => ({
           storageKey: object.storage_key,
@@ -1004,6 +855,24 @@ export async function deleteReadyAsset(input: {
               sizeBytes: Number(row.size_bytes),
             },
           ];
+    for (const object of storageObjects) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(
+           hashtextextended('nabuflow:durable-object:' || $1, 0)
+         )`,
+        [object.storageKey],
+      );
+      await client.query(
+        `INSERT INTO durable_asset_deletion_claims (
+           storage_key, claim_kind, retired_asset_id
+         ) VALUES ($1, 'asset-delete', $2)
+         ON CONFLICT (storage_key) DO NOTHING`,
+        [object.storageKey, input.assetId],
+      );
+    }
+    await client.query("COMMIT");
+    // Historical URL-only rows have no provider object owned by NabuFlow. Their
+    // deletion is a metadata transition, not an endlessly retrying provider job.
     return {
       storageKey: row.storage_key,
       storageBackend: row.storage_backend,

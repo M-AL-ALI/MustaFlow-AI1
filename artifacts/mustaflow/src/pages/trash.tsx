@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Trash2, RotateCcw, AlertCircle } from "lucide-react";
 import {
@@ -9,14 +10,26 @@ import {
 } from "@workspace/api-client-react";
 import type { Project } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  describePurgeDueAt,
+  describePurgeState,
+  isPurgeInProgress,
+  ProjectPermanentDeletionControl,
+  type PurgeableTrashedProject,
+} from "./trash-permanent-deletion";
 
 const RECOVERY_DAYS = 30;
 
-function daysRemaining(deletedAt: string | Date): number {
-  const deleted = new Date(deletedAt).getTime();
-  const expiresAt = deleted + RECOVERY_DAYS * 24 * 60 * 60 * 1000;
-  const ms = expiresAt - Date.now();
-  return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+type TrashedProject = Project & PurgeableTrashedProject;
+
+function readMonotonicNow(): number {
+  return typeof performance === "undefined" ? 0 : performance.now();
+}
+
+function parseServerNow(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export default function TrashPage() {
@@ -24,8 +37,43 @@ export default function TrashPage() {
   const { toast } = useToast();
   const listQuery = useListTrashedProjects();
   const restoreMutation = useRestoreProject();
+  const [locallyPurgingProjectIds, setLocallyPurgingProjectIds] = useState<ReadonlySet<number>>(
+    new Set(),
+  );
+  const [monotonicNowMs, setMonotonicNowMs] = useState(readMonotonicNow);
 
-  const projects = listQuery.data ?? [];
+  const projects = (listQuery.data ?? []) as TrashedProject[];
+  const serverNowSource = projects.find((project) => project.serverNow)?.serverNow ?? null;
+  const serverClockAnchor = useRef<{
+    source: string | null;
+    serverNowMs: number | null;
+    monotonicMs: number;
+  }>({ source: null, serverNowMs: null, monotonicMs: monotonicNowMs });
+  if (serverClockAnchor.current.source !== serverNowSource) {
+    serverClockAnchor.current = {
+      source: serverNowSource,
+      serverNowMs: parseServerNow(serverNowSource),
+      monotonicMs: monotonicNowMs,
+    };
+  }
+  const estimatedServerNowMs =
+    serverClockAnchor.current.serverNowMs === null
+      ? Number.NaN
+      : serverClockAnchor.current.serverNowMs +
+        Math.max(0, monotonicNowMs - serverClockAnchor.current.monotonicMs);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setMonotonicNowMs(readMonotonicNow()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const refreshProjectLists = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: getListTrashedProjectsQueryKey() }),
+      queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() }),
+      queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() }),
+    ]);
+  }, [queryClient]);
 
   function handleRestore(p: Project) {
     restoreMutation.mutate(
@@ -36,16 +84,14 @@ export default function TrashPage() {
             title: "Project restored",
             description: `"${p.name}" is back in your projects.`,
           });
-          void queryClient.invalidateQueries({ queryKey: getListTrashedProjectsQueryKey() });
-          void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-          void queryClient.invalidateQueries({ queryKey: getGetProjectsSummaryQueryKey() });
+          void refreshProjectLists();
         },
-        onError: (err: unknown) => {
-          const msg =
-            err && typeof err === "object" && "message" in err
-              ? String((err as { message: unknown }).message)
-              : "Could not restore project";
-          toast({ title: "Restore failed", description: msg, variant: "destructive" });
+        onError: () => {
+          toast({
+            title: "Restore failed",
+            description: "This project could not be restored. Try again shortly.",
+            variant: "destructive",
+          });
         },
       },
     );
@@ -58,20 +104,32 @@ export default function TrashPage() {
         <div>
           <h1 className="text-2xl font-semibold">Trash</h1>
           <p className="text-sm text-muted-foreground">
-            Deleted projects can be restored for {RECOVERY_DAYS} days. Automatic permanent deletion
-            is not active yet.
+            Projects remain recoverable for up to {RECOVERY_DAYS} days, then are permanently deleted
+            automatically. You can also permanently delete your own project sooner.
           </p>
         </div>
       </header>
 
       {listQuery.isPending && (
-        <div className="flex items-center justify-center py-16">
-          <div className="h-5 w-5 rounded-full border-2 border-border border-t-primary animate-spin" />
+        <div
+          className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div
+            className="h-5 w-5 rounded-full border-2 border-border border-t-primary animate-spin"
+            aria-hidden="true"
+          />
+          Loading Trash…
         </div>
       )}
 
       {listQuery.isError && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3">
+        <div
+          className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 flex items-start gap-3"
+          role="alert"
+        >
           <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" aria-hidden="true" />
           <div className="flex-1">
             <p className="text-sm font-medium text-destructive">Could not load trash</p>
@@ -98,33 +156,69 @@ export default function TrashPage() {
       {projects.length > 0 && (
         <ul className="space-y-2">
           {projects.map((p) => {
-            const days = p.deletedAt ? daysRemaining(p.deletedAt) : 0;
             const isRestoring = restoreMutation.isPending && restoreMutation.variables?.id === p.id;
+            const purgeInProgress =
+              locallyPurgingProjectIds.has(p.id) || isPurgeInProgress(p.purgeState);
+            const restoreAllowed = p.restoreAllowed === true && !purgeInProgress;
+            const purgeStatus = describePurgeState(p);
             return (
               <li
                 key={p.id}
-                className="flex items-center gap-4 rounded-lg border border-border bg-card p-4"
+                className="flex flex-col gap-4 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center"
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{p.name}</p>
+                  <p className="text-sm font-medium [overflow-wrap:anywhere]">{p.name}</p>
                   {p.description && (
-                    <p className="text-xs text-muted-foreground truncate">{p.description}</p>
+                    <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">
+                      {p.description}
+                    </p>
                   )}
                   <p className="text-xs text-muted-foreground/70 mt-1">
-                    {days > 0
-                      ? `Recovery available for ${days} day${days === 1 ? "" : "s"}`
-                      : "Recovery window expired"}
+                    {describePurgeDueAt(p.purgeDueAt, estimatedServerNowMs)}
                   </p>
+                  {purgeStatus && (
+                    <p
+                      className={`mt-1 text-xs ${
+                        purgeStatus.tone === "danger"
+                          ? "text-destructive"
+                          : purgeStatus.tone === "warning"
+                            ? "text-amber-700 dark:text-amber-400"
+                            : "text-muted-foreground"
+                      }`}
+                      role="status"
+                    >
+                      {purgeStatus.message}
+                    </p>
+                  )}
+                  {!p.restoreAllowed && !purgeInProgress && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Restoration is unavailable for this project.
+                    </p>
+                  )}
                 </div>
-                <button
-                  onClick={() => handleRestore(p)}
-                  disabled={isRestoring || days === 0}
-                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
-                  aria-label={`Restore project "${p.name}"`}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-                  {isRestoring ? "Restoring…" : "Restore"}
-                </button>
+                <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                  <button
+                    onClick={() => handleRestore(p)}
+                    disabled={isRestoring || !restoreAllowed}
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label={`Restore project "${p.name}"`}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                    {isRestoring ? "Restoring…" : "Restore"}
+                  </button>
+                  <ProjectPermanentDeletionControl
+                    project={p}
+                    onPurgeActivityChange={(projectId, active) => {
+                      setLocallyPurgingProjectIds((current) => {
+                        const next = new Set(current);
+                        if (active) next.add(projectId);
+                        else next.delete(projectId);
+                        return next;
+                      });
+                    }}
+                    onStateRefresh={refreshProjectLists}
+                  />
+                </div>
               </li>
             );
           })}

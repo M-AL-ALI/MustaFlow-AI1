@@ -198,7 +198,15 @@ export function projectMutationLifecycleProjectId(input: {
   const projectId = Number(match[1]);
   if (!Number.isSafeInteger(projectId) || projectId < 1) return null;
   const requestProjectRoot = `/projects/${match[1]}`;
-  if (method === "DELETE" && normalizedPath.toLowerCase() === requestProjectRoot) return null;
+  if (method === "DELETE") {
+    const lifecyclePath = normalizedPath.toLowerCase();
+    if (
+      lifecyclePath === requestProjectRoot ||
+      lifecyclePath === `${requestProjectRoot}/permanent`
+    ) {
+      return null;
+    }
+  }
   if (method === "POST") {
     const lifecyclePath = normalizedPath.toLowerCase();
     if (

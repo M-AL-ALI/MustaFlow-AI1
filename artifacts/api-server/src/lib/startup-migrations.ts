@@ -444,6 +444,242 @@ export async function applyProjectRetirementOperationsMigration(
   }
 }
 
+/**
+ * Add the durable project-purge receipt. It intentionally has no foreign key
+ * to projects: completed evidence must remain after the project row is gone.
+ */
+export async function applyProjectPurgeOperationsMigration(client: MigrationClient): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_purge_operations (
+        id TEXT PRIMARY KEY,
+        project_id INTEGER NOT NULL,
+        retirement_operation_id_hash TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'scheduled',
+        stage TEXT NOT NULL DEFAULT 'verify',
+        idempotency_key_hash TEXT NOT NULL,
+        requested_by_hash TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        lease_version INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TIMESTAMPTZ,
+        due_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
+        next_attempt_at TIMESTAMPTZ,
+        failure_code TEXT,
+        failure_retryable BOOLEAN,
+        resource_progress JSONB NOT NULL DEFAULT '{}'::jsonb,
+        terminal_evidence JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        started_at TIMESTAMPTZ,
+        terminal_at TIMESTAMPTZ,
+        CONSTRAINT project_purge_operations_trigger_check
+          CHECK (trigger IN ('manual','expiry')),
+        CONSTRAINT project_purge_operations_state_check
+          CHECK (state IN ('scheduled','accepted','running','failed','completed','canceled')),
+        CONSTRAINT project_purge_operations_stage_check
+          CHECK (stage IN ('verify','inventory','assets','snapshots','database','addons','runtime','relational','absence')),
+        CONSTRAINT project_purge_operations_failure_code_check
+          CHECK (failure_code IS NULL OR failure_code IN (
+            'project_purge_owner_required',
+            'project_purge_reverification_required',
+            'project_purge_name_mismatch',
+            'project_purge_project_active',
+            'project_purge_retirement_incomplete',
+            'project_purge_operation_conflict',
+            'project_purge_inventory_unavailable',
+            'project_purge_asset_release_failed',
+            'project_purge_snapshot_release_failed',
+            'project_purge_database_release_failed',
+            'project_purge_addon_release_failed',
+            'project_purge_runtime_release_failed',
+            'project_purge_relational_delete_failed',
+            'project_purge_absence_unverified',
+            'project_purge_attempts_exhausted',
+            'project_purge_operation_unavailable'
+          )),
+        CONSTRAINT project_purge_operations_attempt_count_check CHECK (attempt_count >= 0),
+        CONSTRAINT project_purge_operations_lease_version_check CHECK (lease_version >= 0),
+        CONSTRAINT project_purge_operations_hashes_check CHECK (
+          retirement_operation_id_hash ~ '^[0-9a-f]{64}$'
+          AND idempotency_key_hash ~ '^[0-9a-f]{64}$'
+          AND (requested_by_hash IS NULL OR requested_by_hash ~ '^[0-9a-f]{64}$')
+        ),
+        CONSTRAINT project_purge_operations_requester_check CHECK (
+          trigger = 'expiry' OR requested_by_hash IS NOT NULL
+        ),
+        CONSTRAINT project_purge_operations_terminal_check CHECK (
+          (state IN ('scheduled','accepted','running')
+            AND failure_code IS NULL AND failure_retryable IS NULL
+            AND terminal_evidence IS NULL AND terminal_at IS NULL)
+          OR (state = 'failed'
+            AND failure_code IS NOT NULL AND failure_retryable IS NOT NULL
+            AND terminal_evidence IS NOT NULL AND terminal_at IS NOT NULL)
+          OR (state IN ('completed','canceled')
+            AND failure_code IS NULL AND failure_retryable IS NULL
+            AND terminal_evidence IS NOT NULL AND terminal_at IS NOT NULL)
+        )
+      )
+    `);
+    await client.query(
+      `ALTER TABLE project_purge_operations
+         ADD COLUMN IF NOT EXISTS resource_progress JSONB NOT NULL DEFAULT '{}'::jsonb`,
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS project_purge_operations_project_idx
+         ON project_purge_operations(project_id, created_at)`,
+    );
+    await client.query(
+      `CREATE INDEX IF NOT EXISTS project_purge_operations_due_idx
+         ON project_purge_operations(state, due_at, next_attempt_at)`,
+    );
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS project_purge_operations_idempotency_uq
+         ON project_purge_operations(idempotency_key_hash)`,
+    );
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS project_purge_operations_retirement_uq
+         ON project_purge_operations(project_id, retirement_operation_id_hash)`,
+    );
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS project_purge_operations_active_project_uq
+         ON project_purge_operations(project_id)
+         WHERE state IN ('scheduled','accepted','running','failed')`,
+    );
+    await client.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS notifications_project_purge_milestone_uq
+         ON notifications(resource_type, resource_id, recipient_id)
+         WHERE resource_type = 'project_purge'`,
+    );
+
+    const verification = await client.query<{
+      table_ready: boolean;
+      columns_ready: boolean;
+      constraints_ready: boolean;
+      indexes_ready: boolean;
+      notification_index_ready: boolean;
+      foreign_key_count: string;
+    }>(`
+      SELECT
+        to_regclass('project_purge_operations') IS NOT NULL AS table_ready,
+        (SELECT COUNT(*) = 21
+           FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'project_purge_operations') AS columns_ready,
+        (SELECT COUNT(*) = 10
+                AND bool_and(
+                  CASE conname
+                    WHEN 'project_purge_operations_pkey' THEN
+                      contype = 'p' AND pg_get_constraintdef(oid) = 'PRIMARY KEY (id)'
+                    WHEN 'project_purge_operations_trigger_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%trigger%manual%expiry%'
+                    WHEN 'project_purge_operations_state_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%state%scheduled%accepted%running%failed%completed%canceled%'
+                    WHEN 'project_purge_operations_stage_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%stage%verify%inventory%assets%snapshots%database%addons%runtime%relational%absence%'
+                    WHEN 'project_purge_operations_failure_code_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%failure_code%project_purge_absence_unverified%project_purge_operation_unavailable%'
+                    WHEN 'project_purge_operations_attempt_count_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%attempt_count%>= 0%'
+                    WHEN 'project_purge_operations_lease_version_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%lease_version%>= 0%'
+                    WHEN 'project_purge_operations_hashes_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%retirement_operation_id_hash%idempotency_key_hash%requested_by_hash%'
+                    WHEN 'project_purge_operations_requester_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%trigger%expiry%requested_by_hash%IS NOT NULL%'
+                    WHEN 'project_purge_operations_terminal_check' THEN
+                      contype = 'c' AND pg_get_constraintdef(oid) LIKE '%terminal_evidence%terminal_at%'
+                    ELSE FALSE
+                  END
+                )
+           FROM pg_constraint
+          WHERE conrelid = 'project_purge_operations'::regclass
+            AND convalidated
+            AND conname IN (
+              'project_purge_operations_pkey',
+              'project_purge_operations_trigger_check',
+              'project_purge_operations_state_check',
+              'project_purge_operations_stage_check',
+              'project_purge_operations_failure_code_check',
+              'project_purge_operations_attempt_count_check',
+              'project_purge_operations_lease_version_check',
+              'project_purge_operations_hashes_check',
+              'project_purge_operations_requester_check',
+              'project_purge_operations_terminal_check'
+            )) AS constraints_ready,
+        (SELECT COUNT(*) = 6
+                AND bool_and(index_row.indisvalid AND index_row.indisready)
+                AND bool_and(
+                  CASE index_relation.relname
+                    WHEN 'project_purge_operations_pkey' THEN index_row.indisunique
+                    WHEN 'project_purge_operations_project_idx' THEN
+                      pg_get_indexdef(index_row.indexrelid) LIKE '%(project_id, created_at)%'
+                    WHEN 'project_purge_operations_due_idx' THEN
+                      pg_get_indexdef(index_row.indexrelid) LIKE '%(state, due_at, next_attempt_at)%'
+                    WHEN 'project_purge_operations_idempotency_uq' THEN
+                      index_row.indisunique AND pg_get_indexdef(index_row.indexrelid) LIKE '%(idempotency_key_hash)%'
+                    WHEN 'project_purge_operations_retirement_uq' THEN
+                      index_row.indisunique AND pg_get_indexdef(index_row.indexrelid) LIKE '%(project_id, retirement_operation_id_hash)%'
+                    WHEN 'project_purge_operations_active_project_uq' THEN
+                      index_row.indisunique
+                      AND pg_get_indexdef(index_row.indexrelid) LIKE '%(project_id)%'
+                      AND pg_get_expr(index_row.indpred, index_row.indrelid) LIKE '%scheduled%accepted%running%failed%'
+                    ELSE FALSE
+                  END
+                )
+           FROM pg_index index_row
+           JOIN pg_class index_relation ON index_relation.oid=index_row.indexrelid
+           JOIN pg_class table_relation ON table_relation.oid=index_row.indrelid
+           JOIN pg_namespace namespace_row ON namespace_row.oid=table_relation.relnamespace
+          WHERE namespace_row.nspname = current_schema()
+            AND table_relation.relname = 'project_purge_operations'
+            AND index_relation.relname IN (
+              'project_purge_operations_pkey',
+              'project_purge_operations_project_idx',
+              'project_purge_operations_due_idx',
+              'project_purge_operations_idempotency_uq',
+              'project_purge_operations_retirement_uq',
+              'project_purge_operations_active_project_uq'
+            )) AS indexes_ready,
+        EXISTS (
+          SELECT 1
+            FROM pg_index index_row
+            JOIN pg_class index_relation ON index_relation.oid=index_row.indexrelid
+            JOIN pg_class table_relation ON table_relation.oid=index_row.indrelid
+            JOIN pg_namespace namespace_row ON namespace_row.oid=table_relation.relnamespace
+           WHERE namespace_row.nspname=current_schema()
+             AND table_relation.relname='notifications'
+             AND index_relation.relname='notifications_project_purge_milestone_uq'
+             AND index_row.indisunique AND index_row.indisvalid AND index_row.indisready
+             AND pg_get_indexdef(index_row.indexrelid)
+                   LIKE '%(resource_type, resource_id, recipient_id)%'
+             AND pg_get_expr(index_row.indpred, index_row.indrelid)
+                   LIKE '%resource_type%project_purge%'
+        ) AS notification_index_ready,
+        (SELECT COUNT(*)::text
+           FROM pg_constraint
+          WHERE conrelid = 'project_purge_operations'::regclass
+            AND contype = 'f') AS foreign_key_count
+    `);
+    const observation = verification.rows[0];
+    if (
+      observation?.table_ready !== true ||
+      observation.columns_ready !== true ||
+      observation.constraints_ready !== true ||
+      observation.indexes_ready !== true ||
+      observation.notification_index_ready !== true ||
+      observation.foreign_key_count !== "0"
+    ) {
+      throw new Error("project_purge_operations_schema_incomplete");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 export async function applyUnifiedAssetRegistryMigration(client: MigrationClient): Promise<void> {
   await client.query("BEGIN");
   try {
@@ -557,6 +793,16 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         ON asset_storage_objects(asset_id, state)
     `);
     await client.query(`
+      CREATE TABLE IF NOT EXISTS durable_asset_deletion_claims (
+        storage_key TEXT PRIMARY KEY,
+        claim_kind TEXT NOT NULL,
+        retired_project_id INTEGER,
+        retired_asset_id INTEGER,
+        claimed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT durable_asset_deletion_claims_key_check CHECK (length(storage_key) > 0)
+      )
+    `);
+    await client.query(`
       CREATE TABLE IF NOT EXISTS asset_usage (
         id SERIAL PRIMARY KEY,
         asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -630,7 +876,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     await client.query(`DROP TRIGGER IF EXISTS asset_usage_requires_ready_asset ON asset_usage`);
     await client.query(`
       CREATE TRIGGER asset_usage_requires_ready_asset
-      BEFORE INSERT OR UPDATE OF asset_id ON asset_usage
+      BEFORE INSERT OR UPDATE OF asset_id, project_id ON asset_usage
       FOR EACH ROW EXECUTE FUNCTION require_attachable_asset_for_usage()
     `);
     await client.query(`
@@ -728,6 +974,556 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         ON visual_edit_changes(project_id, created_at)
     `);
 
+    // Every durable surface that can carry an asset URL participates in the
+    // same row-lock protocol as asset_usage. This makes the purge's final
+    // reference scan serializable against a concurrent save. New untyped
+    // /objects/ references are refused: legacy objects must first cross the
+    // governed asset-adoption boundary.
+    await client.query(`
+      CREATE OR REPLACE FUNCTION extract_durable_asset_ids(row_json JSONB)
+      RETURNS SETOF INTEGER AS $$
+        WITH candidate AS (
+          SELECT (match)[1]::bigint AS asset_id
+            FROM regexp_matches(
+              row_json::text,
+              '/api/assets/([1-9][0-9]{0,9})/content([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.assetId') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.assetIds[*]') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.originalAssetIds[*]') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.logoAssetId') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.asset_id') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.asset_ids[*]') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.original_asset_ids[*]') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+          UNION
+          SELECT value::text::bigint
+            FROM jsonb_path_query(row_json, 'lax $.**.logo_asset_id') value
+           WHERE jsonb_typeof(value) = 'number'
+             AND value::text ~ '^[1-9][0-9]{0,9}$'
+        )
+        SELECT DISTINCT asset_id::integer
+          FROM candidate
+         WHERE asset_id BETWEEN 1 AND 2147483647
+      $$ LANGUAGE SQL IMMUTABLE STRICT
+         SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION resolve_durable_asset_ids(row_json JSONB)
+      RETURNS SETOF INTEGER AS $$
+      DECLARE
+        candidate_id INTEGER;
+        route_match TEXT[];
+        image_id BIGINT;
+        project_id BIGINT;
+        upload_id BIGINT;
+      BEGIN
+        FOR candidate_id IN SELECT public.extract_durable_asset_ids(row_json)
+        LOOP
+          RETURN NEXT candidate_id;
+        END LOOP;
+
+        FOR route_match IN
+          SELECT match
+            FROM regexp_matches(
+              row_json::text,
+              '/api/images/([1-9][0-9]{0,9})/file([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        LOOP
+          image_id := route_match[1]::bigint;
+          IF image_id > 2147483647 THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+          SELECT image.asset_id INTO candidate_id
+            FROM public.generated_images image
+           WHERE image.id = image_id::integer
+             AND image.deleted_at IS NULL;
+          IF candidate_id IS NULL THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+          RETURN NEXT candidate_id;
+        END LOOP;
+
+        FOR route_match IN
+          SELECT match
+            FROM regexp_matches(
+              row_json::text,
+              '/api/projects/([1-9][0-9]{0,9})/uploads/([1-9][0-9]{0,9})/content([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        LOOP
+          project_id := route_match[1]::bigint;
+          upload_id := route_match[2]::bigint;
+          IF project_id > 2147483647 OR upload_id > 2147483647 THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+          SELECT asset.id INTO candidate_id
+            FROM public.project_uploads upload
+            JOIN public.assets asset
+              ON asset.project_id = upload.project_id
+             AND asset.source = 'legacy-project-upload'
+             AND asset.storage_key = upload.object_path
+           WHERE upload.project_id = project_id::integer
+             AND upload.id = upload_id::integer;
+          IF candidate_id IS NULL THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+          RETURN NEXT candidate_id;
+        END LOOP;
+
+        -- Canonical provider keys can appear inside historical free-form rows
+        -- and absolute private URLs. Resolve only the governed assets/... key
+        -- shape, then let the shared row-lock guard serialize the writer with
+        -- deletion. The storage-key index keeps this lookup bounded to the
+        -- handful of keys extracted from the row instead of scanning storage.
+        FOR candidate_id IN
+          SELECT DISTINCT storage_row.asset_id
+            FROM regexp_matches(
+              row_json::text,
+              '(assets/[^"[:space:]]+/[^"[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[^"[:space:]?#]+)',
+              'g'
+            ) AS matched(storage_match)
+            JOIN public.asset_storage_objects storage_row
+              ON storage_row.storage_key = matched.storage_match[1]
+             AND storage_row.state <> 'deleted'
+        LOOP
+          RETURN NEXT candidate_id;
+        END LOOP;
+      END;
+      $$ LANGUAGE plpgsql STABLE STRICT SECURITY INVOKER
+         SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION resolve_durable_storage_keys(row_json JSONB)
+      RETURNS SETOF TEXT AS $$
+        WITH raw_keys AS (
+          SELECT (match)[1] AS storage_key
+            FROM regexp_matches(
+              row_json::text,
+              '((?:assets|generated-images|uploaded-images|edited-images|db-snapshots|legacy-generated)/[^"[:space:]?#]+)',
+              'g'
+            ) AS match
+        ),
+        image_routes AS (
+          SELECT (match)[1]::bigint AS image_id
+            FROM regexp_matches(
+              row_json::text,
+              '/api/images/([1-9][0-9]{0,9})/file([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        ),
+        image_keys AS (
+          SELECT image.storage_key
+            FROM image_routes route
+            JOIN public.generated_images image
+              ON route.image_id BETWEEN 1 AND 2147483647
+             AND image.id=route.image_id::integer
+           WHERE image.storage_key IS NOT NULL
+          UNION
+          SELECT regexp_replace(image.storage_key, '/full\\.webp$', '/thumb.webp')
+            FROM image_routes route
+            JOIN public.generated_images image
+              ON route.image_id BETWEEN 1 AND 2147483647
+             AND image.id=route.image_id::integer
+           WHERE image.storage_key LIKE '%/full.webp'
+        )
+        SELECT DISTINCT candidate.storage_key
+          FROM (
+            SELECT storage_key FROM raw_keys
+            UNION
+            SELECT storage_key FROM image_keys
+          ) candidate
+         WHERE candidate.storage_key IS NOT NULL
+           AND length(candidate.storage_key) > 0
+      $$ LANGUAGE SQL STABLE STRICT SECURITY INVOKER
+         SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION durable_asset_reference_exists(
+        candidate_asset_id INTEGER,
+        excluded_project_id INTEGER,
+        excluded_generated_image_id INTEGER
+      ) RETURNS BOOLEAN AS $$
+        WITH candidate AS (
+          SELECT id, owner_user_id, project_id, storage_key, version_id, task_id, message_id
+            FROM public.assets
+           WHERE id = candidate_asset_id
+        ),
+        legacy_aliases AS (
+          SELECT '/api/images/' || image.id::text || '/file' AS alias
+            FROM public.generated_images image
+           WHERE image.asset_id = candidate_asset_id
+          UNION
+          SELECT '/api/projects/' || upload.project_id::text || '/uploads/' || upload.id::text || '/content'
+            FROM public.project_uploads upload
+            JOIN candidate ON upload.object_path = candidate.storage_key
+        ),
+        durable_rows(project_id, generated_image_id, row_json) AS (
+          SELECT message.project_id, NULL::integer, to_jsonb(message) FROM public.chat_messages message
+          UNION ALL SELECT task.project_id, NULL::integer, to_jsonb(task) FROM public.agent_tasks task
+          UNION ALL
+          SELECT tool_call.project_id, NULL::integer, to_jsonb(tool_call)
+            FROM public.agent_tool_calls tool_call
+          UNION ALL SELECT item.project_id, NULL::integer, to_jsonb(item) FROM public.zero_prompt_queue_items item
+          UNION ALL SELECT entry.project_id, NULL::integer, to_jsonb(entry) FROM public.knowledge_entries entry
+          UNION ALL SELECT file.project_id, NULL::integer, to_jsonb(file) FROM public.project_files file
+          UNION ALL SELECT version.project_id, NULL::integer, to_jsonb(version) FROM public.project_versions version
+          UNION ALL SELECT variant.project_id, NULL::integer, to_jsonb(variant) FROM public.canvas_variants variant
+          -- Library and gallery rows survive source-project deletion, so they
+          -- are deliberately global for exclusion purposes.
+          UNION ALL SELECT NULL::integer, NULL::integer, to_jsonb(item) FROM public.canvas_variant_library item
+          UNION ALL SELECT NULL::integer, NULL::integer, to_jsonb(template) FROM public.gallery_templates template
+          UNION ALL SELECT inbox.project_id, NULL::integer, to_jsonb(inbox) FROM public.agent_inbox inbox
+          UNION ALL
+          SELECT task.project_id, NULL::integer, to_jsonb(event)
+            FROM public.task_events event
+            JOIN public.agent_tasks task ON task.id = event.task_id
+          UNION ALL SELECT activity.project_id, NULL::integer, to_jsonb(activity) FROM public.project_activity activity
+          UNION ALL SELECT edit.project_id, NULL::integer, to_jsonb(edit) FROM public.visual_edit_changes edit
+          UNION ALL
+          SELECT image.project_id, image.id, to_jsonb(image)
+            FROM public.generated_images image
+           WHERE image.deleted_at IS NULL
+        )
+        SELECT
+          EXISTS (
+            SELECT 1
+              FROM candidate
+             WHERE (excluded_project_id IS NULL OR candidate.project_id IS DISTINCT FROM excluded_project_id)
+               AND (candidate.version_id IS NOT NULL OR candidate.task_id IS NOT NULL OR candidate.message_id IS NOT NULL)
+          )
+          OR EXISTS (
+            SELECT 1
+              FROM public.asset_usage usage_row
+             WHERE usage_row.asset_id = candidate_asset_id
+               AND (excluded_project_id IS NULL OR usage_row.project_id IS DISTINCT FROM excluded_project_id)
+               AND (
+                 excluded_generated_image_id IS NULL
+                 OR usage_row.consumer <> 'generated-image:' || excluded_generated_image_id::text
+               )
+          )
+          OR EXISTS (
+            SELECT 1
+              FROM public.generated_images image
+              JOIN candidate ON TRUE
+             WHERE image.deleted_at IS NULL
+               AND image.id <> COALESCE(excluded_generated_image_id, -1)
+               AND (excluded_project_id IS NULL OR image.project_id IS DISTINCT FROM excluded_project_id)
+               AND (
+                 image.asset_id = candidate_asset_id
+                 OR COALESCE(image.storage_key, 'legacy-generated/' || image.id::text) = candidate.storage_key
+               )
+          )
+          OR EXISTS (
+            SELECT 1
+              FROM public.project_uploads upload
+              JOIN candidate ON upload.object_path = candidate.storage_key
+             WHERE excluded_project_id IS NULL OR upload.project_id IS DISTINCT FROM excluded_project_id
+          )
+          OR EXISTS (
+            SELECT 1
+              FROM public.asset_analysis_events analysis
+             WHERE analysis.asset_id = candidate_asset_id
+               AND analysis.status IN ('queued', 'started')
+               AND (excluded_project_id IS NULL OR analysis.project_id IS DISTINCT FROM excluded_project_id)
+          )
+          OR EXISTS (
+            SELECT 1
+              FROM public.assets derivative
+             WHERE derivative.state IN ('reserved', 'uploading', 'ready', 'deleting')
+               AND derivative.context ->> 'derivativeOfAssetId' = candidate_asset_id::text
+               AND (excluded_project_id IS NULL OR derivative.project_id IS DISTINCT FROM excluded_project_id)
+          )
+          OR EXISTS (
+            SELECT 1
+             FROM durable_rows durable
+              JOIN candidate ON TRUE
+             WHERE (excluded_project_id IS NULL OR durable.project_id IS DISTINCT FROM excluded_project_id)
+               AND (
+                 excluded_generated_image_id IS NULL
+                 OR durable.generated_image_id IS DISTINCT FROM excluded_generated_image_id
+               )
+               AND (
+                 candidate_asset_id IN (
+                   SELECT public.extract_durable_asset_ids(durable.row_json)
+                 )
+                 OR position(candidate.storage_key in durable.row_json::text) > 0
+                 OR EXISTS (
+                   SELECT 1 FROM legacy_aliases alias_row
+                    WHERE position(alias_row.alias in durable.row_json::text) > 0
+                 )
+               )
+          )
+      $$ LANGUAGE SQL STABLE SECURITY INVOKER
+         SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION require_attachable_assets_in_durable_reference()
+      RETURNS TRIGGER AS $$
+      DECLARE
+        row_json JSONB;
+        row_text TEXT;
+        candidate_id INTEGER;
+        current_state TEXT;
+        legacy_key TEXT;
+        durable_key TEXT;
+        route_match TEXT[];
+        image_id BIGINT;
+        reference_project_id INTEGER;
+        reference_user_id TEXT;
+        asset_project_id INTEGER;
+        asset_owner_user_id TEXT;
+        existing_reference BOOLEAN;
+      BEGIN
+        row_json := to_jsonb(NEW);
+        row_text := row_json::text;
+        IF TG_TABLE_NAME = 'generated_images' AND TG_OP = 'UPDATE' THEN
+          IF NULLIF(to_jsonb(OLD) ->> 'deleted_at', '') IS NULL
+             AND NULLIF(row_json ->> 'deleted_at', '') IS NOT NULL
+             AND (row_json - 'deleted_at' - 'updated_at') =
+                 (to_jsonb(OLD) - 'deleted_at' - 'updated_at') THEN
+            RETURN NEW;
+          END IF;
+        END IF;
+        -- Old object URLs must cross the governed asset-adoption boundary.
+        -- Match either an exact known key or the only production shape ever
+        -- issued by the retired signer; ordinary application routes that
+        -- merely contain the /objects/ segment remain valid source code.
+        SELECT storage_row.storage_key INTO legacy_key
+          FROM public.asset_storage_objects storage_row
+         WHERE storage_row.storage_backend = 'legacy-object'
+           AND position(storage_row.storage_key in row_text) > 0
+         LIMIT 1;
+        IF legacy_key IS NOT NULL
+           OR row_text ~ '/objects/uploads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}' THEN
+          RAISE EXCEPTION 'legacy_object_reference_unavailable' USING ERRCODE = '55000';
+        END IF;
+        reference_project_id := CASE
+          WHEN TG_TABLE_NAME IN ('canvas_variant_library', 'gallery_templates')
+            THEN NULLIF(row_json ->> 'source_project_id', '')::integer
+          WHEN TG_TABLE_NAME = 'task_events'
+            THEN (SELECT task.project_id FROM public.agent_tasks task
+                   WHERE task.id=NULLIF(row_json ->> 'task_id', '')::integer)
+          ELSE NULLIF(row_json ->> 'project_id', '')::integer
+        END;
+        reference_user_id := COALESCE(row_json ->> 'user_id', row_json ->> 'author_id');
+        FOR candidate_id IN
+          SELECT DISTINCT resolved.asset_id
+            FROM public.resolve_durable_asset_ids(row_json) resolved(asset_id)
+           ORDER BY resolved.asset_id
+        LOOP
+          SELECT state, project_id, owner_user_id
+            INTO current_state, asset_project_id, asset_owner_user_id
+            FROM public.assets
+           WHERE id = candidate_id
+           FOR SHARE;
+          IF current_state IS DISTINCT FROM 'ready' THEN
+            RAISE EXCEPTION 'asset_not_ready' USING ERRCODE = '55000';
+          END IF;
+          existing_reference := FALSE;
+          IF TG_OP = 'UPDATE' THEN
+            existing_reference := candidate_id IN (
+              SELECT public.resolve_durable_asset_ids(to_jsonb(OLD))
+            );
+          END IF;
+          IF reference_project_id IS NOT NULL
+             AND asset_project_id IS DISTINCT FROM reference_project_id
+             AND NOT existing_reference
+             AND NOT EXISTS (
+               SELECT 1 FROM public.asset_usage usage_row
+                WHERE usage_row.asset_id=candidate_id
+                  AND usage_row.project_id=reference_project_id
+             ) THEN
+            RAISE EXCEPTION 'asset_reference_forbidden' USING ERRCODE = '42501';
+          END IF;
+          IF reference_project_id IS NULL
+             AND reference_user_id IS NOT NULL
+             AND asset_owner_user_id IS DISTINCT FROM reference_user_id
+             AND NOT existing_reference THEN
+            RAISE EXCEPTION 'asset_reference_forbidden' USING ERRCODE = '42501';
+          END IF;
+        END LOOP;
+        FOR durable_key IN
+          SELECT DISTINCT resolved.storage_key
+            FROM public.resolve_durable_storage_keys(row_json) resolved(storage_key)
+           ORDER BY resolved.storage_key
+        LOOP
+          PERFORM pg_advisory_xact_lock_shared(
+            hashtextextended('nabuflow:durable-object:' || durable_key, 0)
+          );
+          IF EXISTS (
+            SELECT 1 FROM public.durable_asset_deletion_claims claim
+             WHERE claim.storage_key=durable_key
+          ) THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+        END LOOP;
+        FOR route_match IN
+          SELECT match
+            FROM regexp_matches(
+              row_text,
+              '/api/images/([1-9][0-9]{0,9})/file([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        LOOP
+          image_id := route_match[1]::bigint;
+          IF image_id > 2147483647 THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+          PERFORM 1 FROM public.generated_images image
+           WHERE image.id=image_id::integer AND image.deleted_at IS NULL
+           FOR KEY SHARE;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+        END LOOP;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql SECURITY INVOKER
+         SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      DO $$
+      DECLARE guard RECORD;
+      BEGIN
+        FOR guard IN
+          SELECT * FROM (VALUES
+            ('chat_messages', 'project_id, attachments'),
+            ('agent_tasks', 'project_id, attachments, report, staging_snapshot'),
+            ('agent_tool_calls', 'project_id, stdout_preview, args_summary'),
+            ('zero_prompt_queue_items', 'project_id, asset_ids, current_text'),
+            ('knowledge_entries', 'project_id, annotation'),
+            ('project_files', 'project_id, content'),
+            ('project_versions', 'project_id, files_snapshot'),
+            ('canvas_variants', 'project_id, files'),
+            ('canvas_variant_library', 'source_project_id, files'),
+            ('gallery_templates', 'source_project_id, files_snapshot'),
+            ('agent_inbox', 'project_id, screenshot_url'),
+            ('task_events', 'task_id, message, data'),
+            ('project_activity', 'project_id, metadata'),
+            ('visual_edit_changes', 'project_id, before_content, after_content'),
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')
+          ) AS guards(table_name, column_list)
+        LOOP
+          EXECUTE format(
+            'DROP TRIGGER IF EXISTS durable_asset_reference_guard_%I ON %I',
+            guard.table_name,
+            guard.table_name
+          );
+          EXECUTE format(
+            'CREATE TRIGGER durable_asset_reference_guard_%I '
+              || 'BEFORE INSERT OR UPDATE OF %s ON %I '
+              || 'FOR EACH ROW EXECUTE FUNCTION require_attachable_assets_in_durable_reference()',
+            guard.table_name,
+            guard.column_list,
+            guard.table_name
+          );
+        END LOOP;
+      END $$
+    `);
+    const durableReferenceGuards = await client.query<{ guard_ready: boolean }>(`
+      SELECT (
+        (SELECT COUNT(*) = 15
+           AND bool_and(NOT trigger_row.tgisinternal)
+           AND bool_and(trigger_row.tgenabled = ANY(ARRAY['O', 'A']::"char"[]))
+           AND bool_and(trigger_row.tgtype = 23)
+           AND bool_and(trigger_row.tgqual IS NULL)
+           AND bool_and(
+             trigger_row.tgfoid =
+               to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+           )
+           AND bool_and(
+             (SELECT string_agg(attribute.attname, ', ' ORDER BY trigger_column.ordinality)
+                FROM unnest(trigger_row.tgattr::smallint[]) WITH ORDINALITY
+                     AS trigger_column(attnum, ordinality)
+                JOIN pg_catalog.pg_attribute attribute
+                  ON attribute.attrelid=relation.oid
+                 AND attribute.attnum=trigger_column.attnum) = expected.column_list
+           )
+          FROM (VALUES
+            ('chat_messages', 'project_id, attachments'),
+            ('agent_tasks', 'project_id, attachments, report, staging_snapshot'),
+            ('agent_tool_calls', 'project_id, stdout_preview, args_summary'),
+            ('zero_prompt_queue_items', 'project_id, asset_ids, current_text'),
+            ('knowledge_entries', 'project_id, annotation'),
+            ('project_files', 'project_id, content'),
+            ('project_versions', 'project_id, files_snapshot'),
+            ('canvas_variants', 'project_id, files'),
+            ('canvas_variant_library', 'source_project_id, files'),
+            ('gallery_templates', 'source_project_id, files_snapshot'),
+            ('agent_inbox', 'project_id, screenshot_url'),
+            ('task_events', 'task_id, message, data'),
+            ('project_activity', 'project_id, metadata'),
+            ('visual_edit_changes', 'project_id, before_content, after_content'),
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')
+          ) AS expected(table_name, column_list)
+          JOIN pg_catalog.pg_class relation ON relation.relname = expected.table_name
+          JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid = relation.oid
+          JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = 'public'
+           AND trigger_row.tgname = 'durable_asset_reference_guard_' || relation.relname
+           AND trigger_row.tgfoid =
+               to_regprocedure('public.require_attachable_assets_in_durable_reference()'))
+        AND to_regprocedure('public.extract_durable_asset_ids(jsonb)') IS NOT NULL
+        AND to_regprocedure('public.resolve_durable_asset_ids(jsonb)') IS NOT NULL
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.resolve_durable_asset_ids(jsonb)')
+              )),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%join public.asset_storage_objects storage_row on storage_row.storage_key = matched.storage_match[1]%'
+        AND to_regclass('public.durable_asset_deletion_claims') IS NOT NULL
+        AND to_regprocedure('public.resolve_durable_storage_keys(jsonb)') IS NOT NULL
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+              )),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%pg_advisory_xact_lock_shared%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_attachable_assets_in_durable_reference()')
+              )),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%from public.durable_asset_deletion_claims%'
+        AND to_regprocedure(
+              'public.durable_asset_reference_exists(integer,integer,integer)'
+            ) IS NOT NULL
+      ) AS guard_ready
+    `);
+    if (durableReferenceGuards.rows[0]?.guard_ready !== true) {
+      throw new Error("durable_asset_reference_guards_missing");
+    }
+
     // Preserve existing metadata before new callers adopt the shared registry.
     // Generated image byte sizes are unknown in the legacy table and stay zero
     // until a governed provider-HEAD migration measures them.
@@ -765,6 +1561,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         FROM assets asset
        WHERE image.asset_id IS NULL
          AND image.status = 'completed'
+         AND asset.storage_backend <> 'legacy-url'
          AND asset.owner_user_id = image.user_id
          AND asset.storage_key = COALESCE(image.storage_key, 'legacy-generated/' || image.id::text)
     `);
@@ -7902,6 +8699,18 @@ const MIGRATION_STEPS: MigrationStep[] = [
     name: "migrate-project-retirement-operations",
     async run(client) {
       await applyProjectRetirementOperationsMigration(client);
+    },
+  },
+  {
+    name: "migrate-project-purge-operations",
+    async run(client) {
+      await applyProjectPurgeOperationsMigration(client);
+    },
+  },
+  {
+    name: "migrate-durable-asset-reference-guards-v2",
+    async run(client) {
+      await applyUnifiedAssetRegistryMigration(client);
     },
   },
 ];

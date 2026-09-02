@@ -34,6 +34,21 @@ function completedRetirementProgress() {
     deletedCount: 0,
     failureCode: null,
   };
+  progress.managedAddons = {
+    state: "verified_detached",
+    discoveredCount: 0,
+    detachedCount: 0,
+    secretsRemoved: 0,
+    bindingsRemaining: 0,
+    failureCode: null,
+  };
+  progress.sqliteRecovery = {
+    state: "not_applicable",
+    snapshotId: null,
+    sizeBytes: 0,
+    storage: null,
+    failureCode: null,
+  };
   progress.runtimes = progress.runtimes.map((runtime) => ({
     ...runtime,
     state: "verified_absent",
@@ -451,6 +466,22 @@ describe("project retirement foundation", () => {
         },
       }),
     ).toBe("reuse_completed");
+    const restoredProgress = completedRetirementProgress();
+    restoredProgress.restore = {
+      state: "restored",
+      restoredAt: "2026-09-01T12:00:00.000Z",
+    };
+    expect(
+      retirement.decideProjectRetirementReceiptMode({
+        deleted: true,
+        existingOperation: {
+          id: "completed-before-second-trash",
+          state: "completed",
+          completedAt: new Date(),
+          progress: restoredProgress,
+        },
+      }),
+    ).toBe("replace_incompatible_terminal");
     expect(
       retirement.decideProjectRetirementReceiptMode({
         deleted: true,

@@ -20,6 +20,9 @@ import type { ProjectProdContainerStatus } from './projectProdContainerStatus';
 import type { ProjectProjectFormat } from './projectProjectFormat';
 import type { ProjectProjectMode } from './projectProjectMode';
 import type { ProjectProvisioningStatus } from './projectProvisioningStatus';
+import type { ProjectPurgeStage } from './projectPurgeStage';
+import type { ProjectPurgeState } from './projectPurgeState';
+import type { ProjectPurgeTrigger } from './projectPurgeTrigger';
 import type { ProjectStack } from './projectStack';
 import type { ProjectStatus } from './projectStatus';
 import type { ProjectTestContainerStatus } from './projectTestContainerStatus';
@@ -43,6 +46,47 @@ export interface Project {
      * @nullable
      */
   deletedAt?: Date | null;
+  /**
+     * Database-clock automatic-purge deadline. Present on /projects/trash responses.
+     * @nullable
+     */
+  purgeDueAt?: Date | null;
+  /**
+     * Bounded database-clock receipt used to render a truthful Trash countdown without trusting the browser clock.
+     * @nullable
+     */
+  serverNow?: Date | null;
+  /** True only while the owner can atomically cancel the scheduled purge and restore this Trash project. */
+  restoreAllowed?: boolean;
+  /**
+     * Latest governed provider-retirement state for a Trash project.
+     * @nullable
+     */
+  retirementState?: string | null;
+  /** Latest permanent-deletion state for a Trash project. */
+  purgeState?: ProjectPurgeState | null;
+  /**
+     * Owner-scoped durable purge receipt identity for progress recovery after refresh.
+     * @maxLength 200
+     * @nullable
+     */
+  purgeOperationId?: string | null;
+  /** @nullable */
+  purgeTrigger?: ProjectPurgeTrigger;
+  purgeStage?: ProjectPurgeStage | null;
+  /** @minimum 0 */
+  purgeAttemptCount?: number;
+  /**
+     * @maxLength 120
+     * @nullable
+     */
+  purgeFailureCode?: string | null;
+  /** @nullable */
+  purgeFailureRetryable?: boolean | null;
+  /** True only when the same failed operation may be safely re-admitted below its retry ceiling. */
+  purgeRetryAllowed?: boolean;
+  /** @nullable */
+  purgeNextAttemptAt?: Date | null;
   /** @nullable */
   lastTaskSummary?: string | null;
   /** @nullable */

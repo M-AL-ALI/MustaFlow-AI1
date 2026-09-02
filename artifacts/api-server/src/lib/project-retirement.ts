@@ -74,6 +74,11 @@ import {
   type LegacyFlyRuntimeReconciliation,
 } from "./project-retirement-legacy-fly";
 import { readProjectRetirementPreflight } from "./project-retirement-preflight";
+import { scheduleProjectPurgeAfterRetirement } from "./project-purge";
+import {
+  preserveProjectSqliteForRetirement,
+  retireProjectManagedAddonBindings,
+} from "./project-retirement-owned-resources";
 
 export * from "./project-retirement-contract";
 
@@ -297,6 +302,10 @@ export async function acceptProjectRetirement(input: {
       state: "accepted",
       progress,
     });
+    await scheduleProjectPurgeAfterRetirement(tx, {
+      projectId: project.id,
+      retirementOperationId: operationId,
+    });
     await tx.execute(disableProjectDeploymentSchedulesStatement(project.id));
     await tx
       .update(assetAnalysisEventsTable)
@@ -419,6 +428,78 @@ async function cancelQueuedTasks(
     creditsRefunded: receipt.creditsRefunded,
     telemetryFlushed: receipt.telemetryFlushed,
   };
+  await updateProgress(operation.id, progress, leaseVersion);
+}
+
+async function preserveRetiredProjectSqlite(
+  operation: ProjectRetirementOperation,
+  progress: ProjectRetirementProgress,
+  leaseVersion: number,
+): Promise<void> {
+  if (["not_applicable", "not_present", "preserved"].includes(progress.sqliteRecovery.state)) {
+    return;
+  }
+  progress.sqliteRecovery = {
+    state: "pending",
+    snapshotId: null,
+    sizeBytes: 0,
+    storage: null,
+    failureCode: null,
+  };
+  await updateProgress(operation.id, progress, leaseVersion);
+  const result = await preserveProjectSqliteForRetirement({
+    projectId: operation.projectId,
+    operationId: operation.id,
+  });
+  if (!result.ok) {
+    progress.sqliteRecovery = {
+      state: "failed",
+      snapshotId: null,
+      sizeBytes: 0,
+      storage: null,
+      failureCode: result.code,
+    };
+    await updateProgress(operation.id, progress, leaseVersion);
+    throw new ProjectRetirementStepError({
+      code: result.code,
+      target: null,
+      retryable: result.retryable,
+    });
+  }
+  progress.sqliteRecovery = result.receipt;
+  await updateProgress(operation.id, progress, leaseVersion);
+}
+
+async function detachRetiredProjectManagedAddons(
+  operation: ProjectRetirementOperation,
+  progress: ProjectRetirementProgress,
+  leaseVersion: number,
+): Promise<void> {
+  if (progress.managedAddons.state === "verified_detached") return;
+  progress.managedAddons = {
+    state: "detaching",
+    discoveredCount: progress.managedAddons.discoveredCount,
+    detachedCount: progress.managedAddons.detachedCount,
+    secretsRemoved: progress.managedAddons.secretsRemoved,
+    bindingsRemaining: progress.managedAddons.bindingsRemaining,
+    failureCode: null,
+  };
+  await updateProgress(operation.id, progress, leaseVersion);
+  const result = await retireProjectManagedAddonBindings(operation.projectId);
+  if (!result.ok) {
+    progress.managedAddons = {
+      ...progress.managedAddons,
+      state: "failed",
+      failureCode: result.code,
+    };
+    await updateProgress(operation.id, progress, leaseVersion);
+    throw new ProjectRetirementStepError({
+      code: result.code,
+      target: null,
+      retryable: result.retryable,
+    });
+  }
+  progress.managedAddons = result.receipt;
   await updateProgress(operation.id, progress, leaseVersion);
 }
 
@@ -1656,6 +1737,8 @@ export async function runProjectRetirementOperation(operationId: string): Promis
     await releaseTrackedDomainSecurityResources(claimed, progress, claimed.leaseVersion);
     await releaseCustomHostnameCertificates(claimed, progress, claimed.leaseVersion);
     await retainPurchasedDomainAssignments(claimed, progress, claimed.leaseVersion);
+    await preserveRetiredProjectSqlite(claimed, progress, claimed.leaseVersion);
+    await detachRetiredProjectManagedAddons(claimed, progress, claimed.leaseVersion);
     const pointerDisposition = await destroyRuntimeTargets(claimed, progress, claimed.leaseVersion);
     const hasRetainedLegacyPointers = progress.retainedLegacyRuntimePointers.length > 0;
     if (!hasRetainedLegacyPointers && !hasCurrentProjectRetirementCompletionEvidence(progress)) {

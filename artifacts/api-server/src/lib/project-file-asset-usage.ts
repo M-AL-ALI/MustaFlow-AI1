@@ -82,7 +82,10 @@ export async function reconcileProjectFileAssetUsage(
   const readyProjectAssets = readyAssets.filter(
     (asset) => asset.projectId === referenceProjectId || permittedAssetIds.has(asset.id),
   );
-  if (readyProjectAssets.length === 0) return;
+  const allowedAssetIds = new Set(readyProjectAssets.map((asset) => asset.id));
+  if (referencedAssetIds.some((assetId) => !allowedAssetIds.has(assetId))) {
+    throw new Error("project_file_asset_reference_unavailable");
+  }
 
   await tx
     .insert(assetUsageTable)

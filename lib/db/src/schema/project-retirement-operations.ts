@@ -72,6 +72,29 @@ export type ProjectRetirementProgress = {
     deletedCount: number;
     failureCode: string | null;
   };
+  /**
+   * Managed add-ons in the current implementation are project-scoped bindings
+   * to shared services.  Retirement clears those bindings and their injected
+   * secrets, then proves the project has no live binding left.  Provider-owned
+   * resources must use a future explicitly registered release handler instead
+   * of being mistaken for a binding-only add-on.
+   */
+  managedAddons: {
+    state: "pending" | "detaching" | "verified_detached" | "failed";
+    discoveredCount: number;
+    detachedCount: number;
+    secretsRemoved: number;
+    bindingsRemaining: number;
+    failureCode: string | null;
+  };
+  /** Recovery evidence earned before a SQLite-bearing runtime is destroyed. */
+  sqliteRecovery: {
+    state: "pending" | "not_applicable" | "not_present" | "preserved" | "failed";
+    snapshotId: number | null;
+    sizeBytes: number;
+    storage: "inline" | "object" | null;
+    failureCode: string | null;
+  };
   domains: Array<{
     domainId: number | null;
     hostname: string;

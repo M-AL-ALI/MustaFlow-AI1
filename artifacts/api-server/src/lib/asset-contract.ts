@@ -18,6 +18,49 @@ export const ASSET_ERROR_MESSAGES = {
 
 export type AssetErrorCode = keyof typeof ASSET_ERROR_MESSAGES;
 
+export function parseCanonicalAssetId(value: unknown): number | null {
+  if (typeof value !== "string" || !/^[1-9][0-9]{0,9}$/u.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= 2_147_483_647 ? parsed : null;
+}
+
+export function isCanonicalAssetContentRequest(rawUrl: string, decodedId: unknown): boolean {
+  const queryIndex = rawUrl.indexOf("?");
+  const rawPath = queryIndex === -1 ? rawUrl : rawUrl.slice(0, queryIndex);
+  const parsed = parseCanonicalAssetId(decodedId);
+  return parsed !== null && rawPath === `/api/assets/${parsed}/content`;
+}
+
+export function isCanonicalImageFileRequest(rawUrl: string, decodedId: unknown): boolean {
+  const queryIndex = rawUrl.indexOf("?");
+  const rawPath = queryIndex === -1 ? rawUrl : rawUrl.slice(0, queryIndex);
+  const parsed = parseCanonicalAssetId(decodedId);
+  return parsed !== null && rawPath === `/api/images/${parsed}/file`;
+}
+
+export function isCanonicalImageMetadataRequest(rawUrl: string, decodedId: unknown): boolean {
+  const queryIndex = rawUrl.indexOf("?");
+  const rawPath = queryIndex === -1 ? rawUrl : rawUrl.slice(0, queryIndex);
+  const parsed = parseCanonicalAssetId(decodedId);
+  return parsed !== null && rawPath === `/api/images/${parsed}`;
+}
+
+export function isCanonicalProjectUploadContentRequest(
+  rawUrl: string,
+  decodedProjectId: unknown,
+  decodedUploadId: unknown,
+): boolean {
+  const queryIndex = rawUrl.indexOf("?");
+  const rawPath = queryIndex === -1 ? rawUrl : rawUrl.slice(0, queryIndex);
+  const projectId = parseCanonicalAssetId(decodedProjectId);
+  const uploadId = parseCanonicalAssetId(decodedUploadId);
+  return (
+    projectId !== null &&
+    uploadId !== null &&
+    rawPath === `/api/projects/${projectId}/uploads/${uploadId}/content`
+  );
+}
+
 export function humanBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;

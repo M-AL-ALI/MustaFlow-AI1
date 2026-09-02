@@ -30,6 +30,11 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db, projectsTable, secretsTable } from "@workspace/db";
 import { logger } from "./logger";
 import {
+  findNeonProjectByName,
+  neonPreviewProjectNameFor,
+  neonProjectNameFor,
+} from "./neon-project-lifecycle";
+import {
   createContainer,
   ensureContainerLogTailer,
   hasContainerLayerCredentials,
@@ -133,11 +138,6 @@ function humanizeTenantRuntimeError(raw: string | undefined): string {
   return `Cloudflare runtime error: ${excerpt}`;
 }
 
-/** Stable, deterministic Neon project name for a given MustaFlow project. */
-function neonProjectNameFor(projectId: number): string {
-  return `mf-project-${projectId}`;
-}
-
 /**
  * Cached Neon `org_id`. Org-scoped Neon API keys require `org_id` in the
  * project-create body or the request fails with HTTP 400 `org_id is required`.
@@ -190,28 +190,6 @@ export function cancelLocalProjectProvisioning(projectId: number): boolean {
   controller.abort();
   provisioningControllers.delete(projectId);
   return true;
-}
-
-/**
- * Look up an existing Neon project by its (stable) name. Returns its Neon
- * project id if one already exists, otherwise null. Used so that retries
- * after a partial failure don't create a second Postgres project.
- */
-async function findNeonProjectByName(name: string): Promise<string | null> {
-  const apiKey = process.env.NEON_API_KEY;
-  if (!apiKey) return null;
-  try {
-    const res = await fetch(`${NEON_API_BASE}/projects?search=${encodeURIComponent(name)}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { projects?: Array<{ id: string; name: string }> };
-    const match = data.projects?.find((p) => p.name === name);
-    return match?.id ?? null;
-  } catch (err) {
-    logger.warn({ err, name }, "Neon project lookup failed");
-    return null;
-  }
 }
 
 /**
@@ -658,11 +636,6 @@ export function enqueueProvisionProjectJob(projectId: number): void {
 }
 
 // ─── Preview DB provisioning (Task #767) ─────────────────────────────────────
-
-/** Stable Neon project name for a project's preview environment. */
-function neonPreviewProjectNameFor(projectId: number): string {
-  return `mf-preview-${projectId}`;
-}
 
 /**
  * Provision a dedicated Neon Postgres project for the preview environment.

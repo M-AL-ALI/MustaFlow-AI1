@@ -137,6 +137,9 @@ describe("project lifecycle sessions", () => {
       null,
     );
     expect(
+      projectMutationLifecycleProjectId({ method: "DELETE", path: "/projects/51/permanent" }),
+    ).toBe(null);
+    expect(
       projectMutationLifecycleProjectId({ method: "POST", path: "/projects/51/restore" }),
     ).toBe(null);
     expect(
@@ -169,6 +172,18 @@ describe("project lifecycle sessions", () => {
     expect(projectMutationLifecycleProjectId({ method: "DELETE", path: "/projects/51/" })).toBe(
       null,
     );
+    expect(
+      projectMutationLifecycleProjectId({
+        method: "DELETE",
+        path: "/projects/0051/PERMANENT/",
+      }),
+    ).toBe(null);
+    expect(
+      projectMutationLifecycleProjectId({
+        method: "DELETE",
+        path: "/projects/51/permanent-later",
+      }),
+    ).toBe(51);
   });
 
   it.each(lateMutationPaths)("classifies %s as a project lifecycle mutation", (_name, path) => {

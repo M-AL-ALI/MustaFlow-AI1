@@ -16,7 +16,6 @@ import { Webhook } from "svix";
 import { eq, and, isNull } from "drizzle-orm";
 import {
   db,
-  projectsTable,
   orgMembersTable,
   organizationsTable,
   previewSessionsTable,
@@ -24,6 +23,8 @@ import {
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { ensureUserSignupFoundation } from "../lib/workspace-foundation";
+import { acceptOwnedProjectsForAccountErasure } from "../lib/account-erasure-project-retirement";
+import { enqueueGdprErasure } from "../lib/durable-queue";
 
 const router: IRouter = Router();
 
@@ -97,8 +98,8 @@ router.post("/webhooks/clerk", async (req, res): Promise<void> => {
 });
 
 // ── user.deleted ──────────────────────────────────────────────────────────────
-// Soft-deletes all projects owned by the deleted user, revokes their preview
-// sessions and personal access tokens, and removes all org memberships.
+// Accepts every owned project through governed retirement, schedules durable
+// account erasure, then revokes preview sessions and personal access tokens.
 // This satisfies GDPR right-to-erasure obligations triggered via Clerk's
 // user deletion event.
 async function handleUserDeleted(data: Record<string, unknown>): Promise<void> {
@@ -108,12 +109,15 @@ async function handleUserDeleted(data: Record<string, unknown>): Promise<void> {
     return;
   }
 
-  // Soft-delete all user-owned projects.
-  const deletedProjects = await db
-    .update(projectsTable)
-    .set({ deletedAt: new Date() })
-    .where(and(eq(projectsTable.ownerId, userId), isNull(projectsTable.deletedAt)))
-    .returning({ id: projectsTable.id });
+  // Clerk retries any non-2xx webhook. Throwing here is therefore deliberate:
+  // identity deletion must never bypass project retirement receipts, provider
+  // absence proofs, or a durable account-erasure job.
+  const retirement = await acceptOwnedProjectsForAccountErasure({
+    userId,
+    requestedBy: userId,
+  });
+  const erasureJobId = await enqueueGdprErasure(userId);
+  if (!erasureJobId) throw new Error("clerk_user_deleted_erasure_schedule_unavailable");
 
   // Revoke all active preview sessions for this user.
   const now = new Date();
@@ -134,8 +138,12 @@ async function handleUserDeleted(data: Record<string, unknown>): Promise<void> {
   await db.delete(orgMembersTable).where(eq(orgMembersTable.userId, userId));
 
   logger.info(
-    { userId, projectsSoftDeleted: deletedProjects.length },
-    "Clerk user.deleted — projects soft-deleted, sessions revoked, PATs deactivated, org memberships removed",
+    {
+      userId,
+      projectRetirementOperations: retirement.operationIds,
+      erasureJobId,
+    },
+    "Clerk user.deleted — governed project retirement accepted, erasure scheduled, sessions and PATs revoked",
   );
 }
 

@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => {
     warn: vi.fn(),
     purgeCacheForHostnames: vi.fn(),
     reconcileLegacyFlyRuntime: vi.fn(),
+    preserveProjectSqliteForRetirement: vi.fn(),
+    retireProjectManagedAddonBindings: vi.fn(),
   };
 });
 
@@ -125,6 +127,11 @@ vi.mock("./project-retirement-preflight", () => ({
 
 vi.mock("./project-retirement-legacy-fly", () => ({
   reconcileLegacyFlyRuntime: mocks.reconcileLegacyFlyRuntime,
+}));
+
+vi.mock("./project-retirement-owned-resources", () => ({
+  preserveProjectSqliteForRetirement: mocks.preserveProjectSqliteForRetirement,
+  retireProjectManagedAddonBindings: mocks.retireProjectManagedAddonBindings,
 }));
 
 vi.mock("./logger", () => ({
@@ -235,6 +242,29 @@ describe("runProjectRetirementOperation terminal behavior", () => {
     mocks.warn.mockClear();
     mocks.purgeCacheForHostnames.mockReset();
     mocks.reconcileLegacyFlyRuntime.mockReset();
+    mocks.preserveProjectSqliteForRetirement.mockReset();
+    mocks.preserveProjectSqliteForRetirement.mockResolvedValue({
+      ok: true,
+      receipt: {
+        state: "not_applicable",
+        snapshotId: null,
+        sizeBytes: 0,
+        storage: null,
+        failureCode: null,
+      },
+    });
+    mocks.retireProjectManagedAddonBindings.mockReset();
+    mocks.retireProjectManagedAddonBindings.mockResolvedValue({
+      ok: true,
+      receipt: {
+        state: "verified_detached",
+        discoveredCount: 0,
+        detachedCount: 0,
+        secretsRemoved: 0,
+        bindingsRemaining: 0,
+        failureCode: null,
+      },
+    });
   });
 
   it("completes only after the real coordinator validates complete evidence", async () => {
@@ -250,6 +280,66 @@ describe("runProjectRetirementOperation terminal behavior", () => {
     ).toBe(true);
     expect(mocks.updateCalls.some((call) => call.values.state === "failed")).toBe(false);
     expect(mocks.selectResults).toEqual([]);
+    expect(mocks.preserveProjectSqliteForRetirement).toHaveBeenCalledWith({
+      projectId: 51,
+      operationId: "retirement-op-51",
+    });
+    expect(mocks.retireProjectManagedAddonBindings).toHaveBeenCalledWith(51);
+  });
+
+  it("fails retryably before runtime release when SQLite recovery cannot be earned", async () => {
+    const progress = completionProgress();
+    progress.sqliteRecovery = initialProjectRetirementProgress().sqliteRecovery;
+    prepareOperation(progress);
+    mocks.preserveProjectSqliteForRetirement.mockResolvedValue({
+      ok: false,
+      code: "project_retirement_sqlite_snapshot_failed",
+      retryable: true,
+    });
+
+    await expect(runProjectRetirementOperation("retirement-op-51")).rejects.toThrow(
+      "project_retirement_sqlite_snapshot_failed",
+    );
+
+    expect(progress.sqliteRecovery).toMatchObject({
+      state: "failed",
+      failureCode: "project_retirement_sqlite_snapshot_failed",
+    });
+    expect(mocks.retireProjectManagedAddonBindings).not.toHaveBeenCalled();
+    expect(
+      mocks.updateCalls.some(
+        (call) =>
+          call.values.state === "failed" &&
+          call.values.failureCode === "project_retirement_sqlite_snapshot_failed" &&
+          call.values.completedAt === null,
+      ),
+    ).toBe(true);
+  });
+
+  it("fails closed when managed add-on absence cannot be proven", async () => {
+    const progress = completionProgress();
+    progress.managedAddons = initialProjectRetirementProgress().managedAddons;
+    prepareOperation(progress);
+    mocks.retireProjectManagedAddonBindings.mockResolvedValue({
+      ok: false,
+      code: "project_retirement_managed_addon_release_unverified",
+      retryable: false,
+    });
+
+    await runProjectRetirementOperation("retirement-op-51");
+
+    expect(progress.managedAddons).toMatchObject({
+      state: "failed",
+      failureCode: "project_retirement_managed_addon_release_unverified",
+    });
+    expect(
+      mocks.updateCalls.some(
+        (call) =>
+          call.values.state === "failed" &&
+          call.values.failureCode === "project_retirement_managed_addon_release_unverified" &&
+          call.values.completedAt !== null,
+      ),
+    ).toBe(true);
   });
 
   it("terminalizes incomplete evidence with the typed non-retryable failure", async () => {

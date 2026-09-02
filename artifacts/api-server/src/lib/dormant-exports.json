@@ -48,5 +48,80 @@
     "path": "lib/db/src/schema/assets.ts",
     "symbol": "ASSET_STORAGE_OBJECT_STATES",
     "reachableWhen": "A shared runtime validator or public storage-object contract enumerates the durable object states."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/project-purge.ts",
+    "symbol": "PROJECT_PURGE_RECOVERY_DAYS",
+    "reachableWhen": "Retention policy requires a public policy constant for legal review and deterministic schedule alignment."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/project-purge.ts",
+    "symbol": "PROJECT_PURGE_LEASE_MINUTES",
+    "reachableWhen": "The destruction coordinator exposes lease semantics for deterministic retry observability."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/project-purge.ts",
+    "symbol": "readLatestProjectPurgeOperation",
+    "reachableWhen": "Administrative surfaces and operators fetch the latest purge row by project for evidence."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/project-purge.ts",
+    "symbol": "presentStoredProjectPurgeOperation",
+    "reachableWhen": "Audit tooling serializes project purge operations through a stable presentational envelope."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/project-purge.ts",
+    "symbol": "readProjectPurgeOperation",
+    "reachableWhen": "Administrative tools may need to inspect an explicit purge row by operation id."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/snapshot-storage.ts",
+    "symbol": "deleteSnapshotBlobAndProveAbsent",
+    "reachableWhen": "Database snapshot hard-delete evidence requires an explicit blob-absence proof step."
+  },
+  {
+    "path": "lib/api-zod/src/generated/api.ts",
+    "symbol": "GetProjectPermanentDeletionImpactParams",
+    "reachableWhen": "API clients validate permanent-deletion impact requests for owned-trash governance previews."
+  },
+  {
+    "path": "lib/api-zod/src/generated/api.ts",
+    "symbol": "GetProjectPermanentDeletionImpactResponse",
+    "reachableWhen": "Governance UIs read the impact response to surface exactly what will be deleted."
+  },
+  {
+    "path": "lib/api-zod/src/generated/api.ts",
+    "symbol": "PermanentlyDeleteProjectParams",
+    "reachableWhen": "Deletion endpoint validation depends on the route parameter schema contract."
+  },
+  {
+    "path": "lib/api-zod/src/generated/api.ts",
+    "symbol": "PermanentlyDeleteProjectHeader",
+    "reachableWhen": "Delete requests bind idempotency policy through the request-header schema contract."
+  },
+  {
+    "path": "lib/api-zod/src/generated/api.ts",
+    "symbol": "GetProjectPurgeOperationParams",
+    "reachableWhen": "Operational audit screens call this schema when retrieving purge operation progress."
+  },
+  {
+    "path": "lib/api-zod/src/generated/api.ts",
+    "symbol": "GetProjectPurgeOperationResponse",
+    "reachableWhen": "Deletion progress surfaces consume this schema when showing coordinator evidence."
+  },
+  {
+    "path": "lib/api-client-react/src/generated/api.ts",
+    "symbol": "useGetProjectPermanentDeletionImpact",
+    "reachableWhen": "Trash UI reads impact previews through a long-lived query hook."
+  },
+  {
+    "path": "lib/api-client-react/src/generated/api.ts",
+    "symbol": "usePermanentlyDeleteProject",
+    "reachableWhen": "Owner confirmation gate triggers destructive deletion through a typed mutation hook."
+  },
+  {
+    "path": "lib/api-client-react/src/generated/api.ts",
+    "symbol": "useGetProjectPurgeOperation",
+    "reachableWhen": "Owner controls poll purge progress using a dedicated query hook."
   }
 ]
