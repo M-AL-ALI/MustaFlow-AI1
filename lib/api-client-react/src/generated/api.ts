@@ -3413,6 +3413,7 @@ export type GetProjectPermanentDeletionImpactQueryError = ErrorType<ApiError>
  * @summary Preview the exact consequences of permanently deleting an owned Trash project
  */
 
+/** @dormantExport */
 export function useGetProjectPermanentDeletionImpact<TData = Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>, TError = ErrorType<ApiError>>(
  id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPermanentDeletionImpact>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
@@ -3492,6 +3493,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     /**
  * @summary Permanently delete an owned Trash project after recent first-factor reverification
  */
+/** @dormantExport */
 export const usePermanentlyDeleteProject = <TError = ErrorType<ApiError | ClerkReverificationHint>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof permanentlyDeleteProject>>, TError,{id: number;data: BodyType<PermanentlyDeleteProjectBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
@@ -3562,6 +3564,7 @@ export type GetProjectPurgeOperationQueryError = ErrorType<ApiError>
  * @summary Read a sanitized permanent-deletion receipt owned by the caller
  */
 
+/** @dormantExport */
 export function useGetProjectPurgeOperation<TData = Awaited<ReturnType<typeof getProjectPurgeOperation>>, TError = ErrorType<ApiError>>(
  operationId: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectPurgeOperation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 

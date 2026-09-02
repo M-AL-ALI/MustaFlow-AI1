@@ -1293,6 +1293,7 @@ export const RestoreProjectResponse = zod.object({
 /**
  * @summary Preview the exact consequences of permanently deleting an owned Trash project
  */
+/** @dormantExport */
 export const GetProjectPermanentDeletionImpactParams = zod.object({
   "id": zod.coerce.number()
 })
@@ -1324,6 +1325,7 @@ export const GetProjectPermanentDeletionImpactResponse = zod.object({
 /**
  * @summary Permanently delete an owned Trash project after recent first-factor reverification
  */
+/** @dormantExport */
 export const PermanentlyDeleteProjectParams = zod.object({
   "id": zod.coerce.number()
 })
@@ -1353,6 +1355,7 @@ export const getProjectPurgeOperationPathOperationIdMax = 200;
 
 
 
+/** @dormantExport */
 export const GetProjectPurgeOperationParams = zod.object({
   "operationId": zod.coerce.string().max(getProjectPurgeOperationPathOperationIdMax)
 })
