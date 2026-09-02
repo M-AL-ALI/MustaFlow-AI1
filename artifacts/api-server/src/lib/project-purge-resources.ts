@@ -84,6 +84,8 @@ export function validateProjectReferenceCatalog(
   const unknown: string[] = [];
   for (const row of rows) {
     const identity = `${row.tableName}.${row.columnName}`;
+    const policy = PROJECT_REFERENCE_POLICIES[row.tableName]?.[row.columnName];
+    if (policy === "other_product") continue;
     if (
       (row.foreignKeyCount === 0 &&
         (row.deleteAction !== "no_fk" ||
@@ -103,7 +105,7 @@ export function validateProjectReferenceCatalog(
     if (row.deleteAction === "cascade") continue;
     if (row.deleteAction === "set_null" && ALLOWED_SET_NULL_REFERENCES.has(identity)) continue;
     if (row.deleteAction === "restrict" && ALLOWED_RESTRICT_REFERENCES.has(identity)) continue;
-    if (PROJECT_REFERENCE_POLICIES[row.tableName]?.[row.columnName]) continue;
+    if (policy) continue;
     unknown.push(identity);
   }
   return unknown.length === 0

@@ -235,6 +235,33 @@ describe("project purge resource safety", () => {
     expect(query).not.toContain("LIMIT 1");
   });
 
+  it("accepts declared other-product foreign keys without weakening project-owned FK validation", () => {
+    expect(
+      validateProjectReferenceCatalog([
+        {
+          ...projectsForeignKey("orax_threads", "project_id", "restrict"),
+          referencedTableName: "orax_desktop_local_folders",
+        },
+        {
+          ...projectsForeignKey("orax_usage_events", "project_id", "restrict"),
+          referencedTableName: "orax_desktop_local_folders",
+        },
+      ]),
+    ).toMatchObject({ ok: true });
+
+    expect(
+      validateProjectReferenceCatalog([
+        {
+          ...projectsForeignKey("project_files", "project_id", "restrict"),
+          referencedTableName: "orax_desktop_local_folders",
+        },
+      ]),
+    ).toMatchObject({
+      ok: false,
+      unknown: ["project_files.project_id"],
+    });
+  });
+
   it("classifies every real Orax project-shaped column as another product", () => {
     const migration = readFileSync(new URL("./startup-migrations.ts", import.meta.url), "utf8");
     const oraxTables = [
