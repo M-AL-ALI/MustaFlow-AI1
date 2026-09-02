@@ -855,7 +855,7 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
   const operation = await claimProjectPurgeOperation(operationId);
   if (!operation) return;
   const heartbeat = startProjectPurgeLeaseHeartbeat(operation);
-  let inventory: ProjectPurgeResourceInventory | null = null;
+  let inventory: ProjectPurgeResourceInventory | null;
   try {
     heartbeat.assertActive("verify");
     await setOperationStage(operation.id, operation.leaseVersion, "inventory");
