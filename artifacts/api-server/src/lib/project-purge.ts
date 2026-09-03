@@ -554,11 +554,12 @@ export async function enqueueProjectPurgeOperation(operationId: string): Promise
   return outcome.status === "enqueued" || outcome.status === "duplicate";
 }
 
-class ProjectPurgeStepError extends Error {
+export class ProjectPurgeStepError extends Error {
   constructor(
     readonly stage: ProjectPurgeStage,
     readonly code: ProjectPurgeFailureCode,
     readonly retryable: boolean,
+    readonly causeCode: string | null = null,
   ) {
     super(code);
     this.name = "ProjectPurgeStepError";
@@ -669,13 +670,23 @@ export function startProjectPurgeLeaseHeartbeat(
   };
 }
 
-function stepFailure(
+const PROJECT_PURGE_FAILURE_CAUSE_CODE_PATTERN = /^[a-z0-9_]{1,96}$/u;
+
+export function projectPurgeFailureCauseCode(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = Reflect.get(error, "code");
+  return typeof candidate === "string" && PROJECT_PURGE_FAILURE_CAUSE_CODE_PATTERN.test(candidate)
+    ? candidate
+    : null;
+}
+
+export function stepFailure(
   stage: ProjectPurgeStage,
   code: ProjectPurgeFailureCode,
   error: unknown,
 ): ProjectPurgeStepError {
   if (error instanceof ProjectPurgeStepError) return error;
-  return new ProjectPurgeStepError(stage, code, true);
+  return new ProjectPurgeStepError(stage, code, true, projectPurgeFailureCauseCode(error));
 }
 
 async function setOperationStage(

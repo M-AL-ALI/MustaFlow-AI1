@@ -61,6 +61,34 @@ vi.mock("drizzle-orm", () => {
   };
 });
 
+describe("project purge failure diagnostics", () => {
+  it("retains only bounded machine-readable downstream error codes", async () => {
+    const { stepFailure } = await import("./project-purge");
+
+    expect(
+      stepFailure("database", "project_purge_database_release_failed", {
+        code: "production_database_release_unavailable",
+        message: "must never be copied into the durable diagnostic",
+      }),
+    ).toMatchObject({
+      stage: "database",
+      code: "project_purge_database_release_failed",
+      retryable: true,
+      causeCode: "production_database_release_unavailable",
+    });
+    expect(
+      stepFailure("database", "project_purge_database_release_failed", {
+        code: "token=not-a-machine-code",
+      }).causeCode,
+    ).toBeNull();
+    expect(
+      stepFailure("database", "project_purge_database_release_failed", {
+        code: "a".repeat(97),
+      }).causeCode,
+    ).toBeNull();
+  });
+});
+
 vi.mock("@workspace/db", () => {
   const columns = new Proxy({}, { get: (_target, property) => String(property) });
   return {
