@@ -2,7 +2,7 @@ import { flushSync } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isReverificationCancelledError } from "@clerk/react/errors";
 import { useReverification } from "@clerk/react";
-import { AlertTriangle, Loader2, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -71,6 +71,23 @@ type AcceptedDeletion = {
   operationId: string;
   state: string;
   statusUrl: string;
+};
+
+type RetirementOperation = {
+  operationId: string;
+  projectId: number;
+  state: "accepted" | "running" | "failed" | "completed" | "canceled";
+  attemptCount: number;
+  failureCode: string | null;
+  completedAt: string | null;
+  reconciliationEligible: boolean;
+};
+
+type AcceptedRetirementReconciliation = {
+  code: "project_retirement_reconciliation_accepted";
+  operationId: string;
+  projectId: number;
+  state: "accepted";
 };
 
 type DeleteResponse = Record<string, unknown> & { __clientHttpStatus: number };
@@ -247,7 +264,7 @@ function isValidTerminalEvidence(
 
 function parseImpact(
   value: unknown,
-  project: PurgeableTrashedProject,
+  project: Pick<PurgeableTrashedProject, "id" | "name">,
 ): PermanentDeletionImpact | null {
   if (!isRecord(value)) return null;
   if (value.projectId !== project.id || value.name !== project.name) return null;
@@ -271,6 +288,97 @@ function parseImpact(
     return null;
   }
   return value as PermanentDeletionImpact;
+}
+
+function parseRetirementOperation(value: unknown, projectId: number): RetirementOperation | null {
+  if (!isRecord(value) || value.projectId !== projectId || !isOpaqueId(value.operationId)) {
+    return null;
+  }
+  if (
+    value.state !== "accepted" &&
+    value.state !== "running" &&
+    value.state !== "failed" &&
+    value.state !== "completed" &&
+    value.state !== "canceled"
+  ) {
+    return null;
+  }
+  if (!Number.isInteger(value.attemptCount) || Number(value.attemptCount) < 0) return null;
+  if (value.failureCode !== null && !isBoundedString(value.failureCode, 120)) return null;
+  if (value.completedAt !== null && !isBoundedString(value.completedAt)) return null;
+  if (typeof value.reconciliationEligible !== "boolean") return null;
+  return {
+    operationId: value.operationId,
+    projectId,
+    state: value.state,
+    attemptCount: Number(value.attemptCount),
+    failureCode: value.failureCode,
+    completedAt: value.completedAt,
+    reconciliationEligible: value.reconciliationEligible,
+  };
+}
+
+function parseAcceptedRetirementReconciliation(
+  value: unknown,
+  projectId: number,
+): AcceptedRetirementReconciliation | null {
+  if (!isRecord(value) || value.__clientHttpStatus !== 202) return null;
+  if (
+    value.code !== "project_retirement_reconciliation_accepted" ||
+    value.projectId !== projectId ||
+    value.state !== "accepted" ||
+    !isOpaqueId(value.operationId)
+  ) {
+    return null;
+  }
+  return {
+    code: value.code,
+    operationId: value.operationId,
+    projectId,
+    state: "accepted",
+  };
+}
+
+function retirementCleanupFailureMessage(code: unknown): string {
+  switch (code) {
+    case "project_retirement_provider_configuration_unavailable":
+      return "Public-route cleanup is temporarily unavailable. Nothing was reported removed.";
+    case "project_retirement_reconciliation_limit_reached":
+    case "project_retirement_retry_not_allowed":
+      return "Cleanup stopped safely and needs NabuFlow support before permanent deletion.";
+    case "project_retirement_not_terminal":
+      return "Cleanup is already in progress. Its durable receipt will continue updating.";
+    default:
+      return "Cleanup could not be restarted safely. Nothing was reported removed.";
+  }
+}
+
+function retirementCleanupMessage(
+  project: PurgeableTrashedProject,
+  operation: RetirementOperation | null,
+): string {
+  if (operation?.state === "completed") {
+    return "Cleanup verified. Permanent deletion is ready.";
+  }
+  if (operation?.state === "accepted" || operation?.state === "running") {
+    return "Cleanup retry is in progress. Routes, runtimes, and storage are being verified.";
+  }
+  if (operation?.state === "failed") {
+    if (operation.failureCode === "project_retirement_route_deactivation_unverified") {
+      return "Cleanup paused because public-route removal could not yet be verified.";
+    }
+    if (operation.failureCode === "project_retirement_legacy_runtime_retained") {
+      return "Cleanup paused while a legacy runtime reference is resolved safely.";
+    }
+    return "Cleanup paused safely. No permanent deletion has started.";
+  }
+  if (project.retirementState === "accepted" || project.retirementState === "running") {
+    return "Cleanup is in progress. Permanent deletion will unlock after verification.";
+  }
+  if (project.retirementState === "failed") {
+    return "Cleanup paused safely. Checking whether the owner can retry it now.";
+  }
+  return "Cleanup is being prepared. Permanent deletion remains locked.";
 }
 
 function parseAcceptedDeletion(value: unknown): AcceptedDeletion | null {
@@ -474,9 +582,16 @@ export function ProjectPermanentDeletionControl({
   const [operation, setOperation] = useState<PurgeOperation | null>(null);
   const [pollAttempts, setPollAttempts] = useState(0);
   const [failure, setFailure] = useState<string | null>(null);
+  const [retirementOperation, setRetirementOperation] = useState<RetirementOperation | null>(null);
+  const [retirementBusy, setRetirementBusy] = useState(false);
+  const [retirementFailure, setRetirementFailure] = useState<string | null>(null);
+  const [retirementPollAttempts, setRetirementPollAttempts] = useState(0);
   const requestLock = useRef(false);
+  const retirementRequestLock = useRef(false);
   const confirmationInputRef = useRef<HTMLInputElement>(null);
   const initialPurgeInProgress = isPurgeInProgress(project.purgeState);
+  const retirementCompleted =
+    project.retirementState === "completed" || retirementOperation?.state === "completed";
 
   const requestPermanentDeletion = useReverification(
     async (projectName: string, key: string): Promise<DeleteResponse> => {
@@ -496,7 +611,14 @@ export function ProjectPermanentDeletionControl({
     },
   );
 
-  async function loadImpact() {
+  const readRetirementOperation = useCallback(async (): Promise<RetirementOperation | null> => {
+    const response = await authFetch(`/api/projects/${project.id}/retirement`, { method: "GET" });
+    return response.status === 200
+      ? parseRetirementOperation(await readJson(response), project.id)
+      : null;
+  }, [project.id]);
+
+  const loadImpact = useCallback(async () => {
     setImpactBusy(true);
     setFailure(null);
     try {
@@ -504,7 +626,9 @@ export function ProjectPermanentDeletionControl({
         method: "GET",
       });
       const parsed =
-        response.status === 200 ? parseImpact(await readJson(response), project) : null;
+        response.status === 200
+          ? parseImpact(await readJson(response), { id: project.id, name: project.name })
+          : null;
       if (!parsed) {
         setFailure("The deletion impact could not be loaded. Nothing was deleted.");
         return;
@@ -515,6 +639,45 @@ export function ProjectPermanentDeletionControl({
     } finally {
       setImpactBusy(false);
     }
+  }, [project.id, project.name]);
+
+  async function retryRetirementCleanup() {
+    if (retirementRequestLock.current || retirementBusy) return;
+    retirementRequestLock.current = true;
+    setRetirementBusy(true);
+    setRetirementFailure(null);
+    try {
+      const response = await authFetch(`/api/projects/${project.id}/retirement/retry`, {
+        method: "POST",
+      });
+      const body = await readJson(response);
+      const accepted = parseAcceptedRetirementReconciliation(
+        { ...(isRecord(body) ? body : {}), __clientHttpStatus: response.status },
+        project.id,
+      );
+      if (!accepted) {
+        setRetirementFailure(
+          retirementCleanupFailureMessage(isRecord(body) ? body.code : undefined),
+        );
+        return;
+      }
+      setRetirementOperation({
+        operationId: accepted.operationId,
+        projectId: project.id,
+        state: "accepted",
+        attemptCount: 0,
+        failureCode: null,
+        completedAt: null,
+        reconciliationEligible: false,
+      });
+      setRetirementPollAttempts(0);
+      void Promise.resolve(onStateRefresh()).catch(() => undefined);
+    } catch {
+      setRetirementFailure("Cleanup could not be restarted safely. Nothing was reported removed.");
+    } finally {
+      retirementRequestLock.current = false;
+      setRetirementBusy(false);
+    }
   }
 
   const refreshThenReleaseLocalLock = useCallback(() => {
@@ -522,6 +685,99 @@ export function ProjectPermanentDeletionControl({
       .catch(() => undefined)
       .finally(() => onPurgeActivityChange(project.id, false));
   }, [onPurgeActivityChange, onStateRefresh, project.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (project.retirementState === "completed") {
+      setRetirementOperation(null);
+      setRetirementFailure(null);
+      setRetirementPollAttempts(0);
+      return;
+    }
+    if (
+      project.retirementState !== "accepted" &&
+      project.retirementState !== "running" &&
+      project.retirementState !== "failed"
+    ) {
+      return;
+    }
+    setRetirementBusy(true);
+    void readRetirementOperation()
+      .then((next) => {
+        if (cancelled) return;
+        if (!next) {
+          setRetirementFailure(
+            "Cleanup progress could not be verified. Refresh Trash to try again.",
+          );
+          return;
+        }
+        setRetirementOperation(next);
+        setRetirementFailure(null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRetirementFailure(
+            "Cleanup progress could not be verified. Refresh Trash to try again.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRetirementBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, project.retirementState, readRetirementOperation]);
+
+  useEffect(() => {
+    if (
+      !retirementOperation ||
+      (retirementOperation.state !== "accepted" && retirementOperation.state !== "running") ||
+      retirementPollAttempts >= MAX_POLL_ATTEMPTS
+    ) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const next = await readRetirementOperation();
+        if (cancelled) return;
+        if (!next) {
+          setRetirementFailure(
+            "Cleanup progress could not be verified. Refresh Trash to try again.",
+          );
+          setRetirementPollAttempts((current) => current + 1);
+          return;
+        }
+        setRetirementOperation(next);
+        setRetirementFailure(null);
+        setRetirementPollAttempts((current) => current + 1);
+        if (next.state === "completed") {
+          void Promise.resolve(onStateRefresh()).catch(() => undefined);
+        }
+      } catch {
+        if (!cancelled) {
+          setRetirementFailure(
+            "Cleanup progress could not be verified. Refresh Trash to try again.",
+          );
+          setRetirementPollAttempts((current) => current + 1);
+        }
+      }
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [onStateRefresh, readRetirementOperation, retirementOperation, retirementPollAttempts]);
+
+  useEffect(() => {
+    if (!retirementCompleted) return;
+    setFailure((current) =>
+      current === "Project cleanup must finish before permanent deletion can begin."
+        ? null
+        : current,
+    );
+  }, [retirementCompleted]);
 
   function openDialog() {
     const recoveredOperation = operation ?? operationSummaryFromProject(project);
@@ -567,6 +823,10 @@ export function ProjectPermanentDeletionControl({
       const accepted = parseAcceptedDeletion(body);
       if (!accepted) {
         setFailure(failureMessage(body.code));
+        if (body.code === "project_purge_retirement_incomplete") {
+          await Promise.resolve(onStateRefresh()).catch(() => undefined);
+          await loadImpact();
+        }
         return;
       }
       const pending: PurgeOperation = {
@@ -654,9 +914,7 @@ export function ProjectPermanentDeletionControl({
   const recoverableOperation = operationSummaryFromProject(project);
   const hasRecoverableOperation = Boolean(recoverableOperation);
   const canStart =
-    project.retirementState === "completed" &&
-    !initialPurgeInProgress &&
-    project.purgeState !== "completed";
+    retirementCompleted && !initialPurgeInProgress && project.purgeState !== "completed";
   const impactAllowsStart =
     impact?.retirementState === "completed" &&
     !isPurgeInProgress(impact.purgeState) &&
@@ -688,10 +946,47 @@ export function ProjectPermanentDeletionControl({
         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
         {hasRecoverableOperation ? "View deletion progress" : "Delete permanently"}
       </button>
-      {project.retirementState !== "completed" && (
-        <p className="max-w-52 text-xs text-muted-foreground">
-          Cleanup must finish before permanent deletion.
-        </p>
+      {retirementCompleted && retirementOperation?.state === "completed" && (
+        <div
+          className="flex max-w-72 items-start gap-2 rounded-md border border-emerald-500/25 bg-emerald-500/5 p-3 text-xs"
+          role="status"
+          aria-live="polite"
+        >
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+          <p>Cleanup verified. Permanent deletion is ready.</p>
+        </div>
+      )}
+      {!retirementCompleted && (
+        <div className="max-w-72 space-y-2 rounded-md border border-amber-500/25 bg-amber-500/5 p-3">
+          <p className="text-xs font-medium">Cleanup must finish before permanent deletion.</p>
+          <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+            {retirementCleanupMessage(project, retirementOperation)}
+          </p>
+          {retirementBusy && (
+            <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              Checking the durable cleanup receipt…
+            </p>
+          )}
+          {retirementOperation?.state === "failed" &&
+            retirementOperation.reconciliationEligible && (
+              <button
+                type="button"
+                onClick={() => void retryRetirementCleanup()}
+                disabled={retirementBusy}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label={`Retry retirement cleanup for project "${project.name}"`}
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                Retry cleanup
+              </button>
+            )}
+          {retirementFailure && (
+            <p className="text-xs text-destructive" role="alert">
+              {retirementFailure}
+            </p>
+          )}
+        </div>
       )}
       {initialPurgeInProgress && !hasRecoverableOperation && (
         <p className="max-w-52 text-xs text-muted-foreground">

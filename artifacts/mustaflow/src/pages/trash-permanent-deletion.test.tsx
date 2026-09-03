@@ -530,6 +530,89 @@ describe("Trash permanent deletion", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers the owner a bounded cleanup retry and unlocks after verified completion", async () => {
+    const user = userEvent.setup();
+    let retryAccepted = false;
+    vi.mocked(authFetch).mockImplementation(async (url, options) => {
+      if (url.endsWith("/retirement/retry") && options?.method === "POST") {
+        retryAccepted = true;
+        return jsonResponse(
+          {
+            code: "project_retirement_reconciliation_accepted",
+            operationId: "retirement-retry-72",
+            projectId: PROJECT.id,
+            state: "accepted",
+          },
+          202,
+        );
+      }
+      if (url.endsWith("/retirement") && options?.method === "GET") {
+        return jsonResponse({
+          operationId: retryAccepted ? "retirement-retry-72" : "retirement-failed-72",
+          projectId: PROJECT.id,
+          state: retryAccepted ? "completed" : "failed",
+          attemptCount: retryAccepted ? 1 : 4,
+          failureCode: retryAccepted ? null : "project_retirement_route_deactivation_unverified",
+          completedAt: "2026-09-03T12:00:00.000Z",
+          reconciliationEligible: !retryAccepted,
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    const { onStateRefresh } = renderControl({ ...PROJECT, retirementState: "failed" });
+
+    expect(
+      await screen.findByText(/public-route removal could not yet be verified/u),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /Delete project/u })).toBeDisabled();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: `Retry retirement cleanup for project "${PROJECT.name}"`,
+      }),
+    );
+
+    expect(
+      await screen.findByText("Cleanup verified. Permanent deletion is ready.", undefined, {
+        timeout: 4_000,
+      }),
+    ).toBeVisible();
+    expect(onStateRefresh).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /Delete project/u })).toBeEnabled();
+  });
+
+  it("refreshes a stale cleanup refusal instead of keeping an obsolete dialog error", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch)
+      .mockResolvedValueOnce(impactResponse())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: "project_purge_retirement_incomplete",
+            error: "Project cleanup must finish before permanent deletion can begin.",
+          },
+          409,
+        ),
+      )
+      .mockResolvedValueOnce(impactResponse());
+    const { onStateRefresh } = renderControl();
+
+    await user.click(
+      screen.getByRole("button", { name: `Delete project "${PROJECT.name}" permanently` }),
+    );
+    await user.type(await screen.findByRole("textbox"), PROJECT.name);
+    await user.click(screen.getByRole("button", { name: "Verify and delete permanently" }));
+
+    await waitFor(() => expect(vi.mocked(authFetch)).toHaveBeenCalledTimes(3));
+    expect(onStateRefresh).toHaveBeenCalled();
+    expect(
+      screen.queryByRole("alert", {
+        name: "Project cleanup must finish before permanent deletion can begin.",
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Verify and delete permanently" })).toBeEnabled();
+  });
+
   it("refuses deletion while retirement is incomplete or a purge is active", () => {
     const { rerender } = render(
       <ProjectPermanentDeletionControl
