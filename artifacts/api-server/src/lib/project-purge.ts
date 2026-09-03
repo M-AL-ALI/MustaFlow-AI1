@@ -1110,25 +1110,37 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
     try {
       if (!progress.databaseComplete) {
         heartbeat.assertActive("database");
-        await releaseProductionDatabasesForHardDelete(
-          tenantRuntimeProvider,
-          [operation.projectId],
-          {
-            signal: heartbeat.signal,
-            operationTimeoutMs: PROJECT_PURGE_PROVIDER_OPERATION_TIMEOUT_MS,
-          },
-        );
+        try {
+          await releaseProductionDatabasesForHardDelete(
+            tenantRuntimeProvider,
+            [operation.projectId],
+            {
+              signal: heartbeat.signal,
+              operationTimeoutMs: PROJECT_PURGE_PROVIDER_OPERATION_TIMEOUT_MS,
+            },
+          );
+        } catch {
+          heartbeat.assertActive("database");
+          throw new Error("project_purge_production_database_release_failed");
+        }
         heartbeat.assertActive("database");
-        const neon = await releaseNeonProjectsForHardDelete({
-          projectIds: inventory.neonProjectIds,
-          productionProjectName: inventory.productionNeonProjectName,
-          previewProjectName: inventory.previewNeonProjectName,
-          signal: heartbeat.signal,
-        });
+        let neonRemoved = 0;
+        try {
+          const neon = await releaseNeonProjectsForHardDelete({
+            projectIds: inventory.neonProjectIds,
+            productionProjectName: inventory.productionNeonProjectName,
+            previewProjectName: inventory.previewNeonProjectName,
+            signal: heartbeat.signal,
+          });
+          neonRemoved = neon.removed;
+        } catch {
+          heartbeat.assertActive("database");
+          throw new Error("project_purge_neon_database_release_failed");
+        }
         heartbeat.assertActive("database");
         progress = {
           ...progress,
-          providerRemoved: progress.providerRemoved + neon.removed,
+          providerRemoved: progress.providerRemoved + neonRemoved,
           databaseComplete: true,
         };
         await checkpointProjectPurgeResources(operation, "database", progress);

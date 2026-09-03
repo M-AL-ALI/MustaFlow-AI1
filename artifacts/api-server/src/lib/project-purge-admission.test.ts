@@ -83,6 +83,15 @@ describe("project purge failure diagnostics", () => {
         new Error("production_database_release_unavailable"),
       ).causeCode,
     ).toBe("production_database_release_unavailable");
+    for (const causeCode of [
+      "project_purge_production_database_release_failed",
+      "project_purge_neon_database_release_failed",
+    ]) {
+      expect(
+        stepFailure("database", "project_purge_database_release_failed", new Error(causeCode))
+          .causeCode,
+      ).toBe(causeCode);
+    }
     expect(
       stepFailure("database", "project_purge_database_release_failed", {
         code: "token=not-a-machine-code",
