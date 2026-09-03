@@ -77,9 +77,23 @@ describe("project purge failure diagnostics", () => {
       causeCode: "production_database_release_unavailable",
     });
     expect(
+      stepFailure(
+        "database",
+        "project_purge_database_release_failed",
+        new Error("production_database_release_unavailable"),
+      ).causeCode,
+    ).toBe("production_database_release_unavailable");
+    expect(
       stepFailure("database", "project_purge_database_release_failed", {
         code: "token=not-a-machine-code",
       }).causeCode,
+    ).toBeNull();
+    expect(
+      stepFailure(
+        "database",
+        "project_purge_database_release_failed",
+        new Error("https://provider.invalid/private-response"),
+      ).causeCode,
     ).toBeNull();
     expect(
       stepFailure("database", "project_purge_database_release_failed", {

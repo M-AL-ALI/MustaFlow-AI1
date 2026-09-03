@@ -674,10 +674,13 @@ const PROJECT_PURGE_FAILURE_CAUSE_CODE_PATTERN = /^[a-z0-9_]{1,96}$/u;
 
 export function projectPurgeFailureCauseCode(error: unknown): string | null {
   if (!error || typeof error !== "object") return null;
-  const candidate = Reflect.get(error, "code");
-  return typeof candidate === "string" && PROJECT_PURGE_FAILURE_CAUSE_CODE_PATTERN.test(candidate)
-    ? candidate
-    : null;
+  for (const property of ["code", "message"] as const) {
+    const candidate = Reflect.get(error, property);
+    if (typeof candidate === "string" && PROJECT_PURGE_FAILURE_CAUSE_CODE_PATTERN.test(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 export function stepFailure(
