@@ -66,6 +66,33 @@ describe("strict Neon project lifecycle", () => {
     });
   });
 
+  it("accepts omitted pagination only for a terminal short page", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      response(200, {
+        applications: [],
+        integrations: [],
+        projects: [],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(lookupNeonProjectsByStableName("mf-project-51")).resolves.toEqual({
+      kind: "absent",
+    });
+
+    fetchMock.mockResolvedValue(
+      response(200, {
+        projects: Array.from({ length: 100 }, (_, index) => ({
+          id: `near-${index}`,
+          name: `mf-project-${1000 + index}`,
+        })),
+      }),
+    );
+    await expect(lookupNeonProjectsByStableName("mf-project-51")).resolves.toEqual({
+      kind: "unavailable",
+    });
+  });
+
   it("deletes an existing project and requires a final GET 404", async () => {
     const fetchMock = vi
       .fn()

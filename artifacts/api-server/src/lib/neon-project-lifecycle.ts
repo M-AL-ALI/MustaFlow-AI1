@@ -80,9 +80,11 @@ export async function lookupNeonProjectsByStableName(
         unavailable?: unknown;
         pagination?: { cursor?: unknown };
       };
+      const pagination = body.pagination;
       if (
         !Array.isArray(body.projects) ||
-        !body.pagination ||
+        (pagination !== undefined &&
+          (!pagination || typeof pagination !== "object" || Array.isArray(pagination))) ||
         (Array.isArray(body.unavailable) && body.unavailable.length > 0) ||
         (body.unavailable !== undefined && !Array.isArray(body.unavailable))
       ) {
@@ -99,7 +101,7 @@ export async function lookupNeonProjectsByStableName(
       }
       if (exactIds.length > MAX_RELEASE_REFERENCES) return { kind: "unavailable" };
 
-      const nextCursor = body.pagination.cursor;
+      const nextCursor = pagination?.cursor;
       if (nextCursor === undefined || nextCursor === null || nextCursor === "") {
         if (body.projects.length >= NEON_LOOKUP_LIMIT) return { kind: "unavailable" };
         const projectIds = [...new Set(exactIds)].sort();
