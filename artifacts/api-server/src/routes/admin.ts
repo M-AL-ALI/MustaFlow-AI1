@@ -1,3 +1,4 @@
+import { resolveAdminRoleGrantEmail } from "../lib/admin-role-email";
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin routes — all require admin RBAC
 //
@@ -807,69 +808,74 @@ router.get("/admin/roles", requireOwner, async (_req, res): Promise<void> => {
 
 // ── POST /api/admin/roles ─────────────────────────────────────────────────────
 // Body: { userId: string; role: "owner" | "operator" | "support" | "analyst" }
-router.post("/admin/roles", requireOwner, async (req, res): Promise<void> => {
-  const { userId, role } = req.body as { userId?: string; role?: string };
+router.post(
+  "/admin/roles",
+  requireOwner,
+  resolveAdminRoleGrantEmail,
+  async (req, res): Promise<void> => {
+    const { userId, role } = req.body as { userId?: string; role?: string };
 
-  if (!userId || typeof userId !== "string" || !userId.trim()) {
-    res.status(400).json({ error: "userId is required" });
-    return;
-  }
-  if (!["owner", "operator", "support", "analyst"].includes(role ?? "")) {
-    res.status(400).json({ error: "role must be one of: owner, operator, support, analyst" });
-    return;
-  }
+    if (!userId || typeof userId !== "string" || !userId.trim()) {
+      res.status(400).json({ error: "userId is required" });
+      return;
+    }
+    if (!["owner", "operator", "support", "analyst"].includes(role ?? "")) {
+      res.status(400).json({ error: "role must be one of: owner, operator, support, analyst" });
+      return;
+    }
 
-  const targetUserId = userId.trim();
-  const actorUserId = req.userId!;
-  const result = await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(1732050807)`);
-    const [previous] = await tx
-      .select({ role: userRolesTable.role })
-      .from(userRolesTable)
-      .where(eq(userRolesTable.userId, targetUserId));
-    const [ownerCount] = await tx
-      .select({ total: count() })
-      .from(userRolesTable)
-      .where(eq(userRolesTable.role, "owner"));
-    const decision = decideStaffRoleChange(
-      previous?.role ?? null,
-      role as "owner" | "operator" | "support" | "analyst",
-      ownerCount?.total ?? 0,
-    );
-    if (!decision.allowed) return { blocked: true as const, decision };
+    const targetUserId = userId.trim();
+    const actorUserId = req.userId!;
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(1732050807)`);
+      const [previous] = await tx
+        .select({ role: userRolesTable.role })
+        .from(userRolesTable)
+        .where(eq(userRolesTable.userId, targetUserId));
+      const [ownerCount] = await tx
+        .select({ total: count() })
+        .from(userRolesTable)
+        .where(eq(userRolesTable.role, "owner"));
+      const decision = decideStaffRoleChange(
+        previous?.role ?? null,
+        role as "owner" | "operator" | "support" | "analyst",
+        ownerCount?.total ?? 0,
+      );
+      if (!decision.allowed) return { blocked: true as const, decision };
 
-    const [row] = await tx
-      .insert(userRolesTable)
-      .values({ userId: targetUserId, role: role!, grantedBy: actorUserId })
-      .onConflictDoUpdate({
-        target: userRolesTable.userId,
-        set: { role: role!, grantedBy: actorUserId, updatedAt: new Date() },
-      })
-      .returning();
-    await tx.insert(adminAccessReceiptsTable).values({
-      actorUserId,
-      actorRole: "owner",
-      kind: "role_change",
-      action: previous ? "role_changed" : "staff_added",
-      targetUserId,
-      previousRole: previous?.role ?? "user",
-      nextRole: role!,
-      outcome: "completed",
-      requestMethod: req.method,
-      requestPath: "/api/admin/roles",
+      const [row] = await tx
+        .insert(userRolesTable)
+        .values({ userId: targetUserId, role: role!, grantedBy: actorUserId })
+        .onConflictDoUpdate({
+          target: userRolesTable.userId,
+          set: { role: role!, grantedBy: actorUserId, updatedAt: new Date() },
+        })
+        .returning();
+      await tx.insert(adminAccessReceiptsTable).values({
+        actorUserId,
+        actorRole: "owner",
+        kind: "role_change",
+        action: previous ? "role_changed" : "staff_added",
+        targetUserId,
+        previousRole: previous?.role ?? "user",
+        nextRole: role!,
+        outcome: "completed",
+        requestMethod: req.method,
+        requestPath: "/api/admin/roles",
+      });
+      return { blocked: false as const, row };
     });
-    return { blocked: false as const, row };
-  });
-  if (result.blocked) {
-    res.status(409).json({
-      error: result.decision.message,
-      code: result.decision.code,
-    });
-    return;
-  }
+    if (result.blocked) {
+      res.status(409).json({
+        error: result.decision.message,
+        code: result.decision.code,
+      });
+      return;
+    }
 
-  res.json({ ok: true, role: result.row });
-});
+    res.json({ ok: true, role: result.row });
+  },
+);
 
 // ── DELETE /api/admin/roles/:userId ──────────────────────────────────────────
 router.delete("/admin/roles/:userId", requireOwner, async (req, res): Promise<void> => {

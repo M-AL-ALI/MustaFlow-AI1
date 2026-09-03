@@ -16,6 +16,7 @@ const pageMocks = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   toast: vi.fn(),
   reverificationChallenges: 0,
+  reverificationGate: null as Promise<void> | null,
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: pageMocks.invalidateQueries }),
@@ -52,6 +53,7 @@ vi.mock("@clerk/react", () => ({
           "reverification-error"
       ) {
         pageMocks.reverificationChallenges += 1;
+        if (pageMocks.reverificationGate) await pageMocks.reverificationGate;
         result = await fetcher(...args);
       }
       return result;
@@ -303,6 +305,48 @@ describe("Trash permanent deletion", () => {
     expect(screen.queryByText(/Project permanently deleted/u)).not.toBeInTheDocument();
   });
 
+  it("releases the NabuFlow dialog while Clerk owns first-factor focus", async () => {
+    const user = userEvent.setup();
+    let releaseReverification!: () => void;
+    const reverificationGate = new Promise<void>((resolve) => {
+      releaseReverification = resolve;
+    });
+    pageMocks.reverificationGate = reverificationGate;
+    vi.mocked(authFetch)
+      .mockResolvedValueOnce(impactResponse())
+      .mockResolvedValueOnce(clerkReverificationHint())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            code: "project_purge_accepted",
+            operationId: "purge-focus-72",
+            state: "accepted",
+            statusUrl: "/api/project-purge-operations/purge-focus-72",
+          },
+          202,
+        ),
+      );
+    renderControl();
+
+    await user.click(
+      screen.getByRole("button", { name: `Delete project "${PROJECT.name}" permanently` }),
+    );
+    await user.type(await screen.findByRole("textbox"), PROJECT.name);
+    await user.click(screen.getByRole("button", { name: "Verify and delete permanently" }));
+
+    await waitFor(() => expect(pageMocks.reverificationChallenges).toBe(1));
+    expect(
+      screen.queryByRole("button", { name: "Verify and delete permanently" }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      releaseReverification();
+      await reverificationGate;
+    });
+    pageMocks.reverificationGate = null;
+    expect(await screen.findByRole("dialog")).toBeVisible();
+  });
+
   it("replays an ambiguous response with the same destructive idempotency key", async () => {
     const user = userEvent.setup();
     vi.mocked(authFetch)
@@ -325,12 +369,11 @@ describe("Trash permanent deletion", () => {
       screen.getByRole("button", { name: `Delete project "${PROJECT.name}" permanently` }),
     );
     await user.type(await screen.findByRole("textbox"), PROJECT.name);
-    const submit = screen.getByRole("button", { name: "Verify and delete permanently" });
-    await user.click(submit);
+    await user.click(screen.getByRole("button", { name: "Verify and delete permanently" }));
     expect(
       await screen.findByText(/could not confirm whether permanent deletion started/iu),
     ).toBeVisible();
-    await user.click(submit);
+    await user.click(screen.getByRole("button", { name: "Verify and delete permanently" }));
 
     const deleteCalls = vi
       .mocked(authFetch)

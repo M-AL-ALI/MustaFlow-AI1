@@ -19092,7 +19092,7 @@ export const getGrantAdminRoleUrl = () => {
 }
 
 /**
- * @summary Grant or update a role for a user
+ * @summary Grant or update a staff role by exact account email
  */
 export const grantAdminRole = async (adminRoleInput: AdminRoleInput, options?: RequestInit): Promise<GrantAdminRole200> => {
 
@@ -19141,7 +19141,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type GrantAdminRoleMutationError = ErrorType<ApiError>
 
     /**
- * @summary Grant or update a role for a user
+ * @summary Grant or update a staff role by exact account email
  */
 export const useGrantAdminRole = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantAdminRole>>, TError,{data: BodyType<AdminRoleInput>}, TContext>, request?: SecondParameter<typeof customFetch>}

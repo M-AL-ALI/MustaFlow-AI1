@@ -3629,8 +3629,11 @@ export const AdminRoleInputRole = {
 } as const;
 
 export interface AdminRoleInput {
-  /** @minLength 1 */
-  userId: string;
+  /**
+     * @minLength 3
+     * @maxLength 320
+     */
+  email: string;
   role: AdminRoleInputRole;
 }
 

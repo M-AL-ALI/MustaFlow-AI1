@@ -72,20 +72,3 @@ export async function isBillingPrivileged(userId: string | null | undefined): Pr
   await ensureResolved();
   return resolvedIds.has(userId);
 }
-
-/** Test/diagnostic helper — the configured allowlist emails (lowercased). */
-export function billingPrivilegeEmails(): ReadonlyArray<string> {
-  return BILLING_PRIVILEGE_EMAILS;
-}
-
-/** Resolve every configured billing-privilege identity for the Admin bootstrap migration. */
-export async function resolveBillingPrivilegeIdentities(): Promise<
-  ReadonlyArray<{ email: string; userId: string }>
-> {
-  const identities: Array<{ email: string; userId: string }> = [];
-  for (const email of BILLING_PRIVILEGE_EMAILS) {
-    const user = await findClerkUserByEmail(email);
-    if (user?.userId) identities.push({ email, userId: user.userId });
-  }
-  return identities;
-}

@@ -485,6 +485,8 @@ export async function inventoryProjectPurgeResources(
               SELECT 1 FROM asset_usage usage_row
                WHERE usage_row.asset_id=asset_row.id
                  AND usage_row.project_id IS DISTINCT FROM $1
+                 AND usage_row.consumer IS DISTINCT FROM
+                     'project-purge-preserved-direct:' || $1::text
             ) AS shared
        FROM assets asset_row
        LEFT JOIN asset_storage_objects storage_row
@@ -527,6 +529,8 @@ export async function inventoryProjectPurgeResources(
                        SELECT 1 FROM asset_usage usage_row
                         WHERE usage_row.asset_id=asset_row.id
                           AND usage_row.project_id IS DISTINCT FROM $1
+                          AND usage_row.consumer IS DISTINCT FROM
+                              'project-purge-preserved-direct:' || $1::text
                      )
                    )
               )
@@ -571,6 +575,8 @@ export async function inventoryProjectPurgeResources(
                        SELECT 1 FROM asset_usage usage_row
                         WHERE usage_row.asset_id=asset_row.id
                           AND usage_row.project_id IS DISTINCT FROM $1
+                          AND usage_row.consumer IS DISTINCT FROM
+                              'project-purge-preserved-direct:' || $1::text
                      )
                    )
               )
@@ -596,6 +602,8 @@ export async function inventoryProjectPurgeResources(
                        SELECT 1 FROM asset_usage usage_row
                         WHERE usage_row.asset_id=asset_row.id
                           AND usage_row.project_id IS DISTINCT FROM $1
+                          AND usage_row.consumer IS DISTINCT FROM
+                              'project-purge-preserved-direct:' || $1::text
                      )
                    )
               )
@@ -766,15 +774,28 @@ async function claimAssetTargetForPhysicalDeletion(
     if (!state || !["reserved", "uploading", "ready", "deleting", "rejected"].includes(state)) {
       throw new Error("project_purge_asset_release_failed");
     }
-    await client.query(
-      `SELECT pg_advisory_xact_lock(
-         hashtextextended('nabuflow:durable-object:' || $1, 0)
-       )`,
-      [target.storageKey],
+    const storageObjects = await client.query<{ storage_key: string }>(
+      `SELECT storage_key
+         FROM asset_storage_objects
+        WHERE asset_id=$1 AND state <> 'deleted'
+        ORDER BY storage_key
+        FOR UPDATE`,
+      [target.assetId],
     );
+    const storageKeys = Array.from(
+      new Set([...storageObjects.rows.map((row) => row.storage_key), target.storageKey]),
+    ).sort();
+    for (const storageKey of storageKeys) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(
+           hashtextextended('nabuflow:durable-object:' || $1, 0)
+         )`,
+        [storageKey],
+      );
+    }
     const existingClaim = await client.query(
-      `SELECT 1 FROM durable_asset_deletion_claims WHERE storage_key=$1`,
-      [target.storageKey],
+      `SELECT 1 FROM durable_asset_deletion_claims WHERE storage_key=ANY($1::text[])`,
+      [storageKeys],
     );
     await canonicalizeSurvivingAssetAliases(client, projectId, target.assetId);
     const queryReference: ProjectPurgeBooleanQuery = (statement, values) =>
@@ -784,10 +805,13 @@ async function claimAssetTargetForPhysicalDeletion(
       target.assetId,
       queryReference,
     );
-    const hasLegacyRawReference =
-      target.storageBackend === "legacy-object" &&
-      (await hasSurvivingObjectReference(projectId, target.storageKey, queryReference));
-    if (hasDurableReference || hasLegacyRawReference) {
+    let hasRawObjectReference = false;
+    for (const storageKey of storageKeys) {
+      if (await hasSurvivingObjectReference(projectId, storageKey, queryReference)) {
+        hasRawObjectReference = true;
+      }
+    }
+    if (hasDurableReference || hasRawObjectReference) {
       if (existingClaim.rowCount) {
         throw new Error("project_purge_asset_release_failed");
       }
@@ -798,12 +822,17 @@ async function claimAssetTargetForPhysicalDeletion(
       // serializable against every covered writer.
       await client.query(
         `INSERT INTO asset_usage (asset_id, project_id, consumer)
-         VALUES ($1, NULL, 'project-purge-preserved-direct')
-         ON CONFLICT DO NOTHING`,
-        [target.assetId],
+         SELECT $1, NULL, 'project-purge-preserved-direct:' || $2::text
+          WHERE NOT EXISTS (
+            SELECT 1 FROM asset_usage
+             WHERE asset_id=$1
+               AND project_id IS NULL
+               AND consumer='project-purge-preserved-direct:' || $2::text
+          )`,
+        [target.assetId, projectId],
       );
     }
-    if (hasDurableReference || hasLegacyRawReference) {
+    if (hasDurableReference || hasRawObjectReference) {
       await client.query("COMMIT");
       return false;
     }
@@ -984,6 +1013,8 @@ async function hasSurvivingObjectReference(
                 SELECT 1 FROM asset_usage usage_row
                  WHERE usage_row.asset_id=asset_row.id
                    AND usage_row.project_id IS DISTINCT FROM $1
+                   AND usage_row.consumer IS DISTINCT FROM
+                       'project-purge-preserved-direct:' || $1::text
               )
             )
        )
@@ -1321,7 +1352,12 @@ export async function applyProjectRelationalPurge(
       [projectId],
     );
     detached += rehomed.rowCount ?? 0;
-    await client.query(`DELETE FROM asset_usage WHERE project_id=$1`, [projectId]);
+    await client.query(
+      `DELETE FROM asset_usage
+        WHERE project_id=$1
+           OR consumer='project-purge-preserved-direct:' || $1::text`,
+      [projectId],
+    );
 
     const projectDelete = await client.query(`DELETE FROM projects WHERE id=$1`, [projectId]);
     if (projectDelete.rowCount !== 1) throw new Error("project_purge_relational_delete_failed");

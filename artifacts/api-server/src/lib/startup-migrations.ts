@@ -1109,7 +1109,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           SELECT DISTINCT storage_row.asset_id
             FROM regexp_matches(
               row_json::text,
-              '(assets/[^"[:space:]]+/[^"[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[^"[:space:]?#]+)',
+              '(assets/[^"[:space:]]+/[^"[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[^"\\\\[:space:]?#<>(){},;]+)',
               'g'
             ) AS matched(storage_match)
             JOIN public.asset_storage_objects storage_row
@@ -1129,7 +1129,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           SELECT (match)[1] AS storage_key
             FROM regexp_matches(
               row_json::text,
-              '((?:assets|generated-images|uploaded-images|edited-images|db-snapshots|legacy-generated)/[^"[:space:]?#]+)',
+              '((?:assets|generated-images|uploaded-images|edited-images|db-snapshots|legacy-generated)/[^"\\\\[:space:]?#<>(){},;]+)',
               'g'
             ) AS match
         ),
@@ -1177,6 +1177,16 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           SELECT id, owner_user_id, project_id, storage_key, version_id, task_id, message_id
             FROM public.assets
            WHERE id = candidate_asset_id
+        ),
+        candidate_keys AS (
+          SELECT storage_key
+            FROM candidate
+           WHERE storage_key IS NOT NULL
+          UNION
+          SELECT storage_row.storage_key
+            FROM public.asset_storage_objects storage_row
+           WHERE storage_row.asset_id = candidate_asset_id
+             AND storage_row.state <> 'deleted'
         ),
         legacy_aliases AS (
           SELECT '/api/images/' || image.id::text || '/file' AS alias
@@ -1227,6 +1237,11 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
              WHERE usage_row.asset_id = candidate_asset_id
                AND (excluded_project_id IS NULL OR usage_row.project_id IS DISTINCT FROM excluded_project_id)
                AND (
+                 excluded_project_id IS NULL
+                 OR usage_row.consumer IS DISTINCT FROM
+                    'project-purge-preserved-direct:' || excluded_project_id::text
+               )
+               AND (
                  excluded_generated_image_id IS NULL
                  OR usage_row.consumer <> 'generated-image:' || excluded_generated_image_id::text
                )
@@ -1246,7 +1261,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           OR EXISTS (
             SELECT 1
               FROM public.project_uploads upload
-              JOIN candidate ON upload.object_path = candidate.storage_key
+              JOIN candidate_keys ON upload.object_path = candidate_keys.storage_key
              WHERE excluded_project_id IS NULL OR upload.project_id IS DISTINCT FROM excluded_project_id
           )
           OR EXISTS (
@@ -1276,7 +1291,11 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
                  candidate_asset_id IN (
                    SELECT public.extract_durable_asset_ids(durable.row_json)
                  )
-                 OR position(candidate.storage_key in durable.row_json::text) > 0
+                 OR EXISTS (
+                   SELECT 1
+                     FROM candidate_keys candidate_key
+                    WHERE position(candidate_key.storage_key in durable.row_json::text) > 0
+                 )
                  OR EXISTS (
                    SELECT 1 FROM legacy_aliases alias_row
                     WHERE position(alias_row.alias in durable.row_json::text) > 0
@@ -1285,6 +1304,22 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           )
       $$ LANGUAGE SQL STABLE SECURITY INVOKER
          SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      UPDATE public.asset_usage legacy_usage
+         SET consumer='project-purge-preserved-direct:' || asset_row.project_id::text
+        FROM public.assets asset_row
+       WHERE legacy_usage.asset_id=asset_row.id
+         AND legacy_usage.consumer='project-purge-preserved-direct'
+         AND asset_row.project_id IS NOT NULL;
+
+      DELETE FROM public.asset_usage legacy_usage
+       WHERE legacy_usage.consumer='project-purge-preserved-direct'
+         AND NOT EXISTS (
+           SELECT 1 FROM public.assets asset_row
+            WHERE asset_row.id=legacy_usage.asset_id
+              AND asset_row.project_id IS NOT NULL
+         );
     `);
     await client.query(`
       CREATE OR REPLACE FUNCTION require_attachable_assets_in_durable_reference()
@@ -1532,8 +1567,14 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
               )),
               '[[:space:]]+', ' ', 'g'
             ) LIKE '%join public.asset_storage_objects storage_row on storage_row.storage_key = matched.storage_match[1]%'
+        AND pg_get_functiondef(
+              to_regprocedure('public.resolve_durable_asset_ids(jsonb)')
+            ) LIKE '%?#<>(){},;%'
         AND to_regclass('public.durable_asset_deletion_claims') IS NOT NULL
         AND to_regprocedure('public.resolve_durable_storage_keys(jsonb)') IS NOT NULL
+        AND pg_get_functiondef(
+              to_regprocedure('public.resolve_durable_storage_keys(jsonb)')
+            ) LIKE '%?#<>(){},;%'
         AND regexp_replace(
               lower(pg_get_functiondef(
                 to_regprocedure('public.require_attachable_assets_in_durable_reference()')
@@ -1567,6 +1608,18 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         AND to_regprocedure(
               'public.durable_asset_reference_exists(integer,integer,integer)'
             ) IS NOT NULL
+        AND regexp_replace(
+              lower(pg_get_functiondef(to_regprocedure(
+                'public.durable_asset_reference_exists(integer,integer,integer)'
+              ))),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%from public.asset_storage_objects storage_row%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(to_regprocedure(
+                'public.durable_asset_reference_exists(integer,integer,integer)'
+              ))),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%project-purge-preserved-direct:%'
       ) AS guard_ready
     `);
     if (durableReferenceGuards.rows[0]?.guard_ready !== true) {

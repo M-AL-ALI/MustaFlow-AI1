@@ -31,8 +31,15 @@ describe("Admin account and ticket identity controls", () => {
 
   it("keeps the ticket number in both the list and selected-ticket header", () => {
     expect(supportInbox.match(/\{ticket\.ticketNumber\}/gu)?.length).toBeGreaterThanOrEqual(2);
-    expect(supportInbox).toContain(
-      "<SupportOperationConsole ticketId={ticketId} ticketNumber={ticket.ticketNumber}",
-    );
+    expect(supportInbox).toContain("<SupportOperationConsole");
+    expect(supportInbox).toContain("ticketId={ticketId}");
+    expect(supportInbox).toContain("ticketNumber={ticket.ticketNumber}");
+  });
+  it("grants staff allowlist access by exact account email", () => {
+    expect(adminPage).toContain('placeholder="Staff member email address"');
+    expect(adminPage).toContain('type="email"');
+    expect(adminPage).toContain("email: roleEmail.trim().toLowerCase()");
+    expect(adminPage).not.toContain('placeholder="Clerk user ID');
+    expect(adminPage).not.toContain("userId: roleEmail");
   });
 });

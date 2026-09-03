@@ -187,7 +187,7 @@ describe("deployment runtime schema boundary", () => {
     );
     expect(source).toContain("('task_events', 'task_id, message, data')");
     expect(source).toContain(
-      "('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')",
+      "('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')",
     );
     expect(source).toContain("extract_durable_asset_ids");
     expect(source).toContain("resolve_durable_asset_ids");
@@ -200,6 +200,9 @@ describe("deployment runtime schema boundary", () => {
     expect(source).toContain("and image.deleted_at is null");
     expect(source).toContain("join public.asset_storage_objects storage_row");
     expect(source).toContain("storage_row.storage_key = matched.storage_match[1]");
+    expect(source).toContain("LIKE '%?#<>(){},;%' ".trim());
+    expect(source).toContain("from public.asset_storage_objects storage_row");
+    expect(source).toContain("project-purge-preserved-direct:");
     expect(source).toContain("trigger_row.tgtype = 23");
     expect(source).toContain("trigger_row.tgqual IS NULL");
     expect(source).toContain("trigger_row.tgattr::smallint[]");

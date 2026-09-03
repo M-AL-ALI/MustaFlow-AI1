@@ -1,5 +1,5 @@
+import { decoupleLegacyBillingAdminRows } from "./admin-authority-billing-decoupling";
 import { pool } from "@workspace/db";
-import { billingPrivilegeEmails, resolveBillingPrivilegeIdentities } from "./billing-privileges";
 import { logger } from "./logger";
 
 export const ADMIN_AUTHORITY_SEMANTICS = "admin-authority-user-roles-v1" as const;
@@ -7,7 +7,7 @@ const SYSTEM_ACTOR = "system:admin-authority-v1";
 
 export type LegacyAdminIdentity = {
   userId: string;
-  source: "admin_user_ids" | "billing_privilege";
+  source: "admin_user_ids";
 };
 
 type QueryResult<Row = Record<string, unknown>> = {
@@ -52,9 +52,8 @@ function dedupeIdentities(identities: readonly LegacyAdminIdentity[]): LegacyAdm
 }
 
 /**
- * Consume legacy authority exactly once into user_roles. The environment and
- * billing allowlist are inputs to this boot migration only; request-time Admin
- * authorization never reads either source.
+ * Consume explicit bootstrap authority exactly once into user_roles. Request-time
+ * Admin authorization reads only the durable role ledger.
  */
 export async function reconcileAdminAuthorityWithClient(
   client: AdminAuthorityClient,
@@ -64,6 +63,7 @@ export async function reconcileAdminAuthorityWithClient(
   await client.query("BEGIN");
   try {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('admin-authority-user-roles-v1'))");
+    await decoupleLegacyBillingAdminRows(client);
     const initial = await client.query<{ user_id: string; role: string }>(
       "SELECT user_id, role FROM user_roles ORDER BY id ASC",
     );
@@ -154,19 +154,10 @@ export async function reconcileAdminAuthorityAtBoot(): Promise<AdminAuthorityRec
   const envIdentities = parseAdminBootstrapUserIds().map(
     (userId): LegacyAdminIdentity => ({ userId, source: "admin_user_ids" }),
   );
-  const billingIdentities = await resolveBillingPrivilegeIdentities();
-  const resolvedEmails = new Set(billingIdentities.map(({ email }) => email));
-  const unresolvedBillingPrivilegeEmails = billingPrivilegeEmails().filter(
-    (email) => !resolvedEmails.has(email),
-  );
+  const unresolvedBillingPrivilegeEmails: readonly string[] = [];
   const client = await pool.connect();
   try {
-    const receipt = await reconcileAdminAuthorityWithClient(client, [
-      ...envIdentities,
-      ...billingIdentities.map(
-        ({ userId }): LegacyAdminIdentity => ({ userId, source: "billing_privilege" }),
-      ),
-    ]);
+    const receipt = await reconcileAdminAuthorityWithClient(client, envIdentities);
     const result = { ...receipt, unresolvedBillingPrivilegeEmails };
     logger.info(result, "Admin authority reconciled into user_roles");
     return result;

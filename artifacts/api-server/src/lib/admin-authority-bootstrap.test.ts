@@ -101,19 +101,4 @@ describe("single-source Admin authority bootstrap", () => {
     );
     expect(store.statements.at(-1)).toBe("ROLLBACK");
   });
-
-  it("preserves an existing Owner and receipts a separately named billing identity", async () => {
-    const store = fakeAuthorityStore([{ userId: "founder", role: "owner" }]);
-    const receipt = await reconcileAdminAuthorityWithClient(store.client, [
-      { userId: "billing-account", source: "billing_privilege" },
-    ]);
-    expect(receipt).toMatchObject({
-      bootstrapOwnerCreated: false,
-      migratedIdentities: 1,
-      ownerProofReceipts: 2,
-      ownerCount: 2,
-    });
-    expect(store.roles.get("founder")).toBe("owner");
-    expect(store.roles.get("billing-account")).toBe("owner");
-  });
 });

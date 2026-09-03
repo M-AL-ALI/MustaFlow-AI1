@@ -442,7 +442,7 @@ export async function assessDeploymentRuntimeSchema(
             ('task_events', 'task_id, message, data'),
             ('project_activity', 'project_id, metadata'),
             ('visual_edit_changes', 'project_id, before_content, after_content'),
-            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at')
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')
           ) AS expected(table_name, column_list)
           JOIN pg_catalog.pg_class relation ON relation.relname = expected.table_name
           JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid = relation.oid
@@ -497,6 +497,12 @@ export async function assessDeploymentRuntimeSchema(
                        )),
                        '[[:space:]]+', ' ', 'g'
                      ) LIKE '%join public.asset_storage_objects storage_row on storage_row.storage_key = matched.storage_match[1]%'
+                 AND pg_get_functiondef(
+                       to_regprocedure('public.resolve_durable_asset_ids(jsonb)')
+                     ) LIKE '%?#<>(){},;%'
+                 AND pg_get_functiondef(
+                       to_regprocedure('public.resolve_durable_storage_keys(jsonb)')
+                     ) LIKE '%?#<>(){},;%'
                  AND EXISTS (
                   SELECT 1
                     FROM unnest(COALESCE(
@@ -537,6 +543,18 @@ export async function assessDeploymentRuntimeSchema(
                       ))),
                       '[[:space:]]+', ' ', 'g'
                     ) LIKE '%select image.project_id, image.id, to_jsonb(image)%'
+                AND regexp_replace(
+                      lower(pg_get_functiondef(to_regprocedure(
+                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                      ))),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%from public.asset_storage_objects storage_row%'
+                AND regexp_replace(
+                      lower(pg_get_functiondef(to_regprocedure(
+                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                      ))),
+                      '[[:space:]]+', ' ', 'g'
+                    ) LIKE '%project-purge-preserved-direct:%'
                 AND regexp_replace(
                       lower(pg_get_functiondef(to_regprocedure(
                         'public.resolve_durable_asset_ids(jsonb)'

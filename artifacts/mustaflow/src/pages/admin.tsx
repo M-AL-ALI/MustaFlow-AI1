@@ -109,7 +109,7 @@ export default function AdminPage() {
   const grantRoleMutation = useGrantAdminRole();
   const revokeRoleMutation = useRevokeAdminRole();
 
-  const [roleUserId, setRoleUserId] = useState("");
+  const [roleEmail, setRoleEmail] = useState("");
   const [roleValue, setRoleValue] = useState<"owner" | "operator" | "support" | "analyst">(
     "operator",
   );
@@ -172,18 +172,18 @@ export default function AdminPage() {
   }
 
   async function handleGrantRole() {
-    if (!roleUserId.trim()) {
+    if (!roleEmail.trim()) {
       setRoleError("User ID is required.");
       return;
     }
     setRoleError(null);
     setRoleSuccess(null);
     grantRoleMutation.mutate(
-      { data: { userId: roleUserId.trim(), role: roleValue } },
+      { data: { email: roleEmail.trim().toLowerCase(), role: roleValue } },
       {
         onSuccess: () => {
-          setRoleSuccess(`Role "${roleValue}" granted to ${roleUserId.trim()}`);
-          setRoleUserId("");
+          setRoleSuccess(`Role "${roleValue}" granted to ${roleEmail.trim()}`);
+          setRoleEmail("");
           void queryClient.invalidateQueries({ queryKey: getListAdminRolesQueryKey() });
         },
         onError: (err) => {
@@ -483,10 +483,11 @@ export default function AdminPage() {
             </p>
             <div className="flex gap-2 flex-wrap">
               <input
-                type="text"
-                value={roleUserId}
-                onChange={(e) => setRoleUserId(e.target.value)}
-                placeholder="Clerk user ID (e.g. user_abc123)"
+                value={roleEmail}
+                onChange={(e) => setRoleEmail(e.target.value)}
+                type="email"
+                autoComplete="email"
+                placeholder="Staff member email address"
                 className="flex-1 min-w-0 px-3 py-2 rounded-md border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <select
@@ -503,7 +504,7 @@ export default function AdminPage() {
               </select>
               <button
                 onClick={() => void handleGrantRole()}
-                disabled={grantRoleMutation.isPending || !roleUserId.trim()}
+                disabled={grantRoleMutation.isPending || !roleEmail.trim()}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 <UserPlus className="h-3.5 w-3.5" />

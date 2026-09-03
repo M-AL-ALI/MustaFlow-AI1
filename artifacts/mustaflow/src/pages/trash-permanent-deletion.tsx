@@ -1,3 +1,4 @@
+import { flushSync } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isReverificationCancelledError } from "@clerk/react/errors";
 import { useReverification } from "@clerk/react";
@@ -560,6 +561,8 @@ export function ProjectPermanentDeletionControl({
     setSubmitting(true);
     setFailure(null);
     try {
+      // Clerk renders outside this Radix dialog, so release its focus trap first.
+      flushSync(() => setOpen(false));
       const body = await requestPermanentDeletion(project.name, idempotencyKey);
       const accepted = parseAcceptedDeletion(body);
       if (!accepted) {
@@ -590,6 +593,7 @@ export function ProjectPermanentDeletionControl({
           : "We could not confirm whether permanent deletion started. Try again to check the same request safely.",
       );
     } finally {
+      setOpen(true);
       requestLock.current = false;
       setSubmitting(false);
     }

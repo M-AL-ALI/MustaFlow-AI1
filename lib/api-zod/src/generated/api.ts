@@ -7346,13 +7346,15 @@ export const ListAdminRolesResponse = zod.object({
 
 
 /**
- * @summary Grant or update a role for a user
+ * @summary Grant or update a staff role by exact account email
  */
+export const grantAdminRoleBodyEmailMin = 3;
+export const grantAdminRoleBodyEmailMax = 320;
 
 
 
 export const GrantAdminRoleBody = zod.object({
-  "userId": zod.string().min(1),
+  "email": zod.string().email().min(grantAdminRoleBodyEmailMin).max(grantAdminRoleBodyEmailMax),
   "role": zod.enum(['owner', 'operator', 'support', 'analyst'])
 })
 

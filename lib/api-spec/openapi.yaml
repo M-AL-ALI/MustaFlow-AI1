@@ -6359,7 +6359,7 @@ paths:
     post:
       operationId: grantAdminRole
       tags: [admin]
-      summary: Grant or update a role for a user
+      summary: Grant or update a staff role by exact account email
       requestBody:
         required: true
         content:
@@ -11113,9 +11113,9 @@ components:
 
     AdminRoleInput:
       type: object
-      required: [userId, role]
+      required: [email, role]
       properties:
-        userId: { type: string, minLength: 1 }
+        email: { type: string, format: email, minLength: 3, maxLength: 320 }
         role:
           type: string
           enum: [owner, operator, support, analyst]

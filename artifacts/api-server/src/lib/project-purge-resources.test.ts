@@ -67,7 +67,15 @@ function inventory(
   };
 }
 
-function assetClaimClient(shared = false, state = "ready", aliases: readonly string[] = []) {
+function assetClaimClient(
+  shared = false,
+  state = "ready",
+  aliases: readonly string[] = [],
+  options: {
+    storageKeys?: readonly string[];
+    rawSharedKeys?: readonly string[];
+  } = {},
+) {
   const statements: Array<{ sql: string; values: readonly unknown[] }> = [];
   const query = vi.fn(async (statement: string, values: readonly unknown[] = []) => {
     const sql = statement.replace(/\s+/gu, " ").trim();
@@ -75,13 +83,23 @@ function assetClaimClient(shared = false, state = "ready", aliases: readonly str
     if (sql.startsWith("SELECT state FROM assets")) {
       return { rows: [{ state }], rowCount: 1 };
     }
+    if (sql.startsWith("SELECT storage_key FROM asset_storage_objects")) {
+      const rows = (options.storageKeys ?? []).map((storage_key) => ({ storage_key }));
+      return { rows, rowCount: rows.length };
+    }
     if (sql.startsWith("SELECT '/api/images/'")) {
       return { rows: aliases.map((alias) => ({ alias })), rowCount: aliases.length };
     }
     if (sql.includes("public.durable_asset_reference_exists")) {
       return { rows: [{ shared }], rowCount: 1 };
     }
-    if (sql.endsWith(") AS shared")) return { rows: [{ shared }], rowCount: 1 };
+    if (sql.endsWith(") AS shared")) {
+      const storageKey = String(values[1] ?? "");
+      return {
+        rows: [{ shared: shared || (options.rawSharedKeys ?? []).includes(storageKey) }],
+        rowCount: 1,
+      };
+    }
     if (sql.startsWith("SELECT 1 FROM durable_asset_deletion_claims")) {
       return { rows: [], rowCount: 0 };
     }
@@ -415,6 +433,85 @@ describe("project purge resource safety", () => {
       false,
     );
     expect(mocks.deleteAssetObject).not.toHaveBeenCalled();
+  });
+
+  it("locks and preserves every object when only a secondary R2 object is referenced", async () => {
+    const fullKey = "assets/owner/image/00000000-0000-4000-8000-000000000051/full.webp";
+    const thumbnailKey = "assets/owner/image/00000000-0000-4000-8000-000000000051/thumb.webp";
+    const options = {
+      storageKeys: [fullKey, thumbnailKey],
+      rawSharedKeys: [thumbnailKey],
+    };
+    const fullClaim = assetClaimClient(false, "ready", [], options);
+    const thumbnailClaim = assetClaimClient(false, "ready", [], options);
+    mocks.poolConnect
+      .mockReset()
+      .mockResolvedValueOnce(fullClaim)
+      .mockResolvedValueOnce(thumbnailClaim);
+
+    await expect(
+      releaseProjectAssetStorage(
+        inventory({
+          assetTargets: [
+            {
+              assetId: 51,
+              ownerUserId: "owner-user",
+              shared: false,
+              storageBackend: "r2",
+              storageKey: fullKey,
+              sizeBytes: 20,
+            },
+            {
+              assetId: 51,
+              ownerUserId: "owner-user",
+              shared: false,
+              storageBackend: "r2",
+              storageKey: thumbnailKey,
+              sizeBytes: 5,
+            },
+          ],
+        }),
+      ),
+    ).resolves.toMatchObject({ deletedObjects: 0, detachedObjects: 2, complete: true });
+    expect(mocks.deleteAssetObject).not.toHaveBeenCalled();
+    for (const claim of [fullClaim, thumbnailClaim]) {
+      const locks = claim.statements
+        .filter((entry) => entry.sql.includes("pg_advisory_xact_lock"))
+        .map((entry) => entry.values[0]);
+      expect(locks).toEqual([fullKey, thumbnailKey]);
+      const checks = claim.statements
+        .filter(
+          (entry) =>
+            entry.sql.endsWith(") AS shared") &&
+            !entry.sql.includes("public.durable_asset_reference_exists"),
+        )
+        .map((entry) => entry.values[1]);
+      expect(checks).toEqual([fullKey, thumbnailKey]);
+      const marker = claim.statements.find((entry) =>
+        entry.sql.startsWith("INSERT INTO asset_usage"),
+      );
+      expect(marker?.sql).toContain("'project-purge-preserved-direct:' || $2::text");
+      expect(marker?.values).toEqual([51, 51]);
+    }
+  });
+
+  it("keeps purge preservation markers retry-stable, temporary, and delimiter-safe", () => {
+    const source = readFileSync(new URL("./project-purge-resources.ts", import.meta.url), "utf8");
+    expect(source).toContain(
+      "usage_row.consumer IS DISTINCT FROM\n                     'project-purge-preserved-direct:' || $1::text",
+    );
+    expect(source).toContain("OR consumer='project-purge-preserved-direct:' || $1::text");
+
+    const migration = readFileSync(new URL("./startup-migrations.ts", import.meta.url), "utf8");
+    const escapedBackslash = "\\".repeat(4);
+    expect(migration.split(`${escapedBackslash}[:space:]`)).toHaveLength(3);
+    expect(migration).toContain("?#<>(){},;]+)");
+    expect(migration).toContain("FROM candidate_keys candidate_key");
+    expect(migration).toContain("'project-purge-preserved-direct:' || excluded_project_id::text");
+    expect(migration).toContain(
+      "SET consumer='project-purge-preserved-direct:' || asset_row.project_id::text",
+    );
+    expect(migration).toContain("legacy_usage.consumer='project-purge-preserved-direct'");
   });
 
   it("canonicalizes every surviving legacy alias before source metadata can disappear", async () => {
