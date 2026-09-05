@@ -13,6 +13,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { ensureProductionDatabaseAdmissionSchema } from "./production-database-admission-schema";
 import { logger } from "./logger";
 import { encryptionService, isEncryptedValue, type EncryptionService } from "./encryption";
 import { assessDeploymentRuntimeSchema } from "./deployment-runtime-schema";
@@ -729,6 +730,115 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         deleted_at TIMESTAMPTZ
       )
     `);
+    // New writers stamp provenance. Historical rows are backfilled only when
+    // an exact NabuFlow source relation proves their product namespace.
+    await client.query(`ALTER TABLE assets ADD COLUMN IF NOT EXISTS product_scope TEXT`);
+    await client.query(`ALTER TABLE generated_images ADD COLUMN IF NOT EXISTS product_scope TEXT`);
+    await client.query(`ALTER TABLE ora_assets ADD COLUMN IF NOT EXISTS asset_id INTEGER`);
+    await client.query(`ALTER TABLE assets DROP CONSTRAINT IF EXISTS assets_product_scope_check`);
+    await client.query(`ALTER TABLE assets ADD CONSTRAINT assets_product_scope_check
+      CHECK (product_scope IN ('nabuflow','ora'))`);
+    await client.query(
+      `ALTER TABLE generated_images DROP CONSTRAINT IF EXISTS generated_images_product_scope_check`,
+    );
+    await client.query(`ALTER TABLE generated_images ADD CONSTRAINT generated_images_product_scope_check
+      CHECK (product_scope IN ('nabuflow','ora'))`);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION asset_has_verified_nabuflow_provenance(
+        candidate_asset_id INTEGER
+      ) RETURNS BOOLEAN AS $$
+        SELECT EXISTS (
+          SELECT 1
+            FROM public.assets candidate
+           WHERE candidate.id = candidate_asset_id
+             AND (
+               EXISTS (
+                 SELECT 1
+                   FROM public.project_uploads upload
+                   JOIN public.projects project ON project.id = upload.project_id
+                  WHERE candidate.source = 'legacy-project-upload'
+                    AND candidate.storage_backend = 'legacy-object'
+                    AND candidate.project_id = upload.project_id
+                    AND candidate.storage_key = upload.object_path
+                    AND candidate.owner_user_id = project.owner_id
+                    AND NOT EXISTS (
+                      SELECT 1
+                        FROM public.project_uploads conflicting_upload
+                        JOIN public.projects conflicting_project
+                          ON conflicting_project.id = conflicting_upload.project_id
+                       WHERE conflicting_upload.object_path = candidate.storage_key
+                         AND conflicting_project.owner_id IS DISTINCT FROM candidate.owner_user_id
+                    )
+               )
+               OR EXISTS (
+                 SELECT 1
+                   FROM public.generated_images image
+                  WHERE image.product_scope = 'nabuflow'
+                    AND image.user_id = candidate.owner_user_id
+                    AND image.project_id IS NOT DISTINCT FROM candidate.project_id
+                    AND image.source_type = candidate.source
+                    AND COALESCE(image.storage_key, 'legacy-generated/' || image.id::text) =
+                        candidate.storage_key
+                    AND (image.asset_id IS NULL OR image.asset_id = candidate.id)
+               )
+             )
+        )
+      $$ LANGUAGE SQL STABLE STRICT SECURITY INVOKER
+         SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION generated_image_has_verified_nabuflow_provenance(
+        candidate_image_id INTEGER
+      ) RETURNS BOOLEAN AS $$
+        SELECT EXISTS (
+          SELECT 1
+            FROM public.generated_images image
+            LEFT JOIN public.assets asset ON asset.id = image.asset_id
+           WHERE image.id = candidate_image_id
+             AND asset.id IS NOT NULL
+             AND asset.product_scope = 'nabuflow'
+             AND asset.owner_user_id = image.user_id
+             AND asset.project_id IS NOT DISTINCT FROM image.project_id
+        )
+      $$ LANGUAGE SQL STABLE STRICT SECURITY INVOKER
+         SET search_path = pg_catalog, public
+    `);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION prevent_asset_product_scope_change()
+      RETURNS TRIGGER AS $$
+      DECLARE
+        verified_nabuflow_transition BOOLEAN := FALSE;
+      BEGIN
+        IF TG_OP='UPDATE' AND OLD.product_scope IS DISTINCT FROM NEW.product_scope THEN
+          IF OLD.product_scope IS NULL
+             AND NEW.product_scope = 'nabuflow'
+             AND (to_jsonb(NEW) - 'product_scope') =
+                 (to_jsonb(OLD) - 'product_scope') THEN
+            verified_nabuflow_transition := CASE
+              WHEN TG_TABLE_NAME = 'assets' THEN
+                public.asset_has_verified_nabuflow_provenance(NEW.id)
+              WHEN TG_TABLE_NAME = 'generated_images' THEN
+                public.generated_image_has_verified_nabuflow_provenance(NEW.id)
+              ELSE FALSE
+            END;
+          END IF;
+          IF NOT verified_nabuflow_transition THEN
+            RAISE EXCEPTION 'asset_product_scope_immutable' USING ERRCODE='55000';
+          END IF;
+        END IF;
+        IF NEW.product_scope='ora' AND NEW.project_id IS NOT NULL THEN
+          RAISE EXCEPTION 'asset_product_scope_namespace_mismatch' USING ERRCODE='42501';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public
+    `);
+    for (const table of ["assets", "generated_images"]) {
+      await client.query(`DROP TRIGGER IF EXISTS ${table}_product_scope_guard ON ${table}`);
+      await client.query(`CREATE TRIGGER ${table}_product_scope_guard
+        BEFORE INSERT OR UPDATE OF product_scope, project_id ON ${table}
+        FOR EACH ROW EXECUTE FUNCTION prevent_asset_product_scope_change()`);
+    }
     await client.query(`ALTER TABLE assets ADD COLUMN IF NOT EXISTS actor_user_id TEXT`);
     await client.query(`UPDATE assets SET actor_user_id=owner_user_id WHERE actor_user_id IS NULL`);
     await client.query(`ALTER TABLE assets ALTER COLUMN actor_user_id SET NOT NULL`);
@@ -769,6 +879,8 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         role TEXT NOT NULL,
         size_bytes BIGINT NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
         size_measured_at TIMESTAMPTZ,
+        provider_generation TEXT,
+        provider_checksum TEXT,
         state TEXT NOT NULL DEFAULT 'reserved'
           CHECK (state IN ('reserved', 'uploading', 'ready', 'deleting', 'deleted')),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -779,6 +891,11 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     await client.query(`
       ALTER TABLE asset_storage_objects
         ADD COLUMN IF NOT EXISTS size_measured_at TIMESTAMPTZ
+    `);
+    await client.query(`
+      ALTER TABLE asset_storage_objects
+        ADD COLUMN IF NOT EXISTS provider_generation TEXT,
+        ADD COLUMN IF NOT EXISTS provider_checksum TEXT
     `);
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS asset_storage_objects_key_uq
@@ -822,6 +939,32 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     await client.query(
       `CREATE INDEX IF NOT EXISTS asset_usage_project_idx ON asset_usage(project_id)`,
     );
+    await client.query(
+      `ALTER TABLE asset_usage DROP CONSTRAINT IF EXISTS asset_usage_explicit_use_shape_check`,
+    );
+    await client.query(`ALTER TABLE asset_usage ADD CONSTRAINT asset_usage_explicit_use_shape_check CHECK (
+      consumer <> 'explicit-project-use:v1' OR
+      (project_id IS NOT NULL AND artifact_id IS NULL AND version_id IS NULL AND file_path IS NULL)
+    )`);
+    await client.query(`
+      CREATE OR REPLACE FUNCTION require_explicit_asset_use_scope()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.consumer='explicit-project-use:v1' THEN
+          PERFORM 1 FROM assets WHERE id=NEW.asset_id AND state='ready'
+            AND product_scope='nabuflow' FOR SHARE;
+          IF NOT FOUND THEN
+            RAISE EXCEPTION 'asset_reference_forbidden' USING ERRCODE='42501';
+          END IF;
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public
+    `);
+    await client.query(`DROP TRIGGER IF EXISTS asset_usage_explicit_scope_guard ON asset_usage`);
+    await client.query(`CREATE TRIGGER asset_usage_explicit_scope_guard
+      BEFORE INSERT OR UPDATE OF consumer, asset_id, project_id ON asset_usage
+      FOR EACH ROW EXECUTE FUNCTION require_explicit_asset_use_scope()`);
     await client.query(`
       DO $$
       DECLARE
@@ -986,7 +1129,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           SELECT (match)[1]::bigint AS asset_id
             FROM regexp_matches(
               row_json::text,
-              '/api/assets/([1-9][0-9]{0,9})/content([^A-Za-z0-9_/-]|$)',
+              '/api/(?:assets|ora/canonical-assets)/([1-9][0-9]{0,9})/content([^A-Za-z0-9_/-]|$)',
               'g'
             ) AS match
           UNION
@@ -1036,6 +1179,10 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       $$ LANGUAGE SQL IMMUTABLE STRICT
          SET search_path = pg_catalog, public
     `);
+    // SQL literal escaping is shared by both identity and physical-key parsers.
+    // Governed filenames cannot contain quotes; HTML/JS quote delimiters must
+    // never become part of a storage key or escape its deletion claim.
+    const durableStorageKeyToken = "[^\"''\\\\[:space:]?#<>(){},;`]+";
     await client.query(`
       CREATE OR REPLACE FUNCTION resolve_durable_asset_ids(row_json JSONB)
       RETURNS SETOF INTEGER AS $$
@@ -1043,11 +1190,37 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         candidate_id INTEGER;
         route_match TEXT[];
         image_id BIGINT;
-        project_id BIGINT;
-        upload_id BIGINT;
+        route_project_id BIGINT;
+        route_upload_id BIGINT;
+        ora_asset_id BIGINT;
       BEGIN
         FOR candidate_id IN SELECT public.extract_durable_asset_ids(row_json)
         LOOP
+          RETURN NEXT candidate_id;
+        END LOOP;
+
+        FOR route_match IN
+          SELECT match
+            FROM regexp_matches(
+              row_json::text,
+              '/api/ora/assets/([1-9][0-9]{0,9})/download([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        LOOP
+          ora_asset_id := route_match[1]::bigint;
+          IF ora_asset_id > 2147483647 THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+          SELECT ora.asset_id INTO candidate_id
+            FROM public.ora_assets ora
+            JOIN public.assets asset
+              ON asset.id = ora.asset_id
+             AND asset.owner_user_id = ora.user_id
+           WHERE ora.id = ora_asset_id::integer
+             AND ora.deleted_at IS NULL;
+          IF candidate_id IS NULL THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
           RETURN NEXT candidate_id;
         END LOOP;
 
@@ -1081,9 +1254,10 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
               'g'
             ) AS match
         LOOP
-          project_id := route_match[1]::bigint;
-          upload_id := route_match[2]::bigint;
-          IF project_id > 2147483647 OR upload_id > 2147483647 THEN
+          route_project_id := route_match[1]::bigint;
+          route_upload_id := route_match[2]::bigint;
+          IF route_project_id NOT BETWEEN 1 AND 2147483647
+             OR route_upload_id NOT BETWEEN 1 AND 2147483647 THEN
             RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
           END IF;
           SELECT asset.id INTO candidate_id
@@ -1092,8 +1266,42 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
               ON asset.project_id = upload.project_id
              AND asset.source = 'legacy-project-upload'
              AND asset.storage_key = upload.object_path
-           WHERE upload.project_id = project_id::integer
-             AND upload.id = upload_id::integer;
+           WHERE upload.project_id = route_project_id::integer
+             AND upload.id = route_upload_id::integer;
+          IF candidate_id IS NULL THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+          RETURN NEXT candidate_id;
+        END LOOP;
+
+        FOR route_match IN
+          SELECT match
+            FROM regexp_matches(
+              row_json::text,
+              '(/objects/uploads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        LOOP
+          SELECT matched_asset.id INTO candidate_id
+            FROM public.assets matched_asset
+            LEFT JOIN public.asset_storage_objects storage_row
+              ON storage_row.asset_id = matched_asset.id
+             AND storage_row.storage_backend = 'legacy-object'
+             AND storage_row.storage_key = route_match[1]
+             AND storage_row.state <> 'deleted'
+           WHERE matched_asset.source = 'legacy-project-upload'
+             AND matched_asset.state <> 'deleted'
+             AND (
+               (
+                 matched_asset.storage_backend = 'legacy-object'
+                 AND matched_asset.storage_key = route_match[1]
+               )
+               OR storage_row.id IS NOT NULL
+             )
+           ORDER BY
+             CASE WHEN matched_asset.storage_key = route_match[1] THEN 0 ELSE 1 END,
+             matched_asset.id
+           LIMIT 1;
           IF candidate_id IS NULL THEN
             RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
           END IF;
@@ -1109,7 +1317,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           SELECT DISTINCT storage_row.asset_id
             FROM regexp_matches(
               row_json::text,
-              '(assets/[^"[:space:]]+/[^"[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[^"\\\\[:space:]?#<>(){},;]+)',
+              '(assets/[^"[:space:]]+/[^"[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/${durableStorageKeyToken})',
               'g'
             ) AS matched(storage_match)
             JOIN public.asset_storage_objects storage_row
@@ -1129,7 +1337,14 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           SELECT (match)[1] AS storage_key
             FROM regexp_matches(
               row_json::text,
-              '((?:assets|generated-images|uploaded-images|edited-images|db-snapshots|legacy-generated)/[^"\\\\[:space:]?#<>(){},;]+)',
+              '((?:assets|generated-images|uploaded-images|edited-images|db-snapshots|legacy-generated)/${durableStorageKeyToken})',
+              'g'
+            ) AS match
+          UNION
+          SELECT (match)[1] AS storage_key
+            FROM regexp_matches(
+              row_json::text,
+              '(/objects/uploads/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})([^A-Za-z0-9_/-]|$)',
               'g'
             ) AS match
         ),
@@ -1140,6 +1355,55 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
               '/api/images/([1-9][0-9]{0,9})/file([^A-Za-z0-9_/-]|$)',
               'g'
             ) AS match
+        ),
+        ora_routes AS (
+          SELECT (match)[1]::bigint AS ora_asset_id
+            FROM regexp_matches(
+              row_json::text,
+              '/api/ora/assets/([1-9][0-9]{0,9})/download([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        ),
+        upload_routes AS (
+          SELECT (match)[1]::bigint AS project_id, (match)[2]::bigint AS upload_id
+            FROM regexp_matches(
+              row_json::text,
+              '/api/projects/([1-9][0-9]{0,9})/uploads/([1-9][0-9]{0,9})/content([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        ),
+        ora_keys AS (
+          SELECT asset.storage_key
+            FROM ora_routes route
+            JOIN public.ora_assets ora
+              ON ora.id::bigint = route.ora_asset_id
+             AND ora.deleted_at IS NULL
+            JOIN public.assets asset
+              ON asset.id = ora.asset_id
+             AND asset.owner_user_id = ora.user_id
+           WHERE route.ora_asset_id BETWEEN 1 AND 2147483647
+          UNION
+          SELECT storage_row.storage_key
+            FROM ora_routes route
+            JOIN public.ora_assets ora
+              ON ora.id::bigint = route.ora_asset_id
+             AND ora.deleted_at IS NULL
+            JOIN public.asset_storage_objects storage_row
+              ON storage_row.asset_id = ora.asset_id
+             AND storage_row.state <> 'deleted'
+           WHERE route.ora_asset_id BETWEEN 1 AND 2147483647
+        ),
+        upload_keys AS (
+          -- Alias expansion precedes the ordered physical-key locks. The
+          -- trigger rechecks this mapping after every lock wait.
+          SELECT upload.object_path AS storage_key
+            FROM upload_routes route
+            JOIN public.project_uploads upload
+              ON upload.project_id=route.project_id
+             AND upload.id=route.upload_id
+           WHERE route.project_id BETWEEN 1 AND 2147483647
+             AND route.upload_id BETWEEN 1 AND 2147483647
+             AND upload.object_path IS NOT NULL
         ),
         image_keys AS (
           SELECT image.storage_key
@@ -1161,6 +1425,10 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             SELECT storage_key FROM raw_keys
             UNION
             SELECT storage_key FROM image_keys
+            UNION
+            SELECT storage_key FROM ora_keys
+            UNION
+            SELECT storage_key FROM upload_keys
           ) candidate
          WHERE candidate.storage_key IS NOT NULL
            AND length(candidate.storage_key) > 0
@@ -1168,17 +1436,26 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
          SET search_path = pg_catalog, public
     `);
     await client.query(`
-      CREATE OR REPLACE FUNCTION durable_asset_reference_exists(
+      CREATE OR REPLACE FUNCTION durable_asset_reference_exists_excluding_upload(
         candidate_asset_id INTEGER,
         excluded_project_id INTEGER,
-        excluded_generated_image_id INTEGER
+        excluded_generated_image_id INTEGER,
+        excluded_project_upload_id INTEGER
       ) RETURNS BOOLEAN AS $$
         WITH candidate AS (
-          SELECT id, owner_user_id, project_id, storage_key, version_id, task_id, message_id
+          SELECT id, owner_user_id, project_id, storage_key, version_id, task_id, message_id, source
             FROM public.assets
            WHERE id = candidate_asset_id
         ),
-        candidate_keys AS (
+        -- Alias keys establish retention only, never provider ownership or
+        -- product visibility. Keep unknown/other-product/deleted alias metadata
+        -- in this candidate closure while surviving rows still reference bytes.
+        candidate_image_aliases AS (
+          SELECT image.storage_key, image.file_url, image.thumbnail_url
+            FROM public.generated_images image
+           WHERE image.asset_id = candidate_asset_id
+        ),
+        candidate_raw_keys AS (
           SELECT storage_key
             FROM candidate
            WHERE storage_key IS NOT NULL
@@ -1187,15 +1464,47 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             FROM public.asset_storage_objects storage_row
            WHERE storage_row.asset_id = candidate_asset_id
              AND storage_row.state <> 'deleted'
+          UNION
+          SELECT image_alias.storage_key
+            FROM candidate_image_aliases image_alias
+           WHERE image_alias.storage_key IS NOT NULL
+          UNION
+          SELECT resolved.storage_key
+            FROM candidate_image_aliases image_alias
+            CROSS JOIN LATERAL public.resolve_durable_storage_keys(
+              jsonb_build_object(
+                'storage_key', image_alias.storage_key,
+                'file_url', image_alias.file_url,
+                'thumbnail_url', image_alias.thumbnail_url
+              )
+            ) AS resolved(storage_key)
+        ),
+        candidate_keys AS (
+          SELECT raw_key.storage_key
+            FROM candidate_raw_keys raw_key
+           WHERE raw_key.storage_key IS NOT NULL
+             AND length(raw_key.storage_key) > 0
+          UNION
+          SELECT regexp_replace(raw_key.storage_key, '/full\\.webp$', '/thumb.webp')
+            FROM candidate_raw_keys raw_key
+           WHERE raw_key.storage_key LIKE '%/full.webp'
         ),
         legacy_aliases AS (
           SELECT '/api/images/' || image.id::text || '/file' AS alias
             FROM public.generated_images image
            WHERE image.asset_id = candidate_asset_id
+             AND image.deleted_at IS NULL
           UNION
           SELECT '/api/projects/' || upload.project_id::text || '/uploads/' || upload.id::text || '/content'
             FROM public.project_uploads upload
             JOIN candidate ON upload.object_path = candidate.storage_key
+          UNION
+          SELECT '/api/ora/assets/' || ora.id::text || '/download'
+            FROM public.ora_assets ora
+           WHERE ora.asset_id = candidate_asset_id
+           -- A concurrent delete may soft-delete the library row before the
+           -- authoritative post-lock reference check. Preserve the alias map so
+           -- surviving durable rows still retain the underlying storage object.
         ),
         durable_rows(project_id, generated_image_id, row_json) AS (
           SELECT message.project_id, NULL::integer, to_jsonb(message) FROM public.chat_messages message
@@ -1223,6 +1532,9 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           SELECT image.project_id, image.id, to_jsonb(image)
             FROM public.generated_images image
            WHERE image.deleted_at IS NULL
+          UNION ALL
+          SELECT ticket.project_id, NULL::integer, to_jsonb(ticket)
+            FROM public.support_tickets ticket
         )
         SELECT
           EXISTS (
@@ -1262,7 +1574,17 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             SELECT 1
               FROM public.project_uploads upload
               JOIN candidate_keys ON upload.object_path = candidate_keys.storage_key
-             WHERE excluded_project_id IS NULL OR upload.project_id IS DISTINCT FROM excluded_project_id
+             WHERE (excluded_project_id IS NULL OR upload.project_id IS DISTINCT FROM excluded_project_id)
+               AND (
+                 excluded_project_upload_id IS NULL
+                 OR upload.id IS DISTINCT FROM excluded_project_upload_id
+                 OR NOT EXISTS (
+                   SELECT 1 FROM candidate
+                    WHERE candidate.source = 'legacy-project-upload'
+                      AND candidate.project_id = upload.project_id
+                      AND candidate.storage_key = upload.object_path
+                 )
+               )
           )
           OR EXISTS (
             SELECT 1
@@ -1306,6 +1628,21 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
          SET search_path = pg_catalog, public
     `);
     await client.query(`
+      -- Keep the established three-argument contract without a defaulted
+      -- overload. Only the upload deletion boundary may exclude one mapped row.
+      CREATE OR REPLACE FUNCTION durable_asset_reference_exists(
+        candidate_asset_id INTEGER,
+        excluded_project_id INTEGER,
+        excluded_generated_image_id INTEGER
+      ) RETURNS BOOLEAN AS $$
+        SELECT public.durable_asset_reference_exists_excluding_upload(
+          candidate_asset_id, excluded_project_id, excluded_generated_image_id, NULL
+        )
+      $$ LANGUAGE SQL STABLE SECURITY INVOKER
+         SET search_path = pg_catalog, public
+    `);
+
+    await client.query(`
       UPDATE public.asset_usage legacy_usage
          SET consumer='project-purge-preserved-direct:' || asset_row.project_id::text
         FROM public.assets asset_row
@@ -1340,9 +1677,23 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         asset_kind TEXT;
         asset_context JSONB;
         existing_reference BOOLEAN;
+        asset_product_scope TEXT;
+        reference_product_scope TEXT;
+        locked_asset_ids INTEGER[] := ARRAY[]::integer[];
+        locked_storage_keys TEXT[] := ARRAY[]::text[];
+        upload_project_id BIGINT;
+        upload_id BIGINT;
+        ora_asset_id BIGINT;
+        rechecked_asset_id INTEGER;
+        rechecked_storage_key TEXT;
       BEGIN
         row_json := to_jsonb(NEW);
         row_text := row_json::text;
+        reference_product_scope := CASE
+          WHEN TG_TABLE_NAME='generated_images' THEN row_json ->> 'product_scope'
+          WHEN TG_TABLE_NAME='support_tickets' THEN 'ora'
+          ELSE 'nabuflow'
+        END;
         IF TG_TABLE_NAME = 'generated_images' AND TG_OP = 'UPDATE' THEN
           IF NULLIF(to_jsonb(OLD) ->> 'deleted_at', '') IS NULL
              AND NULLIF(row_json ->> 'deleted_at', '') IS NOT NULL
@@ -1367,6 +1718,8 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         reference_project_id := CASE
           WHEN TG_TABLE_NAME IN ('canvas_variant_library', 'gallery_templates')
             THEN NULLIF(row_json ->> 'source_project_id', '')::integer
+          WHEN TG_TABLE_NAME = 'support_tickets'
+            THEN NULL
           WHEN TG_TABLE_NAME = 'task_events'
             THEN (SELECT task.project_id FROM public.agent_tasks task
                    WHERE task.id=NULLIF(row_json ->> 'task_id', '')::integer)
@@ -1378,11 +1731,12 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             FROM public.resolve_durable_asset_ids(row_json) resolved(asset_id)
            ORDER BY resolved.asset_id
         LOOP
-          SELECT state, project_id, owner_user_id, kind, context
-            INTO current_state, asset_project_id, asset_owner_user_id, asset_kind, asset_context
+          SELECT state, project_id, owner_user_id, kind, context, product_scope
+            INTO current_state, asset_project_id, asset_owner_user_id, asset_kind, asset_context, asset_product_scope
             FROM public.assets
            WHERE id = candidate_id
            FOR SHARE;
+          locked_asset_ids := array_append(locked_asset_ids, candidate_id);
           IF current_state IS DISTINCT FROM 'ready'
              AND NOT (
                TG_TABLE_NAME = 'generated_images'
@@ -1419,7 +1773,18 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           IF TG_OP = 'UPDATE' THEN
             existing_reference := candidate_id IN (
               SELECT public.resolve_durable_asset_ids(to_jsonb(OLD))
-            );
+            ) AND (row_json ->> 'project_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'project_id')
+              AND (row_json ->> 'source_project_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'source_project_id')
+              AND (row_json ->> 'task_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'task_id')
+              AND (row_json ->> 'user_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'user_id')
+              AND (row_json ->> 'author_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'author_id');
+          END IF;
+          IF TG_TABLE_NAME = 'support_tickets' THEN
+            existing_reference := FALSE;
+          END IF;
+          IF NOT existing_reference AND
+             (asset_product_scope IS NULL OR asset_product_scope IS DISTINCT FROM reference_product_scope) THEN
+            RAISE EXCEPTION 'asset_reference_forbidden' USING ERRCODE='42501';
           END IF;
           IF reference_project_id IS NOT NULL
              AND asset_project_id IS DISTINCT FROM reference_project_id
@@ -1428,6 +1793,10 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
                SELECT 1 FROM public.asset_usage usage_row
                 WHERE usage_row.asset_id=candidate_id
                   AND usage_row.project_id=reference_project_id
+                  AND usage_row.consumer='explicit-project-use:v1'
+                  AND usage_row.artifact_id IS NULL
+                  AND usage_row.version_id IS NULL
+                  AND usage_row.file_path IS NULL
              ) THEN
             RAISE EXCEPTION 'asset_reference_forbidden' USING ERRCODE = '42501';
           END IF;
@@ -1439,13 +1808,17 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
           END IF;
         END LOOP;
         FOR durable_key IN
-          SELECT DISTINCT resolved.storage_key
-            FROM public.resolve_durable_storage_keys(row_json) resolved(storage_key)
-           ORDER BY resolved.storage_key
+          SELECT deduplicated.storage_key
+            FROM (
+              SELECT DISTINCT resolved.storage_key
+                FROM public.resolve_durable_storage_keys(row_json) resolved(storage_key)
+            ) AS deduplicated
+           ORDER BY deduplicated.storage_key COLLATE "C"
         LOOP
           PERFORM pg_advisory_xact_lock_shared(
             hashtextextended('nabuflow:durable-object:' || durable_key, 0)
           );
+          locked_storage_keys := array_append(locked_storage_keys, durable_key);
           IF EXISTS (
             SELECT 1 FROM public.durable_asset_deletion_claims claim
              WHERE claim.storage_key=durable_key
@@ -1470,6 +1843,66 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
            FOR KEY SHARE;
           IF NOT FOUND THEN
             RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+          END IF;
+        END LOOP;
+        FOR route_match IN
+          SELECT match
+            FROM regexp_matches(
+              row_text,
+              '/api/ora/assets/([1-9][0-9]{0,9})/download([^A-Za-z0-9_/-]|$)',
+              'g'
+            ) AS match
+        LOOP
+          ora_asset_id := route_match[1]::bigint;
+          IF ora_asset_id > 2147483647 THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE='55000';
+          END IF;
+          SELECT asset.id, asset.storage_key
+            INTO rechecked_asset_id, rechecked_storage_key
+            FROM public.ora_assets ora
+            JOIN public.assets asset
+              ON asset.id = ora.asset_id
+             AND asset.owner_user_id = ora.user_id
+             AND asset.product_scope = 'ora'
+           WHERE ora.id = ora_asset_id::integer
+             AND ora.deleted_at IS NULL
+             AND asset.state = 'ready'
+           FOR SHARE OF ora, asset;
+          IF NOT FOUND OR rechecked_asset_id IS NULL OR rechecked_storage_key IS NULL
+             OR NOT (rechecked_asset_id=ANY(locked_asset_ids))
+             OR NOT (rechecked_storage_key=ANY(locked_storage_keys)) THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE='55000';
+          END IF;
+        END LOOP;
+        -- Resolve upload aliases again AFTER all asset/key waits. An old resolver
+        -- result cannot authorize a row whose alias metadata was purged/remapped.
+        FOR route_match IN
+          SELECT match FROM regexp_matches(
+            row_text,
+            '/api/projects/([1-9][0-9]{0,9})/uploads/([1-9][0-9]{0,9})/content([^A-Za-z0-9_/-]|$)',
+            'g'
+          ) AS match
+        LOOP
+          upload_project_id := route_match[1]::bigint;
+          upload_id := route_match[2]::bigint;
+          IF upload_project_id > 2147483647 OR upload_id > 2147483647 THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE='55000';
+          END IF;
+          SELECT asset.id, upload.object_path
+            INTO rechecked_asset_id, rechecked_storage_key
+            FROM public.project_uploads upload
+            JOIN public.assets asset
+              ON asset.project_id=upload.project_id
+             AND asset.source='legacy-project-upload'
+             AND asset.storage_key=upload.object_path
+           WHERE upload.project_id=upload_project_id::integer
+             AND upload.id=upload_id::integer
+             AND asset.state='ready'
+           FOR SHARE OF upload;
+          IF NOT FOUND OR rechecked_asset_id IS NULL OR rechecked_storage_key IS NULL
+             OR NOT (rechecked_asset_id=ANY(locked_asset_ids))
+             OR NOT (rechecked_storage_key=ANY(locked_storage_keys)) THEN
+            RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE='55000';
           END IF;
         END LOOP;
         RETURN NEW;
@@ -1497,7 +1930,8 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             ('task_events', 'task_id, message, data'),
             ('project_activity', 'project_id, metadata'),
             ('visual_edit_changes', 'project_id, before_content, after_content'),
-            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status'),
+            ('support_tickets', 'user_id, project_id, transcript, attachments')
           ) AS guards(table_name, column_list)
         LOOP
           EXECUTE format(
@@ -1518,7 +1952,7 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     `);
     const durableReferenceGuards = await client.query<{ guard_ready: boolean }>(`
       SELECT (
-        (SELECT COUNT(*) = 15
+        (SELECT COUNT(*) = 16
            AND bool_and(NOT trigger_row.tgisinternal)
            AND bool_and(trigger_row.tgenabled = ANY(ARRAY['O', 'A']::"char"[]))
            AND bool_and(trigger_row.tgtype = 23)
@@ -1550,7 +1984,8 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             ('task_events', 'task_id, message, data'),
             ('project_activity', 'project_id, metadata'),
             ('visual_edit_changes', 'project_id, before_content, after_content'),
-            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status'),
+            ('support_tickets', 'user_id, project_id, transcript, attachments')
           ) AS expected(table_name, column_list)
           JOIN pg_catalog.pg_class relation ON relation.relname = expected.table_name
           JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid = relation.oid
@@ -1610,16 +2045,29 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
             ) IS NOT NULL
         AND regexp_replace(
               lower(pg_get_functiondef(to_regprocedure(
-                'public.durable_asset_reference_exists(integer,integer,integer)'
+                'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
               ))),
               '[[:space:]]+', ' ', 'g'
             ) LIKE '%from public.asset_storage_objects storage_row%'
         AND regexp_replace(
               lower(pg_get_functiondef(to_regprocedure(
-                'public.durable_asset_reference_exists(integer,integer,integer)'
+                'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
               ))),
               '[[:space:]]+', ' ', 'g'
             ) LIKE '%project-purge-preserved-direct:%'
+        AND to_regprocedure('public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)') IS NOT NULL
+        AND regexp_replace(
+              lower(pg_get_functiondef(to_regprocedure(
+                'public.durable_asset_reference_exists(integer,integer,integer)'
+              ))),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%select public.durable_asset_reference_exists_excluding_upload( candidate_asset_id, excluded_project_id, excluded_generated_image_id, null )%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(to_regprocedure(
+                'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
+              ))),
+              '[[:space:]]+', ' ', 'g'
+            ) LIKE '%upload.id is distinct from excluded_project_upload_id%candidate.source = ''legacy-project-upload''%candidate.project_id = upload.project_id%candidate.storage_key = upload.object_path%'
       ) AS guard_ready
     `);
     if (durableReferenceGuards.rows[0]?.guard_ready !== true) {
@@ -1631,13 +2079,14 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     // until a governed provider-HEAD migration measures them.
     await client.query(`
       INSERT INTO assets (
-        owner_user_id, actor_user_id, project_id, scope, kind, source, filename, mime_type,
+        owner_user_id, actor_user_id, product_scope, project_id, scope, kind, source, filename, mime_type,
         size_bytes, storage_backend, storage_key, state, scan_state,
         created_at, ready_at, deleted_at
       )
       SELECT
         user_id,
         user_id,
+        product_scope,
         project_id,
         CASE WHEN project_id IS NULL THEN 'account' ELSE 'project' END,
         CASE WHEN source_type = 'uploaded' THEN 'image' ELSE 'generated' END,
@@ -1658,12 +2107,32 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     `);
     await client.query(`
       UPDATE generated_images image
+         SET product_scope = 'nabuflow'
+        FROM assets asset
+       WHERE image.product_scope IS NULL
+         AND image.asset_id = asset.id
+         AND asset.product_scope = 'nabuflow'
+         AND asset.owner_user_id = image.user_id
+         AND asset.project_id IS NOT DISTINCT FROM image.project_id
+    `);
+    await client.query(`
+      UPDATE assets asset
+         SET product_scope = 'nabuflow'
+       WHERE asset.product_scope IS NULL
+         AND public.asset_has_verified_nabuflow_provenance(asset.id)
+    `);
+    await client.query(`
+      UPDATE generated_images image
          SET asset_id = asset.id,
              updated_at = NOW()
         FROM assets asset
        WHERE image.asset_id IS NULL
          AND image.status = 'completed'
-         AND asset.storage_backend <> 'legacy-url'
+         AND image.product_scope IS NOT NULL
+         AND asset.product_scope IS NOT DISTINCT FROM image.product_scope
+         AND asset.project_id IS NOT DISTINCT FROM image.project_id
+         AND asset.state = 'ready'
+         AND asset.storage_backend = 'r2'
          AND asset.owner_user_id = image.user_id
          AND asset.storage_key = COALESCE(image.storage_key, 'legacy-generated/' || image.id::text)
     `);
@@ -1717,12 +2186,13 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     `);
     await client.query(`
       INSERT INTO assets (
-        owner_user_id, actor_user_id, project_id, scope, kind, source, filename, mime_type,
+        owner_user_id, actor_user_id, product_scope, project_id, scope, kind, source, filename, mime_type,
         size_bytes, storage_backend, storage_key, state, scan_state, text_preview, created_at, ready_at
       )
       SELECT
         p.owner_id,
         COALESCE(u.uploader_id, p.owner_id),
+        'nabuflow',
         u.project_id,
         'project',
         CASE WHEN u.mime_type LIKE 'image/%' THEN 'image' ELSE 'file' END,
@@ -1740,6 +2210,12 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
       FROM project_uploads u
       JOIN projects p ON p.id = u.project_id
       ON CONFLICT (storage_key) DO NOTHING
+    `);
+    await client.query(`
+      UPDATE assets asset
+         SET product_scope = 'nabuflow'
+       WHERE asset.product_scope IS NULL
+         AND public.asset_has_verified_nabuflow_provenance(asset.id)
     `);
     // The legacy upload mirror above can create assets during this very first
     // run.  Re-run the additive physical-object insert after the mirror so no
@@ -2524,17 +3000,75 @@ async function addNotValidForeignKey(
   constraintName: string,
   definition: string,
 ): Promise<void> {
+  // Known Drizzle aliases require structural proof, not a name-only guess.
+  const shape =
+    /^FOREIGN KEY \(([a-z_]+)\) REFERENCES ([a-z_]+)\(([a-z_]+)\) ON DELETE (SET NULL|CASCADE)$/u.exec(
+      definition,
+    );
+  if (!shape || !/^[a-z_]+$/u.test(tableName) || !/^[a-z_]+$/u.test(constraintName)) {
+    throw new Error("startup_foreign_key_definition_unsupported");
+  }
+  const [, columnName, referencedTable, referencedColumn, deleteAction] = shape;
+  const schemaConstraintName = `${tableName}_${columnName}_${referencedTable}_${referencedColumn}_fk`;
   await client.query(`
+    LOCK TABLE public.${tableName} IN ACCESS EXCLUSIVE MODE;
     DO $$
+    DECLARE
+      candidate RECORD;
+      retained_name NAME;
     BEGIN
-      IF NOT EXISTS (
-        SELECT 1
-          FROM pg_constraint
-         WHERE conname = '${constraintName}'
-           AND conrelid = '${tableName}'::regclass
-      ) THEN
-        ALTER TABLE ${tableName}
+      FOR candidate IN
+        SELECT * FROM pg_constraint
+         WHERE conrelid='public.${tableName}'::regclass
+           AND conname IN ('${constraintName}'::name, '${schemaConstraintName}'::name)
+      LOOP
+        IF candidate.contype IS DISTINCT FROM 'f'
+           OR candidate.conkey IS DISTINCT FROM ARRAY[(
+             SELECT attnum FROM pg_attribute
+              WHERE attrelid='public.${tableName}'::regclass
+                AND attname='${columnName}' AND NOT attisdropped
+           )]::smallint[]
+           OR candidate.confrelid IS DISTINCT FROM 'public.${referencedTable}'::regclass
+           OR candidate.confkey IS DISTINCT FROM ARRAY[(
+             SELECT attnum FROM pg_attribute
+              WHERE attrelid='public.${referencedTable}'::regclass
+                AND attname='${referencedColumn}' AND NOT attisdropped
+           )]::smallint[]
+           OR candidate.confdeltype IS DISTINCT FROM '${deleteAction === "CASCADE" ? "c" : "n"}'
+           OR candidate.confupdtype IS DISTINCT FROM 'a'
+           OR candidate.confmatchtype IS DISTINCT FROM 's'
+           OR candidate.confdelsetcols IS NOT NULL
+           OR candidate.condeferrable OR candidate.condeferred
+           OR NOT candidate.conislocal OR candidate.coninhcount <> 0
+           OR candidate.conparentid <> 0 THEN
+          RAISE EXCEPTION 'startup_foreign_key_definition_mismatch' USING ERRCODE='55000';
+        END IF;
+      END LOOP;
+      SELECT conname INTO retained_name FROM pg_constraint
+       WHERE conrelid='public.${tableName}'::regclass
+         AND conname IN ('${constraintName}'::name, '${schemaConstraintName}'::name)
+       ORDER BY convalidated DESC, (conname='${constraintName}'::name) DESC, conname
+       LIMIT 1;
+      IF retained_name IS NULL THEN
+        ALTER TABLE public.${tableName}
           ADD CONSTRAINT ${constraintName} ${definition} NOT VALID;
+      ELSE
+        FOR candidate IN
+          SELECT conname FROM pg_constraint
+           WHERE conrelid='public.${tableName}'::regclass
+             AND conname IN ('${constraintName}'::name, '${schemaConstraintName}'::name)
+             AND conname <> retained_name
+        LOOP
+          EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', '${tableName}', candidate.conname);
+        END LOOP;
+        IF retained_name IS DISTINCT FROM '${constraintName}'::name THEN
+          EXECUTE format(
+            'ALTER TABLE public.%I RENAME CONSTRAINT %I TO %I',
+            '${tableName}',
+            retained_name,
+            '${constraintName}'
+          );
+        END IF;
       END IF;
     END $$
   `);
@@ -3610,6 +4144,46 @@ export async function applyZeroModelControlMigration(client: MigrationClient): P
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function applyPreviewDatabaseAllocationMigration(
+  client: MigrationClient,
+): Promise<void> {
+  await client.query("BEGIN");
+  try {
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS preview_db_allocation JSONB");
+    const proof = await client.query<{ receipt_ready: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' " +
+        "AND table_name='projects' AND column_name='preview_db_allocation' " +
+        "AND data_type='jsonb' AND is_nullable='YES') AS receipt_ready",
+    );
+    if (proof.rows[0]?.receipt_ready !== true) {
+      throw new Error("preview_database_allocation_schema_incomplete");
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function applyProductionDatabaseAdmissionMigration(
+  client: MigrationClient,
+): Promise<void> {
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '30s'");
+    await ensureProductionDatabaseAdmissionSchema(client);
+    await client.query("COMMIT");
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Cleanup failure must not replace the original migration error.
+    }
     throw error;
   }
 }
@@ -8817,6 +9391,24 @@ const MIGRATION_STEPS: MigrationStep[] = [
   },
   {
     name: "migrate-durable-asset-reference-guards-v3",
+    async run(client) {
+      await applyUnifiedAssetRegistryMigration(client);
+    },
+  },
+  {
+    name: "migrate-preview-database-allocation-receipt",
+    async run(client) {
+      await applyPreviewDatabaseAllocationMigration(client);
+    },
+  },
+  {
+    name: "migrate-production-database-admission",
+    async run(client) {
+      await applyProductionDatabaseAdmissionMigration(client);
+    },
+  },
+  {
+    name: "migrate-asset-product-scope-v1",
     async run(client) {
       await applyUnifiedAssetRegistryMigration(client);
     },

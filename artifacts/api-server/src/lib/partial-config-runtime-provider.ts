@@ -22,7 +22,7 @@ import {
  * Fail-closed runtime provider used when a selected provider's configuration is incomplete.
  * Only binding names are stored or emitted. Before this provider is selected, the
  * Cloudflare parser checks a present control token's length as a sanity floor, and
- * both parsers reject malformed complete configuration at startup. Therefore an
+ * the parser rejects malformed complete configuration at startup. Therefore an
  * unauthenticated health caller can distinguish a names-only partial-config 503 from
  * startup rejection; no value, prefix, fragment, or measured length is exposed.
  */

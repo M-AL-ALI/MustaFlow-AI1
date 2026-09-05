@@ -226,7 +226,7 @@ const DEV_FEATURES = [
     icon: Terminal,
     title: "Real terminal shell",
     description:
-      "Full shell access via Fly.io exec WebSocket — run commands, inspect processes, tail logs.",
+      "Run commands, inspect processes, and tail logs in your project's Cloudflare runtime.",
     href: "/projects",
   },
   {

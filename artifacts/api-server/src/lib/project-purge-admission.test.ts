@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   releaseAssets: vi.fn(),
   releaseSnapshots: vi.fn(),
   relationalPurge: vi.fn(),
+  neonRelease: vi.fn(),
 }));
 
 function selectable(result: unknown[]) {
@@ -62,6 +63,21 @@ vi.mock("drizzle-orm", () => {
 });
 
 describe("project purge failure diagnostics", () => {
+  it.each([
+    "project_purge_asset_origin_unresolved",
+    "project_purge_asset_storage_migration_required",
+  ])("keeps %s nonretryable until governed reconciliation", async (causeCode) => {
+    const { stepFailure } = await import("./project-purge");
+    expect(
+      stepFailure("relational", "project_purge_relational_delete_failed", new Error(causeCode)),
+    ).toMatchObject({
+      stage: "relational",
+      code: "project_purge_asset_release_failed",
+      retryable: false,
+      causeCode,
+    });
+  });
+
   it("retains only bounded machine-readable downstream error codes", async () => {
     const { stepFailure } = await import("./project-purge");
 
@@ -149,7 +165,7 @@ vi.mock("./production-database-lifecycle", () => ({
 }));
 vi.mock("./tenant-runtime", () => ({ tenantRuntimeProvider: {} }));
 vi.mock("./neon-project-lifecycle", () => ({
-  releaseNeonProjectsForHardDelete: vi.fn(),
+  releaseNeonProjectsForHardDelete: mocks.neonRelease,
 }));
 vi.mock("./project-purge-notifications", () => ({
   databaseProjectPurgeNotificationStore: { createOrGet: mocks.createNotification },
@@ -168,6 +184,7 @@ import {
   startProjectPurgeLeaseHeartbeat,
   validProjectPurgeIdempotencyKey,
 } from "./project-purge";
+import { previewDatabaseEvidenceMatches } from "./preview-database-allocation";
 
 const dueAt = new Date("2026-10-01T00:00:00.000Z");
 const createdAt = new Date("2026-09-01T00:00:00.000Z");
@@ -624,6 +641,21 @@ describe("owner-governed project purge admission", () => {
     ).toThrow("project_purge_resource_progress_invalid");
     expect(JSON.stringify(initial)).not.toContain("storageKey");
     expect(JSON.stringify(initial)).not.toContain("projectName");
+    const oldCheckpoint = parseDurableProjectPurgeResourceProgress(
+      { ...initial, databaseComplete: true },
+      digest,
+    );
+    expect(
+      previewDatabaseEvidenceMatches(
+        51,
+        {
+          status: "none",
+          hasCredential: false,
+          allocation: null,
+        },
+        oldCheckpoint.previewDatabaseEvidence,
+      ),
+    ).toBe(false);
   });
 
   it("proves a durable trash recipient after a Clerk or email channel failure", async () => {
@@ -639,6 +671,7 @@ describe("owner-governed project purge admission", () => {
         neonProjectIds: [],
         productionNeonProjectName: "mf-project-51",
         previewNeonProjectName: "mf-preview-51",
+        previewDatabase: { status: "none", hasCredential: false, allocation: null },
         assetTargets: [],
         legacyGeneratedImageTargets: [],
         uploadTargets: [],
@@ -671,6 +704,7 @@ describe("owner-governed project purge admission", () => {
         neonProjectIds: [],
         productionNeonProjectName: "mf-project-51",
         previewNeonProjectName: "mf-preview-51",
+        previewDatabase: { status: "none", hasCredential: false, allocation: null },
         assetTargets: [],
         legacyGeneratedImageTargets: [],
         uploadTargets: [],
@@ -680,6 +714,84 @@ describe("owner-governed project purge admission", () => {
         digestSha256: "a".repeat(64),
       }),
     ).rejects.toThrow("receipt unavailable");
+  });
+
+  it("revisits an old databaseComplete checkpoint and writes preview-bound evidence before relational purge", async () => {
+    const digest = "a".repeat(64);
+    const claimed = {
+      ...operation,
+      state: "running",
+      attemptCount: 1,
+      leaseVersion: 3,
+      resourceProgress: {
+        ...parseDurableProjectPurgeResourceProgress({}, digest),
+        databaseComplete: true,
+      },
+    };
+    mocks.dbSelect.mockReturnValueOnce(selectable([{ projectId: 51 }]));
+    mocks.selectResults.push([{ ownerId: "owner-user" }]);
+    mocks.transaction.mockImplementationOnce(async (callback: (value: typeof tx) => unknown) => {
+      mocks.updateResults.push([claimed]);
+      return callback(tx);
+    });
+    mocks.dbUpdate.mockImplementation(() => ({
+      set: (values: Record<string, unknown>) => {
+        mocks.updateCalls.push(values);
+        return { where: () => ({ returning: async () => [{ id: operation.id }] }) };
+      },
+    }));
+    const previewDatabase = { status: "none", hasCredential: false, allocation: null };
+    mocks.inventory.mockResolvedValue({
+      projectId: 51,
+      ownerId: "owner-user",
+      projectName: "Project 51",
+      deletedAt: createdAt,
+      retirementOperationId: "retirement-51",
+      retirementProgress: { current: true },
+      neonProjectIds: [],
+      productionNeonProjectName: "mf-project-51",
+      previewNeonProjectName: "mf-preview-51",
+      previewDatabase,
+      assetTargets: [],
+      legacyGeneratedImageTargets: [],
+      uploadTargets: [],
+      snapshotObjectKeys: [],
+      tableCounts: [],
+      activeAddonCount: 0,
+      digestSha256: digest,
+    });
+    mocks.releaseAssets.mockResolvedValue({
+      deletedObjects: 0,
+      detachedObjects: 0,
+      cursor: { assetIndex: 0, legacyImageIndex: 0, uploadIndex: 0 },
+      complete: true,
+    });
+    mocks.releaseSnapshots.mockResolvedValue({
+      deletedObjects: 0,
+      detachedObjects: 0,
+      cursor: { snapshotIndex: 0 },
+      complete: true,
+    });
+    mocks.neonRelease.mockResolvedValue({ removed: 0 });
+    mocks.relationalPurge.mockRejectedValueOnce(
+      new Error("fixture stops after provider checkpoint"),
+    );
+    await expect(runProjectPurgeOperation(operation.id)).rejects.toThrow(
+      "project_purge_relational_delete_failed",
+    );
+    expect(mocks.neonRelease).toHaveBeenCalledTimes(1);
+    const checkpoints = mocks.updateCalls
+      .map((call) => call.resourceProgress as { previewDatabaseEvidence?: unknown } | undefined)
+      .filter((progress) => progress?.previewDatabaseEvidence);
+    expect(checkpoints.length).toBeGreaterThan(0);
+    expect(
+      previewDatabaseEvidenceMatches(
+        51,
+        previewDatabase,
+        checkpoints.at(-1)?.previewDatabaseEvidence,
+      ),
+    ).toBe(true);
+    expect(mocks.relationalPurge).toHaveBeenCalledTimes(1);
   });
 
   it("heartbeats every bounded resource checkpoint and durably yields without spending a retry", async () => {
@@ -712,6 +824,7 @@ describe("owner-governed project purge admission", () => {
       neonProjectIds: [],
       productionNeonProjectName: "mf-project-51",
       previewNeonProjectName: "mf-preview-51",
+      previewDatabase: { status: "none", hasCredential: false, allocation: null },
       assetTargets: [],
       legacyGeneratedImageTargets: [],
       uploadTargets: [],
@@ -854,6 +967,7 @@ describe("owner-governed project purge admission", () => {
         neonProjectIds: [],
         productionNeonProjectName: "mf-project-51",
         previewNeonProjectName: "mf-preview-51",
+        previewDatabase: { status: "none", hasCredential: false, allocation: null },
         assetTargets: [],
         legacyGeneratedImageTargets: [],
         uploadTargets: [],

@@ -157,6 +157,7 @@ describe("DELETE /images/:id physical storage", () => {
       assetId: 71,
       userId: "owner",
       generatedImageIdBeingDeleted: 7,
+      productScope: "nabuflow",
     });
     expect(mocks.deleteReadyAsset.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.transaction.mock.invocationCallOrder[0]!,
@@ -184,6 +185,7 @@ describe("DELETE /images/:id physical storage", () => {
       assetId: 71,
       userId: "owner",
       generatedImageIdBeingDeleted: 7,
+      productScope: "nabuflow",
     });
     expect(mocks.deleteTrackedAssetStorageObjects).toHaveBeenCalledWith(storageObjects);
     expect(mocks.recordAssetDeleted).not.toHaveBeenCalled();

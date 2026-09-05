@@ -95,6 +95,9 @@ import {
   productionDatabaseReleaseResponseSchema,
   productionDatabaseAllocationIdentity,
   productionDatabaseCapabilityDefinition,
+  productionDatabaseAdmissionReceiptSchema,
+  PRODUCTION_DATABASE_ADMISSION_FEATURE,
+  PRODUCTION_DATABASE_ADMISSION_EPOCH_BINDING,
   runtimeArtifactSealedHash,
   runtimeLayeredArtifactContentHash,
   runtimeLayeredArtifactMergedReleaseHash,
@@ -136,6 +139,7 @@ import type {
   EnsureProductionDatabaseRequest,
   ReleaseProductionDatabaseRequest,
   ProductionDatabaseJobRequest,
+  ProductionDatabaseAdmissionReceipt,
   RouteRecord,
 } from "@workspace/tenant-runtime-contracts";
 import { createHash } from "node:crypto";
@@ -165,6 +169,12 @@ import {
   ProductionDatabaseAllocator,
   ProductionDatabaseProviderError,
 } from "./production-database-allocator";
+import {
+  ProductionDatabaseIntentError,
+  productionDatabaseIntentErrorCode,
+  productionDatabaseScope,
+  type ProductionDatabaseEnsureInput,
+} from "./production-database-intent";
 import { deferDurableOperationForWrongDeployment } from "./durable-operation-deployment";
 import { artifactChunkKey, deleteArtifactObjects } from "./artifact-storage";
 import {
@@ -552,6 +562,14 @@ export async function handleControlRequest(
   try {
     route = matchRoute(request.method, url.pathname);
     input = parseInput(route, url, rawBody);
+    if (
+      route.endpoint === "productionDatabaseEnsure" ||
+      route.endpoint === "productionDatabaseRelease"
+    ) {
+      const databaseRequest = input as ProductionDatabaseJobRequest;
+      await assertProductionDatabaseIdentity(databaseRequest);
+      validateProductionDatabaseAdmission(databaseRequest, env);
+    }
   } catch (error) {
     const controlError = toControlError(error);
     await recordAudit(coordinator, requestId, request.method, "unmatched", null, controlError);
@@ -1385,17 +1403,48 @@ const PRODUCTION_DATABASE_CHECKPOINTS = [
   "finalized",
 ] as const;
 
+async function assertProductionDatabaseAuthority(
+  coordinator: ControlCoordinator,
+  execution: DurableOperationExecution & { job: StoredProductionDatabaseJob },
+  nowMs: number,
+): Promise<number> {
+  const current = await coordinator.getDurableOperation(execution.job.jobKey);
+  const observedNowMs = Math.max(nowMs, Date.now());
+  if (
+    current === null ||
+    current.kind !== "production-database" ||
+    current.state !== "active" ||
+    current.ownerId !== execution.ownerId ||
+    current.attempt !== execution.job.attempt ||
+    current.runtimeIdentity !== execution.job.runtimeIdentity ||
+    current.request.projectId !== execution.job.request.projectId ||
+    current.request.allocationIdentity !== execution.job.request.allocationIdentity ||
+    current.request.action !== execution.job.request.action ||
+    current.leaseUntilMs === null ||
+    !Number.isFinite(current.leaseUntilMs) ||
+    current.leaseUntilMs <= observedNowMs ||
+    !Number.isFinite(current.deadlineMs) ||
+    current.deadlineMs <= observedNowMs
+  )
+    throw new ProductionDatabaseIntentError("production_database_authority_lost");
+  return Math.min(current.leaseUntilMs, current.deadlineMs);
+}
+
 async function advanceProductionDatabaseCheckpoint(
   coordinator: ControlCoordinator,
   execution: DurableOperationExecution & { job: StoredProductionDatabaseJob },
   target: StoredProductionDatabaseJob["checkpoint"],
+  now: () => number = Date.now,
 ): Promise<void> {
-  while (execution.job.checkpoint !== target) {
+  for (;;) {
+    await assertProductionDatabaseAuthority(coordinator, execution, now());
     const current = PRODUCTION_DATABASE_CHECKPOINTS.indexOf(execution.job.checkpoint);
     const targetIndex = PRODUCTION_DATABASE_CHECKPOINTS.indexOf(target);
-    if (current < 0 || targetIndex < current) {
+    if (current < 0 || targetIndex < 0) {
       throw new Error("Production database checkpoint transition is invalid");
     }
+    // Adoption resumes an already-reached stage without rewinding durable evidence.
+    if (current >= targetIndex) return;
     const checkpoint = PRODUCTION_DATABASE_CHECKPOINTS[current + 1];
     if (checkpoint === undefined) throw new Error("Production database checkpoint is unavailable");
     execution.job = (await coordinator.checkpointDurableOperation({
@@ -1403,8 +1452,9 @@ async function advanceProductionDatabaseCheckpoint(
       ownerId: execution.ownerId,
       ownerGeneration: execution.job.attempt,
       checkpoint,
-      nowMs: Date.now(),
+      nowMs: now(),
     })) as StoredProductionDatabaseJob;
+    await assertProductionDatabaseAuthority(coordinator, execution, now());
     logDurableOperationCheckpoint(execution.job);
   }
 }
@@ -1412,6 +1462,16 @@ async function advanceProductionDatabaseCheckpoint(
 function productionDatabaseControlError(error: unknown): ControlHttpError {
   if (error instanceof ProductionDatabaseProviderError) {
     return new ControlHttpError(error.status, error.code, error.message, error.retryable);
+  }
+  const intentCode = productionDatabaseIntentErrorCode(error);
+  if (intentCode !== null) {
+    return new ControlHttpError(
+      intentCode === "production_database_allocation_uncertain" ? 503 : 409,
+      intentCode,
+      "The production database operation could not be completed",
+      intentCode === "production_database_allocation_uncertain" ||
+        intentCode === "production_database_release_in_progress",
+    );
   }
   return new ControlHttpError(
     503,
@@ -1421,13 +1481,101 @@ function productionDatabaseControlError(error: unknown): ControlHttpError {
   );
 }
 
+import { hasVerifiedProductionDatabaseRelease } from "./production-database-intent";
+import type { ProductionDatabaseAllocatorDependency } from "./production-database-allocator";
+
+const PRODUCTION_DATABASE_ADMISSION_UUID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+function configuredProductionDatabaseAdmissionEpoch(env: WorkerBindings): string | null {
+  const epoch = env[PRODUCTION_DATABASE_ADMISSION_EPOCH_BINDING];
+  return typeof epoch === "string" && PRODUCTION_DATABASE_ADMISSION_UUID.test(epoch) ? epoch : null;
+}
+
+function validateProductionDatabaseAdmission(
+  request: ProductionDatabaseJobRequest,
+  env: WorkerBindings,
+): ProductionDatabaseAdmissionReceipt | null {
+  // A legacy release may remove positively owned resources, never certify an empty history.
+  if (request.action === "release" && request.admission === undefined) return null;
+  const epoch = configuredProductionDatabaseAdmissionEpoch(env);
+  if (epoch === null) {
+    throw new ControlHttpError(
+      503,
+      "production_database_admission_unconfigured",
+      "Production database admission is not configured",
+      false,
+    );
+  }
+  if (request.admission === undefined) {
+    throw new ControlHttpError(
+      409,
+      "production_database_admission_required",
+      "Production database admission is required",
+      false,
+    );
+  }
+  const parsed = productionDatabaseAdmissionReceiptSchema.safeParse(request.admission);
+  if (
+    !parsed.success ||
+    parsed.data.assertion !== (request.action === "ensure" ? "authorized" : "sealed")
+  ) {
+    throw new ControlHttpError(
+      409,
+      "production_database_admission_invalid",
+      "Production database admission is invalid",
+      false,
+    );
+  }
+  const receipt = parsed.data;
+  if (
+    receipt.projectId !== request.projectId ||
+    receipt.allocationIdentity !== request.allocationIdentity
+  ) {
+    throw new ControlHttpError(
+      409,
+      "production_database_admission_owner_mismatch",
+      "Production database admission ownership differs",
+      false,
+    );
+  }
+  if (receipt.registrationEpoch !== epoch) {
+    throw new ControlHttpError(
+      409,
+      "production_database_admission_epoch_mismatch",
+      "Production database admission epoch differs",
+      false,
+    );
+  }
+  return receipt;
+}
+
+async function assertProductionDatabaseIdentity(
+  request: ProductionDatabaseJobRequest,
+): Promise<void> {
+  const expectedIdentity = await productionDatabaseAllocationIdentity({
+    format: "nabuflow.production-database-allocation/v1",
+    deploymentNamespace: "production",
+    projectId: request.projectId,
+  });
+  if (request.allocationIdentity !== expectedIdentity) {
+    throw new ControlHttpError(
+      409,
+      "production_database_identity_conflict",
+      "Production database identity does not match the project",
+      false,
+    );
+  }
+}
+
 async function executeProductionDatabaseJob(input: {
   request: ProductionDatabaseJobRequest;
   env: WorkerBindings;
   coordinator: ControlCoordinator;
   execution: DurableOperationExecution & { job: StoredProductionDatabaseJob };
   vault: CapabilityVault;
-  allocator: Pick<ProductionDatabaseAllocator, "ensure" | "release" | "verifyGone">;
+  allocator: ProductionDatabaseAllocatorDependency;
+  nowMs: number;
 }): Promise<StoredHttpResponse> {
   const expectedIdentity = await productionDatabaseAllocationIdentity({
     format: "nabuflow.production-database-allocation/v1",
@@ -1442,69 +1590,130 @@ async function executeProductionDatabaseJob(input: {
       false,
     );
   }
+  // input.nowMs predates awaited identity work; it is not an authority clock.
+  // Revalidate persisted jobs independently of HTTP acceptance, including queued v1 bodies.
+  const admission = validateProductionDatabaseAdmission(input.request, input.env);
+  // Read wall time at each fence instead of carrying an omitted-latency offset.
+  const now = () => Date.now();
+  const authority = () =>
+    assertProductionDatabaseAuthority(input.coordinator, input.execution, now());
+  const assertAuthority = async () => {
+    await authority();
+  };
+  const advance = (checkpoint: StoredProductionDatabaseJob["checkpoint"]) =>
+    advanceProductionDatabaseCheckpoint(input.coordinator, input.execution, checkpoint, now);
+  const owner = {
+    projectId: input.request.projectId,
+    allocationIdentity: input.request.allocationIdentity,
+  };
+  const enteredCheckpoint = input.execution.job.checkpoint;
   try {
-    let allocation = await input.vault.getProductionDatabaseAllocation({
-      projectId: input.request.projectId,
-      allocationIdentity: input.request.allocationIdentity,
-    });
+    await authority();
+    let allocation = await input.vault.getProductionDatabaseAllocation(owner);
+    await authority();
+    const initialIntent = await input.vault.getProductionDatabaseIntent(owner);
+    await authority();
     if (input.request.action === "ensure") {
-      if (allocation?.state === "releasing") {
+      if (initialIntent?.version === 2) {
         throw new ControlHttpError(
           409,
           "production_database_release_in_progress",
-          "Production database release is already in progress",
-          true,
+          "Production database authorization is permanently closed",
+          false,
         );
       }
-      await advanceProductionDatabaseCheckpoint(
-        input.coordinator,
-        input.execution,
-        "ownership-verified",
-      );
+      if (
+        allocation?.state === "releasing" ||
+        initialIntent?.state === "releasing" ||
+        initialIntent?.state === "released"
+      ) {
+        throw new ProductionDatabaseIntentError("production_database_release_in_progress");
+      }
+      await advance("ownership-verified");
       let reused = allocation !== null;
       if (allocation === null) {
-        const material = await input.allocator.ensure({
-          projectId: input.request.projectId,
-          allocationIdentity: input.request.allocationIdentity,
+        const ensureInput: ProductionDatabaseEnsureInput & {
+          assertAuthority: () => Promise<void>;
+        } = {
+          ...owner,
+          assertAuthority,
+          beforeCreate: async (scope) => {
+            const expiresAtMs = await authority();
+            // Older adopted jobs may have dispatched before intent storage existed.
+            if (
+              enteredCheckpoint !== "initialized" &&
+              (await input.vault.getProductionDatabaseIntent(owner)) === null
+            ) {
+              throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+            }
+            await input.vault.claimProductionDatabaseDispatch({
+              ...owner,
+              scope,
+              expiresAtMs,
+            });
+            // Never interpret a lost claim acknowledgment as permission to dispatch.
+            await authority();
+            const intent = await input.vault.getProductionDatabaseIntent(owner);
+            await authority();
+            if (intent?.state !== "dispatched") {
+              throw new ProductionDatabaseIntentError("production_database_release_in_progress");
+            }
+          },
+          onProjectResolved: async (project) => {
+            const expiresAtMs = await authority();
+            const intent = await input.vault.recordProductionDatabaseProject({
+              ...owner,
+              scope: productionDatabaseScope(project),
+              providerProjectId: project.providerProjectId,
+              expiresAtMs,
+            });
+            if (intent.state === "releasing" || intent.state === "released") {
+              throw new ProductionDatabaseIntentError("production_database_release_in_progress");
+            }
+            await authority();
+          },
+        };
+        // Both hooks are always present, including for injected allocator fixtures.
+        await authority();
+        const material = await input.allocator.ensure(ensureInput);
+        if (
+          material.allocation.projectId !== owner.projectId ||
+          material.allocation.allocationIdentity !== owner.allocationIdentity
+        ) {
+          throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+        }
+        // Also supports older injected fixtures that return material directly.
+        await ensureInput.onProjectResolved!({
+          ...productionDatabaseScope(material.allocation),
+          providerProjectId: material.allocation.providerProjectId,
         });
-        await advanceProductionDatabaseCheckpoint(
-          input.coordinator,
-          input.execution,
-          "provider-complete",
-        );
-        await advanceProductionDatabaseCheckpoint(
-          input.coordinator,
-          input.execution,
-          "provider-verified",
-        );
+        await advance("provider-complete");
+        await advance("provider-verified");
         const handoff = await input.vault.provisionProductionDatabase({
-          projectId: input.request.projectId,
+          projectId: owner.projectId,
           revision: material.allocation.revision,
           definition: productionDatabaseCapabilityDefinition,
           allocation: material.allocation,
           credential: { kind: "neon-connection-string", value: material.connectionString },
+          expiresAtMs: await authority(),
         });
         reused = material.reused || handoff.state === "replayed";
         allocation = material.allocation;
       } else {
-        await advanceProductionDatabaseCheckpoint(
-          input.coordinator,
-          input.execution,
-          "provider-verified",
-        );
+        await advance("provider-verified");
       }
-      await advanceProductionDatabaseCheckpoint(
-        input.coordinator,
-        input.execution,
-        "vault-complete",
-      );
-      await advanceProductionDatabaseCheckpoint(input.coordinator, input.execution, "finalized");
+      await authority();
+      const finalIntent = await input.vault.getProductionDatabaseIntent(owner);
+      if (finalIntent?.state === "releasing" || finalIntent?.state === "released") {
+        throw new ProductionDatabaseIntentError("production_database_release_in_progress");
+      }
+      await advance("vault-complete");
+      await advance("finalized");
       return {
         status: 200,
         body: productionDatabaseAllocationResponseSchema.parse({
           ok: true,
-          projectId: input.request.projectId,
-          allocationIdentity: input.request.allocationIdentity,
+          ...owner,
           state: "ready",
           capability: { provider: "neon-postgres", name: "database" },
           revision: allocation.revision,
@@ -1514,61 +1723,151 @@ async function executeProductionDatabaseJob(input: {
       };
     }
 
-    const providerProjectId = allocation?.providerProjectId ?? null;
-    if (allocation !== null && allocation.state !== "releasing") {
+    if (
+      initialIntent?.version === 2 ||
+      (initialIntent === null &&
+        allocation === null &&
+        admission?.assertion === "sealed" &&
+        admission.birthRegistered)
+    ) {
+      if (allocation !== null || admission?.assertion !== "sealed" || !admission.birthRegistered) {
+        throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+      }
+      await authority();
+      // The seal only closes authorization. The vault atomically rejects any intent,
+      // allocation, or capability contradiction, including a competing dispatch.
+      await input.vault.completeNeverDispatchedProductionDatabaseRelease({
+        ...owner,
+        receipt: admission,
+      });
+      await authority();
+      const completed = await input.vault.getProductionDatabaseIntent(owner);
+      await authority();
+      const evidence = completed?.completionEvidence;
+      if (
+        !hasVerifiedProductionDatabaseRelease(completed) ||
+        completed?.version !== 2 ||
+        evidence?.kind !== "sealed-birth-no-dispatch" ||
+        evidence.registrationEpoch !== admission.registrationEpoch ||
+        evidence.birthToken !== admission.birthToken ||
+        evidence.receiptId !== admission.receiptId
+      ) {
+        throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+      }
+      await advance("finalized");
+      return {
+        status: 200,
+        body: productionDatabaseReleaseResponseSchema.parse({
+          ok: true,
+          ...owner,
+          state: "released",
+          providerProjectId: null,
+          verifiedGone: true,
+        }),
+      };
+    }
+
+    // Always persist a release fence, including when no ready allocation exists.
+    allocation = await input.vault.beginProductionDatabaseRelease({
+      ...owner,
+      expiresAtMs: await authority(),
+    });
+    await authority();
+    let releaseIntent = await input.vault.getProductionDatabaseIntent(owner);
+    await authority();
+    if (allocation === null && !hasVerifiedProductionDatabaseRelease(releaseIntent)) {
+      // Unknown historical scope cannot be replaced with today's configuration.
+      // Discovery of zero projects cannot disprove an outstanding provider POST.
+      if (
+        releaseIntent?.state !== "releasing" ||
+        releaseIntent.scope === null ||
+        input.allocator.resolveForRelease === undefined
+      ) {
+        throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+      }
+      const recovered = await input.allocator.resolveForRelease({
+        ...owner,
+        scope: releaseIntent.scope,
+        assertAuthority,
+      });
+      await authority();
+      if (recovered === null)
+        throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+      if (
+        recovered.projectId !== owner.projectId ||
+        recovered.allocationIdentity !== owner.allocationIdentity ||
+        recovered.state !== "releasing" ||
+        recovered.providerOrganizationId !== releaseIntent.scope.providerOrganizationId ||
+        recovered.regionId !== releaseIntent.scope.regionId ||
+        recovered.historyRetentionSeconds !== releaseIntent.scope.historyRetentionSeconds
+      ) {
+        throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+      }
+      await input.vault.recordProductionDatabaseProject({
+        ...owner,
+        scope: productionDatabaseScope(recovered),
+        providerProjectId: recovered.providerProjectId,
+        expiresAtMs: await authority(),
+      });
+      await authority();
       allocation = await input.vault.beginProductionDatabaseRelease({
-        projectId: input.request.projectId,
-        allocationIdentity: input.request.allocationIdentity,
+        ...owner,
+        expiresAtMs: await authority(),
       });
+      await authority();
+      releaseIntent = await input.vault.getProductionDatabaseIntent(owner);
+      await authority();
+      if (
+        allocation?.providerProjectId !== recovered.providerProjectId ||
+        releaseIntent?.state !== "releasing" ||
+        releaseIntent.providerProjectId !== recovered.providerProjectId
+      ) {
+        throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+      }
     }
-    await advanceProductionDatabaseCheckpoint(
-      input.coordinator,
-      input.execution,
-      "ownership-verified",
-    );
+    const providerProjectId = allocation?.providerProjectId ?? null;
+    await advance("ownership-verified");
     if (allocation !== null) {
-      await input.allocator.release(allocation);
+      await authority();
+      await input.allocator.release(allocation, assertAuthority);
+      await authority();
     }
-    await advanceProductionDatabaseCheckpoint(
-      input.coordinator,
-      input.execution,
-      "provider-complete",
-    );
-    if (allocation !== null && !(await input.allocator.verifyGone(allocation))) {
-      throw new ProductionDatabaseProviderError(
-        503,
-        "production_database_cleanup_incomplete",
-        true,
-        "provider_rejected",
-      );
-    }
-    await advanceProductionDatabaseCheckpoint(
-      input.coordinator,
-      input.execution,
-      "provider-verified",
-    );
+    await advance("provider-complete");
     if (allocation !== null) {
-      const released = await input.vault.completeProductionDatabaseRelease({
-        projectId: input.request.projectId,
-        allocationIdentity: input.request.allocationIdentity,
-      });
-      if (released === "conflict") {
-        throw new ControlHttpError(
-          409,
-          "production_database_identity_conflict",
-          "Production database ownership changed during release",
-          false,
+      await authority();
+      const gone = await input.allocator.verifyGone(allocation, assertAuthority);
+      await authority();
+      if (!gone) {
+        throw new ProductionDatabaseProviderError(
+          503,
+          "production_database_cleanup_incomplete",
+          true,
+          "provider_rejected",
         );
       }
     }
-    await advanceProductionDatabaseCheckpoint(input.coordinator, input.execution, "vault-complete");
-    await advanceProductionDatabaseCheckpoint(input.coordinator, input.execution, "finalized");
+    await advance("provider-verified");
+    const released = await input.vault.completeProductionDatabaseRelease({
+      ...owner,
+      ...(providerProjectId === null ? {} : { expectedProviderProjectId: providerProjectId }),
+      expiresAtMs: await authority(),
+    });
+    await authority();
+    if (released === "conflict") {
+      throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+    }
+    const completedIntent = await input.vault.getProductionDatabaseIntent(owner);
+    await authority();
+    if (!hasVerifiedProductionDatabaseRelease(completedIntent)) {
+      throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+    }
+    await advance("vault-complete");
+    await advance("finalized");
     return {
       status: 200,
       body: productionDatabaseReleaseResponseSchema.parse({
         ok: true,
-        projectId: input.request.projectId,
-        allocationIdentity: input.request.allocationIdentity,
+        ...owner,
         state: "released",
         providerProjectId,
         verifiedGone: true,
@@ -2641,7 +2940,18 @@ async function executeEndpoint(
             );
           }
           return true;
-        }),
+        })
+          .map((feature): string => feature)
+          .filter((feature) => feature !== PRODUCTION_DATABASE_ADMISSION_FEATURE)
+          .concat(
+            configuredProductionDatabaseAdmissionEpoch(env) !== null &&
+              env.DURABLE_OPERATION_QUEUE !== undefined &&
+              (env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE === "production" ||
+                (env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE === "staging" &&
+                  env.NABUFLOW_STAGING_PRODUCTION_DATABASE_REHEARSAL === "enabled"))
+              ? [PRODUCTION_DATABASE_ADMISSION_FEATURE]
+              : [],
+          ),
       },
     };
   }
@@ -2777,6 +3087,7 @@ async function executeEndpoint(
       },
       vault: injectedVault ?? getCapabilityVault(env, request.projectId),
       allocator: injectedProductionDatabaseAllocator ?? new ProductionDatabaseAllocator(env),
+      nowMs,
     });
   }
   if (endpoint === "capabilityProvision") {

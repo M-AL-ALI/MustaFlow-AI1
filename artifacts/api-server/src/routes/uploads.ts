@@ -11,9 +11,10 @@ import { assetsTable, db, pool, projectsTable, projectUploadsTable } from "@work
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { ObjectStorageService } from "../lib/objectStorage";
 import { requireProjectOwnership } from "../lib/auth";
-import { deleteReadyAsset, recordAssetDeleted } from "../lib/asset-registry";
+import { AssetAdmissionError, deleteReadyAsset, recordAssetDeleted } from "../lib/asset-registry";
 import { deleteTrackedAssetStorageObjects } from "../lib/asset-storage-cleanup";
 import { isCanonicalProjectUploadContentRequest } from "../lib/asset-contract";
+import { openAsset } from "../lib/asset-r2";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -202,11 +203,44 @@ router.get(
       return;
     }
     try {
+      const inlineFilename = row.filename.replace(/[\r\n"]/gu, "_");
+      if (row.objectPath.startsWith("assets/")) {
+        const registered = await pool.query<{ id: number }>(
+          `SELECT asset.id
+             FROM assets asset
+            WHERE asset.storage_key=$1
+              AND asset.owner_user_id=$2
+              AND asset.product_scope='nabuflow'
+              AND asset.state='ready'
+              AND EXISTS (
+                SELECT 1 FROM project_uploads upload
+                 WHERE upload.id=$3 AND upload.project_id=$4
+                   AND upload.object_path=asset.storage_key
+              )`,
+          [row.objectPath, req.userId!, uploadId, Number(req.params.id)],
+        );
+        if (registered.rowCount !== 1) {
+          res.status(404).json({ error: "Upload not found" });
+          return;
+        }
+        const opened = await openAsset(row.objectPath);
+        if (!opened) {
+          res.status(404).json({ error: "Upload not found" });
+          return;
+        }
+        res.status(200);
+        res.setHeader("Content-Type", opened.contentType);
+        res.setHeader("Content-Length", String(opened.sizeBytes));
+        res.setHeader("Cache-Control", "private, no-store");
+        res.setHeader("Content-Disposition", 'inline; filename="' + inlineFilename + '"');
+        opened.body.pipe(res);
+        return;
+      }
       const file = await storage.getObjectEntityFile(row.objectPath);
       const response = await storage.downloadObject(file);
       res.status(response.status);
       response.headers.forEach((v, k) => res.setHeader(k, v));
-      res.setHeader("Content-Disposition", `inline; filename="${row.filename}"`);
+      res.setHeader("Content-Disposition", 'inline; filename="' + inlineFilename + '"');
       if (response.body) {
         const node = Readable.fromWeb(response.body as ReadableStream<Uint8Array>);
         node.pipe(res);
@@ -226,6 +260,10 @@ router.delete(
   requireProjectOwnership,
   async (req: Request, res: Response) => {
     const uploadId = Number(req.params.uploadId);
+    if (!Number.isSafeInteger(uploadId) || uploadId < 1 || uploadId > 2147483647) {
+      res.status(404).json({ error: "Upload not found" });
+      return;
+    }
     const [row] = await db
       .select({ id: projectUploadsTable.id, objectPath: projectUploadsTable.objectPath })
       .from(projectUploadsTable)
@@ -247,13 +285,18 @@ router.delete(
       return;
     }
     const [mirror] = await db
-      .select({ id: assetsTable.id, state: assetsTable.state })
+      .select({
+        id: assetsTable.id,
+        state: assetsTable.state,
+        storageBackend: assetsTable.storageBackend,
+      })
       .from(assetsTable)
       .where(
         and(
-          eq(assetsTable.projectId, Number(req.params.id)),
-          eq(assetsTable.source, "legacy-project-upload"),
           eq(assetsTable.storageKey, row.objectPath),
+          eq(assetsTable.source, "legacy-project-upload"),
+          eq(assetsTable.productScope, "nabuflow"),
+          eq(assetsTable.ownerUserId, req.userId!),
         ),
       )
       .limit(1);
@@ -261,17 +304,33 @@ router.delete(
       res.status(409).json({ error: "This older upload is still being migrated." });
       return;
     }
-    if (mirror.state === "ready") {
-      const pending = await deleteReadyAsset({
-        assetId: mirror.id,
-        userId: req.userId!,
-        storageBackend: "legacy-object",
-      });
+    if (mirror.storageBackend !== "legacy-object" && mirror.storageBackend !== "r2") {
+      res.status(409).json({ error: "This older upload is still being migrated." });
+      return;
+    }
+    if (mirror.state === "ready" || mirror.state === "deleting") {
+      let pending: Awaited<ReturnType<typeof deleteReadyAsset>>;
+      try {
+        pending = await deleteReadyAsset({
+          assetId: mirror.id,
+          userId: req.userId!,
+          storageBackend: mirror.storageBackend,
+          productScope: "nabuflow",
+          projectUploadIdBeingDeleted: row.id,
+        });
+      } catch (error) {
+        if (error instanceof AssetAdmissionError) {
+          res.status(error.status).json({ error: error.message });
+          return;
+        }
+        throw error;
+      }
       if (
-        pending.storageBackend !== "legacy-object" ||
+        pending.storageBackend !== mirror.storageBackend ||
+        pending.storageKey !== row.objectPath ||
         pending.storageObjects.some(
           (object) =>
-            object.storageBackend !== "legacy-object" || object.storageKey !== row.objectPath,
+            object.storageBackend !== mirror.storageBackend || object.storageKey !== row.objectPath,
         )
       ) {
         res.status(409).json({ error: "This older upload is still being migrated." });
@@ -295,7 +354,15 @@ router.delete(
       res.status(409).json({ error: "This older upload is still being migrated." });
       return;
     }
-    await db.delete(projectUploadsTable).where(eq(projectUploadsTable.id, row.id));
+    await db
+      .delete(projectUploadsTable)
+      .where(
+        and(
+          eq(projectUploadsTable.id, row.id),
+          eq(projectUploadsTable.projectId, Number(req.params.id)),
+          eq(projectUploadsTable.objectPath, row.objectPath),
+        ),
+      );
     res.json({ deleted: true });
   },
 );

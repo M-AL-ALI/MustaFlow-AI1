@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { and, eq, isNull, desc, asc, or, sql } from "drizzle-orm";
 import { db, oraAssetsTable, type OraAssetKind } from "@workspace/db";
-import { deleteOraAsset, resolveOraAssetRowBytes, persistOraAssetStrict } from "../lib/ora-assets";
+import {
+  deleteOraAsset,
+  resolveOraAssetRowBytes,
+  persistOraAssetStrict,
+  oraAssetProductScopePredicate,
+} from "../lib/ora-assets";
 import { AssetAdmissionError, getQuota } from "../lib/asset-registry";
 import { relinkFileContextAfterRestore } from "../lib/public-ai/file-context-store";
 import { logger } from "../lib/logger";
@@ -53,6 +58,7 @@ router.get("/ora/assets", async (req, res) => {
   const ownership = and(
     eq(oraAssetsTable.userId, userId),
     isNull(oraAssetsTable.deletedAt),
+    oraAssetProductScopePredicate(),
     ...(projectFilter ? [projectFilter] : []),
   );
 
@@ -125,7 +131,13 @@ router.get("/ora/assets/:id/download", async (req, res) => {
     const [row] = await db
       .select()
       .from(oraAssetsTable)
-      .where(and(eq(oraAssetsTable.id, id), eq(oraAssetsTable.userId, userId)));
+      .where(
+        and(
+          eq(oraAssetsTable.id, id),
+          eq(oraAssetsTable.userId, userId),
+          oraAssetProductScopePredicate(),
+        ),
+      );
 
     if (!row || row.deletedAt) {
       res.status(404).json({ error: "Asset not found" });
@@ -178,7 +190,13 @@ router.get("/ora/assets/:id/versions", async (req, res) => {
         deletedAt: oraAssetsTable.deletedAt,
       })
       .from(oraAssetsTable)
-      .where(and(eq(oraAssetsTable.id, id), eq(oraAssetsTable.userId, userId)));
+      .where(
+        and(
+          eq(oraAssetsTable.id, id),
+          eq(oraAssetsTable.userId, userId),
+          oraAssetProductScopePredicate(),
+        ),
+      );
     if (!anchor || anchor.deletedAt) {
       res.status(404).json({ error: "Asset not found" });
       return;
@@ -202,6 +220,7 @@ router.get("/ora/assets/:id/versions", async (req, res) => {
         and(
           eq(oraAssetsTable.userId, userId),
           isNull(oraAssetsTable.deletedAt),
+          oraAssetProductScopePredicate(),
           or(eq(oraAssetsTable.id, chainRoot), eq(oraAssetsTable.rootAssetId, chainRoot)),
         ),
       )
@@ -247,7 +266,13 @@ router.post("/ora/assets/:id/restore", async (req, res) => {
     const [target] = await db
       .select()
       .from(oraAssetsTable)
-      .where(and(eq(oraAssetsTable.id, id), eq(oraAssetsTable.userId, userId)));
+      .where(
+        and(
+          eq(oraAssetsTable.id, id),
+          eq(oraAssetsTable.userId, userId),
+          oraAssetProductScopePredicate(),
+        ),
+      );
     if (!target || target.deletedAt) {
       res.status(404).json({ error: "Asset not found" });
       return;
@@ -265,6 +290,7 @@ router.post("/ora/assets/:id/restore", async (req, res) => {
         and(
           eq(oraAssetsTable.userId, userId),
           isNull(oraAssetsTable.deletedAt),
+          oraAssetProductScopePredicate(),
           or(eq(oraAssetsTable.id, chainRoot), eq(oraAssetsTable.rootAssetId, chainRoot)),
         ),
       )
@@ -297,6 +323,7 @@ router.post("/ora/assets/:id/restore", async (req, res) => {
     try {
       newAssetId = await persistOraAssetStrict({
         userId,
+        oraProjectId: target.oraProjectId ?? null,
         kind: target.kind as OraAssetKind,
         fileName: target.fileName,
         mimeType: target.mimeType,

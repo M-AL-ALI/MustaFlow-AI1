@@ -1466,7 +1466,8 @@ export function restoreAssetVersion(versionAssetId: number): Promise<RestoreAsse
 
 /**
  * Enqueue an image edit job, poll until complete, then fetch the result bytes
- * through the authenticated /file route (avoids private R2 endpoint issues).
+ * through the canonical Ora content path returned by the trusted status route.
+ * Source and returned image IDs are generated_images IDs, not Ora library asset IDs.
  * Returns a data URL suitable for <Image source={{ uri }} />.
  */
 export async function editImage(
@@ -1477,27 +1478,30 @@ export async function editImage(
 ): Promise<{ displayUrl: string; newImageId: number }> {
   onProgress?.("Rendering the edited image...");
   const { jobId, imageId: newImageId } = await jsonRequest<{ jobId: string; imageId: number }>(
-    `/api/images/${imageId}/edit`,
+    `/api/ora/images/${imageId}/edit`,
     {
       method: "POST",
       body: JSON.stringify({
         instruction,
         quality: "standard",
-        origin: "ora",
         ...(oraProjectId != null ? { oraProjectId } : {}),
       }),
     },
   );
 
   let completed = false;
+  let fileUrl: string | null = null;
   for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 1500));
     try {
-      const s = await jsonRequest<{ status: string; error?: string | null }>(
-        `/api/images/status/${jobId}`,
-      );
+      const s = await jsonRequest<{
+        status: string;
+        fileUrl?: string | null;
+        error?: string | null;
+      }>(`/api/ora/images/status/${jobId}`);
       if (s.status === "completed") {
         completed = true;
+        fileUrl = s.fileUrl ?? null;
         break;
       }
       if (s.status === "failed") throw new Error(s.error ?? "Image edit failed.");
@@ -1508,9 +1512,12 @@ export async function editImage(
     }
   }
   if (!completed) throw new Error("Image edit timed out. Please try again.");
+  if (!fileUrl || !/^\/api\/ora\/canonical-assets\/[1-9]\d*\/content$/.test(fileUrl)) {
+    throw new Error("Could not load the edited image.");
+  }
 
   onProgress?.("Loading the edited image...");
-  const res = await fetchOrThrow(url(`/api/images/${newImageId}/file`));
+  const res = await fetchOrThrow(url(fileUrl));
   if (!res.ok) throw new Error("Could not load the edited image.");
   const blob = await res.blob();
   if (blob.size === 0) throw new Error("The edited image was empty. Please try again.");

@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
-import { pool } from "@workspace/db";
+import { pool, type ProductScope } from "@workspace/db";
+import {
+  assertProductScopeNamespace,
+  isProductScope,
+  requireProductScope,
+} from "./asset-platform-scope";
 import {
   ASSET_ERROR_MESSAGES,
   BASE_ASSET_ALLOWANCE_BYTES,
@@ -55,7 +60,13 @@ export async function readReadyProjectAssets(input: {
     text_preview: string | null;
   }>(
     `SELECT id, kind, filename, mime_type, size_bytes, scan_state, text_preview FROM assets
-      WHERE owner_user_id=$1 AND project_id=$2 AND state='ready' AND id = ANY($3::integer[])`,
+      WHERE product_scope='nabuflow' AND state='ready' AND id = ANY($3::integer[])
+        AND EXISTS (SELECT 1 FROM projects target WHERE target.id=$2 AND target.owner_id=$1 AND target.deleted_at IS NULL)
+        AND (project_id=$2 OR EXISTS (
+          SELECT 1 FROM asset_usage explicit_use WHERE explicit_use.asset_id=assets.id
+            AND explicit_use.project_id=$2 AND explicit_use.consumer='explicit-project-use:v1'
+            AND explicit_use.artifact_id IS NULL AND explicit_use.version_id IS NULL AND explicit_use.file_path IS NULL
+        ))`,
     [input.ownerUserId, input.projectId, assetIds],
   );
   if (result.rows.length !== assetIds.length) {
@@ -98,6 +109,7 @@ function tenantPrefix(userId: string): string {
 }
 
 export async function reserveAsset(input: {
+  productScope: ProductScope;
   ownerUserId: string;
   actorUserId: string;
   projectId: number | null;
@@ -112,6 +124,8 @@ export async function reserveAsset(input: {
   taskId?: number | null;
   context?: Record<string, unknown> | null;
 }): Promise<AssetReservation> {
+  requireProductScope(input.productScope);
+  assertProductScopeNamespace(input.productScope, { projectId: input.projectId });
   if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0) {
     throw new AssetAdmissionError("asset_empty", 400);
   }
@@ -192,8 +206,8 @@ export async function reserveAsset(input: {
       `INSERT INTO assets (
          owner_user_id, actor_user_id, project_id, thread_key, scope, kind, source, filename,
          mime_type, size_bytes, storage_backend, storage_key, state, scan_state,
-         version_id, task_id, context
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'r2',$11,'reserved','not-scanned',$12,$13,$14)
+         version_id, task_id, context, product_scope
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'r2',$11,'reserved','not-scanned',$12,$13,$14,$15)
        RETURNING id`,
       [
         input.ownerUserId,
@@ -210,6 +224,7 @@ export async function reserveAsset(input: {
         input.versionId ?? null,
         input.taskId ?? null,
         input.context ? JSON.stringify(input.context) : null,
+        input.productScope,
       ],
     );
     await client.query(
@@ -230,6 +245,7 @@ export async function reserveAsset(input: {
         `INSERT INTO asset_usage (asset_id, project_id, consumer)
          SELECT id, $2, $3 FROM assets
           WHERE id=$1 AND owner_user_id=$4 AND state='ready'
+             AND product_scope=$5 AND project_id IS NOT DISTINCT FROM $2
          ON CONFLICT DO NOTHING
          RETURNING id`,
         [
@@ -237,6 +253,7 @@ export async function reserveAsset(input: {
           input.projectId,
           `asset-derivative:${inserted.rows[0]!.id}`,
           input.ownerUserId,
+          input.productScope,
         ],
       );
       if (!usage.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
@@ -312,6 +329,7 @@ export async function beginAssetUpload(input: {
       `UPDATE assets
           SET state='uploading', upload_started_at=NOW()
         WHERE id=$1 AND actor_user_id=$2 AND state='reserved'
+           AND product_scope IN ('nabuflow','ora')
       RETURNING id, owner_user_id, actor_user_id, project_id, filename,
                 mime_type, size_bytes, storage_key`,
       [input.assetId, input.actorUserId],
@@ -460,13 +478,32 @@ export async function completeAsset(input: {
       version_id: number | null;
       task_id: number | null;
       context: Record<string, unknown> | null;
+      product_scope: ProductScope | null;
     }>(
-      `SELECT size_bytes, project_id, version_id, task_id, context FROM assets
+      `SELECT size_bytes, project_id, version_id, task_id, context, product_scope FROM assets
         WHERE id=$1 AND owner_user_id=$2 AND actor_user_id=$3 AND state='uploading'
         FOR UPDATE`,
       [input.assetId, input.ownerUserId, input.actorUserId],
     );
-    if (!reserved.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
+    if (!reserved.rowCount || !isProductScope(reserved.rows[0]?.product_scope)) {
+      throw new AssetAdmissionError("asset_not_found", 404);
+    }
+    if (input.generatedImage) {
+      const receipt = await client.query<{ product_scope: ProductScope | null }>(
+        `SELECT product_scope FROM generated_images
+          WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL
+            AND status IN ('pending', 'generating')
+            AND (asset_id IS NULL OR asset_id=$3)
+          FOR UPDATE`,
+        [input.generatedImage.imageId, input.ownerUserId, input.assetId],
+      );
+      if (
+        receipt.rowCount !== 1 ||
+        receipt.rows[0]?.product_scope !== reserved.rows[0]!.product_scope
+      ) {
+        throw new AssetAdmissionError("asset_content_mismatch", 409);
+      }
+    }
     if (input.finalSizeBytes !== undefined || input.finalStorageKey !== undefined) {
       await client.query(
         `UPDATE asset_storage_objects
@@ -762,6 +799,10 @@ export async function deleteReadyAsset(input: {
   storageBackend?: "r2" | "legacy-object" | "dev-file" | "ora-db";
   /** Exact owned gallery row whose reference is being removed after this claim. */
   generatedImageIdBeingDeleted?: number;
+  /** Exact legacy upload metadata removed only after provider absence is proved. */
+  projectUploadIdBeingDeleted?: number;
+  /** Product-facing callers bind scope; governed internal cleanup may omit it. */
+  productScope?: ProductScope;
 }): Promise<{
   storageKey: string;
   storageBackend: string;
@@ -779,8 +820,9 @@ export async function deleteReadyAsset(input: {
       version_id: number | null;
       task_id: number | null;
       message_id: number | null;
+      product_scope: ProductScope | null;
     }>(
-      `SELECT storage_key, storage_backend, size_bytes, state, version_id, task_id, message_id
+      `SELECT storage_key, storage_backend, size_bytes, state, version_id, task_id, message_id, product_scope
          FROM assets
         WHERE id=$1 AND owner_user_id=$2
           AND ($3::text IS NULL OR storage_backend=$3)
@@ -791,10 +833,33 @@ export async function deleteReadyAsset(input: {
         FOR UPDATE`,
       [input.assetId, input.userId, input.storageBackend ?? null],
     );
-    if (!found.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
+    if (
+      !found.rowCount ||
+      (input.productScope !== undefined &&
+        (!isProductScope(input.productScope) ||
+          found.rows[0]?.product_scope !== input.productScope))
+    ) {
+      throw new AssetAdmissionError("asset_not_found", 404);
+    }
+    if (
+      input.projectUploadIdBeingDeleted !== undefined &&
+      (!Number.isSafeInteger(input.projectUploadIdBeingDeleted) ||
+        input.projectUploadIdBeingDeleted < 1 ||
+        input.projectUploadIdBeingDeleted > 2147483647)
+    ) {
+      throw new AssetAdmissionError("asset_not_found", 404);
+    }
     const references = await client.query<{ referenced: boolean }>(
-      `SELECT public.durable_asset_reference_exists($1, NULL, $2) AS referenced`,
-      [input.assetId, input.generatedImageIdBeingDeleted ?? null],
+      input.projectUploadIdBeingDeleted === undefined
+        ? `SELECT public.durable_asset_reference_exists($1, NULL, $2) AS referenced`
+        : `SELECT public.durable_asset_reference_exists_excluding_upload($1, NULL, $2, $3) AS referenced`,
+      input.projectUploadIdBeingDeleted === undefined
+        ? [input.assetId, input.generatedImageIdBeingDeleted ?? null]
+        : [
+            input.assetId,
+            input.generatedImageIdBeingDeleted ?? null,
+            input.projectUploadIdBeingDeleted,
+          ],
     );
     const row = found.rows[0]!;
     if (references.rows[0]?.referenced !== false) {
@@ -811,21 +876,6 @@ export async function deleteReadyAsset(input: {
       }
       throw new AssetAdmissionError("asset_referenced", 409);
     }
-    if (row.state === "ready") {
-      const claimed = await client.query(
-        `UPDATE assets SET state='deleting'
-          WHERE id=$1 AND owner_user_id=$2
-            AND ($3::text IS NULL OR storage_backend=$3) AND state='ready'`,
-        [input.assetId, input.userId, input.storageBackend ?? null],
-      );
-      if (!claimed.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
-    }
-    await client.query(
-      `UPDATE asset_storage_objects
-          SET state='deleting'
-        WHERE asset_id=$1 AND state IN ('ready', 'uploading')`,
-      [input.assetId],
-    );
     const physicalObjects = await client.query<{
       storage_key: string;
       storage_backend: string;
@@ -833,8 +883,9 @@ export async function deleteReadyAsset(input: {
     }>(
       `SELECT storage_key, storage_backend, size_bytes
          FROM asset_storage_objects
-        WHERE asset_id=$1 AND state='deleting'
-        ORDER BY storage_key`,
+        WHERE asset_id=$1 AND state <> 'deleted'
+        ORDER BY storage_key COLLATE "C"
+        FOR UPDATE`,
       [input.assetId],
     );
     // Persist the non-attachable claim before provider work. Writers lock the
@@ -855,19 +906,58 @@ export async function deleteReadyAsset(input: {
               sizeBytes: Number(row.size_bytes),
             },
           ];
-    for (const object of storageObjects) {
+    const storageKeys = [
+      ...new Set([
+        ...storageObjects.map((object) => object.storageKey),
+        ...(row.storage_backend === "legacy-url" ? [] : [row.storage_key]),
+      ]),
+    ].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+    for (const storageKey of storageKeys) {
       await client.query(
         `SELECT pg_advisory_xact_lock(
            hashtextextended('nabuflow:durable-object:' || $1, 0)
          )`,
-        [object.storageKey],
+        [storageKey],
       );
+    }
+    // New READ COMMITTED statement: observe raw-key writers committed during waits.
+    const finalReferences = await client.query<{ referenced: boolean }>(
+      input.projectUploadIdBeingDeleted === undefined
+        ? `SELECT public.durable_asset_reference_exists($1, NULL, $2) AS referenced`
+        : `SELECT public.durable_asset_reference_exists_excluding_upload($1, NULL, $2, $3) AS referenced`,
+      input.projectUploadIdBeingDeleted === undefined
+        ? [input.assetId, input.generatedImageIdBeingDeleted ?? null]
+        : [
+            input.assetId,
+            input.generatedImageIdBeingDeleted ?? null,
+            input.projectUploadIdBeingDeleted,
+          ],
+    );
+    if (finalReferences.rows[0]?.referenced !== false) {
+      throw new AssetAdmissionError("asset_referenced", 409);
+    }
+    if (row.state === "ready") {
+      const claimed = await client.query(
+        `UPDATE assets SET state='deleting'
+          WHERE id=$1 AND owner_user_id=$2
+            AND ($3::text IS NULL OR storage_backend=$3) AND state='ready'`,
+        [input.assetId, input.userId, input.storageBackend ?? null],
+      );
+      if (!claimed.rowCount) throw new AssetAdmissionError("asset_not_found", 404);
+    }
+    await client.query(
+      `UPDATE asset_storage_objects
+          SET state='deleting'
+        WHERE asset_id=$1 AND state IN ('ready', 'uploading')`,
+      [input.assetId],
+    );
+    for (const storageKey of storageKeys) {
       await client.query(
         `INSERT INTO durable_asset_deletion_claims (
            storage_key, claim_kind, retired_asset_id
          ) VALUES ($1, 'asset-delete', $2)
          ON CONFLICT (storage_key) DO NOTHING`,
-        [object.storageKey, input.assetId],
+        [storageKey, input.assetId],
       );
     }
     await client.query("COMMIT");

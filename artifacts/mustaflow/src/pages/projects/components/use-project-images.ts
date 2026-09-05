@@ -1,5 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createProjectImageRequestScope } from "./project-image-request-scope";
 import {
   mergeProjectImageItems,
   parseZeroGeneratedImageEvent,
@@ -63,6 +64,9 @@ export function useProjectImages({
   onThreadImage: (image: ProjectImageItem) => void;
   onProjectFileInserted?: () => void;
 }) {
+  const requestScope = useMemo(() => createProjectImageRequestScope(projectId), [projectId]);
+  const [displayedScope, setDisplayedScope] = useState(requestScope);
+  const submittingScopeRef = useRef<typeof requestScope | null>(null);
   const [studioImages, setStudioImages] = useState<ProjectImageItem[]>([]);
   const [taskAssets, setTaskAssets] = useState<ProjectImageItem[]>([]);
   const [insertedAssets, setInsertedAssets] = useState<ProjectImageItem[]>([]);
@@ -74,21 +78,32 @@ export function useProjectImages({
   const onThreadImageRef = useRef(onThreadImage);
   const onProjectFileInsertedRef = useRef(onProjectFileInserted);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    requestScope.activate();
+    submittingScopeRef.current = null;
+    setSubmitting(false);
+    setError(null);
+    return () => requestScope.deactivate();
+  }, [requestScope]);
+
+  useLayoutEffect(() => {
     onThreadImageRef.current = onThreadImage;
   }, [onThreadImage]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onProjectFileInsertedRef.current = onProjectFileInserted;
   }, [onProjectFileInserted]);
 
   const fetchStudioImages = useCallback(async () => {
+    const isCurrent = requestScope.capture("list");
+    if (!isCurrent()) return;
     try {
       const response = await authFetch(
         `/api/images?projectId=${encodeURIComponent(String(projectId))}&limit=50`,
       );
       if (!response.ok) throw new Error("Could not load project images");
       const body = (await response.json()) as { images?: StudioImageRecord[] };
+      if (!isCurrent()) return;
       const next = (body.images ?? []).map(studioImageToItem);
       setStudioImages(next);
       for (const image of next) {
@@ -98,13 +113,16 @@ export function useProjectImages({
       }
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load project images");
+      if (isCurrent()) {
+        setError(caught instanceof Error ? caught.message : "Could not load project images");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, requestScope]);
 
   useEffect(() => {
+    setDisplayedScope(requestScope);
     setStudioImages([]);
     setTaskAssets([]);
     setInsertedAssets([]);
@@ -116,12 +134,13 @@ export function useProjectImages({
     }
     setLoading(true);
     void fetchStudioImages();
-  }, [enabled, fetchStudioImages]);
+  }, [enabled, fetchStudioImages, requestScope]);
 
   const taskIdsKey = taskIds.join(",");
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    const isCurrent = requestScope.capture();
     const uniqueTaskIds = selectRecentTaskIds(taskIds, historyTaskLimit);
     if (uniqueTaskIds.length === 0) {
       setTaskAssets([]);
@@ -143,7 +162,7 @@ export function useProjectImages({
             }
           }),
         );
-        if (cancelled) return;
+        if (cancelled || !isCurrent()) return;
         for (const events of responses) {
           for (const event of events) {
             const image = parseZeroGeneratedImageEvent(projectId, event);
@@ -151,7 +170,7 @@ export function useProjectImages({
           }
         }
       }
-      if (!cancelled) setTaskAssets(mergeProjectImageItems(collected));
+      if (!cancelled && isCurrent()) setTaskAssets(mergeProjectImageItems(collected));
     })();
 
     return () => {
@@ -159,11 +178,12 @@ export function useProjectImages({
     };
     // taskIdsKey is the stable signal; taskIds is intentionally excluded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, historyTaskLimit, projectId, taskIdsKey]);
+  }, [enabled, historyTaskLimit, projectId, requestScope, taskIdsKey]);
 
-  const hasPendingStudioImage = studioImages.some(
-    (image) => image.status === "pending" || image.status === "generating",
-  );
+  const isDisplayedScopeCurrent = displayedScope === requestScope;
+  const hasPendingStudioImage =
+    isDisplayedScopeCurrent &&
+    studioImages.some((image) => image.status === "pending" || image.status === "generating");
   useEffect(() => {
     if (!enabled || !hasPendingStudioImage) return;
     const interval = setInterval(() => void fetchStudioImages(), 2_000);
@@ -173,7 +193,10 @@ export function useProjectImages({
   const generateImage = useCallback(
     async (prompt: string, options: GenerateProjectImageOptions) => {
       const trimmedPrompt = prompt.trim();
-      if (!trimmedPrompt || submitting) return;
+      if (!trimmedPrompt || submittingScopeRef.current === requestScope) return;
+      const isCurrent = requestScope.capture();
+      if (!isCurrent()) return;
+      submittingScopeRef.current = requestScope;
       setSubmitting(true);
       setError(null);
       try {
@@ -194,6 +217,7 @@ export function useProjectImages({
         const body = (await response.json().catch(() => ({}))) as GenerateImageResponse & {
           error?: string;
         };
+        if (!isCurrent()) return;
         if (!response.ok || typeof body.imageId !== "number") {
           throw new Error(body.error ?? "Image generation could not start");
         }
@@ -215,14 +239,18 @@ export function useProjectImages({
         setStudioImages((current) => mergeProjectImageItems([pendingImage], current));
         onThreadImageRef.current(pendingImage);
       } catch (caught) {
+        if (!isCurrent()) return;
         const message = caught instanceof Error ? caught.message : "Image generation failed";
         setError(message);
         throw caught;
       } finally {
-        setSubmitting(false);
+        if (isCurrent()) {
+          submittingScopeRef.current = null;
+          setSubmitting(false);
+        }
       }
     },
-    [projectId, submitting],
+    [projectId, requestScope],
   );
 
   const regenerateImage = useCallback(
@@ -240,6 +268,12 @@ export function useProjectImages({
 
   const insertIntoProject = useCallback(
     async (image: ProjectImageItem): Promise<string> => {
+      const isCurrent = requestScope.capture();
+      const requireCurrentProject = () => {
+        if (!isCurrent())
+          throw new Error("Project changed. Choose the image again in this project.");
+      };
+      requireCurrentProject();
       if (image.path) return image.path;
       if (typeof image.id !== "number" || image.status !== "completed") {
         throw new Error("This image is not ready to insert");
@@ -247,15 +281,19 @@ export function useProjectImages({
 
       const path = studioInsertPath(image.id);
       const fileResponse = await authFetch(`/api/images/${image.id}/file`);
+      requireCurrentProject();
       if (!fileResponse.ok) throw new Error("Could not load the generated image");
       const content = await blobToBase64(await fileResponse.blob());
+      requireCurrentProject();
       const createResponse = await authFetch(`/api/projects/${projectId}/files`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path, content }),
       });
+      requireCurrentProject();
       if (!createResponse.ok && createResponse.status !== 409) {
         const body = (await createResponse.json().catch(() => ({}))) as { error?: string };
+        requireCurrentProject();
         throw new Error(body.error ?? "Could not add the image to this project");
       }
 
@@ -271,7 +309,7 @@ export function useProjectImages({
       onProjectFileInsertedRef.current?.();
       return path;
     },
-    [projectId],
+    [projectId, requestScope],
   );
 
   const projectFileImages = useMemo(
@@ -295,10 +333,10 @@ export function useProjectImages({
   );
 
   return {
-    images,
-    loading,
-    error,
-    isGenerating: submitting || hasPendingStudioImage,
+    images: isDisplayedScopeCurrent ? images : [],
+    loading: isDisplayedScopeCurrent ? loading : enabled,
+    error: isDisplayedScopeCurrent ? error : null,
+    isGenerating: isDisplayedScopeCurrent && (submitting || hasPendingStudioImage),
     generateImage,
     regenerateImage,
     insertIntoProject,

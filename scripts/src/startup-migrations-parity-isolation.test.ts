@@ -177,7 +177,7 @@ describe("startup-migrations parity isolation", () => {
       async runMigrations() {
         migrationRun++;
         calls.push(`migrate:${migrationRun}`);
-        return { migrationCount: 147 };
+        return { migrationCount: 158 };
       },
       async captureSchema() {
         calls.push(`capture:${migrationRun}`);
@@ -247,7 +247,7 @@ describe("startup-migrations parity isolation", () => {
       },
       async runMigrations() {
         calls.push("migrate");
-        return { migrationCount: 147 };
+        return { migrationCount: 158 };
       },
       async captureSchema() {
         return [];
@@ -306,7 +306,7 @@ describe("startup-migrations parity isolation", () => {
   it("accepts only the exact tolerated startup-migration failure set", () => {
     assert.deepEqual(
       assertToleratedMigrationResult({
-        passed: 146,
+        passed: 157,
         failed: 1,
         errors: [
           {
@@ -315,13 +315,13 @@ describe("startup-migrations parity isolation", () => {
           },
         ],
       }),
-      { migrationCount: 147 },
+      { migrationCount: 158 },
     );
 
     assert.throws(
       () =>
         assertToleratedMigrationResult({
-          passed: 143,
+          passed: 154,
           failed: 2,
           errors: [
             {
@@ -336,7 +336,7 @@ describe("startup-migrations parity isolation", () => {
     assert.throws(
       () =>
         assertToleratedMigrationResult({
-          passed: 144,
+          passed: 155,
           failed: 1,
           errors: [{ name: "migrate-other", message: "other_failure" }],
         }),

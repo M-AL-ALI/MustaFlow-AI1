@@ -271,6 +271,30 @@ describe("capability vault envelope", () => {
         projectId: 42,
         allocationIdentity: allocation.allocationIdentity,
       }),
+    ).rejects.toThrow("production_database_allocation_uncertain");
+    await expect(
+      restarted.completeProductionDatabaseRelease({
+        projectId: 42,
+        allocationIdentity: allocation.allocationIdentity,
+        expectedProviderProjectId: "different-provider-project",
+      }),
+    ).rejects.toThrow("production_database_intent_conflict");
+    await expect(
+      restarted.getProductionDatabaseAllocation({
+        projectId: 42,
+        allocationIdentity: allocation.allocationIdentity,
+      }),
+    ).resolves.toMatchObject({
+      state: "releasing",
+      providerProjectId: allocation.providerProjectId,
+    });
+    // The worker supplies this exact identity only after provider absence proof.
+    await expect(
+      restarted.completeProductionDatabaseRelease({
+        projectId: 42,
+        allocationIdentity: allocation.allocationIdentity,
+        expectedProviderProjectId: allocation.providerProjectId,
+      }),
     ).resolves.toBe("released");
     await expect(
       restarted.getProductionDatabaseAllocation({

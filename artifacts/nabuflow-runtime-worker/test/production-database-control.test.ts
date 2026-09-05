@@ -1,5 +1,5 @@
 import { productionDatabaseAllocationIdentity } from "@workspace/tenant-runtime-contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleControlRequest } from "../src/worker";
 import type { ProductionDatabaseAllocator } from "../src/production-database-allocator";
 import {
@@ -9,10 +9,20 @@ import {
   TEST_NOW_MS,
   fakeEnv,
   mutationAndDrain,
+  productionDatabaseAdmissionFixture,
   signedRequest,
 } from "./helpers";
 
 describe("production database durable control path", () => {
+  beforeEach(() => {
+    // Fixture jobs use a historical epoch; production authority uses wall time.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(TEST_NOW_MS);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("allocates once, survives release changes, and releases only on explicit deletion", async () => {
     const env = Object.assign(fakeEnv(), {
       NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED: "enabled",
@@ -85,6 +95,10 @@ describe("production database durable control path", () => {
       projectId: 42,
       expectedDeploymentVersion: "worker-version-test-1",
       allocationIdentity,
+      admission: productionDatabaseAdmissionFixture(
+        { projectId: 42, allocationIdentity },
+        "authorized",
+      ),
     };
 
     const created = await mutationAndDrain({
@@ -135,7 +149,11 @@ describe("production database durable control path", () => {
     const released = await mutationAndDrain({
       path,
       method: "DELETE",
-      body: { ...request, action: "release" },
+      body: {
+        ...request,
+        action: "release",
+        admission: productionDatabaseAdmissionFixture(request, "sealed"),
+      },
       nonce: "production-database-release",
       idempotencyKey: `production-database:${allocationIdentity}:release`,
       env,
@@ -153,6 +171,12 @@ describe("production database durable control path", () => {
     expect(verifyCalls).toBe(1);
     expect(vault.productionDatabaseAllocations.has(42)).toBe(false);
     expect(vault.databaseRecords.has(42)).toBe(false);
+    expect(
+      await vault.getProductionDatabaseIntent({ projectId: 42, allocationIdentity }),
+    ).toMatchObject({
+      state: "released",
+      completionEvidence: { version: 1, kind: "exact-provider-id-get-404" },
+    });
 
     const jobs = [...coordinator.runtimeLifecycleJobs.values()].filter(
       (job) => job.kind === "production-database",
@@ -209,6 +233,10 @@ describe("production database durable control path", () => {
         projectId: 42,
         expectedDeploymentVersion: "worker-version-test-1",
         allocationIdentity: "f".repeat(64),
+        admission: productionDatabaseAdmissionFixture(
+          { projectId: 42, allocationIdentity: "f".repeat(64) },
+          "authorized",
+        ),
       },
       nonce: "production-database-identity-conflict",
       idempotencyKey: "production-database-identity-conflict",

@@ -496,6 +496,7 @@ async function completeSnapshotObservation(
 ): Promise<Record<string, unknown>> {
   const png = Buffer.from(input.dataUri.slice(input.dataUri.indexOf(",") + 1), "base64");
   const asset = await reserveAsset({
+    productScope: "nabuflow",
     ownerUserId: input.project.ownerId,
     actorUserId: input.actorUserId,
     projectId: input.project.id,

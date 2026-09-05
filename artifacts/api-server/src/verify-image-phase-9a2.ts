@@ -1,6 +1,7 @@
 /**
  * Phase 9A-2 live end-to-end verification script.
  *
+ * Service calls exercise the NabuFlow Image Studio surface.
  * Tests the complete upload, edit, safety, credit, ownership, and R2 flows
  * by calling the service layer directly (same pattern as verify-agentic-provisioning.ts).
  *
@@ -83,6 +84,7 @@ async function makeWebp(): Promise<Buffer> {
 
 async function storeVerifiedUpload(webp: Buffer, raw: Buffer, imageId: number) {
   const reservation = await reserveAsset({
+    productScope: "nabuflow",
     ownerUserId: TEST_USER_ID,
     actorUserId: TEST_USER_ID,
     projectId: null,
@@ -227,6 +229,7 @@ async function _insertCompletedUpload(
   const [row] = await db
     .insert(generatedImagesTable)
     .values({
+      productScope: "nabuflow",
       userId,
       prompt: "[test-upload]",
       quality: "standard",
@@ -311,6 +314,7 @@ async function main() {
   const [pngRow] = await db
     .insert(generatedImagesTable)
     .values({
+      productScope: "nabuflow",
       userId: TEST_USER_ID,
       prompt: "[uploaded]",
       quality: "standard",
@@ -391,6 +395,7 @@ async function main() {
   const [jpegRow] = await db
     .insert(generatedImagesTable)
     .values({
+      productScope: "nabuflow",
       userId: TEST_USER_ID,
       prompt: "[uploaded]",
       quality: "standard",
@@ -443,6 +448,7 @@ async function main() {
   const [webpRow] = await db
     .insert(generatedImagesTable)
     .values({
+      productScope: "nabuflow",
       userId: TEST_USER_ID,
       prompt: "[uploaded]",
       quality: "standard",
@@ -525,6 +531,7 @@ async function main() {
   const [otherRow] = await db
     .insert(generatedImagesTable)
     .values({
+      productScope: "nabuflow",
       userId: OTHER_USER_ID,
       prompt: "[other-user-image]",
       quality: "standard",
@@ -642,6 +649,7 @@ async function main() {
         pass("Credits before edit", `${balanceForEdit} credits`);
 
         const { jobId, imageId } = await enqueueImageEditJob({
+          productScope: "nabuflow",
           userId: TEST_USER_ID,
           parentImageId: editParentId,
           parentStorageKey: parent.storageKey ?? null,
@@ -753,6 +761,7 @@ async function main() {
       await seedCredits(TEST_USER_ID, 20);
 
       const { jobId, imageId } = await enqueueImageEditJob({
+        productScope: "nabuflow",
         userId: TEST_USER_ID,
         parentImageId: webpImageId,
         parentStorageKey: webpDbRow.storageKey ?? null,

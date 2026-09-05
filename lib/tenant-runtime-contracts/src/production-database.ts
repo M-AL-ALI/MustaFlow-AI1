@@ -19,9 +19,47 @@ export const PRODUCTION_DATABASE_MAX_PROJECTS_BINDING =
   "NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS" as const;
 export const PRODUCTION_DATABASE_PROJECT_PREFIX = "nabuflow-production-" as const;
 export const PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS = 5 * 60_000;
+export const PRODUCTION_DATABASE_ADMISSION_FEATURE = "production-database-admission-v1" as const;
+export const PRODUCTION_DATABASE_ADMISSION_EPOCH_BINDING =
+  "NABUFLOW_PRODUCTION_DATABASE_ADMISSION_EPOCH" as const;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const neonResourceIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
+
+/**
+ * Authenticated by the control request HMAC. A sealed admission closes future
+ * authorization; it is not, by itself, evidence that no provider call occurred.
+ * Only the vault's atomic check of the enforced birth/dispatch history can
+ * produce a never-dispatched terminal receipt.
+ */
+const productionDatabaseAdmissionBaseSchema = z
+  .object({
+    format: z.literal("nabuflow.production-database-admission/v1"),
+    issuer: z.literal("nabuflow-api"),
+    audience: z.literal("production"),
+    projectId: z.number().int().positive().safe(),
+    allocationIdentity: sha256Schema,
+    registrationEpoch: z.string().uuid(),
+    birthToken: z.string().uuid(),
+    receiptId: z.string().uuid(),
+    birthRegistered: z.boolean(),
+  })
+  .strict();
+
+export const productionDatabaseAuthorizedAdmissionSchema =
+  productionDatabaseAdmissionBaseSchema.extend({ assertion: z.literal("authorized") });
+export const productionDatabaseSealedAdmissionSchema = productionDatabaseAdmissionBaseSchema.extend(
+  {
+    assertion: z.literal("sealed"),
+  },
+);
+export const productionDatabaseAdmissionReceiptSchema = z.discriminatedUnion("assertion", [
+  productionDatabaseAuthorizedAdmissionSchema,
+  productionDatabaseSealedAdmissionSchema,
+]);
+export type ProductionDatabaseAdmissionReceipt = z.infer<
+  typeof productionDatabaseAdmissionReceiptSchema
+>;
 
 export const productionDatabaseCapabilityDefinition = capabilityDefinitionSchema.parse({
   name: "database",
@@ -63,10 +101,16 @@ const productionDatabaseRequestBase = z
 
 export const ensureProductionDatabaseRequestSchema = productionDatabaseRequestBase.extend({
   action: z.literal("ensure"),
+  // Legacy bodies remain parseable so the Worker can issue a typed admission
+  // error and terminalize already queued v1 jobs rather than retrying them.
+  admission: productionDatabaseAuthorizedAdmissionSchema.optional(),
 });
 
 export const releaseProductionDatabaseRequestSchema = productionDatabaseRequestBase.extend({
   action: z.literal("release"),
+  // No admission receipt means positive owned-resource cleanup only. It must
+  // never authorize a negative absence proof for missing legacy history.
+  admission: productionDatabaseSealedAdmissionSchema.optional(),
 });
 
 export const productionDatabaseJobRequestSchema = z.discriminatedUnion("action", [

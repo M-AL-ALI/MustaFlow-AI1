@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const query = vi.hoisted(() => vi.fn());
@@ -23,6 +24,7 @@ describe("asset admission during historical storage reconciliation", () => {
 
     await expect(
       reserveAsset({
+        productScope: "nabuflow",
         ownerUserId: "owner",
         actorUserId: "owner",
         projectId: 51,
@@ -56,4 +58,40 @@ describe("asset admission during historical storage reconciliation", () => {
     ).toBe(false);
     expect(release).toHaveBeenCalledOnce();
   });
+});
+
+describe("trusted NabuFlow image producer scope", () => {
+  it.each([
+    ["./agent-loop.ts", 2],
+    ["../routes/images.ts", 1],
+    ["../routes/snapshot-observe.ts", 1],
+    ["../validate-image-generation.ts", 2],
+    ["../verify-image-phase-9a2.ts", 3],
+  ] as const)(
+    "stamps a server-owned literal before producer inputs in %s",
+    (path, expectedCalls) => {
+      const source = readFileSync(new URL(path, import.meta.url), "utf8");
+      const calls = [
+        ...source.matchAll(
+          /\b(?:reserveAsset(?:AgainstAvailableQuota)?|enqueueImage(?:Edit)?Job)\(\s*\{/g,
+        ),
+      ];
+      expect(calls).toHaveLength(expectedCalls);
+      for (const call of calls) {
+        const inputs = source.slice(call.index! + call[0].length);
+        expect(inputs).toMatch(/^\s*productScope:\s*"nabuflow"\s*,/);
+      }
+
+      if (path === "../verify-image-phase-9a2.ts") {
+        const receipts = [
+          ...source.matchAll(/\.insert\(generatedImagesTable\)\s*\.values\(\s*\{/g),
+        ];
+        expect(receipts).toHaveLength(5);
+        for (const receipt of receipts) {
+          const values = source.slice(receipt.index! + receipt[0].length);
+          expect(values).toMatch(/^\s*productScope:\s*"nabuflow"\s*,/);
+        }
+      }
+    },
+  );
 });

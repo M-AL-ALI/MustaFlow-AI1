@@ -4,6 +4,16 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(new URL("./image-generation-jobs.ts", import.meta.url), "utf8");
 
 describe("generated images share the unified asset registry", () => {
+  it("requires explicit product scope instead of billing or legacy project inference", () => {
+    expect(
+      source.match(/const productScope = requireProductScope\(opts\.productScope\)/gu),
+    ).toHaveLength(2);
+    expect(source.match(/assertProductScopeNamespace\(productScope, opts\)/gu)).toHaveLength(2);
+    expect(source).not.toContain("persistToOraLibrary");
+    expect(source).toContain("eq(generatedImagesTable.productScope, productScope)");
+    expect(source).toContain("eq(assetsTable.productScope, productScope)");
+  });
+
   it("reserves storage before credits or provider work", () => {
     const enqueue = source.slice(
       source.indexOf("export async function enqueueImageJob"),

@@ -473,7 +473,7 @@ describe("governed project retirement coordinator", () => {
     );
   });
 
-  it("retains the historical testing-workflow pointer instead of misrouting it to Cloudflare", () => {
+  it("reconciles the historical testing-workflow pointer only through fenced Fly cleanup", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const start = source.indexOf("async function destroyRuntimeTargets");
     const end = source.indexOf("export async function enqueueProjectRetirementOperation", start);
@@ -485,8 +485,18 @@ describe("governed project retirement coordinator", () => {
     expect(runtimes).toContain("testContainerId: projectsTable.testContainerId");
     expect(runtimes).toContain('pointer: "testContainerId"');
     expect(runtimes).toContain('reason: "legacy_runtime_provider"');
-    expect(runtimes).not.toContain('{ pointer: "testContainerId" as const');
-    expect(pointerUpdates).not.toContain("testContainerId: null");
+    expect(runtimes).toContain(
+      'legacyFlyPointers.push({ pointer: "testContainerId", identity: project.testContainerId })',
+    );
+    expect(runtimes).toContain("await reconcileLegacyFlyRuntime");
+    expect(runtimes).toContain("else clearTestPointer = true");
+    expect(source.indexOf("await preserveRetiredProjectSqlite")).toBeLessThan(
+      source.indexOf("await destroyRuntimeTargets"),
+    );
+    expect(pointerUpdates).toContain("pointerDisposition.clearTestPointer");
+    expect(pointerUpdates).toContain("testContainerId: null");
+    expect(pointerUpdates).toContain("testContainerUrl: null");
+    expect(pointerUpdates).toContain('testContainerStatus: "stopped"');
   });
 
   it("fences stale-running crash recovery so an old worker cannot complete", () => {

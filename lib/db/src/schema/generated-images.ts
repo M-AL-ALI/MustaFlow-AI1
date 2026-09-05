@@ -1,4 +1,6 @@
-import { pgTable, serial, text, integer, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, boolean, timestamp, check } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import type { ProductScope } from "./assets";
 
 export const IMAGE_QUALITY_COSTS: Record<string, number> = {
   draft: 1,
@@ -17,36 +19,46 @@ export const IMAGE_PURPOSES = [
 
 export type ImagePurpose = (typeof IMAGE_PURPOSES)[number];
 
-export const generatedImagesTable = pgTable("generated_images", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id").notNull(),
-  projectId: integer("project_id"),
-  assetId: integer("asset_id"),
-  prompt: text("prompt").notNull(),
-  negativePrompt: text("negative_prompt"),
-  revisedPrompt: text("revised_prompt"),
-  style: text("style"),
-  purpose: text("purpose"),
-  quality: text("quality").notNull().default("standard"),
-  aspectRatio: text("aspect_ratio").notNull().default("1:1"),
-  transparentBackground: boolean("transparent_background").notNull().default(false),
-  providerName: text("provider_name").notNull().default("openai"),
-  modelName: text("model_name"),
-  status: text("status").notNull().default("pending"),
-  fileUrl: text("file_url"),
-  thumbnailUrl: text("thumbnail_url"),
-  storageKey: text("storage_key"),
-  safetyStatus: text("safety_status").notNull().default("pending"),
-  creditCost: integer("credit_cost").notNull().default(3),
-  parentImageId: integer("parent_image_id"),
-  sourceType: text("source_type").notNull().default("generated"),
-  editInstruction: text("edit_instruction"),
-  errorMessage: text("error_message"),
-  errorCategory: text("error_category"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const generatedImagesTable = pgTable(
+  "generated_images",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    productScope: text("product_scope").$type<ProductScope>(),
+    projectId: integer("project_id"),
+    assetId: integer("asset_id"),
+    prompt: text("prompt").notNull(),
+    negativePrompt: text("negative_prompt"),
+    revisedPrompt: text("revised_prompt"),
+    style: text("style"),
+    purpose: text("purpose"),
+    quality: text("quality").notNull().default("standard"),
+    aspectRatio: text("aspect_ratio").notNull().default("1:1"),
+    transparentBackground: boolean("transparent_background").notNull().default(false),
+    providerName: text("provider_name").notNull().default("openai"),
+    modelName: text("model_name"),
+    status: text("status").notNull().default("pending"),
+    fileUrl: text("file_url"),
+    thumbnailUrl: text("thumbnail_url"),
+    storageKey: text("storage_key"),
+    safetyStatus: text("safety_status").notNull().default("pending"),
+    creditCost: integer("credit_cost").notNull().default(3),
+    parentImageId: integer("parent_image_id"),
+    sourceType: text("source_type").notNull().default("generated"),
+    editInstruction: text("edit_instruction"),
+    errorMessage: text("error_message"),
+    errorCategory: text("error_category"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "generated_images_product_scope_check",
+      sql`${table.productScope} IN ('nabuflow', 'ora')`,
+    ),
+  ],
+);
 
 export type GeneratedImage = typeof generatedImagesTable.$inferSelect;
 export type NewGeneratedImage = typeof generatedImagesTable.$inferInsert;

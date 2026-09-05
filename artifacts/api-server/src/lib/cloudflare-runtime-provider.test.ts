@@ -10,6 +10,7 @@ import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { RuntimeProviderUnavailableError } from "./tenant-runtime-provider";
 import { sealRuntimeArtifact } from "./runtime-artifact";
 import { sealLayeredRuntimeArtifact, sealRuntimeArtifactLayer } from "./runtime-artifact-layers";
+import type { ProductionDatabaseAdmissionService } from "./production-database-admission";
 
 const token = "control-token-with-at-least-thirty-two-characters";
 const config = {
@@ -17,6 +18,42 @@ const config = {
   controlToken: token,
   deploymentNamespace: "staging",
 };
+
+function databaseAdmissionFixture(): ProductionDatabaseAdmissionService {
+  const binding = {
+    format: "nabuflow.production-database-admission/v1" as const,
+    issuer: "nabuflow-api" as const,
+    audience: "production" as const,
+    registrationEpoch: "a18bfd98-7c06-4a3b-b0e6-617b51285683",
+    birthToken: "fa259b49-d58c-41b5-bde6-18c725ae20bd",
+    receiptId: "ff01ec5d-63fc-460f-a3af-04715a27e389",
+    birthRegistered: true,
+  };
+  return {
+    authorize: async ({ projectId, allocationIdentity }) => ({
+      ...binding,
+      projectId,
+      allocationIdentity,
+      assertion: "authorized",
+    }),
+    seal: async ({ projectId, allocationIdentity }) => ({
+      ...binding,
+      projectId,
+      allocationIdentity,
+      assertion: "sealed",
+    }),
+  };
+}
+
+function markDatabaseAdmissionReady(provider: CloudflareRuntimeProvider): void {
+  const state = provider as unknown as {
+    deploymentVersion: string | null;
+    controlFeatures: Set<string>;
+  };
+  state.deploymentVersion = "staging-v1";
+  state.controlFeatures.add("production-database-v1");
+  state.controlFeatures.add("production-database-admission-v1");
+}
 
 function json(
   body: unknown,
@@ -2153,13 +2190,17 @@ describe("CloudflareRuntimeProvider", () => {
   });
 
   it("ensures and releases one opaque project-owned production database identity", async () => {
-    const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+    const provider = new CloudflareRuntimeProvider(config, {
+      sleep: async () => undefined,
+      productionDatabaseAdmission: databaseAdmissionFixture(),
+    });
     const state = provider as unknown as {
       deploymentVersion: string | null;
       controlFeatures: Set<string>;
     };
     state.deploymentVersion = "staging-v1";
     state.controlFeatures.add("production-database-v1");
+    state.controlFeatures.add("production-database-admission-v1");
     const calls: Array<{ method: string; path: string; key: string; body: unknown }> = [];
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const path = new URL(String(input)).pathname;
@@ -2208,14 +2249,79 @@ describe("CloudflareRuntimeProvider", () => {
       ],
     ]);
     expect(calls[0]?.key).toMatch(
-      new RegExp(`^production-database:${ensured.allocationIdentity}:ensure:request-[0-9a-f]{64}$`),
+      new RegExp(
+        `^production-database:${ensured.allocationIdentity}:ensure:admission-v1:request-[0-9a-f]{64}$`,
+      ),
     );
     expect(calls[1]?.key).toMatch(
       new RegExp(
-        `^production-database:${ensured.allocationIdentity}:release:request-[0-9a-f]{64}$`,
+        `^production-database:${ensured.allocationIdentity}:release:admission-v1:request-[0-9a-f]{64}$`,
       ),
     );
     expect(JSON.stringify(calls)).not.toMatch(/connectionString|managementKey|credential/iu);
+    expect(calls[0]?.body).toMatchObject({ admission: { assertion: "authorized", projectId: 42 } });
+    expect(calls[1]?.body).toMatchObject({ admission: { assertion: "sealed", projectId: 42 } });
+  });
+
+  it("never sends an allocation when durable admission fails or the caller is already aborted", async () => {
+    const admission = databaseAdmissionFixture();
+    const authorize = vi
+      .spyOn(admission, "authorize")
+      .mockRejectedValue(new Error("admission_commit_failed"));
+    const provider = new CloudflareRuntimeProvider(config, {
+      productionDatabaseAdmission: admission,
+    });
+    markDatabaseAdmissionReady(provider);
+    await expect(provider.ensureProductionDatabaseCapability({ projectId: 42 })).rejects.toThrow(
+      "admission_commit_failed",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    authorize.mockClear();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      provider.ensureProductionDatabaseCapability({ projectId: 42, signal: controller.signal }),
+    ).rejects.toBeDefined();
+    expect(authorize).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses cross-project admission before provider dispatch", async () => {
+    const admission = databaseAdmissionFixture();
+    const authorize = admission.authorize;
+    admission.authorize = async (input) => ({ ...(await authorize(input)), projectId: 99 });
+    const provider = new CloudflareRuntimeProvider(config, {
+      productionDatabaseAdmission: admission,
+    });
+    markDatabaseAdmissionReady(provider);
+    await expect(
+      provider.ensureProductionDatabaseCapability({ projectId: 42 }),
+    ).rejects.toMatchObject({ code: "production_database_admission_identity_mismatch" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not invent a negative receipt for legacy release without registered history", async () => {
+    const admission = databaseAdmissionFixture();
+    admission.seal = async () => null;
+    const provider = new CloudflareRuntimeProvider(config, {
+      productionDatabaseAdmission: admission,
+    });
+    markDatabaseAdmissionReady(provider);
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body).not.toHaveProperty("admission");
+      return json({
+        ok: true,
+        projectId: 42,
+        allocationIdentity: body.allocationIdentity,
+        state: "released",
+        providerProjectId: "owned-provider-42",
+        verifiedGone: true,
+      });
+    });
+    await expect(
+      provider.releaseProductionDatabaseCapability({ projectId: 42 }),
+    ).resolves.toMatchObject({ verifiedGone: true });
   });
 
   it("replays an identical publish prerequisite but uses a fresh wire key after a control-version change", async () => {
@@ -2253,13 +2359,17 @@ describe("CloudflareRuntimeProvider", () => {
     });
 
     const providerForVersion = (deploymentVersion: string): CloudflareRuntimeProvider => {
-      const provider = new CloudflareRuntimeProvider(config, { sleep: async () => undefined });
+      const provider = new CloudflareRuntimeProvider(config, {
+        sleep: async () => undefined,
+        productionDatabaseAdmission: databaseAdmissionFixture(),
+      });
       const state = provider as unknown as {
         deploymentVersion: string | null;
         controlFeatures: Set<string>;
       };
       state.deploymentVersion = deploymentVersion;
       state.controlFeatures.add("production-database-v1");
+      state.controlFeatures.add("production-database-admission-v1");
       return provider;
     };
 

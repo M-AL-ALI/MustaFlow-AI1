@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import { lookup } from "node:dns/promises";
 import { logger } from "./logger";
 import { ContainerUnavailableError } from "./errors";
+import type { LegacyFlyRetirementRequest } from "./project-retirement-legacy-fly";
 import { LEGACY_NODE_SERVICE_PORT, resolveProjectRuntimeManifest } from "./runtime-manifest";
 
 export type ContainerStatus = "stopped" | "starting" | "running" | "hibernated" | "error";
@@ -343,6 +344,7 @@ async function flyFetch(
   /** Per-request timeout in ms. Default 30 s for API calls. Pass 360_000 for
    *  exec calls that stream output for up to Fly's 300-second exec timeout. */
   timeoutMs = 30_000,
+  maxAttempts = 3,
 ): Promise<Response> {
   const { containerCircuit, withRetry, isTransientError } = await import("./resilience");
   return containerCircuit.call(() =>
@@ -366,7 +368,7 @@ async function flyFetch(
         return res;
       },
       {
-        maxAttempts: 3,
+        maxAttempts,
         baseDelayMs: 500,
         shouldRetry: (err: unknown) =>
           isTransientError(err) || (typeof err === "object" && err !== null && "retryable" in err),
@@ -380,22 +382,87 @@ async function flyFetch(
  * Narrow Fly Machines request surface for legacy retirement reconciliation.
  *
  * The caller must still validate the returned machine document before issuing
- * DELETE. Keeping URL construction and authentication here ensures retirement
+ * STOP or DELETE. Keeping URL construction and authentication here ensures retirement
  * never handles or exposes the Fly token itself.
  */
-export async function requestLegacyFlyMachineForRetirement(input: {
-  machineId: string;
-  method: "GET" | "DELETE";
-}): Promise<Response> {
+export async function requestLegacyFlyMachineForRetirement(
+  input: Parameters<LegacyFlyRetirementRequest>[0],
+): Promise<Response> {
   if (!isConfigured()) {
     throw new ContainerUnavailableError();
+  }
+  // The fixed-app catalog must be complete. Only GET observations may retry.
+  if (input.resource === "volumes") {
+    if (input.method !== "GET") throw new Error("Unsupported retirement machine operation");
+    return flyFetch(
+      `/apps/${encodeURIComponent(FLY_APP)}/volumes`,
+      {
+        method: "GET",
+        redirect: "error",
+      },
+      10_000,
+    );
+  }
+  if (
+    !(
+      (input.resource === undefined && (input.method === "GET" || input.method === "DELETE")) ||
+      (input.resource === "lease" && (input.method === "POST" || input.method === "DELETE")) ||
+      (input.resource === "stop" && input.method === "POST") ||
+      (input.resource === "wait" && input.method === "GET")
+    )
+  ) {
+    throw new Error("Unsupported retirement machine operation");
   }
   const machinePath = `/apps/${encodeURIComponent(FLY_APP)}/machines/${encodeURIComponent(
     input.machineId,
   )}`;
-  return flyFetch(input.method === "DELETE" ? `${machinePath}?force=true` : machinePath, {
-    method: input.method,
-  });
+  const leaseNonce = "leaseNonce" in input ? input.leaseNonce : undefined;
+  if (
+    ((input.method === "DELETE" || input.resource === "stop" || input.resource === "wait") &&
+      !leaseNonce) ||
+    (leaseNonce !== undefined &&
+      (typeof leaseNonce !== "string" || !/^[\x21-\x7E]{1,256}$/u.test(leaseNonce)))
+  ) {
+    throw new Error("Invalid retirement machine lease");
+  }
+  if (
+    input.resource === "lease" &&
+    input.method === "POST" &&
+    (!Number.isInteger(input.ttl) ||
+      input.ttl < 1 ||
+      input.ttl > 300 ||
+      typeof input.description !== "string" ||
+      input.description.length < 1 ||
+      input.description.length > 256)
+  ) {
+    throw new Error("Invalid retirement machine lease");
+  }
+  if (
+    input.resource === "wait" &&
+    (typeof input.instanceId !== "string" || !/^[0-9A-HJKMNP-TV-Z]{26}$/iu.test(input.instanceId))
+  ) {
+    throw new Error("Invalid retirement machine version");
+  }
+  let path = input.resource === "lease" ? machinePath + "/lease" : machinePath;
+  if (input.resource === "stop") path += "/stop";
+  if (input.resource === "wait") {
+    // Fly's version query supersedes instance_id. Never use the default started
+    // state or an unpinned wait. Keep the provider wait below the HTTP deadline.
+    path += `/wait?state=stopped&version=${encodeURIComponent(input.instanceId)}&timeout=15`;
+  }
+  return flyFetch(
+    path,
+    {
+      method: input.method,
+      redirect: "error",
+      ...(leaseNonce ? { headers: { "fly-machine-lease-nonce": leaseNonce } } : {}),
+      ...(input.resource === "lease" && input.method === "POST"
+        ? { body: JSON.stringify({ description: input.description, ttl: input.ttl }) }
+        : {}),
+    },
+    input.resource === "wait" ? 20_000 : 10_000,
+    input.method === "GET" && input.resource !== "wait" ? 3 : 1,
+  );
 }
 
 /**

@@ -205,8 +205,8 @@ vi.mock("../../../lib/ora-assets", () => ({
 
 vi.mock("../../../lib/image-storage", () => ({
   storeGeneratedImage: vi.fn(async () => ({
-    fileUrl: "/api/images/1/file",
-    thumbnailUrl: "/api/images/1/thumb",
+    fileUrl: "/api/images/2/file",
+    thumbnailUrl: "/api/images/2/thumb",
     storageKey: "test/image.png",
     sha256: "a".repeat(64),
     storageObjects: [
@@ -286,29 +286,31 @@ vi.mock("@workspace/db", () => {
     return query;
   }
 
-  function makeMutation() {
+  function makeMutation(returnedId = 1) {
     const query: Record<string, unknown> = {
       values: () => query,
       set: () => query,
       where: () => query,
-      returning: () => Promise.resolve([{ id: 1 }]),
+      returning: () => Promise.resolve([{ id: returnedId }]),
       then: (resolve: (rows: unknown[]) => unknown) => resolve([]),
     };
     return query;
   }
 
   const table = tableStub();
+  // Canonical asset 1 and generated-image row 2 deliberately have distinct IDs.
+  const generatedImageTable = tableStub();
   return {
     db: {
       select: (selection?: unknown) => makeSelect(selection),
-      insert: () => makeMutation(),
-      update: () => makeMutation(),
+      insert: (target: unknown) => makeMutation(target === generatedImageTable ? 2 : 1),
+      update: (target: unknown) => makeMutation(target === generatedImageTable ? 2 : 1),
     },
     knowledgeEntriesTable: table,
     oraProfilesTable: table,
     oraProjectsTable: table,
     oraConversationsTable: table,
-    generatedImagesTable: table,
+    generatedImagesTable: generatedImageTable,
     TIER_ORA_MESSAGE_LIMIT: { free: 100, core: 1000, wave: 5000 },
     TIER_ORA_IMAGE_LIMIT: { free: 10, core: 50, wave: 100 },
     ORA_MEMORY_CATEGORIES: ["preference", "personal", "project", "document", "other"],
@@ -627,7 +629,9 @@ What should I tell Replit?`;
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.reply).toContain("Here's the image you asked for");
     expect(res.body.reply).not.toMatch(/sign in|sign up|create an account/i);
-    expect(res.body.imageUrl).toBe("/api/images/1/file");
+    expect(res.body.imageUrl).toBe("/api/ora/canonical-assets/1/content");
+    expect(res.body.imageUrl).not.toBe("/api/ora/canonical-assets/2/content");
+    expect(res.body.imageUrl).not.toBe("/api/images/2/file");
     expect(res.body.imageMeta).toEqual({
       kind: "logo",
       aspectRatio: "1:1",

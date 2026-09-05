@@ -1,8 +1,14 @@
 import { createHash } from "node:crypto";
-import { db, oraAssetsTable, oraFileContextsTable, pool, type OraAssetKind } from "@workspace/db";
-import { and, eq, isNull } from "drizzle-orm";
+import {
+  assetsTable,
+  db,
+  oraAssetsTable,
+  oraFileContextsTable,
+  pool,
+  type OraAssetKind,
+} from "@workspace/db";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { logger } from "./logger";
-import { r2GetObject } from "./cloudflare";
 import { readAssetBuffer, putAssetBuffer } from "./asset-r2";
 import {
   AssetAdmissionError,
@@ -17,6 +23,20 @@ import {
   type AssetReservation,
 } from "./asset-registry";
 import { deleteTrackedAssetStorageObjects } from "./asset-storage-cleanup";
+import { isOwnedReadyAssetForProduct } from "./asset-platform-scope";
+
+// Ora membership is a metadata alias, not proof of where bytes originated.
+// This predicate is for access only; retention queries must remain global.
+export function oraAssetProductScopePredicate() {
+  return sql`EXISTS (
+    SELECT 1 FROM ${assetsTable}
+     WHERE ${assetsTable.id} = ${oraAssetsTable.assetId}
+       AND ${assetsTable.ownerUserId} = ${oraAssetsTable.userId}
+       AND ${assetsTable.productScope} = 'ora'
+       AND ${assetsTable.state} = 'ready'
+       AND ${assetsTable.deletedAt} IS NULL
+  )`;
+}
 
 /** Compatibility export for the existing Library UI. The real limit is the
  * unified account quota (base plus purchased storage), not an Ora-only cap. */
@@ -35,28 +55,32 @@ export async function getUserStorageBytes(userId: string): Promise<number> {
 }
 
 /**
- * Resolve the raw bytes for an already-loaded Ora asset row. R2 is tried first
- * when a storage key is present; on a miss we fall back to the DB `data` blob
- * if it exists so a partial migration can never strand an asset. Returns null
- * when neither source yields bytes.
+ * Resolve bytes only through a known, owner-matching Ora canonical asset.
+ * Unknown legacy blobs/keys remain retained but cannot authorize delivery.
  */
 export async function resolveOraAssetRowBytes(row: {
+  userId?: string;
   assetId?: number | null;
   storageKey: string | null;
   data: string | null;
   sizeBytes?: number;
 }): Promise<Buffer | null> {
-  if (row.data) return Buffer.from(row.data, "base64");
-  let buf: Buffer | null = null;
-  if (row.assetId && row.storageKey) {
-    const maxBytes = Math.max(1, Number(row.sizeBytes ?? PER_USER_STORAGE_BYTES));
-    buf = await readAssetBuffer(row.storageKey, maxBytes);
+  if (!row.userId || !Number.isSafeInteger(row.assetId) || !row.assetId || row.assetId <= 0) {
+    return null;
   }
-  if (!buf && !row.assetId && row.storageKey) {
-    const legacy = await r2GetObject(row.storageKey);
-    if (legacy) buf = legacy.body;
-  }
-  return buf;
+  const [asset] = await db
+    .select({
+      ownerUserId: assetsTable.ownerUserId,
+      productScope: assetsTable.productScope,
+      state: assetsTable.state,
+      storageKey: assetsTable.storageKey,
+      sizeBytes: assetsTable.sizeBytes,
+    })
+    .from(assetsTable)
+    .where(and(eq(assetsTable.id, row.assetId), isNull(assetsTable.deletedAt)))
+    .limit(1);
+  if (!isOwnedReadyAssetForProduct(asset, row.userId, "ora")) return null;
+  return readAssetBuffer(asset.storageKey, Math.max(1, Number(asset.sizeBytes)));
 }
 
 /**
@@ -70,6 +94,7 @@ export async function getOraAssetBytes(assetId: number, userId: string): Promise
   try {
     const [row] = await db
       .select({
+        userId: oraAssetsTable.userId,
         assetId: oraAssetsTable.assetId,
         storageKey: oraAssetsTable.storageKey,
         data: oraAssetsTable.data,
@@ -77,7 +102,13 @@ export async function getOraAssetBytes(assetId: number, userId: string): Promise
         deletedAt: oraAssetsTable.deletedAt,
       })
       .from(oraAssetsTable)
-      .where(and(eq(oraAssetsTable.id, assetId), eq(oraAssetsTable.userId, userId)));
+      .where(
+        and(
+          eq(oraAssetsTable.id, assetId),
+          eq(oraAssetsTable.userId, userId),
+          oraAssetProductScopePredicate(),
+        ),
+      );
     if (!row || row.deletedAt) return null;
     return await resolveOraAssetRowBytes(row);
   } catch (err) {
@@ -143,6 +174,7 @@ export async function reserveOraGeneratedAsset(input: {
 }): Promise<OraGeneratedAssetReservation> {
   const reservation = await reserveAssetAgainstAvailableQuota({
     ownerUserId: input.userId,
+    productScope: "ora",
     actorUserId: input.userId,
     projectId: null,
     threadKey: input.oraProjectId ? `ora-project:${input.oraProjectId}` : null,
@@ -173,15 +205,70 @@ export async function cancelOraGeneratedAsset(
   reservation: OraGeneratedAssetReservation,
   userId: string,
 ): Promise<void> {
-  await rejectReservedAsset({
-    assetId: reservation.id,
-    ownerUserId: userId,
-    actorUserId: userId,
-    code: "asset_storage_unavailable",
-  }).catch(() => undefined);
-  await deleteTrackedAssetStorageObjects([
-    { storageBackend: "r2", storageKey: reservation.storageKey },
-  ]).catch(() => undefined);
+  const readCanonicalReservation = async () => {
+    const [asset] = await db
+      .select({
+        ownerUserId: assetsTable.ownerUserId,
+        actorUserId: assetsTable.actorUserId,
+        productScope: assetsTable.productScope,
+        state: assetsTable.state,
+        storageBackend: assetsTable.storageBackend,
+        storageKey: assetsTable.storageKey,
+        deletedAt: assetsTable.deletedAt,
+      })
+      .from(assetsTable)
+      .where(
+        and(
+          eq(assetsTable.id, reservation.id),
+          eq(assetsTable.ownerUserId, userId),
+          eq(assetsTable.actorUserId, userId),
+          eq(assetsTable.productScope, "ora"),
+          eq(assetsTable.storageBackend, "r2"),
+          eq(assetsTable.storageKey, reservation.storageKey),
+        ),
+      )
+      .limit(1);
+    return asset;
+  };
+  const matchesReservation = (
+    asset: Awaited<ReturnType<typeof readCanonicalReservation>> | undefined,
+  ): boolean =>
+    asset !== undefined &&
+    asset.ownerUserId === userId &&
+    asset.actorUserId === userId &&
+    asset.productScope === "ora" &&
+    asset.storageBackend === "r2" &&
+    asset.storageKey.length > 0 &&
+    asset.storageKey === reservation.storageKey;
+
+  try {
+    const before = await readCanonicalReservation();
+    if (!before || !matchesReservation(before)) return;
+    if (before.state !== "rejected") {
+      if (
+        (before.state !== "reserved" && before.state !== "uploading") ||
+        before.deletedAt !== null
+      )
+        return;
+      await rejectReservedAsset({
+        assetId: reservation.id,
+        ownerUserId: userId,
+        actorUserId: userId,
+        code: "asset_storage_unavailable",
+      });
+    }
+
+    // The registry owns the transition and its locks. Do not hold another
+    // connection's row lock across it, or mistake a ready winner for rejection.
+    const after = await readCanonicalReservation();
+    if (!after || !matchesReservation(after) || after.state !== "rejected") return;
+    await deleteTrackedAssetStorageObjects([
+      { storageBackend: "r2", storageKey: after.storageKey },
+    ]);
+  } catch {
+    // Cancellation is best-effort. Uncertain admission/transition/cleanup
+    // retains bytes rather than treating completion denial as delete authority.
+  }
 }
 
 /**
@@ -227,6 +314,7 @@ export async function getNextVersionLineage(
         and(
           eq(oraAssetsTable.id, ctx.assetId),
           eq(oraAssetsTable.userId, userId),
+          oraAssetProductScopePredicate(),
           isNull(oraAssetsTable.deletedAt),
         ),
       )
@@ -271,7 +359,13 @@ export async function getOraAssetMeta(
         deletedAt: oraAssetsTable.deletedAt,
       })
       .from(oraAssetsTable)
-      .where(and(eq(oraAssetsTable.id, assetId), eq(oraAssetsTable.userId, userId)));
+      .where(
+        and(
+          eq(oraAssetsTable.id, assetId),
+          eq(oraAssetsTable.userId, userId),
+          oraAssetProductScopePredicate(),
+        ),
+      );
     if (!row || row.deletedAt) return null;
     return {
       fileName: row.fileName,
@@ -314,6 +408,7 @@ export async function getNextVersionLineageFromAssetId(
         and(
           eq(oraAssetsTable.id, parentAssetId),
           eq(oraAssetsTable.userId, userId),
+          oraAssetProductScopePredicate(),
           isNull(oraAssetsTable.deletedAt),
         ),
       )
@@ -364,6 +459,7 @@ async function insertOraLibraryMetadata(
       `SELECT id, owner_user_id, storage_key, size_bytes, state
          FROM assets
         WHERE id=$1 AND owner_user_id=$2 AND state='ready'
+          AND product_scope='ora' AND deleted_at IS NULL
         FOR SHARE`,
       [unifiedAssetId, input.userId],
     );
@@ -375,9 +471,11 @@ async function insertOraLibraryMetadata(
          data, storage_key, asset_id, size_bytes, root_asset_id, parent_asset_id,
          version_number, source_file_ref, edit_summary
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10,$11,$12,$13,$14,$15)
-       ON CONFLICT (asset_id) WHERE asset_id IS NOT NULL
-       DO UPDATE SET asset_id=EXCLUDED.asset_id
-       RETURNING id`,
+        ON CONFLICT (asset_id) WHERE asset_id IS NOT NULL
+        DO UPDATE SET asset_id=EXCLUDED.asset_id
+        WHERE ora_assets.user_id=EXCLUDED.user_id
+          AND ora_assets.ora_project_id IS NOT DISTINCT FROM EXCLUDED.ora_project_id
+        RETURNING id`,
       [
         input.userId,
         input.oraProjectId ?? null,
@@ -396,7 +494,8 @@ async function insertOraLibraryMetadata(
         input.editSummary ?? null,
       ],
     );
-    const oraAssetId = inserted.rows[0]!.id;
+    const oraAssetId = inserted.rows[0]?.id;
+    if (oraAssetId === undefined) throw new AssetAdmissionError("asset_not_found", 404);
     await client.query(
       `INSERT INTO asset_usage (asset_id, consumer)
        VALUES ($1, $2)
@@ -426,6 +525,22 @@ export async function completeOraGeneratedAsset(input: {
   asset: Omit<PersistOraAssetInput, "base64" | "unifiedAssetId">;
   base64: string;
 }): Promise<number> {
+  const [reserved] = await db
+    .select({ id: assetsTable.id, storageKey: assetsTable.storageKey })
+    .from(assetsTable)
+    .where(
+      and(
+        eq(assetsTable.id, input.reservation.id),
+        eq(assetsTable.ownerUserId, input.asset.userId),
+        eq(assetsTable.productScope, "ora"),
+        eq(assetsTable.state, "uploading"),
+        isNull(assetsTable.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!reserved || reserved.storageKey !== input.reservation.storageKey) {
+    throw new AssetAdmissionError("asset_not_found", 404);
+  }
   const bytes = Buffer.from(input.base64, "base64");
   if (bytes.length === 0) {
     await cancelOraGeneratedAsset(input.reservation, input.asset.userId);
@@ -495,6 +610,7 @@ export async function persistOraAssetStrict(input: PersistOraAssetInput): Promis
 
   const reservation = await reserveAsset({
     ownerUserId: input.userId,
+    productScope: "ora",
     actorUserId: input.userId,
     projectId: null,
     threadKey: input.oraProjectId ? `ora-project:${input.oraProjectId}` : null,
@@ -607,13 +723,22 @@ export async function deleteOraAsset(input: {
                 OR EXISTS (
                    SELECT 1 FROM support_tickets ticket
                     WHERE ticket.user_id=ora.user_id
-                      AND ticket.attachments::text LIKE
+                      AND (
+                        ticket.attachments::text LIKE
                           '%/api/ora/assets/' || ora.id::text || '/download%'
-                )
+                        OR ticket.transcript::text LIKE
+                          '%/api/ora/assets/' || ora.id::text || '/download%'
+                      )
+                 )
               ) AS referenced
          FROM ora_assets ora
-        WHERE ora.id=$1 AND ora.user_id=$2 AND ora.deleted_at IS NULL
-        FOR UPDATE`,
+         WHERE ora.id=$1 AND ora.user_id=$2 AND ora.deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM assets owned
+              WHERE owned.id=ora.asset_id AND owned.owner_user_id=ora.user_id
+                AND owned.product_scope='ora'
+           )
+         FOR UPDATE`,
       [input.oraAssetId, input.userId],
     );
     const row = selected.rows[0];

@@ -17,11 +17,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, count, eq, gte, isNull, sql } from "drizzle-orm";
 import {
   db,
+  assetsTable,
   generatedImagesTable,
   userCreditsTable,
   userSubscriptionsTable,
   TIER_MONTHLY_IMAGE_CAP,
   type SubscriptionTier,
+  type ProductScope,
 } from "@workspace/db";
 import {
   generateImage,
@@ -55,12 +57,19 @@ import {
 import { buildOraImageEditProfile } from "./public-ai/image-quality";
 import { logger } from "./logger";
 import {
+  AssetAdmissionError,
   beginAssetUpload,
   completeAsset,
   rejectReservedAsset,
   reserveAssetAgainstAvailableQuota,
 } from "./asset-registry";
 import { acquireProjectLifecycleSession, registerProjectWorkController } from "./project-lifecycle";
+import {
+  assertProductScopeNamespace,
+  canonicalAssetContentUrl,
+  isProductScope,
+  requireProductScope,
+} from "./asset-platform-scope";
 
 export type JobStatus = "pending" | "generating" | "completed" | "failed";
 
@@ -69,6 +78,7 @@ export interface ImageJob {
   imageId: number;
   assetId: number;
   userId: string;
+  productScope: ProductScope;
   status: JobStatus;
   fileUrl?: string;
   thumbnailUrl?: string;
@@ -128,6 +138,7 @@ setInterval(
 
 export interface EnqueueImageJobOpts {
   userId: string;
+  productScope: ProductScope;
   prompt: string;
   negativePrompt?: string;
   purpose?: string;
@@ -138,23 +149,15 @@ export interface EnqueueImageJobOpts {
   projectId?: number;
   subscriptionTier?: string | null;
   /**
-   * When true, the completed image is also copied into the signed-in user's
-   * durable Ora asset library (best-effort, after the DB row is finalized).
-   * Set only for Ora-chat-originated generations — NOT for Image Studio, which
-   * has its own gallery backed by `generated_images`.
-   */
-  persistToOraLibrary?: boolean;
-  /**
-   * Ora project space the library copy should be filed under. Callers MUST
-   * pre-validate ownership/liveness (this module never re-checks). Null or
-   * omitted = the user's Personal space. Only meaningful with
-   * `persistToOraLibrary` (or billingMode "ora" for edits).
+   * Ora-only project namespace. Callers must pre-validate ownership/liveness.
+   * Null or omitted means Personal; it never identifies a NabuFlow project.
    */
   oraProjectId?: number | null;
 }
 
 export function getJob(jobId: string): ImageJob | undefined {
-  return jobs.get(jobId);
+  const job = jobs.get(jobId);
+  return job && isProductScope(job.productScope) ? job : undefined;
 }
 
 /**
@@ -285,6 +288,8 @@ export async function preflightImageJobs(
 export async function enqueueImageJob(
   opts: EnqueueImageJobOpts,
 ): Promise<{ jobId: string; imageId: number }> {
+  const productScope = requireProductScope(opts.productScope);
+  assertProductScopeNamespace(productScope, opts);
   const {
     userId,
     prompt,
@@ -358,6 +363,7 @@ export async function enqueueImageJob(
     .insert(generatedImagesTable)
     .values({
       userId,
+      productScope,
       projectId: projectId ?? null,
       prompt,
       negativePrompt: negativePrompt ?? null,
@@ -384,6 +390,7 @@ export async function enqueueImageJob(
   try {
     reservedAsset = await reserveAssetAgainstAvailableQuota({
       ownerUserId: userId,
+      productScope,
       actorUserId: userId,
       projectId: projectId ?? null,
       threadKey: projectId ? `project:${projectId}` : null,
@@ -469,6 +476,7 @@ export async function enqueueImageJob(
     imageId,
     assetId: reservedAsset.id,
     userId,
+    productScope,
     status: "pending",
     createdAt: new Date(),
   };
@@ -490,6 +498,7 @@ export async function enqueueImageJob(
 
 export interface EnqueueImageEditJobOpts {
   userId: string;
+  productScope: ProductScope;
   parentImageId: number;
   parentStorageKey: string | null;
   parentFileUrl: string;
@@ -512,15 +521,20 @@ export interface EnqueueImageEditJobOpts {
 export async function enqueueImageEditJob(
   opts: EnqueueImageEditJobOpts,
 ): Promise<{ jobId: string; imageId: number }> {
+  const productScope = requireProductScope(opts.productScope);
+  assertProductScopeNamespace(productScope, opts);
+  const expectedBillingMode = productScope === "ora" ? "ora" : "credits";
+  if (opts.billingMode !== undefined && opts.billingMode !== expectedBillingMode) {
+    throw new AssetAdmissionError("asset_not_found", 404);
+  }
   const {
     userId,
     parentImageId,
     instruction,
     quality,
-    parentAspectRatio,
     projectId,
     subscriptionTier,
-    billingMode = "credits",
+    billingMode = expectedBillingMode,
   } = opts;
 
   // Safety check on instruction text
@@ -531,6 +545,34 @@ export async function enqueueImageEditJob(
       category: safetyResult.category,
     });
   }
+
+  // Resolve the source from authoritative, matching product receipts. Caller
+  // URLs and storage keys never substitute for a known canonical parent.
+  const [parent] = await db
+    .select({
+      assetId: assetsTable.id,
+      storageKey: assetsTable.storageKey,
+      aspectRatio: generatedImagesTable.aspectRatio,
+      projectId: generatedImagesTable.projectId,
+    })
+    .from(generatedImagesTable)
+    .innerJoin(assetsTable, eq(assetsTable.id, generatedImagesTable.assetId))
+    .where(
+      and(
+        eq(generatedImagesTable.id, parentImageId),
+        eq(generatedImagesTable.userId, userId),
+        eq(generatedImagesTable.productScope, productScope),
+        eq(generatedImagesTable.status, "completed"),
+        isNull(generatedImagesTable.deletedAt),
+        eq(assetsTable.ownerUserId, userId),
+        eq(assetsTable.productScope, productScope),
+        eq(assetsTable.state, "ready"),
+        isNull(assetsTable.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!parent?.storageKey) throw new AssetAdmissionError("asset_not_found", 404);
+  assertProductScopeNamespace(productScope, { projectId: parent.projectId });
 
   const planTier = normalizeOraPlanTier(subscriptionTier ?? (await resolveImageTier(userId)));
   const oraEditProfile =
@@ -553,10 +595,11 @@ export async function enqueueImageEditJob(
     .insert(generatedImagesTable)
     .values({
       userId,
+      productScope,
       projectId: projectId ?? null,
       prompt: instruction,
       quality: resolvedQuality,
-      aspectRatio: (parentAspectRatio as ImageAspectRatio) ?? "1:1",
+      aspectRatio: (parent.aspectRatio as ImageAspectRatio) ?? "1:1",
       providerName,
       modelName,
       status: "pending",
@@ -575,6 +618,7 @@ export async function enqueueImageEditJob(
   try {
     reservedAsset = await reserveAssetAgainstAvailableQuota({
       ownerUserId: userId,
+      productScope,
       actorUserId: userId,
       projectId: projectId ?? null,
       threadKey: projectId ? `project:${projectId}` : null,
@@ -664,6 +708,7 @@ export async function enqueueImageEditJob(
     imageId,
     assetId: reservedAsset.id,
     userId,
+    productScope,
     status: "pending",
     createdAt: new Date(),
   };
@@ -671,7 +716,15 @@ export async function enqueueImageEditJob(
 
   void runImageEditJob(
     job,
-    { ...opts, quality: resolvedQuality, subscriptionTier: planTier, providerInstruction },
+    {
+      ...opts,
+      parentStorageKey: parent.storageKey,
+      parentFileUrl: canonicalAssetContentUrl(parent.assetId, productScope),
+      parentAspectRatio: parent.aspectRatio,
+      quality: resolvedQuality,
+      subscriptionTier: planTier,
+      providerInstruction,
+    },
     creditCost,
     creditsWereDeducted,
   );
@@ -685,6 +738,11 @@ async function runImageEditJob(
   creditCost: number,
   creditsWereDeducted: boolean,
 ): Promise<void> {
+  if (!isProductScope(job.productScope) || job.productScope !== opts.productScope) {
+    job.status = "failed";
+    job.error = "Image provenance is unavailable";
+    return;
+  }
   const { jobId, imageId, assetId, userId } = job;
   const {
     parentStorageKey,
@@ -769,12 +827,12 @@ async function runImageEditJob(
     completionCommitted = true;
 
     job.status = "completed";
-    job.fileUrl = fileUrl;
-    job.thumbnailUrl = thumbnailUrl ?? undefined;
+    job.fileUrl = canonicalAssetContentUrl(assetId, job.productScope);
+    job.thumbnailUrl = job.fileUrl;
 
     // Ora-origin inline edits gain a Library metadata link to this same unified
     // asset. No second provider object and no second quota charge are created.
-    if (opts.billingMode === "ora") {
+    if (opts.productScope === "ora") {
       try {
         const { persistOraAsset } = await import("./ora-assets");
         await persistOraAsset({
@@ -854,7 +912,7 @@ async function runImageEditJob(
     // The slot was reserved at enqueue time, so a failed edit must refund it —
     // mirroring the synchronous enqueue-path refund and the Builder credit
     // refund above. Best-effort: refundOraQuota never throws.
-    if (opts.billingMode === "ora") {
+    if (opts.productScope === "ora") {
       await refundOraQuota(userId, "image");
     }
 
@@ -872,6 +930,11 @@ async function runImageJob(
   creditCost: number,
   creditsWereDeducted: boolean,
 ): Promise<void> {
+  if (!isProductScope(job.productScope) || job.productScope !== opts.productScope) {
+    job.status = "failed";
+    job.error = "Image provenance is unavailable";
+    return;
+  }
   const { jobId, imageId, assetId, userId } = job;
   const {
     prompt,
@@ -958,12 +1021,12 @@ async function runImageJob(
     completionCommitted = true;
 
     job.status = "completed";
-    job.fileUrl = fileUrl;
-    job.thumbnailUrl = thumbnailUrl ?? undefined;
+    job.fileUrl = canonicalAssetContentUrl(assetId, job.productScope);
+    job.thumbnailUrl = job.fileUrl;
 
     // Add the Ora Library metadata view over this same unified asset. This must
     // never copy provider bytes or charge storage twice.
-    if (opts.persistToOraLibrary) {
+    if (opts.productScope === "ora") {
       try {
         const { persistOraAsset } = await import("./ora-assets");
         await persistOraAsset({

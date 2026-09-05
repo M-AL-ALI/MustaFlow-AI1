@@ -4,12 +4,66 @@ import {
   ensureProductionDatabaseRequestSchema,
   productionDatabaseAllocationIdentity,
   productionDatabaseAllocationRecordSchema,
+  productionDatabaseAdmissionReceiptSchema,
   releaseProductionDatabaseRequestSchema,
 } from "../src";
 
 const sha = (value: string) => value.repeat(64);
 
 describe("production database capability contracts", () => {
+  it("binds strict admission receipts and keeps authorization distinct from sealing", () => {
+    const admission = {
+      format: "nabuflow.production-database-admission/v1" as const,
+      issuer: "nabuflow-api" as const,
+      audience: "production" as const,
+      projectId: 42,
+      allocationIdentity: sha("a"),
+      registrationEpoch: "a18bfd98-7c06-4a3b-b0e6-617b51285683",
+      birthToken: "fa259b49-d58c-41b5-bde6-18c725ae20bd",
+      receiptId: "ff01ec5d-63fc-460f-a3af-04715a27e389",
+      birthRegistered: true,
+      assertion: "authorized" as const,
+    };
+    const request = {
+      projectId: 42,
+      expectedDeploymentVersion: "worker-admission-v1",
+      allocationIdentity: admission.allocationIdentity,
+    };
+    expect(productionDatabaseAdmissionReceiptSchema.parse(admission)).toEqual(admission);
+    expect(
+      ensureProductionDatabaseRequestSchema.safeParse({ ...request, action: "ensure", admission })
+        .success,
+    ).toBe(true);
+    expect(
+      releaseProductionDatabaseRequestSchema.safeParse({ ...request, action: "release", admission })
+        .success,
+    ).toBe(false);
+    const sealed = { ...admission, assertion: "sealed" as const };
+    expect(
+      releaseProductionDatabaseRequestSchema.safeParse({
+        ...request,
+        action: "release",
+        admission: sealed,
+      }).success,
+    ).toBe(true);
+    expect(
+      ensureProductionDatabaseRequestSchema.safeParse({
+        ...request,
+        action: "ensure",
+        admission: sealed,
+      }).success,
+    ).toBe(false);
+    for (const invalid of [
+      { ...admission, registrationEpoch: "unproven" },
+      { ...admission, audience: "preview" },
+      { ...admission, birthRegistered: "true" },
+      { ...admission, providerProjectId: "not-a-birth-proof" },
+      { ...admission, connectionString: "forbidden" },
+    ]) {
+      expect(productionDatabaseAdmissionReceiptSchema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
   it("derives one project-owned identity independent of releases and blue/green slots", async () => {
     const envelope = {
       format: "nabuflow.production-database-allocation/v1" as const,

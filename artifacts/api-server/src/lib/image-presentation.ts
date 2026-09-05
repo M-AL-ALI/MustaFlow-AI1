@@ -1,14 +1,22 @@
+import { canonicalAssetContentUrl, isProductScope } from "./asset-platform-scope";
+
 export function presentPrivateImage<
-  T extends { id: number; status: string; assetId?: number | null; storageKey?: unknown },
+  T extends {
+    id: number;
+    status: string;
+    assetId?: number | null;
+    storageKey?: unknown;
+    productScope?: unknown;
+  },
 >(row: T): Omit<T, "storageKey"> & { fileUrl: string | null; thumbnailUrl: string | null } {
   const { storageKey: privateStorageKey, ...presented } = row;
   void privateStorageKey;
   const contentUrl =
-    row.status !== "completed"
+    row.status !== "completed" || !isProductScope(row.productScope)
       ? null
       : typeof row.assetId === "number" && Number.isSafeInteger(row.assetId) && row.assetId > 0
-        ? `/api/assets/${row.assetId}/content`
-        : `/api/images/${row.id}/file`;
+        ? canonicalAssetContentUrl(row.assetId, row.productScope)
+        : null;
   return {
     ...presented,
     fileUrl: contentUrl,

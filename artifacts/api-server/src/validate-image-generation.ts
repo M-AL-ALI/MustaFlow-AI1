@@ -1,6 +1,7 @@
 /**
  * Phase 9A-1 Live Validation — Image Generation End-to-End
  *
+ * Service calls exercise the NabuFlow Image Studio surface.
  * Runs directly against the live DB and real OpenAI API (no HTTP auth required).
  * Uses the same pattern as verify-agentic-provisioning.ts.
  *
@@ -123,7 +124,12 @@ async function run(): Promise<void> {
   const blockedPrompt = "Generate a nude explicit photo of a person";
   let safetyBlocked = false;
   try {
-    await enqueueImageJob({ userId: TEST_USER_ID, prompt: blockedPrompt, quality: "draft" });
+    await enqueueImageJob({
+      productScope: "nabuflow",
+      userId: TEST_USER_ID,
+      prompt: blockedPrompt,
+      quality: "draft",
+    });
     fail("Safety block — should have thrown SAFETY_BLOCKED");
   } catch (err) {
     const e = err as { code?: string; category?: string };
@@ -239,6 +245,7 @@ async function run(): Promise<void> {
 
   try {
     const result = await enqueueImageJob({
+      productScope: "nabuflow",
       userId: TEST_USER_ID,
       prompt: imagePrompt,
       quality: "draft",

@@ -14,7 +14,6 @@
 import { readFileSync, mkdirSync, writeFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { pool } from "@workspace/db";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -149,6 +148,11 @@ async function run(): Promise<void> {
     );
     process.exit(1);
   }
+
+  // Load the database only after the environment gate. Importing @workspace/db
+  // at module evaluation time makes the documented DATABASE-less CI escape
+  // hatch unreachable because that package correctly rejects a missing URL.
+  const { pool } = await import("@workspace/db");
 
   // Prefer the lightweight public entry as template — fewer preloaded chunks.
   // Fall back to index.html if public.html was not emitted (legacy builds).

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const read = (relative: string): string => readFileSync(new URL(relative, import.meta.url), "utf8");
@@ -284,7 +285,21 @@ describe("project lifecycle mutation fences", () => {
 
   it("keeps database and snapshot receipts until provider deletion is confirmed", () => {
     expect(databaseSource).not.toContain("void deleteSnapshotBlob(");
-    expect(databaseSource).toContain("const deleted = await deleteNeonDatabase");
+    const databaseDelete = routeBlock(databaseSource, 'router.delete(\n  "/projects/:id/database"');
+    const providerConfirmation = databaseDelete.indexOf("await deleteNeonDatabase(");
+    const credentialDelete = databaseDelete.indexOf(".delete(secretsTable)");
+    const success = databaseDelete.indexOf("res.json({ ok: true })");
+    expect(providerConfirmation).toBeGreaterThan(-1);
+    expect(credentialDelete).toBeGreaterThan(providerConfirmation);
+    expect(success).toBeGreaterThan(credentialDelete);
+    expect(databaseDelete).toMatch(
+      /!\(await deleteNeonDatabase\([^\n]+\)\)\)\s*\{\s*throw new Error\("neon_deletion_unconfirmed"\)/u,
+    );
+    expect(databaseDelete).toContain(
+      'if (after.kind !== "absent") throw new Error("neon_catalog_unresolved")',
+    );
+    expect(databaseDelete).toContain("holdResponseProjectLifecycleSession(res)");
+    expect(databaseDelete).toContain("await releaseHold()");
     expect(databaseSource).toContain("database_provider_cleanup_unconfirmed");
     expect(databaseSource).toContain("const blobDeleted = await deleteSnapshotBlob");
     expect(databaseSource).toContain("database_snapshot_storage_cleanup_unconfirmed");
@@ -419,18 +434,213 @@ describe("project lifecycle mutation fences", () => {
   });
 
   it("releases HTTP image admission before detached workers reacquire without nesting", () => {
-    const generateRoute = routeBlock(imageGenRoutesSource, 'router.post("/images/generate"');
-    expect(generateRoute.indexOf("requireActiveProjectLifecycleFor(projectId")).toBeLessThan(
-      generateRoute.indexOf("enqueueImageJob(baseOpts)"),
+    // Inspect actual route/function AST nodes: a comment, missing anchor, or
+    // factory registration without its implementation cannot satisfy the fence.
+    const ast = ts.createSourceFile(
+      "image-gen.ts",
+      imageGenRoutesSource,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
     );
-    const editRoute = routeBlock(imageGenRoutesSource, 'router.post("/images/:id/edit"');
-    expect(editRoute.indexOf("admitGeneratedImageProjectLifecycle(parent.projectId")).toBeLessThan(
-      editRoute.indexOf("enqueueImageEditJob({"),
+    const calls = (root: ts.Node, name: string): ts.CallExpression[] => {
+      const found: ts.CallExpression[] = [];
+      const visit = (node: ts.Node): void => {
+        if (ts.isCallExpression(node) && node.expression.getText(ast) === name) found.push(node);
+        ts.forEachChild(node, visit);
+      };
+      visit(root);
+      return found;
+    };
+    const unparen = (expression: ts.Expression): ts.Expression => {
+      while (ts.isParenthesizedExpression(expression)) expression = expression.expression;
+      return expression;
+    };
+    const bareReturn = (statement: ts.Statement): boolean => {
+      if (ts.isReturnStatement(statement)) return statement.expression === undefined;
+      return (
+        ts.isBlock(statement) &&
+        statement.statements.length === 1 &&
+        bareReturn(statement.statements[0]!)
+      );
+    };
+    const handler = (route: string, scope?: "nabuflow" | "ora"): ts.Block => {
+      const registrations = calls(ast, "router.post").filter(
+        (call) =>
+          call.arguments[0] &&
+          ts.isStringLiteral(call.arguments[0]) &&
+          call.arguments[0].text === route,
+      );
+      expect(registrations).toHaveLength(1);
+      const callback = registrations[0]!.arguments[1];
+      if (!callback) throw new Error("image route callback missing");
+      if (scope === undefined) {
+        if (!ts.isArrowFunction(callback) || !ts.isBlock(callback.body)) {
+          throw new Error("generation route must bind its actual handler");
+        }
+        return callback.body;
+      }
+      if (
+        !ts.isCallExpression(callback) ||
+        callback.expression.getText(ast) !== "imageEditHandler"
+      ) {
+        throw new Error("edit route must bind the product handler factory");
+      }
+      expect(callback.arguments).toHaveLength(1);
+      const product = callback.arguments[0]!;
+      if (!ts.isStringLiteral(product)) throw new Error("edit product must be server selected");
+      expect(product.text).toBe(scope);
+      const factory = ast.statements
+        .filter(ts.isVariableStatement)
+        .flatMap((statement) => [...statement.declarationList.declarations])
+        .find(
+          (declaration) =>
+            ts.isIdentifier(declaration.name) && declaration.name.text === "imageEditHandler",
+        )?.initializer;
+      if (
+        !factory ||
+        !ts.isArrowFunction(factory) ||
+        !ts.isArrowFunction(factory.body) ||
+        !ts.isBlock(factory.body.body)
+      )
+        throw new Error("edit factory implementation missing");
+      return factory.body.body;
+    };
+    const callbackFence = (body: ts.Block): ts.CallExpression => {
+      const admitted = body.statements
+        .filter(ts.isVariableStatement)
+        .flatMap((statement) => [...statement.declarationList.declarations])
+        .find(
+          (declaration) =>
+            ts.isIdentifier(declaration.name) && declaration.name.text === "admitted",
+        );
+      expect(admitted?.initializer?.kind).toBe(ts.SyntaxKind.FalseKeyword);
+      const fences = calls(body, "requireActiveProjectLifecycleFor");
+      expect(fences).toHaveLength(1);
+      const fence = fences[0]!;
+      expect(ts.isAwaitExpression(fence.parent)).toBe(true);
+      expect(fence.arguments.slice(0, 2).map((argument) => argument.getText(ast))).toEqual([
+        "projectId",
+        "res",
+      ]);
+      expect(admitted!.getStart(ast)).toBeLessThan(fence.getStart(ast));
+      const callback = fence.arguments[2];
+      if (!callback || !ts.isArrowFunction(callback) || !ts.isBlock(callback.body)) {
+        throw new Error("lifecycle admission callback missing");
+      }
+      expect(callback.body.statements).toHaveLength(1);
+      const assignment = callback.body.statements[0]!;
+      if (!ts.isExpressionStatement(assignment) || !ts.isBinaryExpression(assignment.expression)) {
+        throw new Error("lifecycle callback must establish admission");
+      }
+      expect(assignment.expression.left.getText(ast)).toBe("admitted");
+      expect(assignment.expression.operatorToken.kind).toBe(ts.SyntaxKind.EqualsToken);
+      expect(assignment.expression.right.kind).toBe(ts.SyntaxKind.TrueKeyword);
+      return fence;
+    };
+    const generateBody = handler("/images/generate");
+    const projectBranches = generateBody.statements.filter(ts.isIfStatement).filter((statement) => {
+      const condition = unparen(statement.expression);
+      return (
+        ts.isBinaryExpression(condition) &&
+        condition.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+        ts.isTypeOfExpression(condition.left) &&
+        condition.left.expression.getText(ast) === "projectId" &&
+        ts.isStringLiteral(condition.right) &&
+        condition.right.text === "number"
+      );
+    });
+    expect(projectBranches).toHaveLength(1);
+    const projectBranch = projectBranches[0]!;
+    if (!ts.isBlock(projectBranch.thenStatement))
+      throw new Error("project admission block missing");
+    const admission = callbackFence(projectBranch.thenStatement);
+    const denials = projectBranch.thenStatement.statements
+      .filter(ts.isIfStatement)
+      .filter((statement) => {
+        const condition = unparen(statement.expression);
+        return (
+          ts.isPrefixUnaryExpression(condition) &&
+          condition.operator === ts.SyntaxKind.ExclamationToken &&
+          unparen(condition.operand).getText(ast) === "admitted"
+        );
+      });
+    expect(denials).toHaveLength(1);
+    expect(bareReturn(denials[0]!.thenStatement)).toBe(true);
+    expect(denials[0]!.getStart(ast)).toBeGreaterThan(admission.end);
+    const generationDispatches = calls(generateBody, "enqueueImageJob");
+    expect(generationDispatches.length).toBeGreaterThan(0);
+    for (const dispatch of generationDispatches) {
+      expect(dispatch.getStart(ast)).toBeGreaterThan(projectBranch.end);
+    }
+
+    const lifecycleHelper = ast.statements.find(
+      (statement) =>
+        ts.isFunctionDeclaration(statement) &&
+        statement.name?.text === "admitGeneratedImageProjectLifecycle",
     );
+    if (!lifecycleHelper || !ts.isFunctionDeclaration(lifecycleHelper) || !lifecycleHelper.body) {
+      throw new Error("edit lifecycle helper implementation missing");
+    }
+    const helperFence = callbackFence(lifecycleHelper.body);
+    const result = lifecycleHelper.body.statements.at(-1)!;
+    if (!ts.isReturnStatement(result))
+      throw new Error("lifecycle helper must return admission result");
+    expect(result.expression?.getText(ast)).toBe("admitted");
+    expect(result.getStart(ast)).toBeGreaterThan(helperFence.end);
+    const accountOnly = lifecycleHelper.body.statements[0]!;
+    if (!ts.isIfStatement(accountOnly) || !ts.isReturnStatement(accountOnly.thenStatement)) {
+      throw new Error("account-only lifecycle bypass missing");
+    }
+    const nullCheck = unparen(accountOnly.expression);
+    if (!ts.isBinaryExpression(nullCheck))
+      throw new Error("account bypass must check null project");
+    expect(nullCheck.left.getText(ast)).toBe("projectId");
+    expect(nullCheck.operatorToken.kind).toBe(ts.SyntaxKind.EqualsEqualsEqualsToken);
+    expect(nullCheck.right.kind).toBe(ts.SyntaxKind.NullKeyword);
+    expect(accountOnly.thenStatement.expression?.kind).toBe(ts.SyntaxKind.TrueKeyword);
+
+    for (const [route, scope] of [
+      ["/images/:id/edit", "nabuflow"],
+      ["/ora/images/:id/edit", "ora"],
+    ] as const) {
+      const body = handler(route, scope);
+      const guardedCalls = body.statements.filter(ts.isIfStatement).flatMap((statement) => {
+        const condition = unparen(statement.expression);
+        if (
+          !ts.isPrefixUnaryExpression(condition) ||
+          condition.operator !== ts.SyntaxKind.ExclamationToken
+        )
+          return [];
+        const awaited = unparen(condition.operand);
+        if (!ts.isAwaitExpression(awaited)) return [];
+        const call = unparen(awaited.expression);
+        return ts.isCallExpression(call) &&
+          call.expression.getText(ast) === "admitGeneratedImageProjectLifecycle"
+          ? [{ statement, call }]
+          : [];
+      });
+      expect(guardedCalls).toHaveLength(1);
+      const guard = guardedCalls[0]!;
+      expect(guard.call.arguments.map((argument) => argument.getText(ast))).toEqual([
+        "parent.projectId",
+        "res",
+      ]);
+      expect(bareReturn(guard.statement.thenStatement)).toBe(true);
+      const editDispatches = calls(body, "enqueueImageEditJob");
+      expect(editDispatches.length).toBeGreaterThan(0);
+      for (const dispatch of editDispatches) {
+        expect(dispatch.getStart(ast)).toBeGreaterThan(guard.statement.end);
+      }
+    }
+
     const deleteRoute = routeBlock(imageGenRoutesSource, 'router.delete("/images/:id"');
-    expect(
-      deleteRoute.indexOf("admitGeneratedImageProjectLifecycle(existing.projectId"),
-    ).toBeLessThan(deleteRoute.indexOf("deleteReadyAsset({"));
+    const deleteFence = deleteRoute.indexOf(
+      "admitGeneratedImageProjectLifecycle(existing.projectId",
+    );
+    const deleteClaim = deleteRoute.indexOf("deleteReadyAsset({");
+    expect(deleteFence).toBeGreaterThan(-1);
+    expect(deleteClaim).toBeGreaterThan(deleteFence);
 
     const enqueueGeneration = imageGenerationJobsSource.slice(
       imageGenerationJobsSource.indexOf("export async function enqueueImageJob("),

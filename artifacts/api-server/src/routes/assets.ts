@@ -10,6 +10,7 @@ import {
   projectFilesTable,
   projectsTable,
   type AssetContext,
+  type ProductScope,
 } from "@workspace/db";
 import { checkProjectAccess, requireProjectAccess } from "../lib/auth";
 import { findLiveSupportGrant } from "../lib/support-access";
@@ -28,7 +29,6 @@ import {
 import {
   acceptsDeclaredAsset,
   ASSET_ERROR_MESSAGES,
-  isCanonicalAssetContentRequest,
   parseCanonicalAssetId,
   sniffAsset,
 } from "../lib/asset-contract";
@@ -75,7 +75,18 @@ import {
   PROJECT_FILE_ASSET_HISTORY_CONSUMER,
 } from "../lib/project-file-asset-reference";
 
+import {
+  AssetProductScopeError,
+  canonicalAssetContentUrl,
+  EXPLICIT_PROJECT_ASSET_USE_CONSUMER,
+} from "../lib/asset-platform-scope";
+import {
+  assertExistingProjectAssetUse,
+  grantExplicitProjectAssetUse,
+} from "../lib/asset-project-use";
+
 const router: IRouter = Router();
+const EXPLICIT_MATERIALIZE_ACTION = Symbol("authenticated-materialize");
 const MAX_MATERIALIZED_ASSET_BYTES = 25 * 1024 * 1024;
 
 async function requireAssetProjectLifecycle(
@@ -83,22 +94,46 @@ async function requireAssetProjectLifecycle(
   res: Response,
   next: NextFunction,
 ): Promise<void> {
-  if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method.toUpperCase())) {
-    next();
+  if (!req.userId) {
+    res.status(401).json({ error: "Unauthenticated" });
     return;
   }
-  const assetId = Number(req.params.assetId);
-  if (!Number.isSafeInteger(assetId) || assetId < 1) {
-    next();
+  const assetId = parseCanonicalAssetId(req.params.assetId);
+  if (assetId === null) {
+    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
     return;
   }
   try {
     const [asset] = await db
-      .select({ projectId: assetsTable.projectId })
+      .select({
+        projectId: assetsTable.projectId,
+        ownerUserId: assetsTable.ownerUserId,
+        actorUserId: assetsTable.actorUserId,
+      })
       .from(assetsTable)
-      .where(eq(assetsTable.id, assetId))
-      .limit(1);
-    if (asset?.projectId == null) {
+      .where(and(eq(assetsTable.id, assetId), eq(assetsTable.productScope, "nabuflow")));
+    if (!asset) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method.toUpperCase())) {
+      next();
+      return;
+    }
+    if (
+      asset.ownerUserId !== req.userId &&
+      asset.actorUserId !== req.userId &&
+      (asset.projectId === null ||
+        (await checkProjectAccess(req.userId, asset.projectId, "member")) !== "granted")
+    ) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
+    if (asset.projectId === null) {
       next();
       return;
     }
@@ -153,6 +188,7 @@ async function loadMaterializableAsset(input: {
   if (
     !asset ||
     asset.state !== "ready" ||
+    asset.productScope !== "nabuflow" ||
     asset.storageBackend !== "r2" ||
     (asset.ownerUserId !== input.userId && asset.projectId !== input.projectId)
   ) {
@@ -177,12 +213,15 @@ async function loadMaterializableAsset(input: {
   };
 }
 
-export async function materializeProjectAsset(input: {
-  userId: string;
-  projectId: number;
-  assetId: number;
-  path?: unknown;
-}): Promise<{ path: string; src: string; assetId: number }> {
+export async function materializeProjectAsset(
+  input: {
+    userId: string;
+    projectId: number;
+    assetId: number;
+    path?: unknown;
+  },
+  explicitAction?: symbol,
+): Promise<{ path: string; src: string; assetId: number }> {
   const asset = await loadMaterializableAsset(input);
   const path = requestedAssetPath(input.path, asset.id, asset.filename);
   if (!path) {
@@ -205,65 +244,88 @@ export async function materializeProjectAsset(input: {
     sizeBytes: asset.sizeBytes,
     sha256: asset.sha256,
   });
-  await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ id: projectFilesTable.id })
-      .from(projectFilesTable)
-      .where(
-        and(
-          eq(projectFilesTable.projectId, input.projectId),
-          eq(projectFilesTable.artifactId, artifactId),
-          eq(projectFilesTable.path, path),
-        ),
-      );
-    if (existing) {
+  await db.transaction(
+    async (tx) => {
+      const admission = {
+        actorUserId: input.userId,
+        assetId: asset.id,
+        targetProjectId: input.projectId,
+        productScope: "nabuflow" as const,
+      };
+      if (explicitAction === EXPLICIT_MATERIALIZE_ACTION) {
+        await grantExplicitProjectAssetUse(tx, admission);
+      } else {
+        await assertExistingProjectAssetUse(tx, admission);
+      }
+      // History retains bytes only; admission above establishes target authority.
       await tx
-        .update(projectFilesTable)
-        .set({
-          content: encoded,
-          mimeType: asset.mimeType,
-          updatedAt: new Date(),
-        })
-        .where(eq(projectFilesTable.id, existing.id));
-    } else {
-      await tx.insert(projectFilesTable).values({
-        projectId: input.projectId,
-        artifactId,
-        path,
-        content: encoded,
-        mimeType: asset.mimeType,
-      });
-    }
-    await reconcileProjectFileAssetUsage(tx, {
-      projectId: input.projectId,
-      artifactId,
-      filePath: path,
-      nextContent: encoded,
-    });
-    await tx
-      .insert(assetUsageTable)
-      .values([
-        {
-          assetId: asset.id,
-          projectId: input.projectId,
-          artifactId,
-          filePath: path,
-          consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
-        },
-        {
+        .insert(assetUsageTable)
+        .values({
           assetId: asset.id,
           projectId: input.projectId,
           consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
-        },
-      ])
-      .onConflictDoNothing();
-  });
+        })
+        .onConflictDoNothing();
+      const [existing] = await tx
+        .select({ id: projectFilesTable.id })
+        .from(projectFilesTable)
+        .where(
+          and(
+            eq(projectFilesTable.projectId, input.projectId),
+            eq(projectFilesTable.artifactId, artifactId),
+            eq(projectFilesTable.path, path),
+          ),
+        );
+      if (existing) {
+        await tx
+          .update(projectFilesTable)
+          .set({
+            content: encoded,
+            mimeType: asset.mimeType,
+            updatedAt: new Date(),
+          })
+          .where(eq(projectFilesTable.id, existing.id));
+      } else {
+        await tx.insert(projectFilesTable).values({
+          projectId: input.projectId,
+          artifactId,
+          path,
+          content: encoded,
+          mimeType: asset.mimeType,
+        });
+      }
+      await reconcileProjectFileAssetUsage(tx, {
+        projectId: input.projectId,
+        artifactId,
+        filePath: path,
+        nextContent: encoded,
+      });
+      await tx
+        .insert(assetUsageTable)
+        .values([
+          {
+            assetId: asset.id,
+            projectId: input.projectId,
+            artifactId,
+            filePath: path,
+            consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
+          },
+          {
+            assetId: asset.id,
+            projectId: input.projectId,
+            consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
+          },
+        ])
+        .onConflictDoNothing();
+    },
+    { isolationLevel: "read committed" },
+  );
   const src = path.startsWith("public/") ? `/${path.slice("public/".length)}` : path;
   return { path, src, assetId: asset.id };
 }
 
 function respondError(res: Response, error: unknown): void {
-  if (error instanceof AssetAdmissionError) {
+  if (error instanceof AssetAdmissionError || error instanceof AssetProductScopeError) {
     res.status(error.status).json({ error: error.message, code: error.code });
     return;
   }
@@ -325,6 +387,7 @@ async function reserveFromRequest(req: Request, res: Response, projectId: number
     const allowedSources = new Set(["picker", "paste", "drop", "observe", "recording"]);
     const source = body.source && allowedSources.has(body.source) ? body.source : "upload";
     const reservation = await reserveAsset({
+      productScope: "nabuflow",
       ownerUserId,
       actorUserId: req.userId,
       projectId,
@@ -743,9 +806,16 @@ router.get("/assets", async (req, res) => {
       return;
     }
   }
-  const conditions = [eq(assetsTable.state, "ready")];
+  const conditions = [eq(assetsTable.state, "ready"), eq(assetsTable.productScope, "nabuflow")];
   if (projectId !== null) {
-    conditions.push(eq(assetsTable.projectId, projectId));
+    conditions.push(sql`(${assetsTable.projectId}=${projectId} OR EXISTS (
+      SELECT 1 FROM asset_usage explicit_use
+      WHERE explicit_use.asset_id=${assetsTable.id}
+        AND explicit_use.project_id=${projectId}
+        AND explicit_use.consumer=${EXPLICIT_PROJECT_ASSET_USE_CONSUMER}
+        AND explicit_use.artifact_id IS NULL AND explicit_use.version_id IS NULL
+        AND explicit_use.file_path IS NULL
+    ))`);
   } else {
     conditions.push(eq(assetsTable.ownerUserId, req.userId));
   }
@@ -775,47 +845,87 @@ router.get("/assets", async (req, res) => {
   });
 });
 
-router.get("/assets/:assetId/content", async (req, res) => {
-  if (!req.userId) {
-    res.status(401).json({ error: "Unauthenticated" });
-    return;
-  }
-  if (!isCanonicalAssetContentRequest(req.originalUrl, req.params.assetId)) {
-    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
-    return;
-  }
-  const assetId = parseCanonicalAssetId(req.params.assetId)!;
-  const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, assetId));
-  if (!asset || asset.state !== "ready") {
-    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
-    return;
-  }
-  const mayRead =
-    asset.ownerUserId === req.userId ||
-    (asset.projectId !== null && (await mayReadProjectAssets(req.userId, asset.projectId)));
-  if (!mayRead) {
-    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
-    return;
-  }
-  if (asset.storageBackend !== "r2") {
-    res.status(409).json({ error: "This older upload is still being migrated." });
-    return;
-  }
-  const object = await openAsset(asset.storageKey);
-  if (!object) {
-    res.status(404).json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
-    return;
-  }
-  res.setHeader("Content-Type", asset.mimeType);
-  res.setHeader("Content-Length", String(object.sizeBytes));
-  res.setHeader("Cache-Control", "private, no-store");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader(
-    "Content-Disposition",
-    `${asset.mimeType.startsWith("image/") || asset.mimeType.startsWith("video/") ? "inline" : "attachment"}; filename="${asset.filename.replace(/"/g, "")}"`,
-  );
-  object.body.pipe(res);
-});
+const assetContentHandler =
+  (productScope: ProductScope) =>
+  async (req: Request, res: Response): Promise<void> => {
+    if (!req.userId) {
+      res.status(401).json({ error: "Unauthenticated" });
+      return;
+    }
+    const requestedId = parseCanonicalAssetId(req.params.assetId);
+    if (
+      requestedId === null ||
+      req.originalUrl.split("?")[0] !== canonicalAssetContentUrl(requestedId, productScope)
+    ) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
+    const assetId = parseCanonicalAssetId(req.params.assetId)!;
+    const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, assetId));
+    if (!asset || asset.state !== "ready" || asset.productScope !== productScope) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
+    let mayRead =
+      asset.ownerUserId === req.userId ||
+      (productScope === "nabuflow" &&
+        asset.projectId !== null &&
+        (await mayReadProjectAssets(req.userId, asset.projectId)));
+    if (!mayRead && productScope === "nabuflow") {
+      const grants = await db
+        .select({ projectId: assetUsageTable.projectId })
+        .from(assetUsageTable)
+        .innerJoin(projectsTable, eq(projectsTable.id, assetUsageTable.projectId))
+        .where(
+          and(
+            eq(assetUsageTable.assetId, assetId),
+            eq(assetUsageTable.consumer, EXPLICIT_PROJECT_ASSET_USE_CONSUMER),
+            sql`${assetUsageTable.artifactId} IS NULL`,
+            sql`${assetUsageTable.versionId} IS NULL`,
+            sql`${assetUsageTable.filePath} IS NULL`,
+            sql`${projectsTable.deletedAt} IS NULL`,
+          ),
+        );
+      for (const grant of grants) {
+        if (grant.projectId !== null && (await mayReadProjectAssets(req.userId, grant.projectId))) {
+          mayRead = true;
+          break;
+        }
+      }
+    }
+    if (!mayRead) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
+    if (asset.storageBackend !== "r2") {
+      res.status(409).json({ error: "This older upload is still being migrated." });
+      return;
+    }
+    const object = await openAsset(asset.storageKey);
+    if (!object) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
+    res.setHeader("Content-Type", asset.mimeType);
+    res.setHeader("Content-Length", String(object.sizeBytes));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader(
+      "Content-Disposition",
+      `${asset.mimeType.startsWith("image/") || asset.mimeType.startsWith("video/") ? "inline" : "attachment"}; filename="${asset.filename.replace(/"/g, "")}"`,
+    );
+    object.body.pipe(res);
+  };
+router.get("/assets/:assetId/content", assetContentHandler("nabuflow"));
+router.get("/ora/canonical-assets/:assetId/content", assetContentHandler("ora"));
 
 router.patch("/assets/:assetId", async (req, res): Promise<void> => {
   if (!req.userId) {
@@ -908,6 +1018,7 @@ router.post("/assets/:assetId/derivatives", async (req, res): Promise<void> => {
     const derivatives = await generateAssetDerivatives(bytes, presets);
     for (const derivative of derivatives) {
       const reserved = await reserveAsset({
+        productScope: "nabuflow",
         ownerUserId: req.userId,
         actorUserId: req.userId,
         projectId: source.projectId,
@@ -965,6 +1076,7 @@ router.post("/assets/:assetId/derivatives", async (req, res): Promise<void> => {
             assetId: item.id,
             userId: req.userId,
             storageBackend: "r2",
+            productScope: "nabuflow",
           });
           await deleteTrackedAssetStorageObjects(pending.storageObjects);
           await recordAssetDeleted({
@@ -997,12 +1109,15 @@ router.post(
       return;
     }
     try {
-      const receipt = await materializeProjectAsset({
-        userId: req.userId,
-        projectId: Number(req.params.id),
-        assetId: Number(req.params.assetId),
-        path: (req.body as { path?: unknown } | null)?.path,
-      });
+      const receipt = await materializeProjectAsset(
+        {
+          userId: req.userId,
+          projectId: Number(req.params.id),
+          assetId: Number(req.params.assetId),
+          path: (req.body as { path?: unknown } | null)?.path,
+        },
+        EXPLICIT_MATERIALIZE_ACTION,
+      );
       res.status(201).json({
         ...receipt,
         message: "The asset is now available in this project and can be restored with its history.",
@@ -1030,6 +1145,28 @@ router.post(
       res.status(400).json({ error: "Choose a valid replacement asset." });
       return;
     }
+    const [prior] = await db
+      .select({ id: assetsTable.id })
+      .from(assetsTable)
+      .where(
+        and(
+          eq(assetsTable.id, assetId),
+          eq(assetsTable.productScope, "nabuflow"),
+          eq(assetsTable.state, "ready"),
+          sql`(${assetsTable.projectId}=${projectId} OR EXISTS (
+          SELECT 1 FROM asset_usage explicit_use WHERE explicit_use.asset_id=${assetsTable.id}
+            AND explicit_use.project_id=${projectId}
+            AND explicit_use.consumer=${EXPLICIT_PROJECT_ASSET_USE_CONSUMER}
+            AND explicit_use.artifact_id IS NULL AND explicit_use.version_id IS NULL
+            AND explicit_use.file_path IS NULL))`,
+        ),
+      );
+    if (!prior) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
     const usages = await db
       .select()
       .from(assetUsageTable)
@@ -1044,6 +1181,12 @@ router.post(
         ),
       )
       .limit(101);
+    if (usages.length === 0) {
+      res
+        .status(404)
+        .json({ error: ASSET_ERROR_MESSAGES.asset_not_found, code: "asset_not_found" });
+      return;
+    }
     if (usages.length > 100 || usages.some((usage) => !usage.filePath)) {
       res.status(409).json({
         error:
@@ -1087,66 +1230,83 @@ router.post(
       });
       const priorUrl = `/api/assets/${assetId}/content`;
       const replacementUrl = `/api/assets/${replacement.id}/content`;
-      await db.transaction(async (tx) => {
-        for (const receipt of receipts) {
-          const [existing] = await tx
-            .select({
-              id: projectFilesTable.id,
-              content: projectFilesTable.content,
-              mimeType: projectFilesTable.mimeType,
-            })
-            .from(projectFilesTable)
-            .where(
-              and(
-                eq(projectFilesTable.projectId, projectId),
-                eq(projectFilesTable.artifactId, artifactId),
-                eq(projectFilesTable.path, receipt.path),
-              ),
-            );
-          const replacesContentUrl = existing?.content.includes(priorUrl) === true;
-          const nextContent = replacesContentUrl
-            ? existing.content.split(priorUrl).join(replacementUrl)
-            : encoded;
-          const nextMimeType = replacesContentUrl ? existing.mimeType : replacement.mimeType;
-          if (existing) {
-            await tx
-              .update(projectFilesTable)
-              .set({ content: nextContent, mimeType: nextMimeType, updatedAt: new Date() })
-              .where(eq(projectFilesTable.id, existing.id));
-          } else {
-            await tx.insert(projectFilesTable).values({
-              projectId,
-              artifactId,
-              path: receipt.path,
-              content: nextContent,
-              mimeType: nextMimeType,
-            });
-          }
-          await reconcileProjectFileAssetUsage(tx, {
-            projectId,
-            artifactId,
-            filePath: receipt.path,
-            nextContent,
+      await db.transaction(
+        async (tx) => {
+          await grantExplicitProjectAssetUse(tx, {
+            actorUserId: req.userId!,
+            assetId: replacement.id,
+            targetProjectId: projectId,
+            productScope: "nabuflow",
           });
           await tx
             .insert(assetUsageTable)
-            .values([
-              {
-                assetId: replacement.id,
+            .values({
+              assetId: replacement.id,
+              projectId,
+              consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
+            })
+            .onConflictDoNothing();
+          for (const receipt of receipts) {
+            const [existing] = await tx
+              .select({
+                id: projectFilesTable.id,
+                content: projectFilesTable.content,
+                mimeType: projectFilesTable.mimeType,
+              })
+              .from(projectFilesTable)
+              .where(
+                and(
+                  eq(projectFilesTable.projectId, projectId),
+                  eq(projectFilesTable.artifactId, artifactId),
+                  eq(projectFilesTable.path, receipt.path),
+                ),
+              );
+            const replacesContentUrl = existing?.content.includes(priorUrl) === true;
+            const nextContent = replacesContentUrl
+              ? existing.content.split(priorUrl).join(replacementUrl)
+              : encoded;
+            const nextMimeType = replacesContentUrl ? existing.mimeType : replacement.mimeType;
+            if (existing) {
+              await tx
+                .update(projectFilesTable)
+                .set({ content: nextContent, mimeType: nextMimeType, updatedAt: new Date() })
+                .where(eq(projectFilesTable.id, existing.id));
+            } else {
+              await tx.insert(projectFilesTable).values({
                 projectId,
                 artifactId,
-                filePath: receipt.path,
-                consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
-              },
-              {
-                assetId: replacement.id,
-                projectId,
-                consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
-              },
-            ])
-            .onConflictDoNothing();
-        }
-      });
+                path: receipt.path,
+                content: nextContent,
+                mimeType: nextMimeType,
+              });
+            }
+            await reconcileProjectFileAssetUsage(tx, {
+              projectId,
+              artifactId,
+              filePath: receipt.path,
+              nextContent,
+            });
+            await tx
+              .insert(assetUsageTable)
+              .values([
+                {
+                  assetId: replacement.id,
+                  projectId,
+                  artifactId,
+                  filePath: receipt.path,
+                  consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
+                },
+                {
+                  assetId: replacement.id,
+                  projectId,
+                  consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
+                },
+              ])
+              .onConflictDoNothing();
+          }
+        },
+        { isolationLevel: "read committed" },
+      );
       res.json({ replaced: true, replacements: receipts });
     } catch (error) {
       respondError(res, error);
@@ -1164,6 +1324,7 @@ router.delete("/assets/:assetId", async (req, res) => {
       assetId: Number(req.params.assetId),
       userId: req.userId,
       storageBackend: "r2",
+      productScope: "nabuflow",
     });
     try {
       await deleteTrackedAssetStorageObjects(pending.storageObjects);
@@ -1204,10 +1365,22 @@ router.get("/assets/:assetId/usage", async (req, res) => {
     return;
   }
   const usages = await db
-    .select()
+    .select({
+      projectId: assetUsageTable.projectId,
+      artifactId: assetUsageTable.artifactId,
+      filePath: assetUsageTable.filePath,
+    })
     .from(assetUsageTable)
-    .where(eq(assetUsageTable.assetId, assetId));
-  res.json({ usages });
+    .innerJoin(projectsTable, eq(projectsTable.id, assetUsageTable.projectId))
+    .where(and(eq(assetUsageTable.assetId, assetId), sql`${projectsTable.deletedAt} IS NULL`));
+  const visible = [];
+  for (const usage of usages) {
+    if (usage.projectId !== null && (await mayReadProjectAssets(req.userId, usage.projectId))) {
+      // Internal consumer names and account/Aura namespace references are not returned.
+      visible.push(usage);
+    }
+  }
+  res.json({ usages: visible });
 });
 
 export default router;

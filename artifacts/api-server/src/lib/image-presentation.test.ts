@@ -6,6 +6,7 @@ describe("private image presentation", () => {
     const row = presentPrivateImage({
       id: 42,
       assetId: 81,
+      productScope: "nabuflow",
       status: "completed",
       storageKey: "assets/private/project-51/00000000-0000-4000-8000-000000000042/full.webp",
       fileUrl: "https://private-bucket.invalid/full.webp",
@@ -18,10 +19,27 @@ describe("private image presentation", () => {
     expect(JSON.stringify(row)).not.toContain("private-bucket.invalid");
   });
 
-  it("keeps the authenticated legacy image route only for a row not yet linked to an asset", () => {
+  it("does not expose unclassified legacy bytes through a fallback route", () => {
     const row = presentPrivateImage({ id: 42, assetId: null, status: "completed" });
-    expect(row.fileUrl).toBe("/api/images/42/file");
-    expect(row.thumbnailUrl).toBe("/api/images/42/file?role=thumbnail");
+    expect(row.fileUrl).toBeNull();
+    expect(row.thumbnailUrl).toBeNull();
+  });
+
+  it("uses Ora canonical IDs without treating them as Ora library IDs", () => {
+    const row = presentPrivateImage({
+      id: 42,
+      assetId: 81,
+      status: "completed",
+      productScope: "ora",
+    });
+    expect(row.fileUrl).toBe("/api/ora/canonical-assets/81/content");
+    expect(row.thumbnailUrl).toBe(row.fileUrl);
+  });
+
+  it.each([null, undefined, "unknown"])("hides an unknown product scope: %s", (productScope) => {
+    const row = presentPrivateImage({ id: 42, assetId: 81, status: "completed", productScope });
+    expect(row.fileUrl).toBeNull();
+    expect(row.thumbnailUrl).toBeNull();
   });
 
   it("does not claim unfinished bytes exist", () => {

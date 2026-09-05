@@ -26,6 +26,7 @@ const MAX_GLOBAL_BYTES = 200 * 1024 * 1024;
 
 export interface ImageEntry {
   sessionId: string;
+  readonly productScope: "ora";
   filename: string;
   mimeType: string;
   sizeBytes: number;
@@ -66,7 +67,9 @@ setInterval(() => {
 
 export type StoreImageResult = { ok: true; imageRef: string } | { ok: false; error: string };
 
-export function storeImage(entry: Omit<ImageEntry, "expiresAt">): StoreImageResult {
+export function storeImage(
+  entry: Omit<ImageEntry, "expiresAt" | "productScope">,
+): StoreImageResult {
   const now = Date.now();
 
   // Evict expired entries first before checking limits
@@ -93,7 +96,7 @@ export function storeImage(entry: Omit<ImageEntry, "expiresAt">): StoreImageResu
   }
 
   const imageRef = crypto.randomUUID();
-  store.set(imageRef, { ...entry, expiresAt: now + TTL_MS });
+  store.set(imageRef, Object.freeze({ ...entry, productScope: "ora", expiresAt: now + TTL_MS }));
   return { ok: true, imageRef };
 }
 
@@ -105,6 +108,7 @@ export function storeImage(entry: Omit<ImageEntry, "expiresAt">): StoreImageResu
 export function getImage(imageRef: string, sessionId: string): ImageEntry | null {
   const entry = store.get(imageRef);
   if (!entry) return null;
+  if (entry.productScope !== "ora") return null;
   if (entry.expiresAt <= Date.now()) {
     store.delete(imageRef);
     return null;

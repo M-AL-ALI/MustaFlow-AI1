@@ -49,6 +49,7 @@ router.post(
       let buffer: Buffer;
       try {
         reservation = await reserveAssetAgainstAvailableQuota({
+          productScope: "nabuflow",
           ownerUserId: project.ownerId,
           actorUserId: req.userId!,
           projectId: project.id,

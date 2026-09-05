@@ -12,6 +12,14 @@ const drizzleConfigSource = readFileSync(
   new URL("../../lib/db/drizzle.config.ts", import.meta.url),
   "utf8",
 );
+const oraMobileBuildSource = readFileSync(
+  new URL("../../artifacts/ora-mobile/scripts/build.js", import.meta.url),
+  "utf8",
+);
+const dynamicPrerenderSource = readFileSync(
+  new URL("./prerender-dynamic-routes.ts", import.meta.url),
+  "utf8",
+);
 
 assert.equal(
   rootPackage.scripts["test:api:serial"],
@@ -38,6 +46,37 @@ assert.equal(
   gateSource.includes("/^artifacts\\/mustaflow\\/src\\/pages\\/.*ora/i"),
   false,
   "Ora file discovery must not match unrelated words such as collaboration",
+);
+assert.ok(
+  oraMobileBuildSource.includes("process.env.npm_execpath") &&
+    oraMobileBuildSource.includes("process.env.npm_node_execpath || process.execPath"),
+  "Ora mobile builds must launch Metro through the inherited pnpm entry point",
+);
+assert.equal(
+  oraMobileBuildSource.includes('spawn("pnpm"'),
+  false,
+  "Ora mobile builds must not use the non-portable Windows pnpm shim directly",
+);
+assert.ok(
+  oraMobileBuildSource.includes(
+    'spawnSync(taskkillPath, ["/pid", String(current.pid), "/t", "/f"]',
+  ),
+  "Ora mobile builds must terminate the complete Metro process tree on Windows",
+);
+assert.equal(
+  oraMobileBuildSource.includes("metroProcess.kill("),
+  false,
+  "Ora mobile shutdown paths must use the process-tree cleanup coordinator",
+);
+assert.equal(
+  dynamicPrerenderSource.includes('import { pool } from "@workspace/db"'),
+  false,
+  "dynamic prerender must not load the database before its DATABASE-less CI gate",
+);
+assert.ok(
+  dynamicPrerenderSource.indexOf('process.env.SKIP_DYNAMIC_PRERENDER === "1"') <
+    dynamicPrerenderSource.indexOf('await import("@workspace/db")'),
+  "dynamic prerender must evaluate the explicit skip gate before loading the database",
 );
 for (const requiredRegistryGuard of [
   "/^artifacts\\/mustaflow\\/src\\/pages\\/(?:.*\\/)?ora(?:x)?(?:[-./]|$)/i",

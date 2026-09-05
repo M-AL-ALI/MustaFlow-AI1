@@ -2988,8 +2988,8 @@ export function useOraChat(): UseOraChatReturn {
   );
 
   // Inline image editing: refine an Ora-generated image with a text instruction.
-  // Reuses the Image Studio edit pipeline (POST /images/:id/edit → poll status),
-  // which records parent/source/instruction lineage while Ora consumes daily image quota.
+  // The trusted Ora edit and status routes select product scope and billing server-side.
+  // The shared edit pipeline still records parent/source/instruction lineage.
   // The derived image carries its own generated_images id so it is re-editable.
   const editInlineImage = useCallback(
     async (sourceImageId: number, instruction: string) => {
@@ -3021,13 +3021,12 @@ export function useOraChat(): UseOraChatReturn {
         // File the edited image under the current project space (server
         // validates ownership and degrades to Personal when absent).
         const editProjectId = currentOraProjectId();
-        const enqueueRes = await safeAuthFetch(`${BASE}/api/images/${sourceImageId}/edit`, {
+        const enqueueRes = await safeAuthFetch(`${BASE}/api/ora/images/${sourceImageId}/edit`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             instruction: trimmed,
             quality: "standard",
-            origin: "ora",
             ...(editProjectId != null ? { oraProjectId: editProjectId } : {}),
           }),
         });
@@ -3048,7 +3047,7 @@ export function useOraChat(): UseOraChatReturn {
         for (let attempt = 0; attempt < 60; attempt++) {
           await new Promise((r) => setTimeout(r, 1500));
           if (!isTurnCurrent()) return;
-          const statusRes = await safeAuthFetch(`${BASE}/api/images/status/${jobId}`);
+          const statusRes = await safeAuthFetch(`${BASE}/api/ora/images/status/${jobId}`);
           if (!isTurnCurrent()) return;
           if (!statusRes.ok) continue;
           const s = (await statusRes.json()) as {
@@ -3065,15 +3064,15 @@ export function useOraChat(): UseOraChatReturn {
           }
         }
         if (!fileUrl) throw new Error("Image edit timed out. Please try again.");
+        if (!/^\/api\/ora\/canonical-assets\/[1-9]\d*\/content$/.test(fileUrl)) {
+          throw new Error("Could not load the edited image.");
+        }
 
-        // Always load the edited bytes through the authenticated file route
-        // rather than trusting the returned fileUrl directly. The stored fileUrl
-        // can be a private R2 S3 endpoint (when R2 is configured without a public
-        // URL) which an <img src> cannot fetch — that produced a "completed" edit
-        // that rendered as a broken image. The /file route resolves the bytes
-        // from whichever backend holds them (dev tmpdir or authenticated R2).
+        // Fetch only the canonical Ora path returned by the trusted status route.
+        // Its asset ID is distinct from newImageId, which remains the generated_images ID.
+        // Never fall back to a different product's file route or a raw storage URL.
         setStreamStatus("Loading the edited image...");
-        const imgRes = await safeAuthFetch(`${BASE}/api/images/${newImageId}/file`);
+        const imgRes = await safeAuthFetch(`${BASE}${fileUrl}`);
         if (!isTurnCurrent()) return;
         if (!imgRes.ok) throw new Error("Could not load the edited image.");
         const blob = await imgRes.blob();

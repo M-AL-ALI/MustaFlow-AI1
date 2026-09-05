@@ -71,7 +71,11 @@ describe("unified asset hardening contracts", () => {
     expect(storage).toContain('CacheControl: "private, no-store"');
     expect(storage).not.toContain('CacheControl: "public');
     expect(storage).not.toContain("CF_R2_PUBLIC_URL");
-    expect(presentation).toContain("/api/images/${row.id}/file");
+    expect(presentation).toContain('from "./asset-platform-scope"');
+    expect(presentation).toContain("!isProductScope(row.productScope)");
+    expect(presentation).toContain("canonicalAssetContentUrl(row.assetId, row.productScope)");
+    expect(presentation).toContain("Number.isSafeInteger(row.assetId)");
+    expect(presentation).not.toContain("/api/images/${row.id}/file");
     expect(route).toContain('res.set("Cache-Control", "private, no-store")');
   });
 

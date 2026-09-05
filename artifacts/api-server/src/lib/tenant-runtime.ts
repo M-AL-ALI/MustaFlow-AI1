@@ -7,7 +7,6 @@
  * translated here until their separately-scoped schema migration.
  */
 
-import { FlyRuntimeProvider } from "./fly-runtime-provider";
 import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { parseTenantRuntimeConfig } from "@workspace/tenant-runtime-contracts";
 import { PartialConfigRuntimeProvider } from "./partial-config-runtime-provider";
@@ -25,15 +24,13 @@ export function createTenantRuntimeProvider(
   environment: Record<string, string | undefined> = process.env,
 ) {
   const config = parseTenantRuntimeConfig(environment);
-  if (config.partialFly) {
-    return new PartialConfigRuntimeProvider("fly", config.partialFly.missingBindings);
-  }
   if (config.partialCloudflare) {
     return new PartialConfigRuntimeProvider("cloudflare", config.partialCloudflare.missingBindings);
   }
-  return config.provider === "cloudflare"
-    ? new CloudflareRuntimeProvider(config.cloudflare!)
-    : new FlyRuntimeProvider();
+  if (!config.cloudflare) {
+    throw new Error("Cloudflare runtime configuration is required");
+  }
+  return new CloudflareRuntimeProvider(config.cloudflare);
 }
 
 export const tenantRuntimeProvider = createTenantRuntimeProvider();

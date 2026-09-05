@@ -953,12 +953,12 @@ router.post(
             const { enqueueImageJob } = await import("../lib/image-generation-jobs");
             const { jobId, imageId } = await enqueueImageJob({
               userId: imageOwner,
+              productScope: "nabuflow",
               prompt: content,
               quality: "standard",
               aspectRatio: "1:1",
               style: "vivid",
               projectId: project.id,
-              persistToOraLibrary: true,
             });
 
             assistantContent = "Your image is being generated. It will appear here once ready.";

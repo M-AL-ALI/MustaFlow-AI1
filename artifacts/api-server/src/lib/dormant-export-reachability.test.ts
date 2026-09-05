@@ -8,12 +8,19 @@ import {
   forEachChild,
   getModifiers,
   isClassDeclaration,
+  isCallExpression,
   isEnumDeclaration,
+  isExportDeclaration,
   isFunctionDeclaration,
   isIdentifier,
   isImportClause,
+  isImportDeclaration,
   isImportSpecifier,
+  isNamedImports,
   isNamespaceImport,
+  isObjectLiteralExpression,
+  isShorthandPropertyAssignment,
+  isStringLiteral,
   isVariableDeclaration,
   isVariableStatement,
   ScriptKind,
@@ -41,6 +48,11 @@ type ExportedSymbol = {
   symbol: string;
 };
 
+const ADMISSION_RECEIPTS_SCHEMA_EXPORT: ExportedSymbol = {
+  path: "lib/db/src/schema/production-database-admissions.ts",
+  symbol: "productionDatabaseAdmissionReceiptsTable",
+};
+
 const dormantExports = JSON.parse(
   readFileSync(new URL("./dormant-exports.json", import.meta.url), "utf8"),
 ) as DormantExport[];
@@ -49,12 +61,19 @@ function normalizedPath(value: string): string {
   return value.replaceAll("\\", "/");
 }
 
+// Exact test-only bootstrap seeder consumed by the parent's disposable PG
+// harness before startup guards exist. This is not a production-export waiver.
+const PROJECT_PURGE_PG_FIXTURE_PATH =
+  "artifacts/api-server/src/lib/project-purge-assets-postgres.fixtures.ts";
+
 function isProductionTypeScript(filePath: string): boolean {
   const normalized = normalizedPath(filePath);
   return (
     (normalized.endsWith(".ts") || normalized.endsWith(".tsx")) &&
     !normalized.endsWith(".d.ts") &&
     !normalized.includes("/__tests__/") &&
+    !normalized.startsWith("artifacts/nabuflow-runtime-worker/test/") &&
+    normalized !== PROJECT_PURGE_PG_FIXTURE_PATH &&
     !/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(normalized) &&
     !normalized.includes("/node_modules/")
   );
@@ -129,6 +148,92 @@ function keyOf(entry: ExportedSymbol): string {
   return `${entry.path}#${entry.symbol}`;
 }
 
+function hasNamedRuntimeImport(source: SourceFile, moduleName: string, name: string): boolean {
+  return source.statements.some(
+    (statement) =>
+      isImportDeclaration(statement) &&
+      isStringLiteral(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === moduleName &&
+      !statement.importClause?.isTypeOnly &&
+      statement.importClause?.namedBindings !== undefined &&
+      isNamedImports(statement.importClause.namedBindings) &&
+      statement.importClause.namedBindings.elements.some(
+        (entry) =>
+          !entry.isTypeOnly &&
+          entry.name.text === name &&
+          (entry.propertyName?.text ?? entry.name.text) === name,
+      ),
+  );
+}
+
+function exportedInitializer(source: SourceFile, symbol: string) {
+  return source.statements
+    .filter(isVariableStatement)
+    .filter(hasExportModifier)
+    .flatMap((statement) => [...statement.declarationList.declarations])
+    .find((declaration) => isIdentifier(declaration.name) && declaration.name.text === symbol)
+    ?.initializer;
+}
+
+/** This exact table is consumed through Drizzle's live namespace schema registration.
+ * Do not exempt schema folders or mere barrel exports: require the full runtime chain. */
+function hasRegisteredAdmissionReceiptsSchema(inventory: SourceInventory): boolean {
+  const table = parseSource(
+    ADMISSION_RECEIPTS_SCHEMA_EXPORT.path,
+    inventory.get(ADMISSION_RECEIPTS_SCHEMA_EXPORT.path) ?? "",
+  );
+  const barrel = parseSource(
+    "lib/db/src/schema/index.ts",
+    inventory.get("lib/db/src/schema/index.ts") ?? "",
+  );
+  const runtime = parseSource("lib/db/src/index.ts", inventory.get("lib/db/src/index.ts") ?? "");
+  const declaration = exportedInitializer(table, ADMISSION_RECEIPTS_SCHEMA_EXPORT.symbol);
+  const registration = exportedInitializer(runtime, "db");
+  if (
+    !hasNamedRuntimeImport(table, "drizzle-orm/pg-core", "pgTable") ||
+    !declaration ||
+    !isCallExpression(declaration) ||
+    !isIdentifier(declaration.expression) ||
+    declaration.expression.text !== "pgTable" ||
+    !declaration.arguments[0] ||
+    !isStringLiteral(declaration.arguments[0]) ||
+    declaration.arguments[0].text !== "production_database_admission_receipts" ||
+    !hasNamedRuntimeImport(runtime, "drizzle-orm/node-postgres", "drizzle") ||
+    !registration ||
+    !isCallExpression(registration) ||
+    !isIdentifier(registration.expression) ||
+    registration.expression.text !== "drizzle"
+  )
+    return false;
+  const options = registration.arguments[1];
+  return (
+    barrel.statements.some(
+      (statement) =>
+        isExportDeclaration(statement) &&
+        !statement.isTypeOnly &&
+        !statement.exportClause &&
+        statement.moduleSpecifier !== undefined &&
+        isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === "./production-database-admissions",
+    ) &&
+    runtime.statements.some(
+      (statement) =>
+        isImportDeclaration(statement) &&
+        isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === "./schema" &&
+        !statement.importClause?.isTypeOnly &&
+        statement.importClause?.namedBindings !== undefined &&
+        isNamespaceImport(statement.importClause.namedBindings) &&
+        statement.importClause.namedBindings.name.text === "schema",
+    ) &&
+    options !== undefined &&
+    isObjectLiteralExpression(options) &&
+    options.properties.some(
+      (property) => isShorthandPropertyAssignment(property) && property.name.text === "schema",
+    )
+  );
+}
+
 /**
  * Deliberately conservative static census: named runtime exports and identifier references only.
  * It cannot prove dynamic/string-keyed dispatch, follow re-export reachability, distinguish an
@@ -154,10 +259,17 @@ function findUndeclaredInertExports(input: {
       consumerIdentifiers(filePath, source),
     ]),
   );
+  const admissionSchemaRegistered = hasRegisteredAdmissionReceiptsSchema(
+    input.consumers ?? input.current,
+  );
 
   return currentExports
     .filter((entry) => !baselineExports.has(keyOf(entry)))
     .filter((entry) => !input.declaredDormant.has(keyOf(entry)))
+    .filter(
+      (entry) =>
+        !admissionSchemaRegistered || keyOf(entry) !== keyOf(ADMISSION_RECEIPTS_SCHEMA_EXPORT),
+    )
     .filter(
       (entry) =>
         ![...consumers].some(
@@ -260,6 +372,20 @@ function currentRepositoryInventory(): Map<string, string> {
 }
 
 describe("non-test export reachability", () => {
+  it.each([
+    ["artifacts/nabuflow-runtime-worker/test/helpers.ts", false],
+    ["artifacts\\nabuflow-runtime-worker\\test\\helpers.ts", false],
+    ["artifacts/nabuflow-runtime-worker/src/helpers.ts", true],
+    ["artifacts/nabuflow-runtime-worker/testing/helpers.ts", true],
+    [PROJECT_PURGE_PG_FIXTURE_PATH, false],
+    ["artifacts\\api-server\\src\\lib\\project-purge-assets-postgres.fixtures.ts", false],
+    ["artifacts/api-server/src/lib/project-purge-assets-postgres.ts", true],
+    ["artifacts/api-server/src/lib/other-postgres.fixtures.ts", true],
+    ["artifacts/api-server/src/lib/asset-contract.ts", true],
+  ] as const)("classifies production inventory membership for %s", (filePath, expected) => {
+    expect(isProductionTypeScript(filePath)).toBe(expected);
+  });
+
   it("marks every registered dormant export at its definition", () => {
     expect(dormantExports).toHaveLength(25);
     expect(
@@ -289,6 +415,27 @@ describe("non-test export reachability", () => {
     expect(undeclared).toEqual([]);
   });
 
+  it("does not exempt an unused production classifier alongside the test fixture", () => {
+    const productionPath = "artifacts/api-server/src/lib/asset-contract.ts";
+    const candidates = new Map([
+      [productionPath, "export function isCanonicalAssetContentRequest() { return false; }"],
+      [
+        PROJECT_PURGE_PG_FIXTURE_PATH,
+        "export async function seedProjectPurgeAssetPostgresFixtures() {}",
+      ],
+    ]);
+    const production = new Map(
+      [...candidates].filter(([filePath]) => isProductionTypeScript(filePath)),
+    );
+    expect(
+      findUndeclaredInertExports({
+        baseline: new Map(),
+        current: production,
+        declaredDormant: new Set(),
+      }),
+    ).toEqual([`${productionPath}#isCanonicalAssetContentRequest`]);
+  });
+
   it("catches the sixth unconsumed export", () => {
     const filePath = "artifacts/api-server/src/lib/example.ts";
     expect(
@@ -301,4 +448,54 @@ describe("non-test export reachability", () => {
       }),
     ).toEqual([`${filePath}#sixthDormantExample`]);
   });
+
+  it.each(["registered", "no-table", "no-barrel", "no-namespace", "no-drizzle", "no-options"])(
+    "recognizes the admission receipts schema only through live registration: %s",
+    (scenario) => {
+      const filePath = ADMISSION_RECEIPTS_SCHEMA_EXPORT.path;
+      const current = new Map([
+        [
+          filePath,
+          scenario === "no-table"
+            ? "export const productionDatabaseAdmissionReceiptsTable = 1;"
+            : 'import { pgTable } from "drizzle-orm/pg-core"; export const productionDatabaseAdmissionReceiptsTable = pgTable("production_database_admission_receipts", {});',
+        ],
+      ]);
+      const consumers = new Map([
+        ...current,
+        [
+          "lib/db/src/schema/index.ts",
+          scenario === "no-barrel" ? "" : 'export * from "./production-database-admissions";',
+        ],
+        [
+          "lib/db/src/index.ts",
+          [
+            scenario === "no-drizzle" ? "" : 'import { drizzle } from "drizzle-orm/node-postgres";',
+            scenario === "no-namespace" ? "" : 'import * as schema from "./schema";',
+            scenario === "no-options"
+              ? "export const db = drizzle(pool);"
+              : "export const db = drizzle(pool, { schema });",
+          ].join("\n"),
+        ],
+      ]);
+      expect(
+        findUndeclaredInertExports({
+          baseline: new Map(),
+          current,
+          consumers,
+          declaredDormant: new Set(),
+        }),
+      ).toEqual(scenario === "registered" ? [] : [keyOf(ADMISSION_RECEIPTS_SCHEMA_EXPORT)]);
+      current.set(filePath, current.get(filePath) + " export const unrelatedSchemaExport = 1;");
+      consumers.set(filePath, current.get(filePath)!);
+      expect(
+        findUndeclaredInertExports({
+          baseline: new Map(),
+          current,
+          consumers,
+          declaredDormant: new Set(),
+        }),
+      ).toContain(`${filePath}#unrelatedSchemaExport`);
+    },
+  );
 });

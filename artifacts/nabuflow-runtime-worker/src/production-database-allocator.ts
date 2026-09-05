@@ -10,6 +10,22 @@ import {
   type ProductionDatabaseAllocationRecord,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
+import type {
+  ProductionDatabaseEnsureInput,
+  ProductionDatabaseIntentOwner,
+  ProductionDatabaseProviderScope,
+} from "./production-database-intent";
+
+export type ProductionDatabaseReleaseResolutionInput = ProductionDatabaseIntentOwner & {
+  scope: ProductionDatabaseProviderScope;
+  assertAuthority(): Promise<void>;
+};
+
+export type ProductionDatabaseAllocatorDependency = Pick<
+  ProductionDatabaseAllocator,
+  "ensure" | "release" | "verifyGone"
+> &
+  Partial<Pick<ProductionDatabaseAllocator, "resolveForRelease">>;
 
 const NEON_ORIGIN = "https://console.neon.tech";
 const PROVIDER_TIMEOUT_MS = 20_000;
@@ -17,6 +33,9 @@ const MAX_PROVIDER_BODY_BYTES = 128 * 1024;
 const MAX_PROVIDER_ATTEMPTS = 3;
 const PROVIDER_RETRY_BASE_DELAY_MS = 100;
 const MAX_PROJECT_LIMIT = 10_000;
+// Smaller pages keep ordinary catalog responses within the existing byte budget.
+const CATALOG_PAGE_SIZE = 50;
+const MAX_CATALOG_PAGES = 256;
 
 export type ProductionDatabaseFailureCause =
   | "pre_dispatch"
@@ -122,9 +141,35 @@ async function readJson(response: Response): Promise<unknown> {
       "malformed_response",
     );
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new ProductionDatabaseProviderError(
+      502,
+      "production_database_provider_rejected",
+      false,
+      "malformed_response",
+    );
+  }
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  let bytes: Uint8Array | undefined;
   try {
-    if (bytes.byteLength > MAX_PROVIDER_BODY_BYTES) throw new Error("response too large");
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > MAX_PROVIDER_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("response too large");
+      }
+      chunks.push(chunk.value);
+    }
+    bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
   } catch (error) {
     if (error instanceof ProductionDatabaseProviderError) throw error;
@@ -135,7 +180,9 @@ async function readJson(response: Response): Promise<unknown> {
       "malformed_response",
     );
   } finally {
-    bytes.fill(0);
+    bytes?.fill(0);
+    for (const chunk of chunks) chunk.fill(0);
+    reader.releaseLock();
   }
 }
 
@@ -176,7 +223,11 @@ async function providerFetch(
   try {
     const url = new URL(path, NEON_ORIGIN);
     if (url.origin !== NEON_ORIGIN) throw new Error("provider origin changed");
-    request = new Request(url, { ...init, signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) });
+    request = new Request(url, {
+      ...init,
+      redirect: "error",
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
   } catch {
     throw new ProductionDatabaseProviderError(
       502,
@@ -259,55 +310,39 @@ export class ProductionDatabaseAllocator {
     private readonly now: () => Date = () => new Date(),
   ) {}
 
-  private async listProjects(configuration: ReturnType<typeof requiredConfiguration>): Promise<{
+  private async listProjects(
+    configuration: ReturnType<typeof requiredConfiguration>,
+    assertAuthority?: () => Promise<void>,
+    enforceCostLimit = true,
+  ): Promise<{
     projects: Array<Record<string, unknown>>;
   }> {
     const namePrefix = PRODUCTION_DATABASE_PROJECT_PREFIX;
-    const response = await exactOperation(async () => {
-      const result = await providerFetch(
-        this.fetchAdapter,
-        `/api/v2/projects?org_id=${encodeURIComponent(configuration.organizationId)}&limit=${configuration.maxProjects + 1}`,
-        { method: "GET", headers: bearer(configuration.managementKey) },
-      );
-      if (result.status !== 200) {
-        throw new ProductionDatabaseProviderError(
-          result.status >= 500 ? 503 : 422,
-          result.status >= 500
-            ? "production_database_provider_unavailable"
-            : "production_database_provider_rejected",
-          result.status >= 500,
-          "provider_rejected",
-        );
-      }
-      return result;
-    });
-    const body = objectRecord(await readJson(response));
-    const projects = (Array.isArray(body.projects) ? body.projects : []).map(objectRecord);
-    const owned = projects.filter(
-      (project) => typeof project.name === "string" && project.name.startsWith(namePrefix),
-    );
-    if (owned.length > configuration.maxProjects) {
-      throw new ProductionDatabaseProviderError(
-        409,
-        "production_database_cost_limit",
+    const owned: Array<Record<string, unknown>> = [];
+    const ids = new Set<string>();
+    const cursors = new Set<string>();
+    let cursor: string | null = null;
+    const incomplete = () =>
+      new ProductionDatabaseProviderError(
+        503,
+        "production_database_integrity_failure",
         false,
-        "provider_rejected",
+        "integrity_failure",
       );
-    }
-    return { projects: owned };
-  }
-
-  private async verifyRetention(
-    configuration: ReturnType<typeof requiredConfiguration>,
-    providerProjectId: string,
-  ): Promise<void> {
-    const retrieve = async (): Promise<Record<string, unknown>> => {
+    for (let page = 0; page < MAX_CATALOG_PAGES; page += 1) {
+      const query = new URLSearchParams({
+        org_id: configuration.organizationId,
+        limit: String(CATALOG_PAGE_SIZE),
+      });
+      if (cursor !== null) query.set("cursor", cursor);
       const response = await exactOperation(async () => {
+        await assertAuthority?.();
         const result = await providerFetch(
           this.fetchAdapter,
-          `/api/v2/projects/${encodeURIComponent(providerProjectId)}`,
+          `/api/v2/projects?${query.toString()}`,
           { method: "GET", headers: bearer(configuration.managementKey) },
         );
+        await assertAuthority?.();
         if (result.status !== 200) {
           throw new ProductionDatabaseProviderError(
             result.status >= 500 ? 503 : 422,
@@ -321,12 +356,80 @@ export class ProductionDatabaseAllocator {
         return result;
       });
       const body = objectRecord(await readJson(response));
+      await assertAuthority?.();
+      if (!Array.isArray(body.projects) || body.projects.length > CATALOG_PAGE_SIZE) {
+        throw incomplete();
+      }
+      // Neon prose and its OpenAPI schema use different partial-result names.
+      for (const key of ["unavailable", "unavailable_project_ids"]) {
+        if (key in body && (!Array.isArray(body[key]) || body[key].length !== 0)) {
+          throw incomplete();
+        }
+      }
+      for (const value of body.projects) {
+        const project = objectRecord(value);
+        const id = requiredString(project.id, 128);
+        const name = requiredString(project.name, 1_024);
+        if (!/^[A-Za-z0-9_-]{1,128}$/u.test(id) || ids.has(id)) throw incomplete();
+        ids.add(id);
+        if (name.startsWith(namePrefix)) owned.push(project);
+      }
+      if (enforceCostLimit && owned.length > configuration.maxProjects) {
+        throw new ProductionDatabaseProviderError(
+          409,
+          "production_database_cost_limit",
+          false,
+          "provider_rejected",
+        );
+      }
+      if (!("pagination" in body)) {
+        if (body.projects.length === CATALOG_PAGE_SIZE) throw incomplete();
+        return { projects: owned };
+      }
+      const pagination = objectRecord(body.pagination);
+      const next = requiredString(pagination.cursor);
+      if (cursors.has(next)) throw incomplete();
+      cursors.add(next);
+      cursor = next;
+    }
+    throw incomplete();
+  }
+
+  private async verifyRetention(
+    configuration: ReturnType<typeof requiredConfiguration>,
+    providerProjectId: string,
+    assertAuthority?: () => Promise<void>,
+  ): Promise<void> {
+    const retrieve = async (): Promise<Record<string, unknown>> => {
+      const response = await exactOperation(async () => {
+        await assertAuthority?.();
+        const result = await providerFetch(
+          this.fetchAdapter,
+          `/api/v2/projects/${encodeURIComponent(providerProjectId)}`,
+          { method: "GET", headers: bearer(configuration.managementKey) },
+        );
+        await assertAuthority?.();
+        if (result.status !== 200) {
+          throw new ProductionDatabaseProviderError(
+            result.status >= 500 ? 503 : 422,
+            result.status >= 500
+              ? "production_database_provider_unavailable"
+              : "production_database_provider_rejected",
+            result.status >= 500,
+            "provider_rejected",
+          );
+        }
+        return result;
+      });
+      const body = objectRecord(await readJson(response));
+      await assertAuthority?.();
       return objectRecord(body.project ?? body);
     };
 
     let project = await retrieve();
     if (project.history_retention_seconds !== configuration.historyRetentionSeconds) {
       const response = await exactOperation(async () => {
+        await assertAuthority?.();
         const result = await providerFetch(
           this.fetchAdapter,
           `/api/v2/projects/${encodeURIComponent(providerProjectId)}`,
@@ -338,6 +441,7 @@ export class ProductionDatabaseAllocator {
             }),
           },
         );
+        await assertAuthority?.();
         if (result.status !== 200) {
           throw new ProductionDatabaseProviderError(
             result.status >= 500 ? 503 : 422,
@@ -351,6 +455,7 @@ export class ProductionDatabaseAllocator {
         return result;
       });
       await readJson(response);
+      await assertAuthority?.();
       project = await retrieve();
     }
     if (project.history_retention_seconds !== configuration.historyRetentionSeconds) {
@@ -389,11 +494,15 @@ export class ProductionDatabaseAllocator {
     return assertConnectionString(body.uri ?? body.connection_uri);
   }
 
-  async ensure(input: {
-    projectId: number;
-    allocationIdentity: string;
-  }): Promise<ProductionDatabaseMaterial> {
+  async ensure(
+    input: ProductionDatabaseEnsureInput & { assertAuthority?: () => Promise<void> },
+  ): Promise<ProductionDatabaseMaterial> {
     const configuration = requiredConfiguration(this.env);
+    const scope = {
+      providerOrganizationId: configuration.organizationId,
+      regionId: configuration.regionId,
+      historyRetentionSeconds: configuration.historyRetentionSeconds,
+    };
     const name = projectName(input.allocationIdentity);
     const listed = await this.listProjects(configuration);
     const matches = listed.projects.filter((project) => project.name === name);
@@ -432,6 +541,10 @@ export class ProductionDatabaseAllocator {
       let lastError: unknown;
       for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt += 1) {
         try {
+          // The worker commits an allocation-scoped claim before dispatch. A
+          // rejected claim prevents a second POST after an uncertain attempt.
+          await input.beforeCreate?.(scope);
+          await input.assertAuthority?.();
           const response = await providerFetch(
             this.fetchAdapter,
             `/api/v2/projects?org_id=${encodeURIComponent(configuration.organizationId)}`,
@@ -487,7 +600,10 @@ export class ProductionDatabaseAllocator {
       if (createdProjectId === null) throw lastError;
       providerProjectId = createdProjectId;
     }
-    await this.verifyRetention(configuration, providerProjectId);
+    // Persist discovered/created ownership before any later provider or vault
+    // work can fail. Credential retrieval is never the first durable receipt.
+    await input.onProjectResolved?.({ ...scope, providerProjectId });
+    await this.verifyRetention(configuration, providerProjectId, input.assertAuthority);
     const connectionString = await this.connectionString(configuration, providerProjectId);
     const timestamp = this.now().toISOString();
     const revision = `production-database-${input.allocationIdentity.slice(0, 48)}`;
@@ -511,7 +627,100 @@ export class ProductionDatabaseAllocator {
     };
   }
 
-  async release(allocation: ProductionDatabaseAllocationRecord): Promise<void> {
+  /** GET-only recovery. Null is unresolved discovery, never an absence receipt. */
+  async resolveForRelease(
+    input: ProductionDatabaseReleaseResolutionInput,
+  ): Promise<ProductionDatabaseAllocationRecord | null> {
+    const configuration = requiredConfiguration(this.env);
+    if (
+      !Number.isSafeInteger(input.projectId) ||
+      input.projectId < 1 ||
+      !/^[0-9a-f]{64}$/u.test(input.allocationIdentity) ||
+      input.scope.providerOrganizationId !== configuration.organizationId ||
+      input.scope.regionId !== configuration.regionId ||
+      input.scope.historyRetentionSeconds !== configuration.historyRetentionSeconds
+    ) {
+      throw new ProductionDatabaseProviderError(
+        409,
+        "production_database_scope_mismatch",
+        false,
+        "pre_dispatch",
+      );
+    }
+    await input.assertAuthority();
+    const listed = await this.listProjects(configuration, input.assertAuthority, false);
+    await input.assertAuthority();
+    const name = projectName(input.allocationIdentity);
+    const matches = listed.projects.filter((project) => project.name === name);
+    if (matches.length > 1) {
+      throw new ProductionDatabaseProviderError(
+        409,
+        "production_database_integrity_failure",
+        false,
+        "integrity_failure",
+      );
+    }
+    if (matches.length === 0) return null;
+    const id = requiredString(matches[0]?.id, 128);
+    const response = await exactOperation(async () => {
+      await input.assertAuthority();
+      const result = await providerFetch(
+        this.fetchAdapter,
+        `/api/v2/projects/${encodeURIComponent(id)}`,
+        {
+          method: "GET",
+          headers: bearer(configuration.managementKey),
+        },
+      );
+      await input.assertAuthority();
+      if (result.status !== 200) {
+        throw new ProductionDatabaseProviderError(
+          503,
+          "production_database_cleanup_incomplete",
+          result.status >= 500,
+          "provider_rejected",
+        );
+      }
+      return result;
+    });
+    const body = objectRecord(await readJson(response));
+    await input.assertAuthority();
+    const project = objectRecord(body.project ?? body);
+    if (
+      project.id !== id ||
+      project.name !== name ||
+      project.org_id !== configuration.organizationId ||
+      project.region_id !== configuration.regionId ||
+      project.history_retention_seconds !== configuration.historyRetentionSeconds
+    ) {
+      throw new ProductionDatabaseProviderError(
+        409,
+        "production_database_scope_mismatch",
+        false,
+        "integrity_failure",
+      );
+    }
+    const timestamp = this.now().toISOString();
+    return productionDatabaseAllocationRecordSchema.parse({
+      format: "nabuflow.production-database-allocation/v1",
+      projectId: input.projectId,
+      allocationIdentity: input.allocationIdentity,
+      provider: "neon-postgres",
+      providerProjectId: id,
+      providerOrganizationId: configuration.organizationId,
+      regionId: configuration.regionId,
+      historyRetentionSeconds: configuration.historyRetentionSeconds,
+      revision: `production-database-${input.allocationIdentity.slice(0, 48)}`,
+      state: "releasing",
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+  }
+
+  async release(
+    allocation: ProductionDatabaseAllocationRecord,
+    assertAuthority?: () => Promise<void>,
+  ): Promise<void> {
     const configuration = requiredConfiguration(this.env);
     if (allocation.providerOrganizationId !== configuration.organizationId) {
       throw new ProductionDatabaseProviderError(
@@ -522,11 +731,13 @@ export class ProductionDatabaseAllocator {
       );
     }
     await exactOperation(async () => {
+      await assertAuthority?.();
       const result = await providerFetch(
         this.fetchAdapter,
         `/api/v2/projects/${encodeURIComponent(allocation.providerProjectId)}`,
         { method: "DELETE", headers: bearer(configuration.managementKey) },
       );
+      await assertAuthority?.();
       if (![200, 204, 404].includes(result.status)) {
         throw new ProductionDatabaseProviderError(
           result.status >= 500 ? 503 : 422,
@@ -541,7 +752,10 @@ export class ProductionDatabaseAllocator {
     });
   }
 
-  async verifyGone(allocation: ProductionDatabaseAllocationRecord): Promise<boolean> {
+  async verifyGone(
+    allocation: ProductionDatabaseAllocationRecord,
+    assertAuthority?: () => Promise<void>,
+  ): Promise<boolean> {
     const configuration = requiredConfiguration(this.env);
     if (allocation.providerOrganizationId !== configuration.organizationId) {
       throw new ProductionDatabaseProviderError(
@@ -552,11 +766,13 @@ export class ProductionDatabaseAllocator {
       );
     }
     const response = await exactOperation(async () => {
+      await assertAuthority?.();
       const result = await providerFetch(
         this.fetchAdapter,
         `/api/v2/projects/${encodeURIComponent(allocation.providerProjectId)}`,
         { method: "GET", headers: bearer(configuration.managementKey) },
       );
+      await assertAuthority?.();
       if (![200, 404].includes(result.status)) {
         throw new ProductionDatabaseProviderError(
           result.status >= 500 ? 503 : 422,

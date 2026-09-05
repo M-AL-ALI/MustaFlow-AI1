@@ -61,7 +61,10 @@ export async function putAssetStream(input: {
       CacheControl: "private, no-store",
       ServerSideEncryption: "AES256",
     }),
-    { abortSignal: input.abortSignal },
+    {
+      abortSignal: boundedProviderSignal(input.abortSignal),
+      requestTimeout: ASSET_R2_PROVIDER_TIMEOUT_MS,
+    },
   );
 }
 
@@ -80,14 +83,20 @@ export async function putAssetBuffer(input: {
   });
 }
 
-export async function openAsset(key: string): Promise<{
+export async function openAsset(
+  key: string,
+  signal?: AbortSignal,
+): Promise<{
   body: Readable;
   sizeBytes: number;
   contentType: string;
 } | null> {
   const { client, bucket } = requireConfig();
   try {
-    const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }), {
+      abortSignal: boundedProviderSignal(signal),
+      requestTimeout: ASSET_R2_PROVIDER_TIMEOUT_MS,
+    });
     if (!response.Body) return null;
     const web = response.Body.transformToWebStream();
     return {

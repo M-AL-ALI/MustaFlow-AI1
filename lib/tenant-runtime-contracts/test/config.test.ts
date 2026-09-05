@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_RUNTIME_BINDING_NAMES,
-  FLY_RUNTIME_BINDING_NAMES,
+  TENANT_RUNTIME_PROVIDERS,
   parseTenantRuntimeConfig,
 } from "../src/config";
 
@@ -21,51 +21,45 @@ const flyEnvironment = {
 };
 
 describe("tenant runtime configuration", () => {
-  it("defaults a missing provider to Fly without requiring Cloudflare config", () => {
-    expect(parseTenantRuntimeConfig({})).toEqual({ provider: "fly" });
-    expect(parseTenantRuntimeConfig({ TENANT_RUNTIME_PROVIDER: "" })).toEqual({ provider: "fly" });
+  it("allows only Cloudflare and defaults missing selection to a fail-closed partial state", () => {
+    expect(TENANT_RUNTIME_PROVIDERS).toEqual(["cloudflare"]);
+    for (const selection of [undefined, "", "   "]) {
+      expect(parseTenantRuntimeConfig({ TENANT_RUNTIME_PROVIDER: selection })).toEqual({
+        provider: "cloudflare",
+        partialCloudflare: {
+          status: "partial-config",
+          missingBindings: [...CLOUDFLARE_RUNTIME_BINDING_NAMES],
+        },
+      });
+    }
   });
 
-  it("preserves the complete Fly configuration result", () => {
-    expect(parseTenantRuntimeConfig(flyEnvironment)).toEqual({ provider: "fly" });
+  it("rejects retired Fly selection even when every legacy credential is present", () => {
+    expect(() => parseTenantRuntimeConfig(flyEnvironment)).toThrow("Fly runtime is retired");
+    expect(() => parseTenantRuntimeConfig({ TENANT_RUNTIME_PROVIDER: "fly" })).toThrow(
+      "Fly runtime is retired",
+    );
   });
 
-  it("preserves the missing-token no-op even when nonsecret Fly settings remain", () => {
+  it("does not use leftover Fly credentials as an active runtime fallback", () => {
     expect(
       parseTenantRuntimeConfig({
-        TENANT_RUNTIME_PROVIDER: "fly",
-        FLY_APP_NAME: "legacy-default",
-        FLY_ORG_SLUG: "personal",
-        FLY_REGION: "iad",
+        ...flyEnvironment,
+        TENANT_RUNTIME_PROVIDER: undefined,
       }),
-    ).toEqual({ provider: "fly" });
+    ).toEqual({
+      provider: "cloudflare",
+      partialCloudflare: {
+        status: "partial-config",
+        missingBindings: [...CLOUDFLARE_RUNTIME_BINDING_NAMES],
+      },
+    });
   });
 
-  it("returns a names-only partial state for every incomplete token-present Fly combination", () => {
-    const requiredAfterToken = FLY_RUNTIME_BINDING_NAMES.filter((name) => name !== "FLY_API_TOKEN");
-    for (let mask = 0; mask < 7; mask += 1) {
-      const environment: Record<string, string> = {
-        TENANT_RUNTIME_PROVIDER: "fly",
-        FLY_API_TOKEN: flyEnvironment.FLY_API_TOKEN,
-      };
-      requiredAfterToken.forEach((name, index) => {
-        if ((mask & (1 << index)) !== 0) environment[name] = flyEnvironment[name];
-      });
-      const missingBindings = requiredAfterToken.filter(
-        (_name, index) => (mask & (1 << index)) === 0,
-      );
-
-      const result = parseTenantRuntimeConfig(environment);
-
-      expect(result).toEqual({
-        provider: "fly",
-        partialFly: { status: "partial-config", missingBindings },
-      });
-      const serialized = JSON.stringify(result);
-      for (const value of FLY_RUNTIME_BINDING_NAMES.map((name) => flyEnvironment[name])) {
-        expect(serialized).not.toContain(value);
-      }
-    }
+  it("uses complete Cloudflare bindings when selection is omitted", () => {
+    expect(
+      parseTenantRuntimeConfig({ ...cloudflareEnvironment, TENANT_RUNTIME_PROVIDER: undefined }),
+    ).toEqual(parseTenantRuntimeConfig(cloudflareEnvironment));
   });
 
   it.each([
@@ -75,8 +69,10 @@ describe("tenant runtime configuration", () => {
     ["path-like org", { FLY_ORG_SLUG: "../personal" }],
     ["long region", { FLY_REGION: "us-east" }],
     ["uppercase region", { FLY_REGION: "IAD" }],
-  ])("rejects malformed Fly configuration: %s", (_name, override) => {
-    expect(() => parseTenantRuntimeConfig({ ...flyEnvironment, ...override })).toThrow();
+  ])("never lets obsolete Fly settings affect Cloudflare selection: %s", (_name, override) => {
+    expect(
+      parseTenantRuntimeConfig({ ...flyEnvironment, ...override, ...cloudflareEnvironment }),
+    ).toEqual(parseTenantRuntimeConfig(cloudflareEnvironment));
   });
 
   it("parses the complete Cloudflare config without activating it", () => {
@@ -95,7 +91,11 @@ describe("tenant runtime configuration", () => {
     (provider) => {
       if (provider === "") {
         expect(parseTenantRuntimeConfig({ TENANT_RUNTIME_PROVIDER: provider })).toEqual({
-          provider: "fly",
+          provider: "cloudflare",
+          partialCloudflare: {
+            status: "partial-config",
+            missingBindings: [...CLOUDFLARE_RUNTIME_BINDING_NAMES],
+          },
         });
       } else {
         expect(() => parseTenantRuntimeConfig({ TENANT_RUNTIME_PROVIDER: provider })).toThrow(
@@ -107,7 +107,10 @@ describe("tenant runtime configuration", () => {
 
   it("returns a names-only partial state for every incomplete Cloudflare combination", () => {
     for (let mask = 0; mask < 7; mask += 1) {
-      const environment: Record<string, string> = { TENANT_RUNTIME_PROVIDER: "cloudflare" };
+      const environment: Record<string, string> = {
+        ...flyEnvironment,
+        TENANT_RUNTIME_PROVIDER: "cloudflare",
+      };
       CLOUDFLARE_RUNTIME_BINDING_NAMES.forEach((name, index) => {
         if ((mask & (1 << index)) !== 0) environment[name] = cloudflareEnvironment[name];
       });
@@ -130,7 +133,7 @@ describe("tenant runtime configuration", () => {
     }
   });
 
-  it("validates supplied Cloudflare settings even while Fly remains selected", () => {
+  it("does not silently reinterpret explicit Fly selection as Cloudflare", () => {
     expect(() =>
       parseTenantRuntimeConfig({
         TENANT_RUNTIME_PROVIDER: "fly",
@@ -138,7 +141,7 @@ describe("tenant runtime configuration", () => {
         CLOUDFLARE_RUNTIME_CONTROL_TOKEN: "short",
         CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "Prod",
       }),
-    ).toThrow("must use HTTPS");
+    ).toThrow("Fly runtime is retired");
   });
 
   it.each([
@@ -166,7 +169,11 @@ describe("tenant runtime configuration", () => {
     expect(
       parseTenantRuntimeConfig({ HOME: "not-part-of-contract", PATH: "also-ignored" }),
     ).toEqual({
-      provider: "fly",
+      provider: "cloudflare",
+      partialCloudflare: {
+        status: "partial-config",
+        missingBindings: [...CLOUDFLARE_RUNTIME_BINDING_NAMES],
+      },
     });
   });
 });

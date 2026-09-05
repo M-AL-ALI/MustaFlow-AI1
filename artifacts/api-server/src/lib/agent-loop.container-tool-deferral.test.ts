@@ -33,7 +33,9 @@ vi.mock("@workspace/db", () => ({
   },
 }));
 
-vi.mock("./container", () => ({
+// Mock the selected-provider gateway, not the retired Fly adapter. These
+// behavioral checks must not depend on live Cloudflare configuration.
+vi.mock("./tenant-runtime", () => ({
   isContainerLayerConfigured: containerMocks.isContainerLayerConfigured,
   provisionContainer: containerMocks.provisionContainer,
   execInContainer: containerMocks.execInContainer,
@@ -109,6 +111,7 @@ describe("Builder Wave 4.1 container-tool deferral", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("TENANT_RUNTIME_PROVIDER", "cloudflare");
     vi.stubEnv("ZERO_SANDBOX_SHELL_ENABLED", "false");
     // Prevent E2E auto-approve from bypassing the createPrompt gate in tests
     // that verify deploy-shaped command approval (E2E_TEST_ENABLED may be set

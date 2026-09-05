@@ -30,7 +30,17 @@ function countProjectSummaryWriterFields(text: string, field: string): number {
 describe("Zero provenance schema completion", () => {
   it("adds the four named memory-truth boot steps and keeps both historical usage step names", () => {
     const migration = source("./startup-migrations.ts");
-    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(175);
+    expect(migration.match(/^\s{4}name:/gm)).toHaveLength(178);
+    const stepsStart = migration.indexOf("const MIGRATION_STEPS");
+    expect(stepsStart).toBeGreaterThan(-1);
+    const steps = migration.slice(stepsStart, migration.indexOf("\n];", stepsStart));
+    const names = [...steps.matchAll(/^\s{4}name: "([^"]+)",$/gmu)].map((match) => match[1]);
+    expect(names).toHaveLength(158);
+    expect(new Set(names).size).toBe(156);
+    expect(names.slice(-2)).toEqual([
+      "migrate-production-database-admission",
+      "migrate-asset-product-scope-v1",
+    ]);
     expect(migration).toContain('name: "knowledge_usage_events"');
     expect(migration).toContain('name: "migrate-knowledge-usage-events"');
     expect(migration).toContain('name: "migrate-knowledge-provenance"');
@@ -94,7 +104,22 @@ describe("Zero provenance schema completion", () => {
       "VALIDATE CONSTRAINT knowledge_provenance_events_claim_kind_check",
     );
     expect(first.join("\n")).toContain("CREATE TABLE IF NOT EXISTS zero_prompt_queue_items");
-    expect(first.join("\n")).not.toMatch(/(DROP|TRUNCATE)\s/i);
+    const reconciliationStatements = first.filter((statement) =>
+      statement.includes("retained_name NAME"),
+    );
+    expect(reconciliationStatements.length).toBeGreaterThan(0);
+    for (const statement of reconciliationStatements) {
+      expect(statement.match(/DROP CONSTRAINT %I/gu)).toHaveLength(1);
+      expect(statement.match(/RENAME CONSTRAINT %I TO %I/gu)).toHaveLength(1);
+      expect(statement).toContain("AND conname IN (");
+      expect(statement).toContain("AND conname <> retained_name");
+      expect(statement).toContain("startup_foreign_key_definition_mismatch");
+    }
+    const withoutKnownFkReconciliation = first
+      .join("\n")
+      .replaceAll("DROP CONSTRAINT %I", "")
+      .replaceAll("RENAME CONSTRAINT %I TO %I", "");
+    expect(withoutKnownFkReconciliation).not.toMatch(/(?:DROP|TRUNCATE|DELETE FROM)\s/iu);
   });
 
   it("records every project-summary writer beside the content mutation", () => {

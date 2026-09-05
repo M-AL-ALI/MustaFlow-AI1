@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 
-export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v6" as const;
+export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v8" as const;
 
 export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "admin_authority_missing",
@@ -21,6 +21,12 @@ export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "project_purge_notification_index_missing",
   "asset_usage_attachment_guard_missing",
   "durable_asset_reference_guards_missing",
+  "preview_database_allocation_missing",
+  "production_database_admission_tables_missing",
+  "production_database_admission_columns_missing",
+  "production_database_admission_constraints_missing",
+  "production_database_admission_indexes_missing",
+  "production_database_admission_triggers_missing",
 ] as const;
 
 export type DeploymentRuntimeSchemaViolation =
@@ -64,6 +70,12 @@ type RuntimeSchemaObservation = {
   projectPurgeNotificationIndexReady: boolean;
   assetUsageAttachmentGuardReady: boolean;
   durableAssetReferenceGuardsReady: boolean;
+  previewDatabaseAllocationReady: boolean;
+  productionDatabaseAdmissionTablesReady: boolean;
+  productionDatabaseAdmissionColumnsReady: boolean;
+  productionDatabaseAdmissionConstraintsReady: boolean;
+  productionDatabaseAdmissionIndexesReady: boolean;
+  productionDatabaseAdmissionTriggersReady: boolean;
 };
 
 /**
@@ -130,7 +142,7 @@ export async function assessDeploymentRuntimeSchema(
       to_regclass('public.project_retirement_operations') IS NOT NULL
         AS "projectRetirementOperationsReady",
       (
-        SELECT COUNT(*) = 15
+        SELECT COUNT(*) = 16
           FROM information_schema.columns column_row
          WHERE column_row.table_schema = 'public'
            AND column_row.table_name = 'project_retirement_operations'
@@ -442,7 +454,8 @@ export async function assessDeploymentRuntimeSchema(
             ('task_events', 'task_id, message, data'),
             ('project_activity', 'project_id, metadata'),
             ('visual_edit_changes', 'project_id, before_content, after_content'),
-            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')
+            ('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status'),
+            ('support_tickets', 'user_id, project_id, transcript, attachments')
           ) AS expected(table_name, column_list)
           JOIN pg_catalog.pg_class relation ON relation.relname = expected.table_name
           JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid = relation.oid
@@ -453,8 +466,9 @@ export async function assessDeploymentRuntimeSchema(
              'chat_messages', 'agent_tasks', 'agent_tool_calls',
              'zero_prompt_queue_items', 'knowledge_entries', 'project_files',
              'project_versions', 'canvas_variants', 'canvas_variant_library',
-             'gallery_templates', 'agent_inbox', 'task_events',
-             'project_activity', 'visual_edit_changes', 'generated_images'
+              'gallery_templates', 'agent_inbox', 'task_events',
+              'project_activity', 'visual_edit_changes', 'generated_images',
+              'support_tickets'
            ])
            AND trigger_row.tgname = 'durable_asset_reference_guard_' || relation.relname
            AND trigger_row.tgfoid =
@@ -574,7 +588,150 @@ export async function assessDeploymentRuntimeSchema(
                          'search_path=pg_catalog,public'
                 )
            )
-      ) AS "durableAssetReferenceGuardsReady"
+      ) AS "durableAssetReferenceGuardsReady",
+      EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='projects'
+          AND column_name='preview_db_allocation' AND data_type='jsonb' AND is_nullable='YES'
+      ) AS "previewDatabaseAllocationReady",
+      (
+        to_regclass('public.production_database_admission_epochs') IS NOT NULL
+        AND to_regclass('public.production_database_admission_receipts') IS NOT NULL
+      ) AS "productionDatabaseAdmissionTablesReady",
+      (
+        SELECT COUNT(*) = 18
+        FROM (VALUES
+          ('production_database_admission_epochs', 'epoch', 'uuid', 'NO'),
+          ('production_database_admission_epochs', 'namespace', 'text', 'NO'),
+          ('production_database_admission_epochs', 'state', 'text', 'NO'),
+          ('production_database_admission_epochs', 'worker_deployment_version', 'text', 'NO'),
+          ('production_database_admission_epochs', 'evidence_sha256', 'text', 'NO'),
+          ('production_database_admission_epochs', 'observed_at', 'timestamp with time zone', 'NO'),
+          ('production_database_admission_epochs', 'activated_at', 'timestamp with time zone', 'YES'),
+          ('production_database_admission_epochs', 'project_id_floor', 'integer', 'NO'),
+          ('production_database_admission_receipts', 'project_id', 'integer', 'NO'),
+          ('production_database_admission_receipts', 'registration_epoch', 'uuid', 'NO'),
+          ('production_database_admission_receipts', 'birth_token', 'uuid', 'NO'),
+          ('production_database_admission_receipts', 'birth_registered', 'boolean', 'NO'),
+          ('production_database_admission_receipts', 'allocation_identity', 'text', 'YES'),
+          ('production_database_admission_receipts', 'state', 'text', 'NO'),
+          ('production_database_admission_receipts', 'authorization_id', 'uuid', 'YES'),
+          ('production_database_admission_receipts', 'seal_id', 'uuid', 'YES'),
+          ('production_database_admission_receipts', 'created_at', 'timestamp with time zone', 'NO'),
+          ('production_database_admission_receipts', 'updated_at', 'timestamp with time zone', 'NO')
+        ) AS required(table_name, column_name, data_type, is_nullable)
+        JOIN information_schema.columns column_row
+          ON column_row.table_schema = 'public'
+         AND column_row.table_name = required.table_name
+         AND column_row.column_name = required.column_name
+         AND column_row.data_type = required.data_type
+         AND column_row.is_nullable = required.is_nullable
+      ) AS "productionDatabaseAdmissionColumnsReady",
+      (
+        (
+          SELECT COUNT(*) = 7
+          FROM (VALUES
+            ('production_database_admission_epochs', 'production_database_admission_epoch_namespace_check'),
+            ('production_database_admission_epochs', 'production_database_admission_epoch_state_check'),
+            ('production_database_admission_epochs', 'production_database_admission_epoch_evidence_check'),
+            ('production_database_admission_epochs', 'production_database_admission_epoch_drain_check'),
+            ('production_database_admission_receipts', 'production_database_admission_receipt_project_check'),
+            ('production_database_admission_receipts', 'production_database_admission_receipt_identity_check'),
+            ('production_database_admission_receipts', 'production_database_admission_receipt_state_check')
+          ) AS required(table_name, constraint_name)
+          JOIN pg_constraint constraint_row
+            ON constraint_row.conrelid = to_regclass('public.' || required.table_name)
+           AND constraint_row.conname = required.constraint_name
+           AND constraint_row.contype = 'c'
+           AND constraint_row.convalidated
+        )
+        AND (
+          SELECT COUNT(*) = 1 FROM pg_constraint
+          WHERE conrelid = to_regclass('public.production_database_admission_receipts')
+            AND contype = 'f'
+        )
+        AND EXISTS (
+          SELECT 1 FROM pg_constraint constraint_row
+          JOIN pg_attribute receipt_column
+            ON receipt_column.attrelid = constraint_row.conrelid
+           AND receipt_column.attname = 'registration_epoch' AND NOT receipt_column.attisdropped
+          JOIN pg_attribute epoch_column
+            ON epoch_column.attrelid = constraint_row.confrelid
+           AND epoch_column.attname = 'epoch' AND NOT epoch_column.attisdropped
+          WHERE constraint_row.conrelid = to_regclass('public.production_database_admission_receipts')
+            AND constraint_row.confrelid = to_regclass('public.production_database_admission_epochs')
+            AND constraint_row.contype = 'f' AND constraint_row.convalidated
+            AND constraint_row.conkey = ARRAY[receipt_column.attnum]::smallint[]
+            AND constraint_row.confkey = ARRAY[epoch_column.attnum]::smallint[]
+            AND constraint_row.confdeltype = 'a' AND constraint_row.confupdtype = 'a'
+            AND NOT constraint_row.condeferrable
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid = to_regclass('public.production_database_admission_epochs')
+            AND contype = 'f'
+        )
+      ) AS "productionDatabaseAdmissionConstraintsReady",
+      (
+        SELECT COUNT(*) = 3
+        FROM (VALUES
+          ('production_database_admission_epochs', 'production_database_admission_epochs_pkey', 'epoch', false),
+          ('production_database_admission_receipts', 'production_database_admission_receipts_pkey', 'project_id', false),
+          ('production_database_admission_epochs', 'production_database_admission_epoch_active_uq', 'namespace', true)
+        ) AS required(table_name, index_name, column_name, partial)
+        JOIN pg_class table_row ON table_row.oid = to_regclass('public.' || required.table_name)
+        JOIN pg_class index_relation ON index_relation.relname = required.index_name
+          AND index_relation.relnamespace = table_row.relnamespace
+        JOIN pg_index index_row ON index_row.indexrelid = index_relation.oid
+          AND index_row.indrelid = table_row.oid
+        JOIN pg_attribute column_row ON column_row.attrelid = table_row.oid
+          AND column_row.attname = required.column_name AND NOT column_row.attisdropped
+        WHERE index_row.indisunique AND index_row.indisvalid AND index_row.indisready
+          AND index_row.indnatts = 1 AND index_row.indnkeyatts = 1
+          AND index_row.indkey[0] = column_row.attnum AND index_row.indexprs IS NULL
+          AND CASE WHEN required.partial THEN
+            regexp_replace(pg_get_expr(index_row.indpred, index_row.indrelid),
+              '[[:space:]()]', '', 'g') = 'state=''active''::text'
+          ELSE index_row.indisprimary AND index_row.indpred IS NULL END
+      ) AS "productionDatabaseAdmissionIndexesReady",
+      (
+        SELECT COUNT(*) = 2
+        FROM (VALUES
+          ('projects', 'production_database_project_birth', 'register_production_database_project_birth', 7),
+          ('production_database_admission_receipts', 'production_database_admission_receipt_guard',
+            'guard_production_database_admission_receipt', 27)
+        ) AS required(table_name, trigger_name, function_name, trigger_type)
+        JOIN pg_trigger trigger_row
+          ON trigger_row.tgrelid = to_regclass('public.' || required.table_name)
+         AND trigger_row.tgname = required.trigger_name
+        JOIN pg_proc function_row ON function_row.oid = trigger_row.tgfoid
+          AND function_row.proname = required.function_name
+        JOIN pg_namespace function_namespace ON function_namespace.oid = function_row.pronamespace
+          AND function_namespace.nspname = 'public'
+        JOIN pg_language function_language ON function_language.oid = function_row.prolang
+          AND function_language.lanname = 'plpgsql'
+        WHERE NOT trigger_row.tgisinternal AND trigger_row.tgenabled IN ('O', 'A')
+          AND trigger_row.tgtype = required.trigger_type
+          AND trigger_row.tgnargs = 0 AND trigger_row.tgqual IS NULL
+          AND cardinality(trigger_row.tgattr::smallint[]) = 0
+          AND NOT trigger_row.tgdeferrable
+          AND function_row.prorettype = 'pg_catalog.trigger'::regtype
+          AND NOT function_row.prosecdef
+          AND function_row.proconfig @> ARRAY['search_path=pg_catalog, public']::text[]
+          AND CASE WHEN required.trigger_name = 'production_database_project_birth' THEN
+            lower(function_row.prosrc) LIKE '%production_database_project_identity_reused%'
+            AND lower(function_row.prosrc) LIKE '%production_database_birth_identity_untrusted%'
+            AND lower(function_row.prosrc) LIKE '%currval(sequence_name::regclass)%'
+            AND lower(function_row.prosrc) LIKE '%for share%'
+            AND lower(function_row.prosrc) LIKE '%insert into public.production_database_admission_receipts%'
+          ELSE
+            lower(function_row.prosrc) LIKE '%production_database_admission_receipt_retained%'
+            AND lower(function_row.prosrc) LIKE '%production_database_admission_receipt_immutable%'
+            AND lower(function_row.prosrc) LIKE '%new.registration_epoch%'
+            AND lower(function_row.prosrc) LIKE '%old.authorization_id%'
+            AND lower(function_row.prosrc) LIKE '%old.state = ''sealed''%'
+          END
+      ) AS "productionDatabaseAdmissionTriggersReady"
   `);
 
   const observation = result.rows[0];
@@ -623,6 +780,18 @@ export async function assessDeploymentRuntimeSchema(
     violations.push("asset_usage_attachment_guard_missing");
   if (observation?.durableAssetReferenceGuardsReady !== true)
     violations.push("durable_asset_reference_guards_missing");
+  if (observation?.previewDatabaseAllocationReady !== true)
+    violations.push("preview_database_allocation_missing");
+  if (observation?.productionDatabaseAdmissionTablesReady !== true)
+    violations.push("production_database_admission_tables_missing");
+  if (observation?.productionDatabaseAdmissionColumnsReady !== true)
+    violations.push("production_database_admission_columns_missing");
+  if (observation?.productionDatabaseAdmissionConstraintsReady !== true)
+    violations.push("production_database_admission_constraints_missing");
+  if (observation?.productionDatabaseAdmissionIndexesReady !== true)
+    violations.push("production_database_admission_indexes_missing");
+  if (observation?.productionDatabaseAdmissionTriggersReady !== true)
+    violations.push("production_database_admission_triggers_missing");
 
   return violations.length === 0
     ? {

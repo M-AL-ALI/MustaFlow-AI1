@@ -144,12 +144,12 @@ export type ProjectRetirementProgress = {
   /** Sanitized Fly reconciliation evidence; raw machine identities remain internal. */
   legacyRuntimeResolutions?: Array<
     | {
-        pointer: "containerId" | "prodContainerId";
+        pointer: "containerId" | "prodContainerId" | "testContainerId";
         state: "verified_absent";
         proof: "initial_get_404" | "delete_then_get_404";
       }
     | {
-        pointer: "containerId" | "prodContainerId";
+        pointer: "containerId" | "prodContainerId" | "testContainerId";
         state: "retained";
         reason:
           | "legacy_pointer_malformed"

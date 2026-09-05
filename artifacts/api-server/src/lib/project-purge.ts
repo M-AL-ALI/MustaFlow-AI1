@@ -38,6 +38,11 @@ import { releaseProductionDatabasesForHardDelete } from "./production-database-l
 import { tenantRuntimeProvider } from "./tenant-runtime";
 import { releaseNeonProjectsForHardDelete } from "./neon-project-lifecycle";
 import {
+  previewDatabaseEvidenceMatches,
+  releasePreviewDatabaseAllocation,
+  type PreviewDatabaseDeletionEvidence,
+} from "./preview-database-allocation";
+import {
   databaseProjectPurgeNotificationStore,
   deliverProjectPurgeMilestone,
   presentProjectPurgeMilestone,
@@ -689,7 +694,15 @@ export function stepFailure(
   error: unknown,
 ): ProjectPurgeStepError {
   if (error instanceof ProjectPurgeStepError) return error;
-  return new ProjectPurgeStepError(stage, code, true, projectPurgeFailureCauseCode(error));
+  const causeCode = projectPurgeFailureCauseCode(error);
+  if (
+    causeCode === "project_purge_asset_origin_unresolved" ||
+    causeCode === "project_purge_asset_storage_migration_required"
+  ) {
+    // Unknown origin and unsupported delivery need governed reconciliation, not blind retry.
+    return new ProjectPurgeStepError(stage, "project_purge_asset_release_failed", false, causeCode);
+  }
+  return new ProjectPurgeStepError(stage, code, true, causeCode);
 }
 
 async function setOperationStage(
@@ -725,6 +738,7 @@ type DurableProjectPurgeResourceProgress = {
   providerRemoved: number;
   providerDetached: number;
   databaseComplete: boolean;
+  previewDatabaseEvidence?: PreviewDatabaseDeletionEvidence;
   readmissionAudit?: ProjectPurgeReadmissionAudit;
 };
 
@@ -1005,7 +1019,7 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
     heartbeat.assertActive("verify");
     await setOperationStage(operation.id, operation.leaseVersion, "inventory");
     try {
-      inventory = await inventoryProjectPurgeResources(operation.projectId);
+      inventory = await inventoryProjectPurgeResources(operation.projectId, heartbeat.signal);
     } catch (error) {
       throw stepFailure("inventory", "project_purge_inventory_unavailable", error);
     }
@@ -1026,7 +1040,7 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
     // reference count. Re-inventory after the idempotent notification write so
     // a crash/yield resumes against the same digest that was checkpointed.
     try {
-      inventory = await inventoryProjectPurgeResources(operation.projectId);
+      inventory = await inventoryProjectPurgeResources(operation.projectId, heartbeat.signal);
     } catch (error) {
       throw stepFailure("inventory", "project_purge_inventory_unavailable", error);
     }
@@ -1108,7 +1122,16 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
 
     await setOperationStage(operation.id, operation.leaseVersion, "database");
     try {
-      if (!progress.databaseComplete) {
+      const previewDatabase = inventory.previewDatabase;
+      if (!previewDatabase) throw new Error("project_purge_preview_allocation_unresolved");
+      if (
+        !progress.databaseComplete ||
+        !previewDatabaseEvidenceMatches(
+          operation.projectId,
+          previewDatabase,
+          progress.previewDatabaseEvidence,
+        )
+      ) {
         heartbeat.assertActive("database");
         try {
           await releaseProductionDatabasesForHardDelete(
@@ -1123,6 +1146,16 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
           heartbeat.assertActive("database");
           throw new Error("project_purge_production_database_release_failed");
         }
+        heartbeat.assertActive("database");
+        const previewDatabaseEvidence = await releasePreviewDatabaseAllocation({
+          projectId: operation.projectId,
+          state: previewDatabase,
+          signal: heartbeat.signal,
+          assertActive: async () => {
+            heartbeat.assertActive("database");
+            return true;
+          },
+        });
         heartbeat.assertActive("database");
         let neonRemoved = 0;
         try {
@@ -1142,6 +1175,7 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
           ...progress,
           providerRemoved: progress.providerRemoved + neonRemoved,
           databaseComplete: true,
+          previewDatabaseEvidence,
         };
         await checkpointProjectPurgeResources(operation, "database", progress);
       }

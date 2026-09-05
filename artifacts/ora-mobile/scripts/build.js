@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
 
@@ -22,11 +22,32 @@ function findWorkspaceRoot(startDir) {
 const workspaceRoot = findWorkspaceRoot(projectRoot);
 const basePath = (process.env.BASE_PATH || "/").replace(/\/+$/, "");
 
+function stopMetro() {
+  const current = metroProcess;
+  if (!current) return;
+  metroProcess = null;
+
+  if (process.platform === "win32" && typeof current.pid === "number") {
+    const systemRoot = process.env.SystemRoot;
+    const taskkillPath =
+      systemRoot && path.isAbsolute(systemRoot)
+        ? path.join(systemRoot, "System32", "taskkill.exe")
+        : null;
+    if (taskkillPath && fs.existsSync(taskkillPath)) {
+      const result = spawnSync(taskkillPath, ["/pid", String(current.pid), "/t", "/f"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      if (!result.error && result.status === 0) return;
+    }
+  }
+
+  current.kill();
+}
+
 function exitWithError(message) {
   console.error(message);
-  if (metroProcess) {
-    metroProcess.kill();
-  }
+  stopMetro();
   process.exit(1);
 }
 
@@ -34,7 +55,7 @@ function setupSignalHandlers() {
   const cleanup = () => {
     if (metroProcess) {
       console.log("Cleaning up Metro process...");
-      metroProcess.kill();
+      stopMetro();
     }
     process.exit(0);
   };
@@ -151,12 +172,27 @@ async function startMetro(expoPublicDomain, expoPublicReplId) {
     console.log(`Setting EXPO_PUBLIC_REPL_ID=${expoPublicReplId}`);
   }
 
-  metroProcess = spawn("pnpm", ["exec", "expo", "start", "--no-dev", "--minify", "--localhost"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: false,
-    cwd: projectRoot,
-    env,
-  });
+  const pnpmEntryPoint = process.env.npm_execpath;
+  if (!pnpmEntryPoint || !path.isAbsolute(pnpmEntryPoint) || !fs.existsSync(pnpmEntryPoint)) {
+    exitWithError(
+      "pnpm entry point is unavailable; run this build through the pnpm package script",
+    );
+  }
+
+  // Invoke the exact package-manager JavaScript entry point inherited from the
+  // parent pnpm process. A literal `spawn(\"pnpm\")` is not portable on Windows,
+  // where the PATH entry is commonly a .cmd shim that child_process cannot
+  // execute directly without a shell.
+  metroProcess = spawn(
+    process.env.npm_node_execpath || process.execPath,
+    [pnpmEntryPoint, "exec", "expo", "start", "--no-dev", "--minify", "--localhost"],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
+      cwd: projectRoot,
+      env,
+    },
+  );
 
   if (metroProcess.stdout) {
     metroProcess.stdout.on("data", (data) => {
@@ -539,16 +575,12 @@ async function main() {
 
   console.log("Build complete! Deploy to:", baseUrl);
 
-  if (metroProcess) {
-    metroProcess.kill();
-  }
+  stopMetro();
   process.exit(0);
 }
 
 main().catch((error) => {
   console.error("Build failed:", error.message);
-  if (metroProcess) {
-    metroProcess.kill();
-  }
+  stopMetro();
   process.exit(1);
 });

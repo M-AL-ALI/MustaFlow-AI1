@@ -49,6 +49,7 @@ describe("unified asset registry migration", () => {
     expect(sql).toContain(
       "('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')",
     );
+    expect(sql).toContain("('support_tickets', 'user_id, project_id, transcript, attachments')");
     expect(sql).toContain("JOIN public.asset_storage_objects storage_row");
     expect(sql).toContain("storage_row.storage_key = matched.storage_match[1]");
     expect(sql).toContain("storage_row.state <> 'deleted'");
@@ -84,7 +85,11 @@ describe("unified asset registry migration", () => {
     expect(sql).toContain("position('coalesce(artifact_id,' IN normalized_definition) = 0");
     expect(sql).toContain("generated-image:");
     expect(sql).toContain("UPDATE generated_images image");
-    expect(sql).toContain("asset.storage_backend <> 'legacy-url'");
+    expect(sql).toContain("image.product_scope IS NOT NULL");
+    expect(sql).toContain("asset.product_scope IS NOT DISTINCT FROM image.product_scope");
+    expect(sql).toContain("asset.project_id IS NOT DISTINCT FROM image.project_id");
+    expect(sql).toContain("asset.state = 'ready'");
+    expect(sql).toContain("asset.storage_backend = 'r2'");
     expect(sql).toMatch(
       /INSERT INTO account_asset_quota \(user_id, used_bytes, reserved_bytes\)[\s\S]*?ON CONFLICT \(user_id\) DO NOTHING/u,
     );

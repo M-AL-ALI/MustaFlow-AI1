@@ -6476,7 +6476,7 @@ export const ProvisionDatabaseParams = zod.object({
 })
 
 export const ProvisionDatabaseBody = zod.object({
-  "provider": zod.enum(['postgres', 'sqlite'])
+  "provider": zod.enum(['postgres'])
 })
 
 export const ProvisionDatabaseResponse = zod.object({

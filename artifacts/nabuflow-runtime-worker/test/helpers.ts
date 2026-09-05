@@ -14,6 +14,7 @@ import {
   type RuntimeReconciliationTerminal,
   type StripeCapabilityPolicy,
   type ProductionDatabaseAllocationRecord,
+  type ProductionDatabaseAdmissionReceipt,
 } from "@workspace/tenant-runtime-contracts";
 import { getSandbox } from "@cloudflare/sandbox";
 import type { WorkerBindings } from "../src/bindings";
@@ -68,9 +69,48 @@ import type {
   RuntimeReconciliationObservationSink,
 } from "../src/runtime-backend";
 import type { ProductionDatabaseAllocator } from "../src/production-database-allocator";
+import {
+  assertProductionDatabaseIntentAuthority,
+  beginProductionDatabaseReleaseIntent,
+  claimProductionDatabaseDispatchIntent,
+  completeProductionDatabaseReleaseIntent,
+  completeNeverDispatchedProductionDatabaseReleaseIntent,
+  hasVerifiedProductionDatabaseRelease,
+  observeProductionDatabaseProjectIntent,
+  parseProductionDatabaseIntent,
+  productionDatabaseHandoffIntent,
+  productionDatabaseIntentReleaseAllocation,
+  type ProductionDatabaseIntent,
+  type ProductionDatabaseIntentOwner,
+  type ProductionDatabaseProviderScope,
+} from "../src/production-database-intent";
 
 export const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 export const TEST_NOW_MS = 1_785_859_200_000;
+export const TEST_DATABASE_ADMISSION_EPOCH = "13b8ba22-503b-4a79-84f5-39c219cff001";
+
+// Explicit opt-in fixture construction; signedRequest never invents authorization.
+export function productionDatabaseAdmissionFixture<A extends "authorized" | "sealed">(
+  owner: { projectId: number; allocationIdentity: string },
+  assertion: A,
+  birthRegistered = false,
+) {
+  return {
+    format: "nabuflow.production-database-admission/v1" as const,
+    issuer: "nabuflow-api" as const,
+    audience: "production" as const,
+    projectId: owner.projectId,
+    allocationIdentity: owner.allocationIdentity,
+    registrationEpoch: TEST_DATABASE_ADMISSION_EPOCH,
+    birthToken: "13b8ba22-503b-4a79-84f5-39c219cff002",
+    receiptId:
+      assertion === "authorized"
+        ? "13b8ba22-503b-4a79-84f5-39c219cff003"
+        : "13b8ba22-503b-4a79-84f5-39c219cff004",
+    birthRegistered,
+    assertion,
+  };
+}
 
 export class MemoryArtifactCommitQueue {
   readonly messages: DurableOperationQueueMessage[] = [];
@@ -1673,6 +1713,7 @@ export class MemoryCapabilityVault implements CapabilityVault {
     { revision: string; definition: CapabilityDefinition; credential: string }
   >();
   readonly productionDatabaseAllocations = new Map<number, ProductionDatabaseAllocationRecord>();
+  readonly productionDatabaseIntents = new Map<number, ProductionDatabaseIntent>();
   readonly stripeRecords = new Map<
     number,
     {
@@ -1764,6 +1805,56 @@ export class MemoryCapabilityVault implements CapabilityVault {
     return "revoked";
   }
 
+  async getProductionDatabaseIntent(input: ProductionDatabaseIntentOwner) {
+    return parseProductionDatabaseIntent(
+      this.productionDatabaseIntents.get(input.projectId),
+      input,
+    );
+  }
+
+  async claimProductionDatabaseDispatch(
+    input: ProductionDatabaseIntentOwner & {
+      scope: ProductionDatabaseProviderScope;
+      expiresAtMs: number;
+    },
+  ): Promise<void> {
+    assertProductionDatabaseIntentAuthority(input.expiresAtMs, TEST_NOW_MS);
+    if (this.productionDatabaseAllocations.has(input.projectId)) {
+      throw new Error("production_database_intent_conflict");
+    }
+    const current = parseProductionDatabaseIntent(
+      this.productionDatabaseIntents.get(input.projectId),
+      input,
+    );
+    this.productionDatabaseIntents.set(
+      input.projectId,
+      claimProductionDatabaseDispatchIntent(current, input, input.scope, TEST_NOW_MS),
+    );
+  }
+
+  async recordProductionDatabaseProject(
+    input: ProductionDatabaseIntentOwner & {
+      scope: ProductionDatabaseProviderScope;
+      providerProjectId: string;
+      expiresAtMs?: number;
+    },
+  ): Promise<ProductionDatabaseIntent> {
+    assertProductionDatabaseIntentAuthority(input.expiresAtMs, TEST_NOW_MS);
+    const current = parseProductionDatabaseIntent(
+      this.productionDatabaseIntents.get(input.projectId),
+      input,
+    );
+    const next = observeProductionDatabaseProjectIntent(
+      current,
+      input,
+      input.scope,
+      input.providerProjectId,
+      TEST_NOW_MS,
+    );
+    this.productionDatabaseIntents.set(input.projectId, next);
+    return structuredClone(next);
+  }
+
   async getProductionDatabaseAllocation(input: {
     projectId: number;
     allocationIdentity: string;
@@ -1782,7 +1873,17 @@ export class MemoryCapabilityVault implements CapabilityVault {
     definition: CapabilityDefinition;
     allocation: ProductionDatabaseAllocationRecord;
     credential: { kind: "neon-connection-string"; value: string };
+    expiresAtMs?: number;
   }): Promise<{ state: "provisioned" | "replayed"; keyId: string }> {
+    assertProductionDatabaseIntentAuthority(input.expiresAtMs, TEST_NOW_MS);
+    const intent = productionDatabaseHandoffIntent(
+      parseProductionDatabaseIntent(
+        this.productionDatabaseIntents.get(input.projectId),
+        input.allocation,
+      ),
+      input.allocation,
+      TEST_NOW_MS,
+    );
     const existing = this.productionDatabaseAllocations.get(input.projectId);
     if (existing !== undefined) {
       if (
@@ -1800,20 +1901,22 @@ export class MemoryCapabilityVault implements CapabilityVault {
       credential: input.credential.value,
     });
     this.productionDatabaseAllocations.set(input.projectId, structuredClone(input.allocation));
+    this.productionDatabaseIntents.set(input.projectId, intent);
     return { state: "provisioned", keyId: "v1" };
   }
 
   async beginProductionDatabaseRelease(input: {
     projectId: number;
     allocationIdentity: string;
+    expiresAtMs?: number;
   }): Promise<ProductionDatabaseAllocationRecord | null> {
     const allocation = await this.getProductionDatabaseAllocation(input);
-    if (allocation === null) return null;
-    const releasing = {
-      ...allocation,
-      state: "releasing" as const,
-      updatedAt: new Date(TEST_NOW_MS).toISOString(),
-    };
+    const current = await this.getProductionDatabaseIntent(input);
+    assertProductionDatabaseIntentAuthority(input.expiresAtMs, TEST_NOW_MS);
+    const intent = beginProductionDatabaseReleaseIntent(current, input, allocation, TEST_NOW_MS);
+    this.productionDatabaseIntents.set(input.projectId, intent);
+    if (allocation === null) return productionDatabaseIntentReleaseAllocation(intent);
+    const releasing = { ...allocation, state: "releasing" as const, updatedAt: intent.updatedAt };
     this.productionDatabaseAllocations.set(input.projectId, releasing);
     return structuredClone(releasing);
   }
@@ -1821,17 +1924,64 @@ export class MemoryCapabilityVault implements CapabilityVault {
   async completeProductionDatabaseRelease(input: {
     projectId: number;
     allocationIdentity: string;
+    expectedProviderProjectId?: string;
+    expiresAtMs?: number;
   }): Promise<"released" | "not_found" | "conflict"> {
     const allocation = this.productionDatabaseAllocations.get(input.projectId);
-    if (allocation === undefined) return "not_found";
+    const current = await this.getProductionDatabaseIntent(input);
+    assertProductionDatabaseIntentAuthority(input.expiresAtMs, TEST_NOW_MS);
+    if (current?.version === 2) {
+      return allocation !== undefined ||
+        this.databaseRecords.has(input.projectId) ||
+        input.expectedProviderProjectId !== undefined ||
+        !hasVerifiedProductionDatabaseRelease(current)
+        ? "conflict"
+        : "not_found";
+    }
     if (
-      allocation.allocationIdentity !== input.allocationIdentity ||
-      allocation.state !== "releasing"
+      allocation !== undefined &&
+      (allocation.allocationIdentity !== input.allocationIdentity ||
+        allocation.state !== "releasing" ||
+        allocation.providerProjectId !== current?.providerProjectId)
     ) {
       return "conflict";
     }
+    const completed = completeProductionDatabaseReleaseIntent(
+      current,
+      input,
+      input.expectedProviderProjectId,
+      TEST_NOW_MS,
+    );
+    this.productionDatabaseIntents.set(input.projectId, completed);
     this.productionDatabaseAllocations.delete(input.projectId);
     this.databaseRecords.delete(input.projectId);
+    return current?.state === "released" ? "not_found" : "released";
+  }
+
+  async completeNeverDispatchedProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+    receipt: ProductionDatabaseAdmissionReceipt;
+  }): Promise<"released" | "replayed"> {
+    // No awaits between comparison and commit, mirroring the real vault transaction.
+    const current = parseProductionDatabaseIntent(
+      this.productionDatabaseIntents.get(input.projectId),
+      input,
+    );
+    const completed = completeNeverDispatchedProductionDatabaseReleaseIntent(
+      current,
+      input,
+      input.receipt,
+      TEST_NOW_MS,
+    );
+    if (
+      this.productionDatabaseAllocations.has(input.projectId) ||
+      this.databaseRecords.has(input.projectId)
+    ) {
+      throw new Error("production_database_intent_conflict");
+    }
+    if (current !== null) return "replayed";
+    this.productionDatabaseIntents.set(input.projectId, completed);
     return "released";
   }
 
@@ -1976,6 +2126,7 @@ export function fakeEnv(): WorkerBindings {
     CLOUDFLARE_RUNTIME_CONTROL_TOKEN: TEST_SECRET,
     CLOUDFLARE_CAPABILITY_VAULT_KEK_V1: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
     CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: "staging",
+    NABUFLOW_PRODUCTION_DATABASE_ADMISSION_EPOCH: TEST_DATABASE_ADMISSION_EPOCH,
     CLOUDFLARE_RUNTIME_PREVIEW_PUBLIC_KEY: "test-public-key",
     NABUFLOW_RUNTIME_SLEEP_AFTER: "10m",
     NABUFLOW_RUNTIME_LAYER_PLATFORM:

@@ -74,8 +74,10 @@ export function projectFileByteSize(input: { content: string; mimeType: string }
 
 /**
  * Resolve a binary project-file reference at a trusted serving/build boundary.
- * The durable project-history usage is the authorization link; the manifest's
- * size and digest bind the exact immutable bytes expected by history/restore.
+ * The caller authorizes access to the current target project. Only a known
+ * NabuFlow asset born in that active project or explicitly granted to it may
+ * supply bytes. History usages preserve retention, not visibility. The manifest
+ * size and digest still bind the exact immutable bytes expected by restore.
  */
 export async function resolveProjectFileBytes(input: {
   projectId: number;
@@ -99,14 +101,25 @@ export async function resolveProjectFileBytes(input: {
        FROM assets asset
       WHERE asset.id=$1
         AND asset.state='ready'
+        AND asset.product_scope='nabuflow'
         AND asset.storage_backend='r2'
         AND EXISTS (
-          SELECT 1 FROM asset_usage usage
-           WHERE usage.asset_id=asset.id
-             AND usage.project_id=$2
-             AND usage.consumer=$3
+          SELECT 1 FROM projects target
+           WHERE target.id=$2 AND target.deleted_at IS NULL
+        )
+        AND (
+          asset.project_id=$2
+          OR EXISTS (
+            SELECT 1 FROM asset_usage usage
+             WHERE usage.asset_id=asset.id
+               AND usage.project_id=$2
+               AND usage.consumer=$3
+               AND usage.artifact_id IS NULL
+               AND usage.version_id IS NULL
+               AND usage.file_path IS NULL
+          )
         )`,
-    [reference.assetId, input.projectId, PROJECT_FILE_ASSET_HISTORY_CONSUMER],
+    [reference.assetId, input.projectId, "explicit-project-use:v1"],
   );
   const asset = result.rows[0];
   if (
@@ -166,7 +179,8 @@ export async function resolveProjectRuntimeFiles(
 
 /**
  * @dormantExport
- * Grant one project durable access to the immutable object for history/restore.
+ * Pin retention for a current-project NabuFlow asset. This automatic history
+ * marker never grants another project access to the immutable object.
  */
 export async function pinProjectFileAssetHistory(input: {
   assetId: number;
@@ -174,8 +188,13 @@ export async function pinProjectFileAssetHistory(input: {
 }): Promise<void> {
   const linked = await pool.query(
     `INSERT INTO asset_usage (asset_id, project_id, consumer)
-     SELECT id, $2, $3 FROM assets
-      WHERE id=$1 AND project_id=$2 AND state='ready'
+     SELECT asset.id, $2, $3 FROM assets asset
+      WHERE asset.id=$1 AND asset.project_id=$2 AND asset.state='ready'
+        AND asset.product_scope='nabuflow'
+        AND EXISTS (
+          SELECT 1 FROM projects target
+           WHERE target.id=$2 AND target.deleted_at IS NULL
+        )
      ON CONFLICT DO NOTHING
      RETURNING id`,
     [input.assetId, input.projectId, PROJECT_FILE_ASSET_HISTORY_CONSUMER],

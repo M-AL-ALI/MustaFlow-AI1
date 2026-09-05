@@ -1,5 +1,22 @@
 import { DurableObject } from "cloudflare:workers";
 import {
+  PRODUCTION_DATABASE_INTENT_STORAGE_KEY,
+  ProductionDatabaseIntentError,
+  assertProductionDatabaseIntentAuthority,
+  beginProductionDatabaseReleaseIntent,
+  claimProductionDatabaseDispatchIntent,
+  completeProductionDatabaseReleaseIntent,
+  completeNeverDispatchedProductionDatabaseReleaseIntent,
+  hasVerifiedProductionDatabaseRelease,
+  observeProductionDatabaseProjectIntent,
+  parseProductionDatabaseIntent,
+  productionDatabaseHandoffIntent,
+  productionDatabaseIntentReleaseAllocation,
+  type ProductionDatabaseIntent,
+  type ProductionDatabaseIntentOwner,
+  type ProductionDatabaseProviderScope,
+} from "./production-database-intent";
+import {
   capabilityDefinitionSchema,
   capabilityDatabaseResponseSchema,
   capabilityEchoResponseSchema,
@@ -8,11 +25,13 @@ import {
   stripeCapabilityInputSchema,
   stripeCapabilityPolicySchema,
   productionDatabaseAllocationRecordSchema,
+  productionDatabaseAllocationIdentity,
   type CapabilityDefinition,
   type CapabilityInvocation,
   type StripeCapabilityPolicy,
   type StripePaymentIntent,
   type ProductionDatabaseAllocationRecord,
+  type ProductionDatabaseAdmissionReceipt,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import type { CapabilityVault, CapabilityVaultInvocationResult } from "./model";
@@ -334,12 +353,56 @@ export class CapabilityVaultDurableObject
         context,
         plaintext,
       );
-      await this.ctx.storage.put(DATABASE_STORAGE_KEY, {
+      const owner = {
         projectId: input.projectId,
-        revision: input.revision,
-        definition,
-        envelope,
-      } satisfies StoredCapabilityRecord);
+        allocationIdentity: await productionDatabaseAllocationIdentity({
+          format: "nabuflow.production-database-allocation/v1",
+          deploymentNamespace: "production",
+          projectId: input.projectId,
+        }),
+      };
+      // Encryption can yield across a completed production release. Compare the
+      // current owner-bound history and publish the capability in one transaction.
+      await this.ctx.storage.transaction(async (transaction) => {
+        const [rawIntent, rawAllocation] = await Promise.all([
+          transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+          transaction.get(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY),
+        ]);
+        // Only an absent key is missing history; a stored null is malformed.
+        if (rawIntent === null) {
+          throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+        }
+        const current = parseProductionDatabaseIntent(rawIntent, owner);
+        if (current?.state === "releasing" || current?.state === "released") {
+          throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+        }
+        if (rawAllocation !== undefined) {
+          const allocation = productionDatabaseAllocationRecordSchema.safeParse(rawAllocation);
+          if (
+            !allocation.success ||
+            allocation.data.projectId !== owner.projectId ||
+            allocation.data.allocationIdentity !== owner.allocationIdentity ||
+            allocation.data.state === "releasing"
+          ) {
+            throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+          }
+          if (
+            current !== null &&
+            (current.providerProjectId !== allocation.data.providerProjectId ||
+              current.scope?.providerOrganizationId !== allocation.data.providerOrganizationId ||
+              current.scope?.regionId !== allocation.data.regionId ||
+              current.scope?.historyRetentionSeconds !== allocation.data.historyRetentionSeconds)
+          ) {
+            throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+          }
+        }
+        await transaction.put(DATABASE_STORAGE_KEY, {
+          projectId: input.projectId,
+          revision: input.revision,
+          definition,
+          envelope,
+        } satisfies StoredCapabilityRecord);
+      });
       return { state: "provisioned", keyId };
     } finally {
       plaintext.fill(0);
@@ -358,6 +421,74 @@ export class CapabilityVaultDurableObject
       }
       await transaction.delete(DATABASE_STORAGE_KEY);
       return "revoked" as const;
+    });
+  }
+
+  async getProductionDatabaseIntent(
+    input: ProductionDatabaseIntentOwner,
+  ): Promise<ProductionDatabaseIntent | null> {
+    return parseProductionDatabaseIntent(
+      await this.ctx.storage.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+      input,
+    );
+  }
+
+  async claimProductionDatabaseDispatch(
+    input: ProductionDatabaseIntentOwner & {
+      scope: ProductionDatabaseProviderScope;
+      expiresAtMs: number;
+    },
+  ): Promise<void> {
+    await this.ctx.storage.transaction(async (transaction) => {
+      const allocation = await transaction.get(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY);
+      const current = parseProductionDatabaseIntent(
+        await transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+        input,
+      );
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      if (allocation !== undefined) throw new Error("production_database_intent_conflict");
+      const next = claimProductionDatabaseDispatchIntent(current, input, input.scope, Date.now());
+      await transaction.put(PRODUCTION_DATABASE_INTENT_STORAGE_KEY, next);
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+    });
+  }
+
+  async recordProductionDatabaseProject(
+    input: ProductionDatabaseIntentOwner & {
+      scope: ProductionDatabaseProviderScope;
+      providerProjectId: string;
+      expiresAtMs?: number;
+    },
+  ): Promise<ProductionDatabaseIntent> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      const current = parseProductionDatabaseIntent(
+        await transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+        input,
+      );
+      const record = await transaction.get<ProductionDatabaseAllocationRecord>(
+        PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
+      );
+      if (record !== undefined) {
+        const parsed = productionDatabaseAllocationRecordSchema.parse(record);
+        if (
+          parsed.projectId !== input.projectId ||
+          parsed.allocationIdentity !== input.allocationIdentity ||
+          parsed.providerProjectId !== input.providerProjectId
+        ) {
+          throw new Error("production_database_intent_conflict");
+        }
+      }
+      const next = observeProductionDatabaseProjectIntent(
+        current,
+        input,
+        input.scope,
+        input.providerProjectId,
+        Date.now(),
+      );
+      await transaction.put(PRODUCTION_DATABASE_INTENT_STORAGE_KEY, next);
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      return next;
     });
   }
 
@@ -385,6 +516,7 @@ export class CapabilityVaultDurableObject
     definition: CapabilityDefinition;
     allocation: ProductionDatabaseAllocationRecord;
     credential: { kind: "neon-connection-string"; value: string };
+    expiresAtMs?: number;
   }): Promise<{ state: "provisioned" | "replayed"; keyId: string }> {
     const definition = validateDatabaseDefinition(input.definition);
     const allocation = productionDatabaseAllocationRecordSchema.parse(input.allocation);
@@ -398,6 +530,12 @@ export class CapabilityVaultDurableObject
     }
     const keyId = this.env.NABUFLOW_CAPABILITY_VAULT_ACTIVE_KEY_ID;
     if (keyId !== "v1") throw new Error("The configured vault key version is unsupported");
+    assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+    productionDatabaseHandoffIntent(
+      await this.getProductionDatabaseIntent(allocation),
+      allocation,
+      Date.now(),
+    );
     const existingAllocation = await this.ctx.storage.get<ProductionDatabaseAllocationRecord>(
       PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
     );
@@ -442,6 +580,16 @@ export class CapabilityVaultDurableObject
         if (claimedAllocation !== undefined || claimedCapability !== undefined) {
           throw new Error("Production database allocation was claimed concurrently");
         }
+        const intent = productionDatabaseHandoffIntent(
+          parseProductionDatabaseIntent(
+            await transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+            allocation,
+          ),
+          allocation,
+          Date.now(),
+        );
+        assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+        await transaction.put(PRODUCTION_DATABASE_INTENT_STORAGE_KEY, intent);
         await transaction.put(DATABASE_STORAGE_KEY, {
           projectId: input.projectId,
           revision: input.revision,
@@ -459,50 +607,111 @@ export class CapabilityVaultDurableObject
   async beginProductionDatabaseRelease(input: {
     projectId: number;
     allocationIdentity: string;
+    expiresAtMs?: number;
   }): Promise<ProductionDatabaseAllocationRecord | null> {
     return this.ctx.storage.transaction(async (transaction) => {
       const record = await transaction.get<ProductionDatabaseAllocationRecord>(
         PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
       );
-      if (record === undefined) return null;
-      const parsed = productionDatabaseAllocationRecordSchema.parse(record);
-      if (
-        parsed.projectId !== input.projectId ||
-        parsed.allocationIdentity !== input.allocationIdentity
-      ) {
-        throw new Error("Production database release ownership conflict");
-      }
-      if (parsed.state === "releasing") return parsed;
-      const updated = productionDatabaseAllocationRecordSchema.parse({
-        ...parsed,
+      const allocation =
+        record === undefined ? null : productionDatabaseAllocationRecordSchema.parse(record);
+      const current = parseProductionDatabaseIntent(
+        await transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+        input,
+      );
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      const intent = beginProductionDatabaseReleaseIntent(current, input, allocation, Date.now());
+      await transaction.put(PRODUCTION_DATABASE_INTENT_STORAGE_KEY, intent);
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      if (allocation === null) return productionDatabaseIntentReleaseAllocation(intent);
+      const releasing = productionDatabaseAllocationRecordSchema.parse({
+        ...allocation,
         state: "releasing",
-        updatedAt: new Date().toISOString(),
+        updatedAt: intent.updatedAt,
       });
-      await transaction.put(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY, updated);
-      return updated;
+      await transaction.put(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY, releasing);
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      return releasing;
+    });
+  }
+
+  async completeNeverDispatchedProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+    receipt: ProductionDatabaseAdmissionReceipt;
+  }): Promise<"released" | "replayed"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const [rawIntent, allocation, capability] = await Promise.all([
+        transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+        transaction.get(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY),
+        transaction.get(DATABASE_STORAGE_KEY),
+      ]);
+      const current = parseProductionDatabaseIntent(rawIntent, input);
+      const completed = completeNeverDispatchedProductionDatabaseReleaseIntent(
+        current,
+        input,
+        input.receipt,
+        Date.now(),
+      );
+      // Even a matching replay cannot hide ownership written by another path.
+      if (allocation !== undefined || capability !== undefined) {
+        throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+      }
+      if (current !== null) return "replayed" as const;
+      await transaction.put(PRODUCTION_DATABASE_INTENT_STORAGE_KEY, completed);
+      return "released" as const;
     });
   }
 
   async completeProductionDatabaseRelease(input: {
     projectId: number;
     allocationIdentity: string;
+    expectedProviderProjectId?: string;
+    expiresAtMs?: number;
   }): Promise<"released" | "not_found" | "conflict"> {
     return this.ctx.storage.transaction(async (transaction) => {
       const record = await transaction.get<ProductionDatabaseAllocationRecord>(
         PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY,
       );
-      if (record === undefined) return "not_found" as const;
-      const parsed = productionDatabaseAllocationRecordSchema.parse(record);
-      if (
-        parsed.projectId !== input.projectId ||
-        parsed.allocationIdentity !== input.allocationIdentity ||
-        parsed.state !== "releasing"
-      ) {
-        return "conflict" as const;
+      const current = parseProductionDatabaseIntent(
+        await transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+        input,
+      );
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      if (current?.version === 2) {
+        const capability = await transaction.get(DATABASE_STORAGE_KEY);
+        assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+        if (
+          record !== undefined ||
+          capability !== undefined ||
+          input.expectedProviderProjectId !== undefined ||
+          !hasVerifiedProductionDatabaseRelease(current)
+        ) {
+          return "conflict" as const;
+        }
+        // Negative proof never authorizes deleting an existing capability.
+        return "not_found" as const;
       }
+      if (record !== undefined) {
+        const parsed = productionDatabaseAllocationRecordSchema.parse(record);
+        if (
+          parsed.projectId !== input.projectId ||
+          parsed.allocationIdentity !== input.allocationIdentity ||
+          parsed.state !== "releasing" ||
+          parsed.providerProjectId !== current?.providerProjectId
+        )
+          return "conflict" as const;
+      }
+      const completed = completeProductionDatabaseReleaseIntent(
+        current,
+        input,
+        input.expectedProviderProjectId,
+        Date.now(),
+      );
+      await transaction.put(PRODUCTION_DATABASE_INTENT_STORAGE_KEY, completed);
       await transaction.delete(DATABASE_STORAGE_KEY);
       await transaction.delete(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY);
-      return "released" as const;
+      return current?.state === "released" ? ("not_found" as const) : ("released" as const);
     });
   }
 

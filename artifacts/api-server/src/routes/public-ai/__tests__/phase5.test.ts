@@ -141,6 +141,7 @@ describe("image-store", () => {
   const makeEntry = (
     overrides?: Partial<Omit<ImageEntry, "expiresAt">>,
   ): Omit<ImageEntry, "expiresAt"> => ({
+    productScope: "ora",
     sessionId: "sess-abc",
     filename: "test.png",
     mimeType: "image/png",
@@ -158,6 +159,7 @@ describe("image-store", () => {
 
     const entry = getImage(result.imageRef, "sess-abc");
     expect(entry).not.toBeNull();
+    expect(entry?.productScope).toBe("ora");
     expect(entry?.filename).toBe("test.png");
     expect(entry?.width).toBe(800);
   });

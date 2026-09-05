@@ -11,5 +11,4 @@ export type DatabaseProvisionInputProvider = typeof DatabaseProvisionInputProvid
 
 export const DatabaseProvisionInputProvider = {
   postgres: 'postgres',
-  sqlite: 'sqlite',
 } as const;

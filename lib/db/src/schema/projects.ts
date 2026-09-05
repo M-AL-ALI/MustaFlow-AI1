@@ -244,6 +244,9 @@ export const projectsTable = pgTable(
     // previewDbStatus: none | provisioning | ready | error
     previewDbUrl: text("preview_db_url"),
     previewDbStatus: text("preview_db_status").notNull().default("none"),
+    // Durable dispatch scope and ownership, independent of the encrypted credential.
+    // Null on historical rows is unknown history, never a successful release receipt.
+    previewDbAllocation: jsonb("preview_db_allocation").$type<Record<string, unknown>>(),
     // ── Testing workflow (test-then-publish architecture) ─────────────────────
     // Dedicated test container — entirely separate from the live dev container
     // (containerId). Never touched by file saves, AI builds, Apply, or terminal.

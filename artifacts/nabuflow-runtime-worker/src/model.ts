@@ -24,6 +24,7 @@ import type {
   ProductionDatabaseDurableCheckpoint,
   ProductionDatabaseJobRequest,
   ProductionDatabaseAllocationRecord,
+  ProductionDatabaseAdmissionReceipt,
   PromoteRuntimeLayeredArtifactRequest,
   RuntimeReconciliationAuditRecord,
   RuntimeReconciliationObservation,
@@ -577,7 +578,9 @@ export type CapabilityVaultInvocationResult =
       retryable: boolean;
     };
 
-export interface CapabilityVault {
+import type { ProductionDatabaseIntentVault } from "./production-database-intent";
+
+export interface CapabilityVault extends ProductionDatabaseIntentVault {
   provisionEcho(input: {
     projectId: number;
     revision: string;
@@ -611,15 +614,28 @@ export interface CapabilityVault {
     definition: CapabilityDefinition;
     allocation: ProductionDatabaseAllocationRecord;
     credential: { kind: "neon-connection-string"; value: string };
+    expiresAtMs?: number;
   }): Promise<{ state: "provisioned" | "replayed"; keyId: string }>;
   beginProductionDatabaseRelease(input: {
     projectId: number;
     allocationIdentity: string;
+    expiresAtMs?: number;
   }): Promise<ProductionDatabaseAllocationRecord | null>;
+  /** A new completion requires a freshly GET-404-verified expected provider id.
+   * Only a versioned verified completion receipt may be replayed without it. */
   completeProductionDatabaseRelease(input: {
     projectId: number;
     allocationIdentity: string;
+    expectedProviderProjectId?: string;
+    expiresAtMs?: number;
   }): Promise<"released" | "not_found" | "conflict">;
+  /** Called only after the worker authenticates and validates the active admission epoch.
+   * Rejects malformed receipts or contradictory ownership without deleting records. */
+  completeNeverDispatchedProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+    receipt: ProductionDatabaseAdmissionReceipt;
+  }): Promise<"released" | "replayed">;
   invokeDatabase(input: {
     projectId: number;
     invocation: CapabilityInvocation;

@@ -43,7 +43,7 @@ import {
 import {
   decideProjectJobAdmission,
   decideProjectRetirementReceiptMode,
-  decideProjectRetirementReconciliation,
+  decideProjectRetirementReconciliation as decideBaseProjectRetirementReconciliation,
   decideProjectRetirementSchedulingReceipt,
   classifyStoredRuntimePointer,
   hasCurrentProjectRetirementCompletionEvidence,
@@ -81,6 +81,30 @@ import {
 } from "./project-retirement-owned-resources";
 
 export * from "./project-retirement-contract";
+
+/**
+ * One owner-governed configuration recovery for an exhausted legacy receipt.
+ * This only admits a fresh operation; it never supplies storage/absence proof.
+ * Keep the existing public decision and receipt shapes, including the shared
+ * contract's ordinary limits and the persisted one-use recovery marker.
+ */
+export function decideProjectRetirementReconciliation(
+  input: Parameters<typeof decideBaseProjectRetirementReconciliation>[0],
+): ReturnType<typeof decideBaseProjectRetirementReconciliation> {
+  if (
+    input.failureCode === "project_retirement_legacy_runtime_retained" &&
+    input.state === "failed" &&
+    input.completedAt != null &&
+    input.generation === 2 &&
+    input.allowLegacyAdminReconciliation === true &&
+    input.allowConfigurationRecovery === true &&
+    input.currentCloudflareCachePurgeConfigured === true &&
+    input.configurationRecoveryUsed === false
+  ) {
+    return { allowed: true, reason: "configuration_recovery" };
+  }
+  return decideBaseProjectRetirementReconciliation(input);
+}
 
 export type AcceptedProjectRetirement = {
   operationId: string;
@@ -407,6 +431,7 @@ async function updateProgress(
         eq(projectRetirementOperationsTable.id, operationId),
         eq(projectRetirementOperationsTable.state, "running"),
         eq(projectRetirementOperationsTable.leaseVersion, leaseVersion),
+        sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
       ),
     )
     .returning({ id: projectRetirementOperationsTable.id });
@@ -965,6 +990,7 @@ async function releaseTrackedDomainSecurityResources(
           eq(projectRetirementOperationsTable.id, operation.id),
           eq(projectRetirementOperationsTable.state, "running"),
           eq(projectRetirementOperationsTable.leaseVersion, leaseVersion),
+          sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
         ),
       )
       .returning({ id: projectRetirementOperationsTable.id });
@@ -1084,6 +1110,7 @@ async function releaseTrackedDomainSecurityResources(
             eq(projectRetirementOperationsTable.id, operation.id),
             eq(projectRetirementOperationsTable.state, "running"),
             eq(projectRetirementOperationsTable.leaseVersion, leaseVersion),
+            sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning({ id: projectRetirementOperationsTable.id });
@@ -1302,6 +1329,7 @@ async function releaseCustomHostnameCertificates(
             eq(projectRetirementOperationsTable.id, operation.id),
             eq(projectRetirementOperationsTable.state, "running"),
             eq(projectRetirementOperationsTable.leaseVersion, leaseVersion),
+            sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning({ id: projectRetirementOperationsTable.id });
@@ -1363,6 +1391,50 @@ async function retainPurchasedDomainAssignments(
   await updateProgress(operation.id, progress, leaseVersion);
 }
 
+type ObservedRuntimePointers = {
+  containerId: string | null;
+  prodContainerId: string | null;
+  testContainerId: string | null;
+};
+
+function observedRuntimePointerPredicates(observed: ObservedRuntimePointers) {
+  return [
+    sql`${projectsTable.containerId} IS NOT DISTINCT FROM ${observed.containerId}`,
+    sql`${projectsTable.prodContainerId} IS NOT DISTINCT FROM ${observed.prodContainerId}`,
+    sql`${projectsTable.testContainerId} IS NOT DISTINCT FROM ${observed.testContainerId}`,
+  ];
+}
+
+/** A single database observation must prove both worker and project authority. */
+async function assertRuntimeRetirementAuthority(
+  operation: ProjectRetirementOperation,
+  leaseVersion: number,
+  observed: ObservedRuntimePointers,
+): Promise<void> {
+  const authorized = await db
+    .select({ id: projectRetirementOperationsTable.id })
+    .from(projectRetirementOperationsTable)
+    .innerJoin(
+      projectsTable,
+      and(
+        eq(projectsTable.id, projectRetirementOperationsTable.projectId),
+        isNotNull(projectsTable.deletedAt),
+        ...observedRuntimePointerPredicates(observed),
+      ),
+    )
+    .where(
+      and(
+        eq(projectRetirementOperationsTable.id, operation.id),
+        eq(projectRetirementOperationsTable.projectId, operation.projectId),
+        eq(projectRetirementOperationsTable.state, "running"),
+        eq(projectRetirementOperationsTable.leaseVersion, leaseVersion),
+        sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
+      ),
+    )
+    .limit(1);
+  if (authorized.length !== 1) throw new ProjectRetirementLeaseLostError();
+}
+
 async function destroyRuntimeTargets(
   operation: ProjectRetirementOperation,
   progress: ProjectRetirementProgress,
@@ -1370,6 +1442,8 @@ async function destroyRuntimeTargets(
 ): Promise<{
   clearContainerPointer: boolean;
   clearProductionPointer: boolean;
+  clearTestPointer: boolean;
+  observedPointers: ObservedRuntimePointers;
 }> {
   const namespace = process.env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE;
   if (!namespace) {
@@ -1396,19 +1470,27 @@ async function destroyRuntimeTargets(
     });
   }
 
+  const observedPointers: ObservedRuntimePointers = {
+    containerId: project.containerId,
+    prodContainerId: project.prodContainerId,
+    testContainerId: project.testContainerId,
+  };
+  const assertAuthority = () =>
+    assertRuntimeRetirementAuthority(operation, leaseVersion, observedPointers);
   progress.retainedLegacyRuntimePointers ??= [];
   progress.legacyRuntimeResolutions ??= [];
   let clearContainerPointer = project.containerId === null;
   let clearProductionPointer = project.prodContainerId === null;
-  const malformedLegacyPointers: Array<{
-    pointer: "containerId" | "prodContainerId";
+  let clearTestPointer = project.testContainerId === null;
+  const legacyFlyPointers: Array<{
+    pointer: "containerId" | "prodContainerId" | "testContainerId";
     identity: string;
   }> = [];
   // testContainerId belongs to the historical Fly-backed testing workflow. It
   // is not a Cloudflare preview identity and must never be sent to the current
-  // tenant-runtime provider or silently cleared. Retain it as explicit typed
-  // evidence so cleanup cannot complete until a separately governed Fly path
-  // has preserved any SQLite data and proven the machine absent.
+  // tenant-runtime provider or silently cleared. The worker reaches this point
+  // only after SQLite preservation and reconciles the exact historical machine
+  // through the lease-fenced Fly absence proof below.
   if (
     project.testContainerId &&
     !progress.retainedLegacyRuntimePointers.some((item) => item.pointer === "testContainerId")
@@ -1418,7 +1500,9 @@ async function destroyRuntimeTargets(
       identity: project.testContainerId,
       reason: "legacy_runtime_provider",
     });
-    await updateProgress(operation.id, progress, leaseVersion);
+  }
+  if (project.testContainerId) {
+    legacyFlyPointers.push({ pointer: "testContainerId", identity: project.testContainerId });
   }
   for (const stored of [
     { pointer: "containerId" as const, identity: project.containerId },
@@ -1437,7 +1521,7 @@ async function destroyRuntimeTargets(
       continue;
     }
     if (classification.reason === "runtime_identity_malformed") {
-      malformedLegacyPointers.push({ pointer: stored.pointer, identity: stored.identity });
+      legacyFlyPointers.push({ pointer: stored.pointer, identity: stored.identity });
     }
     if (!progress.retainedLegacyRuntimePointers.some((item) => item.pointer === stored.pointer)) {
       progress.retainedLegacyRuntimePointers.push({
@@ -1462,6 +1546,7 @@ async function destroyRuntimeTargets(
       role: runtime.role,
       slot: runtime.slot,
     });
+    await assertAuthority();
     try {
       await tenantRuntimeProvider.destroy(runtimeId, operation.projectId, {
         operationTimeoutMs: 60_000,
@@ -1504,7 +1589,7 @@ async function destroyRuntimeTargets(
   }
 
   const persistLegacyResolution = (
-    pointer: "containerId" | "prodContainerId",
+    pointer: "containerId" | "prodContainerId" | "testContainerId",
     resolution: LegacyFlyRuntimeReconciliation,
   ): void => {
     progress.legacyRuntimeResolutions = [
@@ -1512,10 +1597,11 @@ async function destroyRuntimeTargets(
       { pointer, ...resolution },
     ];
   };
-  for (const stored of malformedLegacyPointers) {
+  for (const stored of legacyFlyPointers) {
     const resolution = await reconcileLegacyFlyRuntime({
       machineId: stored.identity,
       projectId: operation.projectId,
+      assertAuthority,
     });
     persistLegacyResolution(stored.pointer, resolution);
     if (resolution.state === "verified_absent") {
@@ -1523,7 +1609,8 @@ async function destroyRuntimeTargets(
         (item) => item.pointer !== stored.pointer,
       );
       if (stored.pointer === "containerId") clearContainerPointer = true;
-      else clearProductionPointer = true;
+      else if (stored.pointer === "prodContainerId") clearProductionPointer = true;
+      else clearTestPointer = true;
       await updateProgress(operation.id, progress, leaseVersion);
       continue;
     }
@@ -1539,7 +1626,12 @@ async function destroyRuntimeTargets(
       });
     }
   }
-  return { clearContainerPointer, clearProductionPointer };
+  return {
+    clearContainerPointer,
+    clearProductionPointer,
+    clearTestPointer,
+    observedPointers,
+  };
 }
 
 export async function enqueueProjectRetirementOperation(
@@ -1583,8 +1675,8 @@ type ReconciliableRetirementProgress = ProjectRetirementProgress & {
 
 /**
  * Mint a fresh bounded operation after a terminal cleanup failure. Each
- * operation still has its four-attempt cap; at most two explicit generations
- * can follow it, preventing both permanent stranding and infinite retries.
+ * operation still has its four-attempt cap, with two ordinary follow-up
+ * generations and one bounded, one-use configuration recovery after generation two.
  */
 export async function requestProjectRetirementReconciliation(input: {
   projectId: number;
@@ -1760,6 +1852,7 @@ export async function runProjectRetirementOperation(operationId: string): Promis
             eq(projectRetirementOperationsTable.id, operationId),
             eq(projectRetirementOperationsTable.state, "running"),
             eq(projectRetirementOperationsTable.leaseVersion, claimed.leaseVersion),
+            sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning({ id: projectRetirementOperationsTable.id });
@@ -1783,6 +1876,9 @@ export async function runProjectRetirementOperation(operationId: string): Promis
         ...(pointerDisposition.clearProductionPointer
           ? { prodContainerId: null, prodContainerUrl: null, prodContainerStatus: "stopped" }
           : {}),
+        ...(pointerDisposition.clearTestPointer
+          ? { testContainerId: null, testContainerUrl: null, testContainerStatus: "stopped" }
+          : {}),
       };
       await tx
         .update(projectDomainsTable)
@@ -1793,14 +1889,20 @@ export async function runProjectRetirementOperation(operationId: string): Promis
           updatedAt: sql`now()`,
         })
         .where(eq(projectDomainsTable.projectId, claimed.projectId));
-      await tx
+      const clearedProject = await tx
         .update(projectsTable)
         .set(pointerUpdates)
         .where(
-          and(eq(projectsTable.id, claimed.projectId), sql`${projectsTable.deletedAt} IS NOT NULL`),
-        );
+          and(
+            eq(projectsTable.id, claimed.projectId),
+            isNotNull(projectsTable.deletedAt),
+            ...observedRuntimePointerPredicates(pointerDisposition.observedPointers),
+          ),
+        )
+        .returning({ id: projectsTable.id });
+      if (clearedProject.length !== 1) throw new ProjectRetirementLeaseLostError();
       if (!hasRetainedLegacyPointers) {
-        await tx
+        const completed = await tx
           .update(projectRetirementOperationsTable)
           .set({
             state: "completed",
@@ -1814,8 +1916,11 @@ export async function runProjectRetirementOperation(operationId: string): Promis
               eq(projectRetirementOperationsTable.id, operationId),
               eq(projectRetirementOperationsTable.state, "running"),
               eq(projectRetirementOperationsTable.leaseVersion, claimed.leaseVersion),
+              sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
             ),
-          );
+          )
+          .returning({ id: projectRetirementOperationsTable.id });
+        if (completed.length !== 1) throw new ProjectRetirementLeaseLostError();
       }
     });
     if (hasRetainedLegacyPointers) {
@@ -1854,6 +1959,7 @@ export async function runProjectRetirementOperation(operationId: string): Promis
           eq(projectRetirementOperationsTable.id, operationId),
           eq(projectRetirementOperationsTable.state, "running"),
           eq(projectRetirementOperationsTable.leaseVersion, claimed.leaseVersion),
+          sql`${projectRetirementOperationsTable.leaseExpiresAt} > clock_timestamp()`,
         ),
       );
     logger.warn(

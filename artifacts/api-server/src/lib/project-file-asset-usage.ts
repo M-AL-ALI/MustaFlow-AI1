@@ -10,7 +10,7 @@ export const PROJECT_FILE_ASSET_USAGE_CONSUMER = "project-file";
 type ProjectFileAssetUsageTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const PROJECT_ASSET_CONTENT_URL_PATTERN =
-  /\/api\/assets\/([1-9][0-9]*)\/content(?=$|[?#[\]{}()<>"'`\s,;:])/gu;
+  /\/api\/(?:assets|ora\/canonical-assets)\/([1-9][0-9]*)\/content(?=$|[?#[\]{}()<>"'`\s,;:])/gu;
 
 export function extractProjectFileAssetIds(content: string): number[] {
   const assetIds = new Set<number>();
@@ -27,6 +27,8 @@ export function extractProjectFileAssetIds(content: string): number[] {
  * Rebuild one project-file consumer set from the content that will exist after
  * the caller's mutation. The caller must pass the transaction that performs
  * the file write so a failed usage update rolls the file mutation back too.
+ * Project access/lifecycle checks remain the caller's responsibility. Only the
+ * actual target project, never copy metadata or automatic history, grants use.
  */
 export async function reconcileProjectFileAssetUsage(
   tx: ProjectFileAssetUsageTransaction,
@@ -36,8 +38,8 @@ export async function reconcileProjectFileAssetUsage(
     filePath: string;
     nextContent: string | null;
     /**
-     * A trusted copy operation may retain references owned by the source
-     * project while recording the new consumer against projectId.
+     * Legacy copy metadata only, never an authorization input. A cross-project
+     * copy needs an explicit-use grant for projectId before the file write.
      */
     referenceProjectId?: number;
   },
@@ -63,24 +65,38 @@ export async function reconcileProjectFileAssetUsage(
   const referencedAssetIds = extractProjectFileAssetIds(input.nextContent);
   if (referencedAssetIds.length === 0) return;
 
-  const referenceProjectId = input.referenceProjectId ?? input.projectId;
+  // Lock the admitted assets and existing grants through the caller's write.
+  // Retention histories are deliberately not an authorization source.
   const readyAssets = await tx
     .select({ id: assetsTable.id, projectId: assetsTable.projectId })
     .from(assetsTable)
-    .where(and(eq(assetsTable.state, "ready"), inArray(assetsTable.id, referencedAssetIds)));
-  const historyPermissions = await tx
+    .where(
+      and(
+        eq(assetsTable.productScope, "nabuflow"),
+        eq(assetsTable.state, "ready"),
+        inArray(assetsTable.id, referencedAssetIds),
+      ),
+    )
+    .orderBy(assetsTable.id)
+    .for("share");
+  const explicitPermissions = await tx
     .select({ assetId: assetUsageTable.assetId })
     .from(assetUsageTable)
     .where(
       and(
-        eq(assetUsageTable.projectId, referenceProjectId),
-        eq(assetUsageTable.consumer, PROJECT_FILE_ASSET_HISTORY_CONSUMER),
+        eq(assetUsageTable.projectId, input.projectId),
+        eq(assetUsageTable.consumer, "explicit-project-use:v1"),
+        isNull(assetUsageTable.artifactId),
+        isNull(assetUsageTable.versionId),
+        isNull(assetUsageTable.filePath),
         inArray(assetUsageTable.assetId, referencedAssetIds),
       ),
-    );
-  const permittedAssetIds = new Set(historyPermissions.map((usage) => usage.assetId));
+    )
+    .orderBy(assetUsageTable.assetId)
+    .for("share");
+  const permittedAssetIds = new Set(explicitPermissions.map((usage) => usage.assetId));
   const readyProjectAssets = readyAssets.filter(
-    (asset) => asset.projectId === referenceProjectId || permittedAssetIds.has(asset.id),
+    (asset) => asset.projectId === input.projectId || permittedAssetIds.has(asset.id),
   );
   const allowedAssetIds = new Set(readyProjectAssets.map((asset) => asset.id));
   if (referencedAssetIds.some((assetId) => !allowedAssetIds.has(assetId))) {

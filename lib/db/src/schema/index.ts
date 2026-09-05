@@ -63,6 +63,7 @@ export * from "./notifications";
 export * from "./project-activity";
 export * from "./project-retirement-operations";
 export * from "./project-purge-operations";
+export * from "./production-database-admissions";
 export * from "./share-links";
 export * from "./gallery-templates";
 export * from "./extensions";

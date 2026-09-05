@@ -770,6 +770,8 @@ function WorkspaceSurfaceFallback() {
   );
 }
 
+import { useProjectScopedImages } from "./components/use-project-scoped-images";
+
 export default function ProjectWorkspacePage() {
   const { id } = useParams<{ id: string }>();
   const projectId = parseInt(id, 10);
@@ -1164,7 +1166,7 @@ export default function ProjectWorkspacePage() {
     }
   });
   const [threadImages, setThreadImages] = useState<ProjectImageItem[]>([]);
-  const [liveProjectImages, setLiveProjectImages] = useState<ProjectImageItem[]>([]);
+  const [liveProjectImages, setLiveProjectImages] = useProjectScopedImages(projectId);
   const [liveImageGenerating, setLiveImageGenerating] = useState(false);
   const recordThreadImage = useCallback((image: ProjectImageItem) => {
     setThreadImages((current) => mergeProjectImageItems(current, [image]).slice(0, 12));

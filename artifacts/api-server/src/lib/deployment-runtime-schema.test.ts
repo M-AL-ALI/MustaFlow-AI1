@@ -24,6 +24,12 @@ function observation(overrides: Record<string, boolean> = {}) {
     projectPurgeNotificationIndexReady: true,
     assetUsageAttachmentGuardReady: true,
     durableAssetReferenceGuardsReady: true,
+    previewDatabaseAllocationReady: true,
+    productionDatabaseAdmissionTablesReady: true,
+    productionDatabaseAdmissionColumnsReady: true,
+    productionDatabaseAdmissionConstraintsReady: true,
+    productionDatabaseAdmissionIndexesReady: true,
+    productionDatabaseAdmissionTriggersReady: true,
     ...overrides,
   };
 }
@@ -36,7 +42,7 @@ describe("deployment runtime schema boundary", () => {
     });
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "read-only-ready",
       violations: [],
     });
@@ -54,7 +60,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "read-only-incomplete",
       violations: ["support_delivery_constraints_missing", "prompt_queue_missing"],
     });
@@ -72,7 +78,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "mutable",
       violations: [],
     });
@@ -84,7 +90,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "read-only-ready",
       violations: [],
     });
@@ -102,7 +108,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toMatchObject({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "read-only-incomplete",
       violations: [
         "project_retirement_operations_columns_missing",
@@ -125,7 +131,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "read-only-incomplete",
       violations: [
         "project_purge_operations_columns_missing",
@@ -154,7 +160,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "read-only-incomplete",
       violations: ["asset_usage_attachment_guard_missing"],
     });
@@ -172,13 +178,13 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v6",
+      contractId: "deployment_runtime_schema_v8",
       mode: "read-only-incomplete",
       violations: ["durable_asset_reference_guards_missing"],
     });
 
     const source = readFileSync(new URL("./deployment-runtime-schema.ts", import.meta.url), "utf8");
-    expect(source).toContain("SELECT COUNT(*) = 15");
+    expect(source).toContain("SELECT COUNT(*) = 16");
     expect(source).toContain("require_attachable_assets_in_durable_reference");
     expect(source).toContain("legacy_object_reference_unavailable");
     expect(source).toContain("durable_asset_reference_guard_");
@@ -189,6 +195,7 @@ describe("deployment runtime schema boundary", () => {
     expect(source).toContain(
       "('generated_images', 'project_id, user_id, asset_id, storage_key, file_url, thumbnail_url, deleted_at, status')",
     );
+    expect(source).toContain("('support_tickets', 'user_id, project_id, transcript, attachments')");
     expect(source).toContain("extract_durable_asset_ids");
     expect(source).toContain("resolve_durable_asset_ids");
     expect(source).toContain("durable_asset_deletion_claims");
@@ -206,6 +213,50 @@ describe("deployment runtime schema boundary", () => {
     expect(source).toContain("trigger_row.tgtype = 23");
     expect(source).toContain("trigger_row.tgqual IS NULL");
     expect(source).toContain("trigger_row.tgattr::smallint[]");
+  });
+
+  it("rejects a read-only deployment without the nullable JSONB preview receipt", async () => {
+    const query = vi.fn(async () => ({
+      rows: [observation({ previewDatabaseAllocationReady: false })],
+    }));
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
+      contractId: "deployment_runtime_schema_v8",
+      mode: "read-only-incomplete",
+      violations: ["preview_database_allocation_missing"],
+    });
+  });
+
+  it.each([
+    ["productionDatabaseAdmissionTablesReady", "production_database_admission_tables_missing"],
+    ["productionDatabaseAdmissionColumnsReady", "production_database_admission_columns_missing"],
+    [
+      "productionDatabaseAdmissionConstraintsReady",
+      "production_database_admission_constraints_missing",
+    ],
+    ["productionDatabaseAdmissionIndexesReady", "production_database_admission_indexes_missing"],
+    ["productionDatabaseAdmissionTriggersReady", "production_database_admission_triggers_missing"],
+  ])("fails closed when admission schema evidence is missing: %s", async (flag, violation) => {
+    const query = vi.fn(async () => ({ rows: [observation({ [flag]: false })] }));
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
+      contractId: "deployment_runtime_schema_v8",
+      mode: "read-only-incomplete",
+      violations: [violation],
+    });
+  });
+
+  it("pins admission columns, retained-receipt FKs, indexes, and enabled row triggers", () => {
+    const source = readFileSync(new URL("./deployment-runtime-schema.ts", import.meta.url), "utf8");
+    expect(source).toContain("SELECT COUNT(*) = 18");
+    expect(source).toContain("production_database_admission_epoch_active_uq");
+    expect(source).toContain("constraint_row.confdeltype = 'a'");
+    expect(source).toContain("constraint_row.confupdtype = 'a'");
+    expect(source).toContain("constraint_row.conkey = ARRAY[receipt_column.attnum]::smallint[]");
+    expect(source).toContain("'register_production_database_project_birth', 7");
+    expect(source).toContain("'guard_production_database_admission_receipt', 27");
+    expect(source).toContain("trigger_row.tgenabled IN ('O', 'A')");
+    expect(source).toContain("trigger_row.tgqual IS NULL");
+    expect(source).toContain("production_database_admission_receipt_immutable");
+    expect(source).toContain("production_database_birth_identity_untrusted");
   });
 
   it("wires the read-only decision before any migration step can execute", () => {

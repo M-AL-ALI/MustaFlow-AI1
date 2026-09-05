@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { validateDeploymentNamespace } from "./runtime-identity";
 
-export const TENANT_RUNTIME_PROVIDERS = ["fly", "cloudflare"] as const;
+export const TENANT_RUNTIME_PROVIDERS = ["cloudflare"] as const;
 export type TenantRuntimeProviderId = (typeof TENANT_RUNTIME_PROVIDERS)[number];
 
 export const CLOUDFLARE_RUNTIME_BINDING_NAMES = [
@@ -11,14 +11,7 @@ export const CLOUDFLARE_RUNTIME_BINDING_NAMES = [
 ] as const;
 export type CloudflareRuntimeBindingName = (typeof CLOUDFLARE_RUNTIME_BINDING_NAMES)[number];
 
-export const FLY_RUNTIME_BINDING_NAMES = [
-  "FLY_API_TOKEN",
-  "FLY_APP_NAME",
-  "FLY_ORG_SLUG",
-  "FLY_REGION",
-] as const;
-export type FlyRuntimeBindingName = (typeof FLY_RUNTIME_BINDING_NAMES)[number];
-export type TenantRuntimeBindingName = CloudflareRuntimeBindingName | FlyRuntimeBindingName;
+export type TenantRuntimeBindingName = CloudflareRuntimeBindingName;
 
 const optionalNonemptyString = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
@@ -31,10 +24,6 @@ const tenantRuntimeConfigInputSchema = z
     CLOUDFLARE_RUNTIME_CONTROL_URL: optionalNonemptyString,
     CLOUDFLARE_RUNTIME_CONTROL_TOKEN: optionalNonemptyString,
     CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE: optionalNonemptyString,
-    FLY_API_TOKEN: optionalNonemptyString,
-    FLY_APP_NAME: optionalNonemptyString,
-    FLY_ORG_SLUG: optionalNonemptyString,
-    FLY_REGION: optionalNonemptyString,
   })
   .strict();
 
@@ -49,14 +38,7 @@ export interface TenantRuntimeConfig {
     status: "partial-config";
     missingBindings: CloudflareRuntimeBindingName[];
   };
-  partialFly?: {
-    status: "partial-config";
-    missingBindings: FlyRuntimeBindingName[];
-  };
 }
-
-const flyResourceNamePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
-const flyRegionPattern = /^[a-z]{3}$/u;
 
 function optionalEnvironmentValue(
   environment: Record<string, string | undefined>,
@@ -82,43 +64,15 @@ export function parseTenantRuntimeConfig(
       environment,
       "CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE",
     ),
-    FLY_API_TOKEN: optionalEnvironmentValue(environment, "FLY_API_TOKEN"),
-    FLY_APP_NAME: optionalEnvironmentValue(environment, "FLY_APP_NAME"),
-    FLY_ORG_SLUG: optionalEnvironmentValue(environment, "FLY_ORG_SLUG"),
-    FLY_REGION: optionalEnvironmentValue(environment, "FLY_REGION"),
   });
 
-  const provider = parsed.TENANT_RUNTIME_PROVIDER ?? "fly";
+  const provider = parsed.TENANT_RUNTIME_PROVIDER ?? "cloudflare";
+  if (provider === "fly") {
+    throw new Error("Fly runtime is retired; configure TENANT_RUNTIME_PROVIDER=cloudflare");
+  }
   if (!TENANT_RUNTIME_PROVIDERS.includes(provider as TenantRuntimeProviderId)) {
     throw new Error(`Unsupported TENANT_RUNTIME_PROVIDER: ${provider}`);
   }
-
-  if (provider === "fly" && parsed.FLY_API_TOKEN !== undefined) {
-    const missingBindings = FLY_RUNTIME_BINDING_NAMES.filter((name) => parsed[name] === undefined);
-    if (missingBindings.length > 0) {
-      return {
-        provider: "fly",
-        partialFly: { status: "partial-config", missingBindings },
-      };
-    }
-
-    if (!flyResourceNamePattern.test(parsed.FLY_APP_NAME!)) {
-      throw new Error("FLY_APP_NAME must be a lowercase Fly resource name");
-    }
-    if (!flyResourceNamePattern.test(parsed.FLY_ORG_SLUG!)) {
-      throw new Error("FLY_ORG_SLUG must be a lowercase Fly resource name");
-    }
-    if (!flyRegionPattern.test(parsed.FLY_REGION!)) {
-      throw new Error("FLY_REGION must be a three-letter lowercase region code");
-    }
-  }
-
-  const anyCloudflareValue =
-    parsed.CLOUDFLARE_RUNTIME_CONTROL_URL !== undefined ||
-    parsed.CLOUDFLARE_RUNTIME_CONTROL_TOKEN !== undefined ||
-    parsed.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE !== undefined;
-
-  if (provider === "fly" && !anyCloudflareValue) return { provider: "fly" };
 
   const missingBindings = CLOUDFLARE_RUNTIME_BINDING_NAMES.filter(
     (name) => parsed[name] === undefined,

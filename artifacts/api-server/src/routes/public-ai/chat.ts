@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { logger } from "../../lib/logger";
+import { canonicalAssetContentUrl } from "../../lib/asset-platform-scope";
 import {
   validateSession,
   incrementMessageCount,
@@ -1982,6 +1983,7 @@ router.post("/public-ai/chat", async (req, res) => {
           .insert(generatedImagesTable)
           .values({
             userId: authed.userId,
+            productScope: "ora",
             prompt: imageProfile.originalPrompt,
             quality: imageProfile.quality,
             aspectRatio: imageProfile.aspectRatio,
@@ -2113,7 +2115,10 @@ router.post("/public-ai/chat", async (req, res) => {
       const usage = await oraUsageResponse(authed, payload.msgCount);
       res.json({
         reply: "Here's the image you asked for. Tap Edit to refine it with an instruction.",
-        imageUrl: pendingEditableFileUrl ?? result.openaiUrl,
+        imageUrl:
+          pendingEditableAsset && editableCompletionCommitted
+            ? canonicalAssetContentUrl(pendingEditableAsset.id, "ora")
+            : (pendingEditableFileUrl ?? result.openaiUrl),
         ...(editableImageId ? { imageId: editableImageId } : {}),
         imageMeta: {
           kind: imageProfile.kind,

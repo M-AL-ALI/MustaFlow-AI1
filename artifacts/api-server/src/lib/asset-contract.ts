@@ -24,13 +24,6 @@ export function parseCanonicalAssetId(value: unknown): number | null {
   return Number.isSafeInteger(parsed) && parsed <= 2_147_483_647 ? parsed : null;
 }
 
-export function isCanonicalAssetContentRequest(rawUrl: string, decodedId: unknown): boolean {
-  const queryIndex = rawUrl.indexOf("?");
-  const rawPath = queryIndex === -1 ? rawUrl : rawUrl.slice(0, queryIndex);
-  const parsed = parseCanonicalAssetId(decodedId);
-  return parsed !== null && rawPath === `/api/assets/${parsed}/content`;
-}
-
 export function isCanonicalImageFileRequest(rawUrl: string, decodedId: unknown): boolean {
   const queryIndex = rawUrl.indexOf("?");
   const rawPath = queryIndex === -1 ? rawUrl : rawUrl.slice(0, queryIndex);

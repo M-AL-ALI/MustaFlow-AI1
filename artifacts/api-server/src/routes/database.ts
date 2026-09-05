@@ -1,7 +1,7 @@
 /**
  * Per-project database provisioning routes (Phase G).
  *
- * POST   /api/projects/:id/database/provision              — provision Postgres or SQLite, inject DATABASE_URL secret
+ * POST   /api/projects/:id/database/provision              - provision Neon Postgres, inject DATABASE_URL secret
  * GET    /api/projects/:id/database                         — get current DB status
  * DELETE /api/projects/:id/database                         — deprovision DB and remove DATABASE_URL secret
  * POST   /api/projects/:id/database/query                   — run read-only SQL (SELECT only, 200-row limit)
@@ -32,8 +32,17 @@ import {
   downloadSnapshotBlob,
   deleteSnapshotBlobAndProveAbsent as deleteSnapshotBlob,
 } from "../lib/snapshot-storage";
-import { deleteNeonProjectAndProveAbsent as deleteNeonDatabase } from "../lib/neon-project-lifecycle";
-import { requireActiveProjectLifecycleSession } from "../lib/project-lifecycle";
+import {
+  deleteNeonProjectAndProveAbsent as deleteNeonDatabase,
+  lookupNeonProjectsByStableName,
+  neonProjectNameFor,
+} from "../lib/neon-project-lifecycle";
+import {
+  holdResponseProjectLifecycleSession,
+  requireActiveProjectLifecycleSession,
+  responseProjectLifecycleSession,
+} from "../lib/project-lifecycle";
+import { ensureManualNeonAllocation } from "../lib/manual-neon-allocation";
 
 const router: IRouter = Router();
 
@@ -102,54 +111,23 @@ async function getLatestVersionId(projectId: number): Promise<number | null> {
   return row?.id ?? null;
 }
 
-// ── Neon provisioning (optional — requires NEON_API_KEY env var) ──────────────
-
-async function provisionNeonDatabase(
-  projectId: number,
-  projectName: string,
-): Promise<{ connectionString: string; neonProjectId: string } | null> {
-  const apiKey = process.env.NEON_API_KEY;
-  if (!apiKey) return null;
-
-  const safeName = `mf-project-${projectId}-${Date.now()}`;
-  const dbName = projectName
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "-")
-    .slice(0, 32);
-
-  const res = await fetch("https://console.neon.tech/api/v2/projects", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      project: {
-        name: safeName,
-        pg_version: 16,
-        default_database_name: dbName,
-        default_role_name: "mustaflow",
-        region_id: "aws-us-east-1",
-      },
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    logger.error({ err, projectId }, "Neon project creation failed");
-    return null;
-  }
-
-  const data = (await res.json()) as {
-    connection_uris?: Array<{ connection_uri: string }>;
-    project?: { id: string };
-  };
-
-  const connectionString = data.connection_uris?.[0]?.connection_uri;
-  const neonProjectId = data.project?.id;
-
-  if (!connectionString || !neonProjectId) return null;
-  return { connectionString, neonProjectId };
+// CAS every manual database receipt against the admitted owner and observed
+// state. Provider work is outside SQL transactions, but inside the lifecycle
+// session; the allocation intent is committed before crossing that boundary.
+function manualDatabaseFence(project: NonNullable<Awaited<ReturnType<typeof loadProject>>>) {
+  return and(
+    eq(projectsTable.id, project.id),
+    eq(projectsTable.ownerId, project.ownerId),
+    isNull(projectsTable.deletedAt),
+    eq(projectsTable.dbProvider, project.dbProvider),
+    eq(projectsTable.dbStatus, project.dbStatus),
+    project.dbConnectionId === null
+      ? isNull(projectsTable.dbConnectionId)
+      : eq(projectsTable.dbConnectionId, project.dbConnectionId),
+    project.neonProjectId === null
+      ? isNull(projectsTable.neonProjectId)
+      : eq(projectsTable.neonProjectId, project.neonProjectId),
+  );
 }
 
 // ── Postgres structured snapshot ──────────────────────────────────────────────
@@ -298,10 +276,13 @@ router.post(
   requireActiveProjectLifecycleSession,
   async (req, res): Promise<void> => {
     const projectId = Number(req.params.id);
-    const { provider } = req.body as { provider?: string };
+    const { provider } = (req.body ?? {}) as { provider?: string };
 
-    if (provider !== "postgres" && provider !== "sqlite") {
-      res.status(400).json({ error: "provider must be 'postgres' or 'sqlite'" });
+    if (provider !== "postgres") {
+      res.status(400).json({
+        code: "database_provider_not_supported",
+        error: "New databases must use PostgreSQL on Neon.",
+      });
       return;
     }
 
@@ -311,64 +292,85 @@ router.post(
       return;
     }
 
-    if (project.dbStatus === "connected" || project.dbStatus === "provisioning") {
+    if (project.dbStatus === "connected") {
       res.status(400).json({ error: "Database already provisioned for this project" });
       return;
     }
 
-    await db
-      .update(projectsTable)
-      .set({ dbProvider: provider, dbStatus: "provisioning" })
-      .where(eq(projectsTable.id, projectId));
-
-    let connectionString: string;
-    let dbConnectionId: string;
-
-    if (provider === "postgres") {
-      const neon = await provisionNeonDatabase(projectId, project.name);
-      if (neon) {
-        connectionString = neon.connectionString;
-        dbConnectionId = neon.neonProjectId;
-      } else {
-        connectionString = `postgresql://user:password@localhost:5432/project_${projectId}`;
-        dbConnectionId = `local-${projectId}`;
-        logger.warn(
-          { projectId },
-          "NEON_API_KEY not set — injecting placeholder Postgres URL. Set NEON_API_KEY to auto-provision real databases.",
-        );
-      }
-    } else {
-      connectionString = `file:/data/db.sqlite`;
-      dbConnectionId = `sqlite-${projectId}`;
+    const apiKey = process.env.NEON_API_KEY?.trim();
+    if (!apiKey) {
+      res.status(503).json({
+        code: "neon_not_configured",
+        error: "Database setup is unavailable. Please try again later.",
+      });
+      return;
     }
 
+    const releaseHold = holdResponseProjectLifecycleSession(res);
+    const session = responseProjectLifecycleSession(res);
+    const observed = { ...project };
+    let intentRecorded = project.dbProvider === "postgres" && project.dbStatus !== "none";
     try {
-      const existing = await db
-        .select()
-        .from(secretsTable)
-        .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")));
-
+      const saveAllocation = async (neonProjectId?: string): Promise<boolean> => {
+        if (!(await session.assertActive())) return false;
+        const values = {
+          dbProvider: "postgres",
+          dbStatus: "provisioning",
+          ...(neonProjectId ? { neonProjectId, dbConnectionId: neonProjectId } : {}),
+        };
+        const rows = await db
+          .update(projectsTable)
+          .set(values)
+          .where(manualDatabaseFence(observed))
+          .returning({ id: projectsTable.id });
+        if (rows.length !== 1) return false;
+        Object.assign(observed, values);
+        intentRecorded = true;
+        return true;
+      };
+      const neon = await ensureManualNeonAllocation({
+        project,
+        apiKey,
+        assertActive: () => session.assertActive(),
+        store: {
+          recordIntent: () => saveAllocation(),
+          recordOwnership: (id) => saveAllocation(id),
+        },
+      });
+      if (!neon) throw new Error("neon_allocation_unresolved");
+      const { connectionString, neonProjectId: dbConnectionId } = neon;
       const encrypted = encryptionService.encrypt(connectionString);
-
-      if (existing.length > 0) {
-        await db
-          .update(secretsTable)
-          .set({ valueEncrypted: encrypted })
+      if (!(await session.assertActive())) throw new Error("project_inactive");
+      // Credential and success receipt either commit together or not at all.
+      // Ownership was committed separately and survives a rollback here.
+      await db.transaction(async (transaction) => {
+        const existing = await transaction
+          .select()
+          .from(secretsTable)
           .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")));
-      } else {
-        await db.insert(secretsTable).values({
-          projectId,
-          name: "DATABASE_URL",
-          valueEncrypted: encrypted,
-          environment: "production",
-          category: "database",
-        });
-      }
-
-      await db
-        .update(projectsTable)
-        .set({ dbStatus: "connected", dbConnectionId })
-        .where(eq(projectsTable.id, projectId));
+        if (existing.length > 0) {
+          await transaction
+            .update(secretsTable)
+            .set({ valueEncrypted: encrypted })
+            .where(
+              and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")),
+            );
+        } else {
+          await transaction.insert(secretsTable).values({
+            projectId,
+            name: "DATABASE_URL",
+            valueEncrypted: encrypted,
+            environment: "production",
+            category: "database",
+          });
+        }
+        const rows = await transaction
+          .update(projectsTable)
+          .set({ dbStatus: "connected", dbConnectionId, neonProjectId: dbConnectionId })
+          .where(manualDatabaseFence(observed))
+          .returning({ id: projectsTable.id });
+        if (rows.length !== 1) throw new Error("neon_allocation_receipt_conflict");
+      });
 
       const maskedUrl = maskValue(connectionString);
       res.json({
@@ -377,13 +379,22 @@ router.post(
         dbConnectionId,
         maskedUrl,
       });
-    } catch (err) {
-      logger.error({ err, projectId }, "Database provisioning failed");
-      await db
-        .update(projectsTable)
-        .set({ dbStatus: "error" })
-        .where(eq(projectsTable.id, projectId));
-      res.status(500).json({ error: "Database provisioning failed" });
+    } catch {
+      logger.error({ projectId }, "Database provisioning failed");
+      if (intentRecorded) {
+        await db
+          .update(projectsTable)
+          .set({ dbStatus: "error" })
+          .where(manualDatabaseFence(observed))
+          .catch(() => undefined);
+      }
+      res.status(503).json({
+        code: "neon_provisioning_unavailable",
+        error:
+          "Database setup is not confirmed. Retrying checks the existing attempt without creating another database.",
+      });
+    } finally {
+      await releaseHold();
     }
   },
 );
@@ -420,30 +431,63 @@ router.delete(
       return;
     }
 
-    if (project.dbProvider === "postgres" && project.dbConnectionId) {
-      const looksLikeNeon = !project.dbConnectionId.startsWith("local-");
-      if (looksLikeNeon) {
-        const deleted = await deleteNeonDatabase(project.dbConnectionId);
-        if (!deleted) {
-          res.status(503).json({
-            error: "The database could not be removed because provider deletion was not confirmed.",
-            code: "database_provider_cleanup_unconfirmed",
-          });
-          return;
+    const releaseHold = holdResponseProjectLifecycleSession(res);
+    const session = responseProjectLifecycleSession(res);
+    try {
+      if (project.dbProvider === "postgres") {
+        const knownIds = [
+          ...new Set(
+            [project.neonProjectId, project.dbConnectionId].filter(
+              (id): id is string => id !== null,
+            ),
+          ),
+        ];
+        // An uncertain POST can complete after a currently empty catalog. Do
+        // not erase its durable intent or allow a new allocation generation.
+        if (knownIds.length !== 1 || !/^[A-Za-z0-9_-]{1,128}$/u.test(knownIds[0]!)) {
+          throw new Error("neon_allocation_unresolved");
         }
+        const stableName = neonProjectNameFor(projectId);
+        const before = await lookupNeonProjectsByStableName(stableName);
+        if (
+          before.kind === "unavailable" ||
+          (before.kind === "found" && before.projectIds.some((id) => id !== knownIds[0]))
+        ) {
+          throw new Error("neon_catalog_unresolved");
+        }
+        if (!(await session.assertActive()) || !(await deleteNeonDatabase(knownIds[0]!))) {
+          throw new Error("neon_deletion_unconfirmed");
+        }
+        const after = await lookupNeonProjectsByStableName(stableName);
+        if (after.kind !== "absent") throw new Error("neon_catalog_unresolved");
       }
+      if (!(await session.assertActive())) throw new Error("project_inactive");
+      await db.transaction(async (transaction) => {
+        await transaction
+          .delete(secretsTable)
+          .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")));
+        const rows = await transaction
+          .update(projectsTable)
+          .set({
+            dbProvider: "none",
+            dbStatus: "none",
+            dbConnectionId: null,
+            ...(project.dbProvider === "postgres" ? { neonProjectId: null } : {}),
+          })
+          .where(manualDatabaseFence(project))
+          .returning({ id: projectsTable.id });
+        if (rows.length !== 1) throw new Error("database_deletion_receipt_conflict");
+      });
+      res.json({ ok: true });
+    } catch {
+      res.status(503).json({
+        error:
+          "Database cleanup is not confirmed. Its ownership and pending setup have been retained.",
+        code: "database_provider_cleanup_unconfirmed",
+      });
+    } finally {
+      await releaseHold();
     }
-
-    await db
-      .delete(secretsTable)
-      .where(and(eq(secretsTable.projectId, projectId), eq(secretsTable.name, "DATABASE_URL")));
-
-    await db
-      .update(projectsTable)
-      .set({ dbProvider: "none", dbStatus: "none", dbConnectionId: null })
-      .where(eq(projectsTable.id, projectId));
-
-    res.json({ ok: true });
   },
 );
 

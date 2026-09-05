@@ -127,12 +127,16 @@ describe("public asset reservation input isolation", () => {
         mimeType: "image/png",
         sizeBytes: 120,
         source: "picker",
+        productScope: "ora",
+        product_scope: "ora",
+        origin: "ora",
         versionId: 991,
         taskId: 992,
         threadKey: "another-thread",
         kind: "recording",
         context: {
           resized: true,
+          productScope: "ora",
           derivativeOfAssetId: 993,
           arbitrary: "caller-controlled",
         },
@@ -142,6 +146,7 @@ describe("public asset reservation input isolation", () => {
     expect(mocks.reserveAsset).toHaveBeenCalledOnce();
     const admission = mocks.reserveAsset.mock.calls[0]?.[0];
     expect(admission).toEqual({
+      productScope: "nabuflow",
       ownerUserId: "owner",
       actorUserId: "owner",
       projectId: null,

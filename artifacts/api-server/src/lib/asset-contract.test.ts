@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   acceptsDeclaredAsset,
   BASE_ASSET_ALLOWANCE_BYTES,
-  isCanonicalAssetContentRequest,
   isCanonicalImageFileRequest,
   isCanonicalImageMetadataRequest,
   isCanonicalProjectUploadContentRequest,
@@ -10,6 +9,7 @@ import {
   quotaMessage,
   sniffAsset,
 } from "./asset-contract";
+import { canonicalAssetContentUrl } from "./asset-platform-scope";
 
 describe("unified asset contract", () => {
   it("pins the founder's one account allowance", () => {
@@ -21,7 +21,9 @@ describe("unified asset contract", () => {
 
   it("defines one canonical asset URL language for delivery and durable-reference scans", () => {
     expect(parseCanonicalAssetId("51")).toBe(51);
-    expect(isCanonicalAssetContentRequest("/api/assets/51/content?download=1", "51")).toBe(true);
+    expect("/api/assets/51/content?download=1".split("?")[0]).toBe(
+      canonicalAssetContentUrl(parseCanonicalAssetId("51")!, "nabuflow"),
+    );
     for (const [rawUrl, decoded] of [
       ["/api/assets/0051/content", "0051"],
       ["/api/assets/%35%31/content", "51"],
@@ -29,7 +31,10 @@ describe("unified asset contract", () => {
       ["/api/assets/+51/content", "+51"],
       ["/api/assets/51e0/content", "51e0"],
     ]) {
-      expect(isCanonicalAssetContentRequest(rawUrl, decoded)).toBe(false);
+      const parsed = parseCanonicalAssetId(decoded);
+      expect(
+        parsed === null || rawUrl.split("?")[0] !== canonicalAssetContentUrl(parsed, "nabuflow"),
+      ).toBe(true);
     }
     expect(isCanonicalImageFileRequest("/api/images/51/file?role=thumbnail", "51")).toBe(true);
     expect(isCanonicalImageFileRequest("/api/images/%35%31/file", "51")).toBe(false);
@@ -50,6 +55,13 @@ describe("unified asset contract", () => {
     ]) {
       expect(isCanonicalProjectUploadContentRequest(rawUrl, projectId, uploadId)).toBe(false);
     }
+  });
+
+  it("keeps canonical delivery namespaces disjoint for the same asset ID", () => {
+    expect(canonicalAssetContentUrl(51, "nabuflow")).toBe("/api/assets/51/content");
+    expect(canonicalAssetContentUrl(51, "ora")).toBe("/api/ora/canonical-assets/51/content");
+    expect(canonicalAssetContentUrl(51, "ora")).not.toBe(canonicalAssetContentUrl(51, "nabuflow"));
+    expect(() => canonicalAssetContentUrl(0, "nabuflow")).toThrow();
   });
 
   it("sniffs content instead of trusting an extension", () => {

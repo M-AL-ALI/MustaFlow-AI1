@@ -236,9 +236,9 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
   const isProvisioning = dbStatus?.dbStatus === "provisioning" || provisioning;
   const dbProvider = (project as { dbProvider?: string })?.dbProvider ?? "none";
 
-  function handleProvision(provider: "postgres" | "sqlite") {
+  function handleProvision() {
     provision(
-      { id: projectId, data: { provider } },
+      { id: projectId, data: { provider: "postgres" } },
       {
         onSuccess: () => {
           void queryClient.invalidateQueries({ queryKey: getGetDatabaseStatusQueryKey(projectId) });
@@ -340,28 +340,20 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
       {/* Provision UI */}
       {!isProvisioned && !isProvisioning && (
         <div className="border border-border rounded-lg p-4 bg-card space-y-3">
-          <div className="font-medium text-sm">Add a database to this project</div>
+          <div className="font-medium text-sm">Add a PostgreSQL database on Neon</div>
           <p className="text-xs text-muted-foreground">
-            Provision a database and inject{" "}
+            Provision PostgreSQL on Neon and inject{" "}
             <code className="bg-muted px-1 rounded">DATABASE_URL</code> as a project secret
             automatically. The AI builder will then generate real database-backed code.
           </p>
           <div className="flex gap-2">
-            <Button size="sm" onClick={() => handleProvision("postgres")} disabled={provisioning}>
+            <Button size="sm" onClick={handleProvision} disabled={provisioning}>
               {provisioning ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : (
                 <Database className="h-4 w-4 mr-2" />
               )}
-              Add PostgreSQL
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => handleProvision("sqlite")}
-              disabled={provisioning}
-            >
-              Add SQLite
+              Add PostgreSQL on Neon
             </Button>
           </div>
         </div>

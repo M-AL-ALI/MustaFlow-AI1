@@ -38,11 +38,6 @@ export function neonProjectNameFor(projectId: number): string {
   return `mf-project-${projectId}`;
 }
 
-/** Stable, deterministic Neon project name for a preview environment. */
-export function neonPreviewProjectNameFor(projectId: number): string {
-  return `mf-preview-${projectId}`;
-}
-
 /**
  * Bounded exact-name lookup. `unavailable` is intentionally distinct from
  * `absent`; callers performing destructive lifecycle work must fail closed.
@@ -123,12 +118,6 @@ export async function lookupNeonProjectsByStableName(
     logger.warn({ errorName: errorName(error), name }, "Neon project lookup unavailable");
     return { kind: "unavailable" };
   }
-}
-
-/** Compatibility wrapper for ordinary provisioning retry behavior. */
-export async function findNeonProjectByName(name: string): Promise<string | null> {
-  const result = await lookupNeonProjectsByStableName(name);
-  return result.kind === "found" ? (result.projectIds[0] ?? null) : null;
 }
 
 /**

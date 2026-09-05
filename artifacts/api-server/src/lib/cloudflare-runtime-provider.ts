@@ -38,6 +38,9 @@ import {
   productionDatabaseAllocationResponseSchema,
   productionDatabaseReleaseResponseSchema,
   PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
+  PRODUCTION_DATABASE_ADMISSION_FEATURE,
+  productionDatabaseAuthorizedAdmissionSchema,
+  productionDatabaseSealedAdmissionSchema,
   type RuntimeManifestContract,
   type RuntimeDescriptor,
   type RuntimeLocator,
@@ -50,6 +53,7 @@ import {
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { sealRuntimeArtifact } from "./runtime-artifact";
 import { logger } from "./logger";
+import type { ProductionDatabaseAdmissionService } from "./production-database-admission";
 import {
   RuntimeProviderUnavailableError,
   type ArtifactDeployingTenantRuntimeProvider,
@@ -125,6 +129,7 @@ interface CloudflareRuntimeProviderDependencies {
   now?: () => number;
   /** Monotonic operation clock; independent from the control signing clock. */
   monotonicNow?: () => number;
+  productionDatabaseAdmission?: ProductionDatabaseAdmissionService;
 }
 
 export type CloudflareRuntimeTransportCause =
@@ -350,6 +355,7 @@ export class CloudflareRuntimeProvider
   private readonly sleep: (delayMs: number) => Promise<void>;
   private readonly now: () => number;
   private readonly monotonicNow: () => number;
+  private readonly productionDatabaseAdmission: ProductionDatabaseAdmissionService;
 
   constructor(
     private readonly config: CloudflareConfig,
@@ -365,6 +371,18 @@ export class CloudflareRuntimeProvider
       });
     this.now = dependencies.now ?? Date.now;
     this.monotonicNow = dependencies.monotonicNow ?? (() => performance.now());
+    this.productionDatabaseAdmission = dependencies.productionDatabaseAdmission ?? {
+      authorize: async (input) => {
+        const { getProductionDatabaseAdmissionService } =
+          await import("./production-database-admission");
+        return (await getProductionDatabaseAdmissionService()).authorize(input);
+      },
+      seal: async (input) => {
+        const { getProductionDatabaseAdmissionService } =
+          await import("./production-database-admission");
+        return (await getProductionDatabaseAdmissionService()).seal(input);
+      },
+    };
   }
 
   private sleepFor(delayMs: number): Promise<void> {
@@ -1671,13 +1689,35 @@ export class CloudflareRuntimeProvider
   ): ReturnType<
     ProductionDatabaseCapabilityTenantRuntimeProvider["ensureProductionDatabaseCapability"]
   > {
+    input.signal?.throwIfAborted();
     await this.requireControlFeature("production-database-v1");
+    await this.requireControlFeature(PRODUCTION_DATABASE_ADMISSION_FEATURE);
     const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
     const allocationIdentity = await productionDatabaseAllocationIdentity({
       format: "nabuflow.production-database-allocation/v1",
       deploymentNamespace: "production",
       projectId: input.projectId,
     });
+    input.signal?.throwIfAborted();
+    const admission = productionDatabaseAuthorizedAdmissionSchema.parse(
+      await this.productionDatabaseAdmission.authorize({
+        projectId: input.projectId,
+        allocationIdentity,
+        signal: input.signal,
+      }),
+    );
+    if (
+      admission.projectId !== input.projectId ||
+      admission.allocationIdentity !== allocationIdentity
+    ) {
+      throw new CloudflareRuntimeControlError(
+        409,
+        "production_database_admission_identity_mismatch",
+        false,
+        "Database admission does not match the project",
+      );
+    }
+    input.signal?.throwIfAborted();
     const response = await this.request({
       method: "PUT",
       path: `${CONTROL_API_PREFIX}/capabilities/${input.projectId}/neon-postgres/database/production-allocation`,
@@ -1686,8 +1726,9 @@ export class CloudflareRuntimeProvider
         projectId: input.projectId,
         expectedDeploymentVersion,
         allocationIdentity,
+        admission,
       },
-      idempotencyKey: `production-database:${allocationIdentity}:ensure`,
+      idempotencyKey: `production-database:${allocationIdentity}:ensure:admission-v1`,
       operation: this.operationOptions(
         "production-database.ensure",
         PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
@@ -1711,13 +1752,36 @@ export class CloudflareRuntimeProvider
   ): ReturnType<
     ProductionDatabaseCapabilityTenantRuntimeProvider["releaseProductionDatabaseCapability"]
   > {
+    input.signal?.throwIfAborted();
     await this.requireControlFeature("production-database-v1");
+    await this.requireControlFeature(PRODUCTION_DATABASE_ADMISSION_FEATURE);
     const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
     const allocationIdentity = await productionDatabaseAllocationIdentity({
       format: "nabuflow.production-database-allocation/v1",
       deploymentNamespace: "production",
       projectId: input.projectId,
     });
+    input.signal?.throwIfAborted();
+    const sealed = await this.productionDatabaseAdmission.seal({
+      projectId: input.projectId,
+      allocationIdentity,
+      signal: input.signal,
+    });
+    const admission =
+      sealed === null ? undefined : productionDatabaseSealedAdmissionSchema.parse(sealed);
+    if (
+      admission &&
+      (admission.projectId !== input.projectId ||
+        admission.allocationIdentity !== allocationIdentity)
+    ) {
+      throw new CloudflareRuntimeControlError(
+        409,
+        "production_database_admission_identity_mismatch",
+        false,
+        "Database admission does not match the project",
+      );
+    }
+    input.signal?.throwIfAborted();
     const response = await this.request({
       method: "DELETE",
       path: `${CONTROL_API_PREFIX}/capabilities/${input.projectId}/neon-postgres/database/production-allocation`,
@@ -1726,8 +1790,9 @@ export class CloudflareRuntimeProvider
         projectId: input.projectId,
         expectedDeploymentVersion,
         allocationIdentity,
+        ...(admission ? { admission } : {}),
       },
-      idempotencyKey: `production-database:${allocationIdentity}:release`,
+      idempotencyKey: `production-database:${allocationIdentity}:release:admission-v1`,
       operation: this.operationOptions(
         "production-database.release",
         PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,

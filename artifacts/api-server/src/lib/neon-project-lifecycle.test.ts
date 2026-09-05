@@ -5,7 +5,6 @@ vi.mock("./logger", () => ({ logger: { warn: mocks.warn } }));
 
 import {
   deleteNeonProjectAndProveAbsent,
-  findNeonProjectByName,
   lookupNeonProjectsByStableName,
   releaseNeonProjectsForHardDelete,
 } from "./neon-project-lifecycle";
@@ -50,7 +49,6 @@ describe("strict Neon project lifecycle", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toContain("limit=100");
     expect(fetchMock.mock.calls[0]?.[0]).toContain("timeout=5000");
     expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
-    await expect(findNeonProjectByName("mf-preview-51")).resolves.toBe("preview-exact");
   });
 
   it("fails closed on missing configuration or an unknown lookup response", async () => {

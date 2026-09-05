@@ -1,5 +1,6 @@
 import {
   bigint,
+  check,
   index,
   integer,
   jsonb,
@@ -18,6 +19,8 @@ export type AssetKind = (typeof ASSET_KINDS)[number];
 
 export const ASSET_SCOPES = ["account", "project", "thread"] as const;
 export type AssetScope = (typeof ASSET_SCOPES)[number];
+
+export type ProductScope = "nabuflow" | "ora";
 
 export const ASSET_STATES = [
   "reserved",
@@ -61,6 +64,7 @@ export const assetsTable = pgTable(
   {
     id: serial("id").primaryKey(),
     ownerUserId: text("owner_user_id").notNull(),
+    productScope: text("product_scope").$type<ProductScope>(),
     actorUserId: text("actor_user_id").notNull(),
     projectId: integer("project_id").references(() => projectsTable.id, { onDelete: "cascade" }),
     threadKey: text("thread_key"),
@@ -87,6 +91,7 @@ export const assetsTable = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
+    check("assets_product_scope_check", sql`${table.productScope} IN ('nabuflow', 'ora')`),
     uniqueIndex("assets_storage_key_uq").on(table.storageKey),
     index("assets_owner_state_idx").on(table.ownerUserId, table.state),
     index("assets_project_created_idx").on(table.projectId, table.createdAt),
@@ -149,6 +154,10 @@ export const assetStorageObjectsTable = pgTable(
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull().default(0),
     /** Null only for adopted provider objects whose exact bytes still need observation. */
     sizeMeasuredAt: timestamp("size_measured_at", { withTimezone: true }),
+    /** Immutable provider object generation observed before destructive cleanup. */
+    providerGeneration: text("provider_generation"),
+    /** Provider checksum associated with the observed generation. */
+    providerChecksum: text("provider_checksum"),
     state: text("state").notNull().default("reserved"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     readyAt: timestamp("ready_at", { withTimezone: true }),

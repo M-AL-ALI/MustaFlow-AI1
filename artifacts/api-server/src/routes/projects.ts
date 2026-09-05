@@ -1499,13 +1499,9 @@ router.post(
       res.status(404).json({ error: "Project not found" });
       return;
     }
-    if (project.previewDbStatus === "provisioning") {
-      res.status(409).json({ error: "Preview DB provisioning is already in progress." });
-      return;
-    }
-    // Fire-and-forget — the front-end polls project status to see when it changes to "ready".
+    // Existing attempts are lookup-only, including a provisioning status left by a restart.
     setImmediate(() => {
-      void provisionPreviewDb(projectId);
+      void provisionPreviewDb(projectId).catch(() => undefined);
     });
     res.json({ previewDbStatus: "provisioning" });
   },

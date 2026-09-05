@@ -5168,6 +5168,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Neon provisioning is unavailable because Neon is not configured or temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /projects/{id}/database:
     get:
@@ -11697,7 +11703,7 @@ components:
       properties:
         provider:
           type: string
-          enum: [postgres, sqlite]
+          enum: [postgres]
 
     DatabaseStatus:
       type: object

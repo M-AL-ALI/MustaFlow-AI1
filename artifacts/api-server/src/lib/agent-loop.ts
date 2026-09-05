@@ -7276,6 +7276,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
           let reservation: Awaited<ReturnType<typeof reserveAsset>>;
           try {
             reservation = await reserveAsset({
+              productScope: "nabuflow",
               ownerUserId: project.ownerId,
               actorUserId,
               projectId: input.projectId,
@@ -8318,6 +8319,7 @@ async function executeCreativeToolWithinLifecycle(
   let reservation: Awaited<ReturnType<typeof reserveAssetAgainstAvailableQuota>>;
   try {
     reservation = await reserveAssetAgainstAvailableQuota({
+      productScope: "nabuflow",
       ownerUserId: input.ownerUserId,
       actorUserId: input.actorUserId,
       projectId: input.projectId,

@@ -15,12 +15,14 @@
  * ISOLATION: this file MUST NOT import from builder.ts or any pipeline module.
  */
 import { createHash } from "node:crypto";
-import { Router, type IRouter, type Response } from "express";
+import { Router, type IRouter, type RequestHandler, type Response } from "express";
 import multer from "multer";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import sharp from "sharp";
 import {
+  assetsTable,
+  type ProductScope,
   assetStorageObjectsTable,
   assetUsageTable,
   db,
@@ -65,7 +67,23 @@ import {
 } from "../lib/asset-contract";
 import { canonicalizeSurvivingAssetAliases } from "../lib/project-purge-resources";
 
+import {
+  assertProductScopeNamespace,
+  AssetProductScopeError,
+  canonicalAssetContentUrl,
+  EXPLICIT_PROJECT_ASSET_USE_CONSUMER,
+} from "../lib/asset-platform-scope";
+
 const router: IRouter = Router();
+const knownNabuImageScope = () =>
+  and(
+    eq(generatedImagesTable.productScope, "nabuflow"),
+    sql`(${generatedImagesTable.assetId} IS NULL OR EXISTS (
+    SELECT 1 FROM assets scope_asset
+    WHERE scope_asset.id=${generatedImagesTable.assetId}
+      AND scope_asset.product_scope='nabuflow'
+  ))`,
+  );
 
 // ── Multer for image uploads ──────────────────────────────────────────────────
 
@@ -153,6 +171,7 @@ router.post("/images/generate", async (req, res): Promise<void> => {
   const imageUser = await resolveTierForUser(userId);
 
   const baseOpts = {
+    productScope: "nabuflow" as const,
     userId,
     prompt: prompt.trim(),
     negativePrompt: negativePrompt?.trim() || undefined,
@@ -304,6 +323,7 @@ router.post(
         .values({
           userId,
           prompt: "[uploaded]",
+          productScope: "nabuflow",
           quality: "standard",
           aspectRatio: width >= height ? (width / height > 1.3 ? "16:9" : "1:1") : "9:16",
           providerName: "upload",
@@ -322,6 +342,7 @@ router.post(
       imageId = imageRow.id;
 
       reservation = await reserveAsset({
+        productScope: "nabuflow",
         ownerUserId: userId,
         actorUserId: userId,
         projectId: null,
@@ -424,40 +445,46 @@ router.post(
 );
 
 // ── GET /images/status/:jobId ─────────────────────────────────────────────────
-router.get("/images/status/:jobId", async (req, res): Promise<void> => {
-  const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Not authenticated" });
-    return;
-  }
+const imageStatusHandler =
+  (productScope: ProductScope): RequestHandler =>
+  async (req, res): Promise<void> => {
+    const userId = req.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
 
-  const { jobId } = req.params;
-  if (!jobId) {
-    res.status(400).json({ error: "jobId is required" });
-    return;
-  }
+    const { jobId } = req.params;
+    if (typeof jobId !== "string" || jobId.length === 0) {
+      res.status(400).json({ error: "jobId is required" });
+      return;
+    }
 
-  const job = getJob(jobId);
-  if (!job) {
-    res.status(404).json({ error: "Job not found or expired" });
-    return;
-  }
+    const job = getJob(jobId);
+    if (!job || job.productScope !== productScope || job.userId !== userId) {
+      res.status(404).json({ error: "Job not found or expired" });
+      return;
+    }
 
-  if (job.userId !== userId) {
-    res.status(403).json({ error: "Access denied" });
-    return;
-  }
+    if (job.userId !== userId) {
+      res.status(404).json({ error: "Job not found or expired" });
+      return;
+    }
 
-  res.json({
-    jobId: job.jobId,
-    imageId: job.imageId,
-    assetId: job.assetId,
-    status: job.status,
-    fileUrl: job.status === "completed" ? `/api/assets/${job.assetId}/content` : null,
-    thumbnailUrl: job.status === "completed" ? `/api/assets/${job.assetId}/content` : null,
-    error: job.status === "failed" ? (job.error ?? null) : null,
-  });
-});
+    res.json({
+      jobId: job.jobId,
+      imageId: job.imageId,
+      assetId: job.assetId,
+      status: job.status,
+      fileUrl:
+        job.status === "completed" ? canonicalAssetContentUrl(job.assetId, productScope) : null,
+      thumbnailUrl:
+        job.status === "completed" ? canonicalAssetContentUrl(job.assetId, productScope) : null,
+      error: job.status === "failed" ? (job.error ?? null) : null,
+    });
+  };
+router.get("/images/status/:jobId", imageStatusHandler("nabuflow"));
+router.get("/ora/images/status/:jobId", imageStatusHandler("ora"));
 
 // ── GET /images ───────────────────────────────────────────────────────────────
 router.get("/images", async (req, res): Promise<void> => {
@@ -473,6 +500,7 @@ router.get("/images", async (req, res): Promise<void> => {
     req.query.projectId !== undefined ? Number(req.query.projectId) : undefined;
 
   const conditions = [
+    knownNabuImageScope(),
     eq(generatedImagesTable.userId, userId),
     isNull(generatedImagesTable.deletedAt),
     ...(projectIdFilter !== undefined && Number.isFinite(projectIdFilter)
@@ -482,6 +510,7 @@ router.get("/images", async (req, res): Promise<void> => {
 
   const rows = await db
     .select({
+      productScope: generatedImagesTable.productScope,
       id: generatedImagesTable.id,
       assetId: generatedImagesTable.assetId,
       prompt: generatedImagesTable.prompt,
@@ -544,6 +573,7 @@ router.get("/images/:id", async (req, res): Promise<void> => {
       and(
         eq(generatedImagesTable.id, imageId),
         eq(generatedImagesTable.userId, userId),
+        knownNabuImageScope(),
         isNull(generatedImagesTable.deletedAt),
       ),
     );
@@ -586,6 +616,7 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
       and(
         eq(generatedImagesTable.id, imageId),
         eq(generatedImagesTable.userId, userId),
+        knownNabuImageScope(),
         isNull(generatedImagesTable.deletedAt),
       ),
     );
@@ -610,10 +641,29 @@ router.get("/images/:id/file", async (req, res): Promise<void> => {
             ),
           )
           .limit(1);
-  const storageKey =
-    trackedObject?.storageKey ?? (requestedRole === "primary" ? row.storageKey : null);
-  const fileUrl = row.fileUrl;
-  if (!storageKey && !fileUrl) {
+  const storageKey = trackedObject?.storageKey ?? null;
+  // Resolve only a known, owned canonical asset. No public/legacy URL fallback.
+  if (row.assetId === null) {
+    res.status(404).json({ error: "Image not found" });
+    return;
+  }
+  const [canonical] = await db
+    .select({ id: assetsTable.id })
+    .from(assetsTable)
+    .where(
+      and(
+        eq(assetsTable.id, row.assetId),
+        eq(assetsTable.ownerUserId, userId),
+        eq(assetsTable.productScope, "nabuflow"),
+        eq(assetsTable.state, "ready"),
+      ),
+    );
+  if (!canonical) {
+    res.status(404).json({ error: "Image not found" });
+    return;
+  }
+  const fileUrl = "";
+  if (!storageKey) {
     res.status(404).json({ error: "Image file not available" });
     return;
   }
@@ -650,196 +700,234 @@ const ImageEditBody = z.object({
   oraProjectId: z.number().int().positive().nullable().optional(),
 });
 
-router.post("/images/:id/edit", async (req, res): Promise<void> => {
-  const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Not authenticated" });
-    return;
-  }
-
-  const parentId = Number(req.params.id);
-  if (!Number.isFinite(parentId)) {
-    res.status(400).json({ error: "Invalid image id" });
-    return;
-  }
-
-  const parsed = ImageEditBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-
-  const { instruction, quality, projectId, origin, oraProjectId } = parsed.data;
-  const isOraEdit = origin === "ora";
-
-  if (
-    typeof projectId === "number" &&
-    (await checkProjectAccess(userId, projectId, "member")) !== "granted"
-  ) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-  if (typeof projectId === "number") {
-    let admitted = false;
-    await requireActiveProjectLifecycleFor(projectId, res, () => {
-      admitted = true;
-    });
-    if (!admitted) return;
-  }
-
-  if (!isImageProviderConfigured()) {
-    res.status(503).json({
-      error: "Image editing is not configured. Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY.",
-    });
-    return;
-  }
-
-  // Resolve the Ora project the edited result should be filed under. Invalid,
-  // foreign, or archived projects silently degrade to Personal (null) — the
-  // edit itself must never fail because of a stale project selection.
-  let oraLibraryProjectId: number | null = null;
-  if (isOraEdit && typeof oraProjectId === "number") {
-    const { isOwnedActiveOraProject } = await import("../lib/public-ai/ora-projects");
-    oraLibraryProjectId = (await isOwnedActiveOraProject(userId, oraProjectId))
-      ? oraProjectId
-      : null;
-  }
-
-  // Fetch parent image and verify ownership
-  const [parent] = await db
-    .select({
-      id: generatedImagesTable.id,
-      fileUrl: generatedImagesTable.fileUrl,
-      storageKey: generatedImagesTable.storageKey,
-      aspectRatio: generatedImagesTable.aspectRatio,
-      status: generatedImagesTable.status,
-      projectId: generatedImagesTable.projectId,
-      creditCost: generatedImagesTable.creditCost,
-      sourceType: generatedImagesTable.sourceType,
-    })
-    .from(generatedImagesTable)
-    .where(
-      and(
-        eq(generatedImagesTable.id, parentId),
-        eq(generatedImagesTable.userId, userId),
-        isNull(generatedImagesTable.deletedAt),
-      ),
-    );
-
-  if (!parent) {
-    res.status(404).json({ error: "Image not found" });
-    return;
-  }
-
-  // Ownership is proven before consulting lifecycle state. A foreign image
-  // therefore remains indistinguishable from a missing one and cannot trigger
-  // project/provider work.
-  if (!(await admitGeneratedImageProjectLifecycle(parent.projectId, res))) return;
-
-  if (parent.status !== "completed") {
-    res.status(422).json({ error: "Cannot edit an image that is not completed." });
-    return;
-  }
-
-  if (!parent.fileUrl) {
-    res.status(422).json({ error: "Image has no file URL — cannot edit." });
-    return;
-  }
-
-  if (
-    isOraEdit &&
-    (parent.projectId !== null ||
-      parent.creditCost !== 0 ||
-      (parent.sourceType !== "generated" && parent.sourceType !== "edited"))
-  ) {
-    res.status(403).json({ error: "This image is not eligible for Ora inline editing." });
-    return;
-  }
-
-  let reservedOraImageQuota = false;
-  let oraImageCount: number | undefined;
-  let oraImageLimit: number | undefined;
-  let oraResetsAt: string | null | undefined;
-  let oraTier: string | null = null;
-  try {
-    if (isOraEdit) {
-      const oraUser = await resolveTierForUser(userId);
-      oraTier = oraUser.tier;
-      const quota = await consumeOraQuota(userId, oraUser.tier, "image");
-      if (!quota.allowed) {
-        res.status(429).json({
-          error: `You've used all ${quota.limit} Ora images in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`,
-          upgradeCta: true,
-          imageCount: quota.used,
-          imageLimit: quota.limit,
-          resetsAt: quota.resetsAt,
-        });
-        return;
-      }
-      reservedOraImageQuota = true;
-      oraImageCount = quota.used;
-      oraImageLimit = quota.limit;
-      oraResetsAt = quota.resetsAt;
-    }
-
-    const { jobId, imageId } = await enqueueImageEditJob({
-      userId,
-      parentImageId: parentId,
-      parentStorageKey: parent.storageKey,
-      parentFileUrl: parent.fileUrl,
-      parentAspectRatio: parent.aspectRatio,
-      instruction: instruction.trim(),
-      quality: isOraEdit ? undefined : quality,
-      projectId,
-      subscriptionTier: isOraEdit ? oraTier : undefined,
-      billingMode: isOraEdit ? "ora" : "credits",
-      oraProjectId: oraLibraryProjectId,
-    });
-
-    res.status(202).json({
-      jobId,
-      imageId,
-      creditCost: isOraEdit ? 0 : (IMAGE_CREDIT_COSTS[quality] ?? 3),
-      status: "pending",
-      ...(isOraEdit
-        ? { imageCount: oraImageCount, imageLimit: oraImageLimit, resetsAt: oraResetsAt }
-        : {}),
-    });
-  } catch (err) {
-    if (reservedOraImageQuota) await refundOraQuota(userId, "image");
-    const e = err as {
-      code?: string;
-      message?: string;
-      balance?: number;
-      category?: string;
-      cap?: number;
-      used?: number;
-      tier?: string;
-    };
-    if (e.code === "INSUFFICIENT_CREDITS") {
-      res.status(402).json({ error: "Insufficient credits", balance: e.balance });
+const imageEditHandler =
+  (productScope: ProductScope): RequestHandler =>
+  async (req, res): Promise<void> => {
+    const userId = req.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Not authenticated" });
       return;
     }
-    if (e.code === "MONTHLY_CAP_REACHED") {
-      res.status(429).json({
-        error: e.message ?? "Monthly image limit reached",
-        upgradeCta: true,
-        cap: e.cap,
-        used: e.used,
-        tier: e.tier,
+
+    const parentId = Number(req.params.id);
+    if (!Number.isFinite(parentId)) {
+      res.status(400).json({ error: "Invalid image id" });
+      return;
+    }
+
+    const parsed = ImageEditBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    const { instruction, quality, projectId, origin, oraProjectId } = parsed.data;
+    const isOraEdit = productScope === "ora";
+    try {
+      assertProductScopeNamespace(productScope, { projectId, oraProjectId });
+      if (origin !== undefined && origin !== (isOraEdit ? "ora" : "image_studio"))
+        throw new AssetProductScopeError();
+    } catch {
+      res.status(404).json({ error: "Image not found" });
+      return;
+    }
+
+    if (
+      typeof projectId === "number" &&
+      (await checkProjectAccess(userId, projectId, "member")) !== "granted"
+    ) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (typeof projectId === "number") {
+      let admitted = false;
+      await requireActiveProjectLifecycleFor(projectId, res, () => {
+        admitted = true;
+      });
+      if (!admitted) return;
+    }
+
+    if (!isImageProviderConfigured()) {
+      res.status(503).json({
+        error: "Image editing is not configured. Set OPENAI_IMAGE_API_KEY or OPENAI_API_KEY.",
       });
       return;
     }
-    if (e.code === "SAFETY_BLOCKED") {
-      res
-        .status(422)
-        .json({ error: e.message ?? "Instruction failed safety check", category: e.category });
+
+    // Resolve the Ora project the edited result should be filed under. Invalid,
+    // foreign, or archived projects silently degrade to Personal (null) — the
+    // edit itself must never fail because of a stale project selection.
+    let oraLibraryProjectId: number | null = null;
+    if (isOraEdit && typeof oraProjectId === "number") {
+      const { isOwnedActiveOraProject } = await import("../lib/public-ai/ora-projects");
+      if (!(await isOwnedActiveOraProject(userId, oraProjectId))) {
+        res.status(404).json({ error: "Image not found" });
+        return;
+      }
+      oraLibraryProjectId = oraProjectId;
+    }
+
+    // Fetch parent image and verify ownership
+    const [parent] = await db
+      .select({
+        id: generatedImagesTable.id,
+        assetId: generatedImagesTable.assetId,
+        productScope: generatedImagesTable.productScope,
+        fileUrl: generatedImagesTable.fileUrl,
+        storageKey: generatedImagesTable.storageKey,
+        aspectRatio: generatedImagesTable.aspectRatio,
+        status: generatedImagesTable.status,
+        projectId: generatedImagesTable.projectId,
+        creditCost: generatedImagesTable.creditCost,
+        sourceType: generatedImagesTable.sourceType,
+      })
+      .from(generatedImagesTable)
+      .where(
+        and(
+          eq(generatedImagesTable.id, parentId),
+          eq(generatedImagesTable.userId, userId),
+          eq(generatedImagesTable.productScope, productScope),
+          sql`EXISTS (SELECT 1 FROM assets scope_asset
+          WHERE scope_asset.id=${generatedImagesTable.assetId}
+            AND scope_asset.product_scope=${productScope} AND scope_asset.state='ready')`,
+          isNull(generatedImagesTable.deletedAt),
+        ),
+      );
+
+    if (!parent) {
+      res.status(404).json({ error: "Image not found" });
       return;
     }
-    logger.warn({ err }, "image-gen: unexpected error in /images/:id/edit");
-    res.status(500).json({ error: "Image edit failed. Please try again." });
-  }
-});
+
+    // Ownership is proven before consulting lifecycle state. A foreign image
+    // therefore remains indistinguishable from a missing one and cannot trigger
+    // project/provider work.
+    if (!(await admitGeneratedImageProjectLifecycle(parent.projectId, res))) return;
+
+    if (parent.status !== "completed") {
+      res.status(422).json({ error: "Cannot edit an image that is not completed." });
+      return;
+    }
+
+    if (!parent.fileUrl) {
+      res.status(422).json({ error: "Image has no file URL — cannot edit." });
+      return;
+    }
+
+    const outputProjectId = isOraEdit ? undefined : (projectId ?? parent.projectId ?? undefined);
+    if (outputProjectId !== undefined) {
+      if ((await checkProjectAccess(userId, outputProjectId, "member")) !== "granted") {
+        res.status(404).json({ error: "Image not found" });
+        return;
+      }
+      if (parent.projectId !== outputProjectId) {
+        const [grant] = await db
+          .select({ id: assetUsageTable.id })
+          .from(assetUsageTable)
+          .where(
+            and(
+              eq(assetUsageTable.assetId, parent.assetId!),
+              eq(assetUsageTable.projectId, outputProjectId),
+              eq(assetUsageTable.consumer, EXPLICIT_PROJECT_ASSET_USE_CONSUMER),
+              isNull(assetUsageTable.artifactId),
+              isNull(assetUsageTable.versionId),
+              isNull(assetUsageTable.filePath),
+            ),
+          );
+        if (!grant) {
+          res.status(404).json({ error: "Image not found" });
+          return;
+        }
+      }
+    }
+
+    let reservedOraImageQuota = false;
+    let oraImageCount: number | undefined;
+    let oraImageLimit: number | undefined;
+    let oraResetsAt: string | null | undefined;
+    let oraTier: string | null = null;
+    try {
+      if (isOraEdit) {
+        const oraUser = await resolveTierForUser(userId);
+        oraTier = oraUser.tier;
+        const quota = await consumeOraQuota(userId, oraUser.tier, "image");
+        if (!quota.allowed) {
+          res.status(429).json({
+            error: `You've used all ${quota.limit} Ora images in your current window on your plan. Upgrade for a higher limit, or wait for your window to reset.`,
+            upgradeCta: true,
+            imageCount: quota.used,
+            imageLimit: quota.limit,
+            resetsAt: quota.resetsAt,
+          });
+          return;
+        }
+        reservedOraImageQuota = true;
+        oraImageCount = quota.used;
+        oraImageLimit = quota.limit;
+        oraResetsAt = quota.resetsAt;
+      }
+
+      const { jobId, imageId } = await enqueueImageEditJob({
+        userId,
+        productScope,
+        parentImageId: parentId,
+        parentStorageKey: parent.storageKey,
+        parentFileUrl: parent.fileUrl,
+        parentAspectRatio: parent.aspectRatio,
+        instruction: instruction.trim(),
+        quality: isOraEdit ? undefined : quality,
+        projectId: outputProjectId,
+        subscriptionTier: isOraEdit ? oraTier : undefined,
+        billingMode: isOraEdit ? "ora" : "credits",
+        oraProjectId: oraLibraryProjectId,
+      });
+
+      res.status(202).json({
+        jobId,
+        imageId,
+        creditCost: isOraEdit ? 0 : (IMAGE_CREDIT_COSTS[quality] ?? 3),
+        status: "pending",
+        ...(isOraEdit
+          ? { imageCount: oraImageCount, imageLimit: oraImageLimit, resetsAt: oraResetsAt }
+          : {}),
+      });
+    } catch (err) {
+      if (reservedOraImageQuota) await refundOraQuota(userId, "image");
+      const e = err as {
+        code?: string;
+        message?: string;
+        balance?: number;
+        category?: string;
+        cap?: number;
+        used?: number;
+        tier?: string;
+      };
+      if (e.code === "INSUFFICIENT_CREDITS") {
+        res.status(402).json({ error: "Insufficient credits", balance: e.balance });
+        return;
+      }
+      if (e.code === "MONTHLY_CAP_REACHED") {
+        res.status(429).json({
+          error: e.message ?? "Monthly image limit reached",
+          upgradeCta: true,
+          cap: e.cap,
+          used: e.used,
+          tier: e.tier,
+        });
+        return;
+      }
+      if (e.code === "SAFETY_BLOCKED") {
+        res
+          .status(422)
+          .json({ error: e.message ?? "Instruction failed safety check", category: e.category });
+        return;
+      }
+      logger.warn({ err }, "image-gen: unexpected error in /images/:id/edit");
+      res.status(500).json({ error: "Image edit failed. Please try again." });
+    }
+  };
+router.post("/images/:id/edit", imageEditHandler("nabuflow"));
+router.post("/ora/images/:id/edit", imageEditHandler("ora"));
 
 // ── DELETE /images/:id ────────────────────────────────────────────────────────
 router.delete("/images/:id", async (req, res): Promise<void> => {
@@ -866,6 +954,7 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
       and(
         eq(generatedImagesTable.id, imageId),
         eq(generatedImagesTable.userId, userId),
+        knownNabuImageScope(),
         isNull(generatedImagesTable.deletedAt),
       ),
     );
@@ -884,8 +973,8 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
         await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
         const locked = await client.query(
           `SELECT id FROM assets
-            WHERE id=$1 AND owner_user_id=$2 AND state='ready'
-            FOR UPDATE`,
+            WHERE id=$1 AND owner_user_id=$2 AND state='ready' AND product_scope='nabuflow'
+             FOR UPDATE`,
           [rewriteAssetId, userId],
         );
         if (locked.rowCount !== 1) throw new Error("image_delete_claim_lost");
@@ -893,8 +982,8 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
         const removed = await client.query(
           `UPDATE generated_images
               SET deleted_at=NOW(), updated_at=NOW()
-            WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL
-            RETURNING id`,
+            WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND product_scope='nabuflow'
+             RETURNING id`,
           [imageId, userId],
         );
         if (removed.rowCount !== 1) throw new Error("image_delete_claim_lost");
@@ -918,6 +1007,7 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
           and(
             eq(generatedImagesTable.id, imageId),
             eq(generatedImagesTable.userId, userId),
+            knownNabuImageScope(),
             isNull(generatedImagesTable.deletedAt),
           ),
         )
@@ -937,6 +1027,7 @@ router.delete("/images/:id", async (req, res): Promise<void> => {
         assetId: existing.assetId,
         userId,
         generatedImageIdBeingDeleted: imageId,
+        productScope: "nabuflow",
       });
       await softDeleteGeneratedImage();
       try {
