@@ -378,7 +378,7 @@ describe("bounded legacy zero-volume configuration recovery", () => {
           state: "failed",
           completedAt: decisionInput.completedAt,
           failureCode: "project_retirement_operation_unavailable",
-          progress: null as never,
+          progress: {},
         },
       ],
     );
