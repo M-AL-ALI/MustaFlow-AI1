@@ -1733,6 +1733,7 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
 });
 
 router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
+  res.set("Cache-Control", "no-store");
   const params = DeleteProjectParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });

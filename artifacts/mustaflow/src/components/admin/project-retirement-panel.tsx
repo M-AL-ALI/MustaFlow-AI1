@@ -785,6 +785,7 @@ export function ProjectRetirementPanel() {
     try {
       const response = await authFetch(`/api/projects/${projectId}/retirement`, {
         method: "GET",
+        cache: "no-store",
       });
       const body = await response.json();
       const status = response.status === 200 ? parseProjectRetirementStatus(body, projectId) : null;

@@ -201,7 +201,10 @@ describe("ProjectRetirementPanel", () => {
     await user.type(screen.getByRole("spinbutton", { name: "Retired project ID" }), "5");
     await user.click(screen.getByRole("button", { name: "Check retirement status" }));
 
-    expect(authFetch).toHaveBeenCalledWith("/api/projects/5/retirement", { method: "GET" });
+    expect(authFetch).toHaveBeenCalledWith("/api/projects/5/retirement", {
+      method: "GET",
+      cache: "no-store",
+    });
     expect(await screen.findByText("Cleanup is running.")).toBeVisible();
     expect(screen.getByText("Attempt count: 2.")).toBeVisible();
     expect(screen.queryByText("not rendered")).not.toBeInTheDocument();
