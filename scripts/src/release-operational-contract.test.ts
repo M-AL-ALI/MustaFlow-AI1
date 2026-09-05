@@ -117,6 +117,9 @@ for (const databaseTest of [
   "src/routes/__tests__/ora-conversation-persistence.test.ts",
   "src/routes/__tests__/ora-support-surface-isolation.test.ts",
   "src/routes/__tests__/ora-project-spaces.test.ts",
+  "src/routes/__tests__/ora-account-consistency.test.ts",
+  "src/routes/__tests__/ora-memory-enhancements.test.ts",
+  "src/routes/__tests__/ora-memory-upgrades.test.ts",
   "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
   "src/routes/__tests__/ora-memory-consolidation.test.ts",
 ]) {

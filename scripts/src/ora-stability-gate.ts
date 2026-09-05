@@ -649,10 +649,7 @@ const API_ACCOUNT_BILLING_HISTORY = [
   "src/routes/__tests__/admin-ora-routing-diagnostics.test.ts",
   "src/routes/__tests__/billing-ora-plans-public.test.ts",
   "src/routes/__tests__/billing-subscription-checkout.test.ts",
-  "src/routes/__tests__/ora-account-consistency.test.ts",
-  "src/routes/__tests__/ora-memory-enhancements.test.ts",
   "src/routes/__tests__/ora-memory-relevance.test.ts",
-  "src/routes/__tests__/ora-memory-upgrades.test.ts",
   "src/routes/__tests__/ora-tiers-meta.test.ts",
   "src/routes/__tests__/brand-kit-api.test.ts",
 ].join(" ");
@@ -663,6 +660,9 @@ const API_RELEASE_DATABASE = [
   "src/routes/__tests__/ora-conversation-persistence.test.ts",
   "src/routes/__tests__/ora-support-surface-isolation.test.ts",
   "src/routes/__tests__/ora-project-spaces.test.ts",
+  "src/routes/__tests__/ora-account-consistency.test.ts",
+  "src/routes/__tests__/ora-memory-enhancements.test.ts",
+  "src/routes/__tests__/ora-memory-upgrades.test.ts",
   "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
   "src/routes/__tests__/ora-memory-consolidation.test.ts",
 ].join(" ");
