@@ -330,11 +330,17 @@ export function sanitizeProjectRetirementProgress(value: unknown): Record<string
           hasParent: typeof reconciliation.parentOperationId === "string",
           verificationRepair: verificationRepair
             ? {
-                version: closedValue(verificationRepair.version, ["fly-destroyed-tombstone-v1"]),
+                version: closedValue(verificationRepair.version, [
+                  "fly-destroyed-tombstone-v1",
+                  "fly-provider-verification-v1",
+                ]),
                 pointer: closedValue(verificationRepair.pointer, POINTERS),
                 predecessorGeneration: verificationRepair.predecessorGeneration === 3 ? 3 : null,
                 failureCode: sanitizeProjectRetirementFailureCode(verificationRepair.failureCode),
-                reason: closedValue(verificationRepair.reason, ["absence_unverified"]),
+                reason: closedValue(verificationRepair.reason, [
+                  "absence_unverified",
+                  "provider_observation_unavailable",
+                ]),
                 hasParent: typeof verificationRepair.parentOperationId === "string",
               }
             : null,

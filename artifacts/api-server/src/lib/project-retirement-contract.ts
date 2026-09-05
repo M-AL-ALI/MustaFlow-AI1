@@ -206,7 +206,8 @@ export function decideProjectRetirementReconciliation(input: {
       input.state === "failed" &&
       input.generation === 3 &&
       (input.failureCode === "project_retirement_legacy_runtime_absence_unverified" ||
-        input.failureCode === "project_retirement_legacy_runtime_retained") &&
+        input.failureCode === "project_retirement_legacy_runtime_retained" ||
+        input.failureCode === "project_retirement_legacy_runtime_provider_unavailable") &&
       input.allowLegacyAdminReconciliation === true &&
       input.allowConfigurationRecovery === true &&
       input.currentCloudflareCachePurgeConfigured === true &&
@@ -243,7 +244,7 @@ export function decideProjectRetirementReconciliation(input: {
   return { allowed: false, code: "project_retirement_retry_not_allowed" };
 }
 
-/** Exact stale-checker witness. This is admission evidence, never provider absence evidence. */
+/** Exact exhausted-verifier witness. This is admission evidence, never provider absence evidence. */
 export function projectRetirementVerificationRepairPointer(
   progress: unknown,
 ): "containerId" | "prodContainerId" | "testContainerId" | null {
@@ -268,7 +269,9 @@ export function projectRetirementVerificationRepairPointer(
     !isRecord(resolution) ||
     !isRecord(retained) ||
     resolution.state !== "retained" ||
-    resolution.reason !== "absence_unverified" ||
+    !["absence_unverified", "provider_observation_unavailable"].includes(
+      String(resolution.reason),
+    ) ||
     resolution.retryable !== true ||
     resolution.proof !== undefined ||
     !["containerId", "prodContainerId", "testContainerId"].includes(String(resolution.pointer)) ||

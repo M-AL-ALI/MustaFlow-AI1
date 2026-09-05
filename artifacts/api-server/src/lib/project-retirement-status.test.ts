@@ -31,6 +31,34 @@ describe("project retirement status sanitization", () => {
     });
     expect(JSON.stringify(sanitized)).not.toContain("private-");
   });
+  it("shows the closed provider-verification repair cause without exposing identifiers", () => {
+    const sanitized = sanitizeProjectRetirementProgress({
+      reconciliation: {
+        generation: 4,
+        reason: "retryable_terminal",
+        configurationRecoveryUsed: true,
+        verificationRepair: {
+          version: "fly-provider-verification-v1",
+          parentOperationId: "private-operation",
+          requestedBy: "private-actor",
+          pointer: "containerId",
+          predecessorGeneration: 3,
+          failureCode: "project_retirement_legacy_runtime_provider_unavailable",
+          reason: "provider_observation_unavailable",
+        },
+      },
+    });
+    expect(sanitized).toMatchObject({
+      reconciliation: {
+        verificationRepair: {
+          version: "fly-provider-verification-v1",
+          reason: "provider_observation_unavailable",
+          hasParent: true,
+        },
+      },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain("private-");
+  });
   it.each([
     "initial_destroyed_tombstone_active_catalog_absent",
     "delete_then_destroyed_tombstone_active_catalog_absent",

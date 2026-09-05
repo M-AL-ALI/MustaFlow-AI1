@@ -354,6 +354,42 @@ describe("bounded legacy zero-volume configuration recovery", () => {
     ).toEqual({ allowed: true, reason: "retryable_terminal" });
   });
 
+  it("admits one final provider verifier after the exhausted observer was unavailable", () => {
+    const progress = initialProjectRetirementProgress();
+    progress.reconciliation = {
+      generation: 3,
+      parentOperationId: "legacy-generation-two-77",
+      requestedBy: "platform-owner",
+      reason: "configuration_recovery",
+      configurationRecoveryUsed: true,
+    };
+    progress.legacyRuntimeResolutions = [
+      {
+        pointer: "containerId",
+        state: "retained",
+        reason: "provider_observation_unavailable",
+        retryable: true,
+      },
+    ];
+    progress.retainedLegacyRuntimePointers = [
+      {
+        pointer: "containerId",
+        identity: "18551d6b7229e8",
+        reason: "runtime_identity_malformed",
+      },
+    ];
+
+    expect(
+      decideProjectRetirementReconciliation({
+        ...decisionInput,
+        generation: 3,
+        failureCode: "project_retirement_legacy_runtime_provider_unavailable",
+        configurationRecoveryUsed: true,
+        progress,
+      }),
+    ).toEqual({ allowed: true, reason: "retryable_terminal" });
+  });
+
   it("does not create recovery for a project outside the supplied owner scope", async () => {
     mocks.selectResults.push([]);
     expect(

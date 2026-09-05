@@ -890,6 +890,46 @@ describe("project retirement route behavior", () => {
     expect(mocks.insertCalls).toHaveLength(1);
   });
 
+  it("admits one platform-owner provider verification repair with the exact persisted witness", async () => {
+    const predecessor = staleFlyCheckerCompletion();
+    predecessor.failureCode = "project_retirement_legacy_runtime_provider_unavailable";
+    predecessor.progress.legacyRuntimeResolutions = [
+      {
+        pointer: "containerId",
+        state: "retained",
+        reason: "provider_observation_unavailable",
+        retryable: true,
+      },
+    ];
+    mocks.selectResults = [
+      [],
+      [{ id: 27, containerId: "historical-machine-27" }],
+      [predecessor],
+      [],
+    ];
+    const response = await request(appAs("staff-owner")).post("/projects/27/retirement/retry");
+    expect(response.status).toBe(202);
+    const inserted = mocks.insertCalls.find(
+      (call) => call.table === projectRetirementOperationsTable,
+    )!;
+    expect(inserted.values.progress).toMatchObject({
+      reconciliation: {
+        generation: 4,
+        configurationRecoveryUsed: true,
+        verificationRepair: {
+          version: "fly-provider-verification-v1",
+          parentOperationId: predecessor.id,
+          requestedBy: "staff-owner",
+          pointer: "containerId",
+          predecessorGeneration: 3,
+          failureCode: "project_retirement_legacy_runtime_provider_unavailable",
+          reason: "provider_observation_unavailable",
+        },
+      },
+    });
+    assertNoProviderCall();
+  });
+
   it.each(["owner-77", "staff-operator"])(
     "keeps checker repair unavailable to %s",
     async (actor) => {
@@ -928,7 +968,7 @@ describe("project retirement route behavior", () => {
       if (variant === "already_used")
         Object.assign(operation.progress.reconciliation!, { verificationRepair: null });
       if (variant === "wrong_failure")
-        operation.failureCode = "project_retirement_legacy_runtime_provider_unavailable";
+        operation.failureCode = "project_retirement_runtime_destroy_unverified";
       if (variant === "wrong_reason")
         operation.progress.legacyRuntimeResolutions = [
           {

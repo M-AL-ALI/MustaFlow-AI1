@@ -158,6 +158,14 @@ export async function requestProjectRetirementEvidenceReconciliation(input: {
     }
     const metadata = readStoredProjectRetirementReconciliationMetadata(latest);
     const previousRepair = latest.progress?.reconciliation?.verificationRepair;
+    const repairResolution = repairPointer
+      ? latest.progress?.legacyRuntimeResolutions?.find(
+          (resolution) => resolution.pointer === repairPointer && resolution.state === "retained",
+        )
+      : undefined;
+    const repairReason =
+      repairResolution?.state === "retained" ? repairResolution.reason : undefined;
+    const providerVerificationRepair = repairReason === "provider_observation_unavailable";
     const operationId = crypto.randomUUID();
     let progress = initialProjectRetirementProgress();
     progress.reconciliation = {
@@ -171,13 +179,19 @@ export async function requestProjectRetirementEvidenceReconciliation(input: {
       ...(repairPointer
         ? {
             verificationRepair: {
-              version: "fly-destroyed-tombstone-v1" as const,
+              version: providerVerificationRepair
+                ? ("fly-provider-verification-v1" as const)
+                : ("fly-destroyed-tombstone-v1" as const),
               parentOperationId: latest.id,
               requestedBy: input.requestedBy,
               pointer: repairPointer,
               predecessorGeneration: 3 as const,
-              failureCode: "project_retirement_legacy_runtime_absence_unverified" as const,
-              reason: "absence_unverified" as const,
+              failureCode: providerVerificationRepair
+                ? ("project_retirement_legacy_runtime_provider_unavailable" as const)
+                : ("project_retirement_legacy_runtime_absence_unverified" as const),
+              reason: providerVerificationRepair
+                ? ("provider_observation_unavailable" as const)
+                : ("absence_unverified" as const),
             },
           }
         : {}),

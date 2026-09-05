@@ -27,15 +27,17 @@ export type ProjectRetirementProgress = {
     requestedBy: string;
     reason: "retryable_terminal" | "legacy_admin_reconciliation" | "configuration_recovery";
     configurationRecoveryUsed?: boolean;
-    /** One admission for the corrected Fly tombstone checker; never an absence proof. */
+    /** One admission for the corrected Fly absence checker; never an absence proof. */
     verificationRepair?: {
-      version: "fly-destroyed-tombstone-v1";
+      version: "fly-destroyed-tombstone-v1" | "fly-provider-verification-v1";
       parentOperationId: string;
       requestedBy: string;
       pointer: "containerId" | "prodContainerId" | "testContainerId";
       predecessorGeneration: 3;
-      failureCode: "project_retirement_legacy_runtime_absence_unverified";
-      reason: "absence_unverified";
+      failureCode:
+        | "project_retirement_legacy_runtime_absence_unverified"
+        | "project_retirement_legacy_runtime_provider_unavailable";
+      reason: "absence_unverified" | "provider_observation_unavailable";
     };
   };
   route: {
