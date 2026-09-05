@@ -171,7 +171,14 @@ export async function reserveOraGeneratedAsset(input: {
   source: string;
   fileName: string;
   mimeType: string;
+  generatedImageId?: number;
 }): Promise<OraGeneratedAssetReservation> {
+  if (
+    input.generatedImageId !== undefined &&
+    (!Number.isSafeInteger(input.generatedImageId) || input.generatedImageId <= 0)
+  ) {
+    throw new AssetAdmissionError("asset_link_mismatch", 400);
+  }
   const reservation = await reserveAssetAgainstAvailableQuota({
     ownerUserId: input.userId,
     productScope: "ora",
@@ -183,7 +190,10 @@ export async function reserveOraGeneratedAsset(input: {
     source: input.source,
     filename: input.fileName,
     mimeType: input.mimeType,
-    context: { oraProjectId: input.oraProjectId ?? null },
+    context: {
+      oraProjectId: input.oraProjectId ?? null,
+      ...(input.generatedImageId !== undefined ? { generatedImageId: input.generatedImageId } : {}),
+    },
   });
   try {
     const claim = await beginAssetUpload({ assetId: reservation.id, actorUserId: input.userId });

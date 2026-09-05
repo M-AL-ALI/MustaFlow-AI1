@@ -238,7 +238,7 @@ export async function reserveAsset(input: {
       derivativeOfAssetId !== undefined &&
       (!Number.isSafeInteger(derivativeOfAssetId) || Number(derivativeOfAssetId) < 1)
     ) {
-      throw new AssetAdmissionError("asset_content_mismatch", 409);
+      throw new AssetAdmissionError("asset_link_mismatch", 409);
     }
     if (typeof derivativeOfAssetId === "number") {
       const usage = await client.query(
@@ -392,7 +392,7 @@ export async function registerAssetStorageObjects(input: {
         object.sizeBytes < 0,
     )
   ) {
-    throw new AssetAdmissionError("asset_content_mismatch", 409);
+    throw new AssetAdmissionError("asset_link_mismatch", 409);
   }
   const client = await pool.connect();
   try {
@@ -501,7 +501,7 @@ export async function completeAsset(input: {
         receipt.rowCount !== 1 ||
         receipt.rows[0]?.product_scope !== reserved.rows[0]!.product_scope
       ) {
-        throw new AssetAdmissionError("asset_content_mismatch", 409);
+        throw new AssetAdmissionError("asset_link_mismatch", 409);
       }
     }
     if (input.finalSizeBytes !== undefined || input.finalStorageKey !== undefined) {
@@ -578,7 +578,7 @@ export async function completeAsset(input: {
         contextGeneratedImageId !== input.generatedImage.imageId ||
         !Number.isSafeInteger(input.generatedImage.imageId)
       ) {
-        throw new AssetAdmissionError("asset_content_mismatch", 409);
+        throw new AssetAdmissionError("asset_link_mismatch", 409);
       }
       const generated = await client.query(
         `UPDATE generated_images
@@ -609,7 +609,7 @@ export async function completeAsset(input: {
           input.generatedImage.quality ?? null,
         ],
       );
-      if (!generated.rowCount) throw new AssetAdmissionError("asset_content_mismatch", 409);
+      if (!generated.rowCount) throw new AssetAdmissionError("asset_link_mismatch", 409);
     }
     if (attribution.version_id !== null) {
       await client.query(
@@ -634,7 +634,7 @@ export async function completeAsset(input: {
     }
     if (input.projectFileHistoryProjectId !== undefined) {
       if (input.projectFileHistoryProjectId !== attribution.project_id) {
-        throw new AssetAdmissionError("asset_content_mismatch", 409);
+        throw new AssetAdmissionError("asset_link_mismatch", 409);
       }
       await client.query(
         `INSERT INTO asset_usage (asset_id, project_id, consumer)

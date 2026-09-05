@@ -2005,6 +2005,7 @@ router.post("/public-ai/chat", async (req, res) => {
           source: "ora-image-generation",
           fileName: `ora-image-${imageRow.id}.webp`,
           mimeType: "image/webp",
+          generatedImageId: imageRow.id,
         });
       }
       const result = await generateImage({

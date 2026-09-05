@@ -46,6 +46,18 @@ describe("Ora uses the account-wide asset boundary", () => {
     expect(realtimeTools).not.toContain("persistOraAssetStrict({");
   });
 
+  it("binds an inline image receipt into its reservation before provider work", () => {
+    const inlineImage = chatRoute.slice(
+      chatRoute.indexOf('source: "ora-image-generation"'),
+      chatRoute.indexOf("const result = await generateImage({"),
+    );
+    expect(inlineImage).toContain("generatedImageId: imageRow.id");
+    expect(oraAssets).toContain("generatedImageId?: number;");
+    expect(oraAssets).toContain("generatedImageId: input.generatedImageId");
+    expect(assetRegistry).not.toContain('AssetAdmissionError("asset_content_mismatch"');
+    expect(assetRegistry).toContain('AssetAdmissionError("asset_link_mismatch"');
+  });
+
   it("awaits signed-in upload admission and returns typed storage failures", () => {
     expect(uploadRoute).toContain("await persistOraAssetStrict({");
     expect(uploadRoute).toContain("await persistUploadMirrors({");

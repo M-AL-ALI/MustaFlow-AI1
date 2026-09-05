@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import { evaluateOraResponseQuality } from "../../../lib/public-ai/response-quality";
 import { storeFile } from "../../../lib/public-ai/file-store";
 import { completeAsset } from "../../../lib/asset-registry";
+import { reserveOraGeneratedAsset } from "../../../lib/ora-assets";
 
 const TEST_SECRET = "ora-chat-response-qa-secret";
 
@@ -645,6 +646,9 @@ What should I tell Replit?`;
     expect(res.body.imageUrl).toBe("/api/ora/canonical-assets/1/content");
     expect(res.body.imageUrl).not.toBe("/api/ora/canonical-assets/2/content");
     expect(res.body.imageUrl).not.toBe("/api/images/2/file");
+    expect(reserveOraGeneratedAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ generatedImageId: 2 }),
+    );
     expect(completeAsset).toHaveBeenCalledWith(
       expect.objectContaining({
         assetId: 1,
