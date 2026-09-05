@@ -64,10 +64,7 @@ import {
   type ProjectRetirementRuntimeTarget,
   type ProjectRetirementSchedulingReceipt,
 } from "./project-retirement-contract";
-import {
-  resolveCurrentCloudflareRetirementPosture,
-  resolveLegacyHostnameKvPosture,
-} from "./project-retirement-activation";
+import { resolveLegacyHostnameKvPosture } from "./project-retirement-activation";
 import { retireProjectAccessSurfaces } from "./project-retirement-access";
 import {
   reconcileLegacyFlyRuntime,
