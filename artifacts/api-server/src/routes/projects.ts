@@ -1548,6 +1548,7 @@ router.get("/projects/trash", async (req, res): Promise<void> => {
     .from(projectRetirementOperationsTable)
     .where(inArray(projectRetirementOperationsTable.projectId, projectIds))
     .orderBy(
+      sql`CASE WHEN ${projectRetirementOperationsTable.id} LIKE 'project-retirement:legacy:v1:%' THEN 1 ELSE 0 END`,
       desc(projectRetirementOperationsTable.createdAt),
       desc(projectRetirementOperationsTable.updatedAt),
       desc(projectRetirementOperationsTable.id),
@@ -1634,6 +1635,7 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
       .from(projectRetirementOperationsTable)
       .where(eq(projectRetirementOperationsTable.projectId, params.data.id))
       .orderBy(
+        sql`CASE WHEN ${projectRetirementOperationsTable.id} LIKE 'project-retirement:legacy:v1:%' THEN 1 ELSE 0 END`,
         desc(projectRetirementOperationsTable.createdAt),
         desc(projectRetirementOperationsTable.updatedAt),
         desc(projectRetirementOperationsTable.id),

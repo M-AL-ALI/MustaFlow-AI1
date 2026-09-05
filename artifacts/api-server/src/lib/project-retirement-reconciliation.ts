@@ -132,6 +132,7 @@ export async function requestProjectRetirementEvidenceReconciliation(input: {
       .from(projectRetirementOperationsTable)
       .where(eq(projectRetirementOperationsTable.projectId, input.projectId))
       .orderBy(
+        sql`CASE WHEN ${projectRetirementOperationsTable.id} LIKE 'project-retirement:legacy:v1:%' THEN 1 ELSE 0 END`,
         desc(projectRetirementOperationsTable.createdAt),
         desc(projectRetirementOperationsTable.updatedAt),
         desc(projectRetirementOperationsTable.id),

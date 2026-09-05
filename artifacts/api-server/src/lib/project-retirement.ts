@@ -141,6 +141,7 @@ async function readLatestProjectRetirementOperation(
     .from(projectRetirementOperationsTable)
     .where(eq(projectRetirementOperationsTable.projectId, projectId))
     .orderBy(
+      sql`CASE WHEN ${projectRetirementOperationsTable.id} LIKE 'project-retirement:legacy:v1:%' THEN 1 ELSE 0 END`,
       desc(projectRetirementOperationsTable.createdAt),
       desc(projectRetirementOperationsTable.updatedAt),
       desc(projectRetirementOperationsTable.id),
@@ -1959,6 +1960,7 @@ export async function readProjectRetirementOperation(
     .from(projectRetirementOperationsTable)
     .where(eq(projectRetirementOperationsTable.projectId, projectId))
     .orderBy(
+      sql`CASE WHEN ${projectRetirementOperationsTable.id} LIKE 'project-retirement:legacy:v1:%' THEN 1 ELSE 0 END`,
       desc(projectRetirementOperationsTable.createdAt),
       desc(projectRetirementOperationsTable.updatedAt),
       desc(projectRetirementOperationsTable.id),
