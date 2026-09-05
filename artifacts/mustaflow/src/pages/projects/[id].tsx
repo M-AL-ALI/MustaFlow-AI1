@@ -2371,6 +2371,7 @@ export default function ProjectWorkspacePage() {
     reconcilePreview,
     receivePreviewPayload,
     recordThreadImage,
+    setLiveProjectImages,
   ]);
 
   // ── Project-level preview SSE ───────────────────────────────────────────────

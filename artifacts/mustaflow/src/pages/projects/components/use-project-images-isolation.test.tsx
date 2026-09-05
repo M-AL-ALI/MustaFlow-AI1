@@ -402,9 +402,10 @@ describe("useProjectImages project isolation", () => {
     const hook = renderHook(
       (current: HookProps) => {
         const images = useProjectImages(current);
+        const generateImage = images.generateImage;
         useLayoutEffect(() => {
-          operations.push(settle(images.generateImage("Strict replay image", GENERATE_OPTIONS)));
-        }, [images.generateImage]);
+          operations.push(settle(generateImage("Strict replay image", GENERATE_OPTIONS)));
+        }, [generateImage]);
         return images;
       },
       { initialProps: props, wrapper: StrictWrapper, reactStrictMode: true },

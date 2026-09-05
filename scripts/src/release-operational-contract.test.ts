@@ -82,10 +82,45 @@ for (const requiredRegistryGuard of [
   "/^artifacts\\/mustaflow\\/src\\/pages\\/(?:.*\\/)?ora(?:x)?(?:[-./]|$)/i",
   "/^artifacts\\/mustaflow\\/src\\/pages\\/projects\\/components\\/(?:collaboration-card|project-collaboration)/i",
   "/project-collaboration/i",
+  "/phase5\\.test\\.ts$/i",
 ]) {
   assert.ok(
     gateSource.includes(requiredRegistryGuard),
     `missing feature-registry path guard: ${requiredRegistryGuard}`,
+  );
+}
+
+assert.equal(
+  gateSource.includes('process.env.DATABASE_URL ?? "postgresql://ora_gate'),
+  false,
+  "the release gate must never invent or forward an ambient database target",
+);
+for (const databaseGuard of [
+  "ORA_STABILITY_GATE_DATABASE_URL",
+  "/^ora_gate_disposable_[a-f0-9]{16}$/u",
+  'url.hostname !== "127.0.0.1"',
+  "requiresDatabase?: boolean",
+  "The gate never forwards ambient DATABASE_URL into mutating tests.",
+  'SKIP_DYNAMIC_PRERENDER: process.env.SKIP_DYNAMIC_PRERENDER ?? "1"',
+]) {
+  assert.ok(gateSource.includes(databaseGuard), `missing release database guard: ${databaseGuard}`);
+}
+const releaseDatabaseGroup = gateSource.match(
+  /const API_RELEASE_DATABASE = \[([\s\S]*?)\]\.join\(" "\);/u,
+)?.[1];
+assert.ok(releaseDatabaseGroup, "missing isolated release database group");
+for (const databaseTest of [
+  "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
+  "src/routes/__tests__/ora-memory-consolidation.test.ts",
+]) {
+  assert.ok(
+    releaseDatabaseGroup.includes(databaseTest),
+    `missing database-only test: ${databaseTest}`,
+  );
+  assert.equal(
+    gateSource.slice(0, gateSource.indexOf("const API_RELEASE_DATABASE")).includes(databaseTest),
+    false,
+    `database-only test leaked into an unconditional release group: ${databaseTest}`,
   );
 }
 

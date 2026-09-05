@@ -14,6 +14,7 @@ interface GateCheck {
   profiles: Array<"fast" | "website" | "mobile" | "release">;
   timeoutMs?: number;
   critical?: boolean;
+  requiresDatabase?: boolean;
   why: string;
 }
 
@@ -213,6 +214,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /image/i,
       /generated-image/i,
       /imageMeta/i,
+      /phase5\.test\.ts$/i,
       /public-ai\/ora-(kill-switches|spend-cap)\.ts$/i,
     ],
     manualWebsite:
@@ -638,7 +640,6 @@ const API_RELEASE_EXTENDED = [
   "src/routes/public-ai/__tests__/search-video-cards.test.ts",
   "src/routes/public-ai/__tests__/search-wants-videos.test.ts",
   "src/routes/__tests__/ora-image-edit.test.ts",
-  "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
   "src/routes/public-ai/__tests__/realtime-metering.test.ts",
 ].join(" ");
 
@@ -650,7 +651,6 @@ const API_ACCOUNT_BILLING_HISTORY = [
   "src/routes/__tests__/ora-account-consistency.test.ts",
   "src/routes/__tests__/ora-assets.test.ts",
   "src/routes/__tests__/ora-conversation-persistence.test.ts",
-  "src/routes/__tests__/ora-memory-consolidation.test.ts",
   "src/routes/__tests__/ora-memory-enhancements.test.ts",
   "src/routes/__tests__/ora-memory-relevance.test.ts",
   "src/routes/__tests__/ora-memory-upgrades.test.ts",
@@ -658,6 +658,11 @@ const API_ACCOUNT_BILLING_HISTORY = [
   "src/routes/__tests__/ora-support-surface-isolation.test.ts",
   "src/routes/__tests__/ora-tiers-meta.test.ts",
   "src/routes/__tests__/brand-kit-api.test.ts",
+].join(" ");
+
+const API_RELEASE_DATABASE = [
+  "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
+  "src/routes/__tests__/ora-memory-consolidation.test.ts",
 ].join(" ");
 
 const WEB_REALTIME = [
@@ -865,6 +870,17 @@ const CHECKS: GateCheck[] = [
     why: "Protects plan sync, billing public metadata, conversation persistence, account consistency, assets, and memory.",
   },
   {
+    id: "api-release-database",
+    title: "API disposable-database release tests",
+    area: "api/release",
+    command: `pnpm --filter @workspace/api-server exec vitest run ${API_RELEASE_DATABASE} --no-file-parallelism`,
+    profiles: ["release"],
+    timeoutMs: 300_000,
+    critical: true,
+    requiresDatabase: true,
+    why: "Runs mutating realtime-usage and memory-consolidation checks only against an explicitly named disposable loopback database.",
+  },
+  {
     id: "web-release-extended",
     title: "Website extended Ora UI/file/source/history tests",
     area: "web/release",
@@ -1046,27 +1062,61 @@ function parseProfile(value: string | undefined): Profile {
   throw new Error(`Invalid --profile. Expected fast, website, mobile, or release; got ${value}`);
 }
 
+function resolveGateDatabaseUrl(): string | undefined {
+  const value = process.env.ORA_STABILITY_GATE_DATABASE_URL;
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const database = decodeURIComponent(url.pathname.slice(1));
+    const port = url.port ? Number(url.port) : 5432;
+    if (
+      !["postgres:", "postgresql:"].includes(url.protocol) ||
+      url.hostname !== "127.0.0.1" ||
+      !/^ora_gate_disposable_[a-f0-9]{16}$/u.test(database) ||
+      url.search !== "" ||
+      url.hash !== "" ||
+      !Number.isInteger(port) ||
+      port < 1 ||
+      port > 65535
+    ) {
+      throw new Error("unsafe target");
+    }
+    return value;
+  } catch {
+    throw new Error(
+      "ORA_STABILITY_GATE_DATABASE_URL must target 127.0.0.1 and an ora_gate_disposable_<16 hex> database",
+    );
+  }
+}
+
 function runShell(
   command: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  options: { databaseUrl?: string } = {},
 ): {
   exitCode: number | null;
   output: string;
   durationMs: number;
 } {
   const start = Date.now();
+  const {
+    DATABASE_URL: _ambientDatabaseUrl,
+    ORA_STABILITY_GATE_DATABASE_URL: _gateDatabaseUrl,
+    ...inheritedEnvironment
+  } = process.env;
   const result = spawnSync(command, {
     cwd: repoRoot,
     shell: true,
     encoding: "utf-8",
     timeout: timeoutMs,
     env: {
-      ...process.env,
+      ...inheritedEnvironment,
       NODE_ENV: process.env.NODE_ENV ?? "test",
       NODE_OPTIONS: process.env.NODE_OPTIONS ?? DEFAULT_NODE_OPTIONS,
       CI: process.env.CI ?? "1",
-      DATABASE_URL:
-        process.env.DATABASE_URL ?? "postgresql://ora_gate:ora_gate@127.0.0.1:5432/ora_gate",
+      ...(options.databaseUrl
+        ? { DATABASE_URL: options.databaseUrl }
+        : { SKIP_DYNAMIC_PRERENDER: process.env.SKIP_DYNAMIC_PRERENDER ?? "1" }),
       ORA_SESSION_SECRET:
         process.env.ORA_SESSION_SECRET ?? "ora-stability-gate-local-test-session-secret",
       AI_INTEGRATIONS_OPENAI_BASE_URL:
@@ -1171,7 +1221,26 @@ function loadCheckpoint(input: {
 function commandResult(check: GateCheck): CheckResult {
   console.log(`\n[ora-gate] ${check.id}: ${check.title}`);
   console.log(`[ora-gate] ${check.command}`);
-  const { exitCode, output, durationMs } = runShell(check.command, check.timeoutMs);
+  const databaseUrl = resolveGateDatabaseUrl();
+  if (check.requiresDatabase && !databaseUrl) {
+    const output =
+      "Skipped: ORA_STABILITY_GATE_DATABASE_URL was not supplied. The gate never forwards ambient DATABASE_URL into mutating tests.";
+    console.log(`[ora-gate] WARN ${check.id} (explicit disposable database unavailable)`);
+    return {
+      id: check.id,
+      title: check.title,
+      area: check.area,
+      status: "warn",
+      durationMs: 0,
+      command: check.command,
+      exitCode: null,
+      output,
+      why: check.why,
+    };
+  }
+  const { exitCode, output, durationMs } = runShell(check.command, check.timeoutMs, {
+    databaseUrl: check.requiresDatabase ? databaseUrl : undefined,
+  });
   const status: GateStatus = exitCode === 0 ? "pass" : "fail";
   console.log(`[ora-gate] ${status.toUpperCase()} ${check.id} (${Math.round(durationMs / 1000)}s)`);
   if (status === "fail" && output) {
