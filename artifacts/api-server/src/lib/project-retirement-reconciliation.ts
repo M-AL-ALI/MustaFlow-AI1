@@ -51,9 +51,30 @@ export function readProjectRetirementReconciliationMetadata(progress: unknown) {
   return { generation: PROJECT_RETIREMENT_MAX_RECONCILIATIONS, configurationRecoveryUsed: true };
 }
 
+function readStoredProjectRetirementReconciliationMetadata(
+  operation: Pick<
+    ProjectRetirementOperation,
+    "id" | "projectId" | "state" | "completedAt" | "failureCode" | "progress"
+  >,
+) {
+  if (
+    operation.progress == null &&
+    operation.state === "failed" &&
+    operation.completedAt != null &&
+    operation.failureCode === "project_retirement_operation_unavailable" &&
+    operation.id === `project-retirement:legacy:v1:${operation.projectId}`
+  ) {
+    return { generation: 0, configurationRecoveryUsed: false };
+  }
+  return readProjectRetirementReconciliationMetadata(operation.progress);
+}
+
 export function decideStoredProjectRetirementReconciliation(
   operation:
-    | Pick<ProjectRetirementOperation, "state" | "completedAt" | "failureCode" | "progress">
+    | Pick<
+        ProjectRetirementOperation,
+        "id" | "projectId" | "state" | "completedAt" | "failureCode" | "progress"
+      >
     | null
     | undefined,
   authority: ReconciliationAuthority = {},
@@ -64,7 +85,7 @@ export function decideStoredProjectRetirementReconciliation(
     completedAt: operation.completedAt,
     failureCode: operation.failureCode,
     progress: operation.progress,
-    ...readProjectRetirementReconciliationMetadata(operation.progress),
+    ...readStoredProjectRetirementReconciliationMetadata(operation),
     allowLegacyAdminReconciliation: authority.allowLegacyAdminReconciliation === true,
     allowConfigurationRecovery: authority.allowConfigurationRecovery === true,
     currentCloudflareCachePurgeConfigured:
@@ -131,8 +152,8 @@ export async function requestProjectRetirementEvidenceReconciliation(input: {
       if (purge && purge.state !== "scheduled")
         return { code: "project_purge_in_progress" as const };
     }
-    const metadata = readProjectRetirementReconciliationMetadata(latest.progress);
-    const previousRepair = latest.progress.reconciliation?.verificationRepair;
+    const metadata = readStoredProjectRetirementReconciliationMetadata(latest);
+    const previousRepair = latest.progress?.reconciliation?.verificationRepair;
     const operationId = crypto.randomUUID();
     let progress = initialProjectRetirementProgress();
     progress.reconciliation = {

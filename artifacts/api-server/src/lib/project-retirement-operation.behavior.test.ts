@@ -367,6 +367,41 @@ describe("bounded legacy zero-volume configuration recovery", () => {
     ).toEqual({ code: "project_retirement_not_found" });
     expect(mocks.insertCalls).toEqual([]);
   });
+
+  it("converts the exact null-progress migration sentinel into a bounded child operation", async () => {
+    mocks.selectResults.push(
+      [{ id: 77 }],
+      [
+        {
+          id: "project-retirement:legacy:v1:77",
+          projectId: 77,
+          state: "failed",
+          completedAt: decisionInput.completedAt,
+          failureCode: "project_retirement_operation_unavailable",
+          progress: null as never,
+        },
+      ],
+    );
+
+    const result = await requestProjectRetirementReconciliation({
+      projectId: 77,
+      requestedBy: "platform-owner",
+      allowLegacyAdminReconciliation: true,
+      allowConfigurationRecovery: true,
+    });
+
+    expect(result).toMatchObject({ projectId: 77, state: "accepted" });
+    expect(mocks.insertCalls).toHaveLength(1);
+    expect(
+      (mocks.insertCalls[0]!.values.progress as ProjectRetirementProgress).reconciliation,
+    ).toEqual({
+      generation: 1,
+      parentOperationId: "project-retirement:legacy:v1:77",
+      requestedBy: "platform-owner",
+      reason: "retryable_terminal",
+      configurationRecoveryUsed: false,
+    });
+  });
 });
 
 function completionProgress(): ProjectRetirementProgress {
