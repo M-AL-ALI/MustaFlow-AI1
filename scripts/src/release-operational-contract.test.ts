@@ -112,6 +112,9 @@ const releaseDatabaseGroup = gateSource.match(
 )?.[1];
 assert.ok(releaseDatabaseGroup, "missing isolated release database group");
 for (const databaseTest of [
+  "src/routes/__tests__/ora-image-edit.test.ts",
+  "src/routes/__tests__/ora-assets.test.ts",
+  "src/routes/__tests__/ora-conversation-persistence.test.ts",
   "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
   "src/routes/__tests__/ora-memory-consolidation.test.ts",
 ]) {

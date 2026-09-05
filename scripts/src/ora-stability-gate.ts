@@ -641,7 +641,6 @@ const API_RELEASE_EXTENDED = [
   "src/routes/public-ai/__tests__/search-media.test.ts",
   "src/routes/public-ai/__tests__/search-video-cards.test.ts",
   "src/routes/public-ai/__tests__/search-wants-videos.test.ts",
-  "src/routes/__tests__/ora-image-edit.test.ts",
   "src/routes/public-ai/__tests__/realtime-metering.test.ts",
 ].join(" ");
 
@@ -651,8 +650,6 @@ const API_ACCOUNT_BILLING_HISTORY = [
   "src/routes/__tests__/billing-ora-plans-public.test.ts",
   "src/routes/__tests__/billing-subscription-checkout.test.ts",
   "src/routes/__tests__/ora-account-consistency.test.ts",
-  "src/routes/__tests__/ora-assets.test.ts",
-  "src/routes/__tests__/ora-conversation-persistence.test.ts",
   "src/routes/__tests__/ora-memory-enhancements.test.ts",
   "src/routes/__tests__/ora-memory-relevance.test.ts",
   "src/routes/__tests__/ora-memory-upgrades.test.ts",
@@ -663,6 +660,9 @@ const API_ACCOUNT_BILLING_HISTORY = [
 ].join(" ");
 
 const API_RELEASE_DATABASE = [
+  "src/routes/__tests__/ora-image-edit.test.ts",
+  "src/routes/__tests__/ora-assets.test.ts",
+  "src/routes/__tests__/ora-conversation-persistence.test.ts",
   "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
   "src/routes/__tests__/ora-memory-consolidation.test.ts",
 ].join(" ");
