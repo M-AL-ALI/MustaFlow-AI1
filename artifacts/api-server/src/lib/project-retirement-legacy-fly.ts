@@ -450,7 +450,7 @@ export async function reconcileLegacyFlyRuntime(
   if (lease?.status !== 201) return retained("provider_observation_unavailable", true);
 
   let leaseNonce: string | null = null;
-  let expiresAt = 0;
+  let expiresAt: number;
   try {
     try {
       const leaseDocument = await readBoundedJson(lease);

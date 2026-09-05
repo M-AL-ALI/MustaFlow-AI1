@@ -1559,7 +1559,7 @@ describe.skipIf(!config)("final purge alias isolation with real PostgreSQL", () 
     const owner = "purge-pg:" + manifest!.epoch + ":ora-transcript-delete";
     const storageKey = "ora/account/" + manifest!.epoch + "/transcript-delete.webp";
     let assetId: number | null = null;
-    let oraAssetId: number | null = null;
+    let oraAssetId: number;
     let initialTicketId: number | null = null;
     let raceTicketId: number | null = null;
     try {

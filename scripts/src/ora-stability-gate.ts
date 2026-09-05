@@ -14,7 +14,7 @@ interface GateCheck {
   profiles: Array<"fast" | "website" | "mobile" | "release">;
   timeoutMs?: number;
   critical?: boolean;
-  requiresDatabase?: boolean;
+  databaseMode?: "import-only" | "required";
   why: string;
 }
 
@@ -70,6 +70,8 @@ const PROFILE_GROUPS: Record<Profile, Set<GateCheck["profiles"][number]>> = {
 
 const DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096";
 const DEFAULT_TIMEOUT_MS = 180_000;
+const IMPORT_ONLY_DATABASE_URL =
+  "postgresql://ora_gate_import_only:ora_gate_import_only@127.0.0.1:1/ora_gate_import_only";
 
 const ORA_FILE_HINTS = [
   /^artifacts\/api-server\/src\/(lib|routes)\/public-ai\//,
@@ -783,6 +785,7 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_PUBLIC_AI_CORE} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
+    databaseMode: "import-only",
     why: "Protects the routing brain, Ora identity, current date/time block, copied-report analysis, and response quality.",
   },
   {
@@ -792,6 +795,7 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_SEARCH} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
+    databaseMode: "import-only",
     why: "Protects live search, retry/fallback behavior, source links, news/current/sports routing, and no stale-current answers.",
   },
   {
@@ -801,6 +805,7 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_FILE_IMAGE} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
+    databaseMode: "import-only",
     why: "Protects image routing/quality, real file generation, PDF/Word/Excel/PPTX/CSV export, and chart/report workflows.",
   },
   {
@@ -810,6 +815,7 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_REALTIME} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
+    databaseMode: "import-only",
     why: "Protects voice-session minting, usage metering, time-budget rules, and server prompt wiring.",
   },
   {
@@ -857,6 +863,7 @@ const CHECKS: GateCheck[] = [
     profiles: ["release"],
     timeoutMs: 300_000,
     critical: true,
+    databaseMode: "import-only",
     why: "Adds broader route, memory, streaming, kill-switch, production-safety, and media-card coverage before release.",
   },
   {
@@ -867,6 +874,7 @@ const CHECKS: GateCheck[] = [
     profiles: ["release"],
     timeoutMs: 300_000,
     critical: true,
+    databaseMode: "import-only",
     why: "Protects plan sync, billing public metadata, conversation persistence, account consistency, assets, and memory.",
   },
   {
@@ -877,7 +885,7 @@ const CHECKS: GateCheck[] = [
     profiles: ["release"],
     timeoutMs: 300_000,
     critical: true,
-    requiresDatabase: true,
+    databaseMode: "required",
     why: "Runs mutating realtime-usage and memory-consolidation checks only against an explicitly named disposable loopback database.",
   },
   {
@@ -1221,8 +1229,9 @@ function loadCheckpoint(input: {
 function commandResult(check: GateCheck): CheckResult {
   console.log(`\n[ora-gate] ${check.id}: ${check.title}`);
   console.log(`[ora-gate] ${check.command}`);
-  const databaseUrl = resolveGateDatabaseUrl();
-  if (check.requiresDatabase && !databaseUrl) {
+  const configuredDatabaseUrl =
+    check.databaseMode === "required" ? resolveGateDatabaseUrl() : undefined;
+  if (check.databaseMode === "required" && !configuredDatabaseUrl) {
     const output =
       "Skipped: ORA_STABILITY_GATE_DATABASE_URL was not supplied. The gate never forwards ambient DATABASE_URL into mutating tests.";
     console.log(`[ora-gate] WARN ${check.id} (explicit disposable database unavailable)`);
@@ -1239,7 +1248,12 @@ function commandResult(check: GateCheck): CheckResult {
     };
   }
   const { exitCode, output, durationMs } = runShell(check.command, check.timeoutMs, {
-    databaseUrl: check.requiresDatabase ? databaseUrl : undefined,
+    databaseUrl:
+      check.databaseMode === "required"
+        ? configuredDatabaseUrl
+        : check.databaseMode === "import-only"
+          ? IMPORT_ONLY_DATABASE_URL
+          : undefined,
   });
   const status: GateStatus = exitCode === 0 ? "pass" : "fail";
   console.log(`[ora-gate] ${status.toUpperCase()} ${check.id} (${Math.round(durationMs / 1000)}s)`);

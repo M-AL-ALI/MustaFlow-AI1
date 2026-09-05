@@ -1644,7 +1644,7 @@ describe("project purge resource safety", () => {
       .find((line) => line.includes("const durableStorageKeyToken ="));
     expect(migration.match(/const durableStorageKeyToken =/gu)).toHaveLength(1);
     expect(migration.match(/\$\{durableStorageKeyToken\}/gu)).toHaveLength(2);
-    expect(tokenDefinition).toContain("\'\'");
+    expect(tokenDefinition).toContain("''");
     expect(tokenDefinition).toContain("[:space:]");
     expect(tokenDefinition).toContain("?#<>(){},;" + String.fromCharCode(96) + "]+");
     expect(migration).toContain("FROM candidate_keys candidate_key");

@@ -100,7 +100,8 @@ for (const databaseGuard of [
   "ORA_STABILITY_GATE_DATABASE_URL",
   "/^ora_gate_disposable_[a-f0-9]{16}$/u",
   'url.hostname !== "127.0.0.1"',
-  "requiresDatabase?: boolean",
+  'databaseMode?: "import-only" | "required"',
+  "127.0.0.1:1/ora_gate_import_only",
   "The gate never forwards ambient DATABASE_URL into mutating tests.",
   'SKIP_DYNAMIC_PRERENDER: process.env.SKIP_DYNAMIC_PRERENDER ?? "1"',
 ]) {

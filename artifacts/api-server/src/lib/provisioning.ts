@@ -3,8 +3,8 @@
  *
  * When a project is created with `builderMode = 'agentic'` the API kicks off
  * a background job that:
- *   1. Creates a Fly.io machine for the project (dev container).
- *   2. Provisions a Neon Postgres project and stores the connection string as
+ *   1. Creates the project's Cloudflare tenant runtime.
+ *   2. Provisions a Neon Postgres allocation and stores the connection string as
  *      the `DATABASE_URL` project secret.
  *   3. Stamps `containerId`, `neonProjectId`, and flips `provisioningStatus`
  *      to "ready" — only after BOTH pieces are persisted successfully.
@@ -15,7 +15,7 @@
  *
  * Strictness: a project is only marked "ready" when it has a real
  * `containerId` AND a real `neonProjectId` AND a stored DATABASE_URL secret.
- * Any other outcome (API error, missing FLY_API_TOKEN, missing NEON_API_KEY)
+ * Any other outcome (provider error or missing runtime/database configuration)
  * marks the project as "error" with a human-readable `provisioningError`,
  * so the workspace header surfaces a Retry instead of a false-positive
  * "ready" badge.
@@ -48,8 +48,6 @@ import { acquireProjectLifecycleSession, registerProjectWorkController } from ".
 import { ensureManualNeonAllocation } from "./manual-neon-allocation";
 import { mayStartNeonAllocation } from "./neon-allocation-intent";
 
-const NEON_API_BASE = "https://console.neon.tech/api/v2";
-
 // ── ETA: rolling average of past provisioning durations ───────────────────────
 // Kept in-memory; resets on server restart (initialised to 60 s as a baseline
 // so the first project gets a reasonable estimate before real data accumulates).
@@ -67,113 +65,10 @@ export function getRollingAverageMs(): number {
   return rollingAverageMs;
 }
 
-// ── Plain-English error message mapper ────────────────────────────────────────
-// Maps raw API error text / HTTP status codes to user-facing messages.
-
-function humanizeError(raw: string | undefined, provider: "fly" | "neon"): string {
-  if (!raw) {
-    return provider === "fly"
-      ? "Could not reach Fly.io. Check your FLY_API_TOKEN and try again."
-      : "Could not reach Neon. Check your NEON_API_KEY and try again.";
-  }
-  const lower = raw.toLowerCase();
-
-  if (
-    lower.includes("401") ||
-    lower.includes("403") ||
-    lower.includes("unauthorized") ||
-    lower.includes("forbidden")
-  ) {
-    return provider === "fly"
-      ? "Fly.io rejected our credentials — your FLY_API_TOKEN may be invalid or expired."
-      : "Neon rejected our credentials — your NEON_API_KEY may be invalid or expired.";
-  }
-  if (
-    lower.includes("429") ||
-    lower.includes("rate limit") ||
-    lower.includes("too many requests")
-  ) {
-    return provider === "fly"
-      ? "Fly.io rate limit hit — please wait a moment and retry."
-      : "Neon rate limit hit — please wait a moment and retry.";
-  }
-  if (
-    lower.includes("quota") ||
-    lower.includes("limit exceeded") ||
-    lower.includes("project limit")
-  ) {
-    return "Account quota reached — you may need to delete unused projects or upgrade your plan.";
-  }
-  if (lower.includes("timeout") || lower.includes("timed out")) {
-    return provider === "fly"
-      ? "Fly.io timed out while creating the machine. The service may be under heavy load — please retry."
-      : "Neon timed out while creating the database. Please retry.";
-  }
-  if (
-    lower.includes("500") ||
-    lower.includes("502") ||
-    lower.includes("503") ||
-    lower.includes("internal server error")
-  ) {
-    return provider === "fly"
-      ? "Fly.io is temporarily unavailable. Please retry in a few minutes."
-      : "Neon is temporarily unavailable. Please retry in a few minutes.";
-  }
-  if (lower.includes("org_id") || lower.includes("organization")) {
-    return "Neon organization configuration error — check your NEON_ORG_ID setting.";
-  }
-  if (lower.includes("network") || lower.includes("econnrefused") || lower.includes("enotfound")) {
-    return provider === "fly"
-      ? "Could not reach Fly.io — check your network configuration."
-      : "Could not reach Neon — check your network configuration.";
-  }
-  // Fall back to a sanitized excerpt of the raw error
-  const excerpt = raw.slice(0, 120).replace(/\n/g, " ").trim();
-  return provider === "fly" ? `Fly.io error: ${excerpt}` : `Neon error: ${excerpt}`;
-}
-
 function humanizeTenantRuntimeError(raw: string | undefined): string {
   if (!raw) return "Could not reach the Cloudflare runtime. Please try again.";
   const excerpt = raw.slice(0, 120).replace(/\n/g, " ").trim();
   return `Cloudflare runtime error: ${excerpt}`;
-}
-
-/**
- * Cached Neon `org_id`. Org-scoped Neon API keys require `org_id` in the
- * project-create body or the request fails with HTTP 400 `org_id is required`.
- * Personal API keys ignore it. We prefer the explicit `NEON_ORG_ID` env var;
- * otherwise we auto-detect via /users/me/organizations the first time we need
- * it. A null cached value (after a resolved lookup) means "personal key, no
- * org needed" and we won't keep re-checking.
- */
-let cachedNeonOrgId: string | null | undefined;
-
-async function resolveNeonOrgId(apiKey: string): Promise<string | null> {
-  if (cachedNeonOrgId !== undefined) return cachedNeonOrgId;
-  const envOrgId = process.env.NEON_ORG_ID?.trim();
-  if (envOrgId) {
-    cachedNeonOrgId = envOrgId;
-    return cachedNeonOrgId;
-  }
-  try {
-    const res = await fetch(`${NEON_API_BASE}/users/me/organizations`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (res.status === 403 || res.status === 404) {
-      cachedNeonOrgId = null;
-      return null;
-    }
-    if (!res.ok) {
-      logger.warn({ status: res.status }, "Neon org_id lookup returned non-OK status; not caching");
-      return null;
-    }
-    const data = (await res.json()) as { organizations?: Array<{ id: string }> };
-    cachedNeonOrgId = data.organizations?.[0]?.id ?? null;
-    return cachedNeonOrgId;
-  } catch (err) {
-    logger.warn({ err }, "Neon org_id auto-detection failed; not caching");
-    return null;
-  }
 }
 
 /**
@@ -190,54 +85,6 @@ export function cancelLocalProjectProvisioning(projectId: number): boolean {
   controller.abort();
   provisioningControllers.delete(projectId);
   return true;
-}
-
-/**
- * Fetch the connection URI for an existing Neon project. Used during retry
- * when we already have a `neonProjectId` but the DATABASE_URL secret was
- * never persisted (e.g. crash between Neon create + secret upsert).
- */
-async function fetchNeonConnectionUri(neonProjectId: string): Promise<string | null> {
-  const apiKey = process.env.NEON_API_KEY;
-  if (!apiKey) return null;
-  try {
-    const projRes = await fetch(`${NEON_API_BASE}/projects/${neonProjectId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (!projRes.ok) return null;
-    const projData = (await projRes.json()) as {
-      project?: { default_branch_id?: string; default_endpoint_settings?: unknown };
-      branch?: { id?: string };
-    };
-    const branchId = projData.project?.default_branch_id ?? projData.branch?.id;
-    if (!branchId) return null;
-
-    const dbsRes = await fetch(
-      `${NEON_API_BASE}/projects/${neonProjectId}/branches/${branchId}/databases`,
-      { headers: { Authorization: `Bearer ${apiKey}` } },
-    );
-    const rolesRes = await fetch(
-      `${NEON_API_BASE}/projects/${neonProjectId}/branches/${branchId}/roles`,
-      { headers: { Authorization: `Bearer ${apiKey}` } },
-    );
-    if (!dbsRes.ok || !rolesRes.ok) return null;
-    const dbsData = (await dbsRes.json()) as { databases?: Array<{ name: string }> };
-    const rolesData = (await rolesRes.json()) as { roles?: Array<{ name: string }> };
-    const dbName = dbsData.databases?.[0]?.name;
-    const roleName = rolesData.roles?.[0]?.name;
-    if (!dbName || !roleName) return null;
-
-    const uriRes = await fetch(
-      `${NEON_API_BASE}/projects/${neonProjectId}/connection_uri?database_name=${encodeURIComponent(dbName)}&role_name=${encodeURIComponent(roleName)}`,
-      { headers: { Authorization: `Bearer ${apiKey}` } },
-    );
-    if (!uriRes.ok) return null;
-    const uriData = (await uriRes.json()) as { uri?: string };
-    return uriData.uri ?? null;
-  } catch (err) {
-    logger.warn({ err, neonProjectId }, "Neon connection-uri fetch failed");
-    return null;
-  }
 }
 
 /** Upsert the DATABASE_URL secret for a project. */
