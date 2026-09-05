@@ -205,7 +205,8 @@ export function decideProjectRetirementReconciliation(input: {
     if (
       input.state === "failed" &&
       input.generation === 3 &&
-      input.failureCode === "project_retirement_legacy_runtime_absence_unverified" &&
+      (input.failureCode === "project_retirement_legacy_runtime_absence_unverified" ||
+        input.failureCode === "project_retirement_legacy_runtime_retained") &&
       input.allowLegacyAdminReconciliation === true &&
       input.allowConfigurationRecovery === true &&
       input.currentCloudflareCachePurgeConfigured === true &&
