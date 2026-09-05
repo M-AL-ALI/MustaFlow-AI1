@@ -10,6 +10,7 @@ import {
 } from "@workspace/api-client-react";
 import type { Project } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { authFetch } from "@/lib/api-fetch";
 import {
   describePurgeDueAt,
   describePurgeState,
@@ -20,7 +21,209 @@ import {
 
 const RECOVERY_DAYS = 30;
 
-type TrashedProject = Project & PurgeableTrashedProject;
+type TrashedProject = Project &
+  PurgeableTrashedProject & {
+    restoreBlockedCode?: string | null;
+    retirementOperationId?: string | null;
+    reconciliationEligible?: boolean;
+    reconciliationBlockedCode?: string | null;
+  };
+
+type RetirementRecoveryStatus = {
+  operationId: string;
+  state: string;
+  completedAt: string | null;
+  reconciliationEligible: boolean;
+  reconciliationBlockedCode: string | null;
+  completionEvidenceCurrent: boolean;
+};
+
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function cleanupRecoveryMessage(code: unknown): string {
+  switch (code) {
+    case "project_retirement_reconciliation_limit_reached":
+      return "Cleanup has reached its retry limit. Contact support with the cleanup reference below.";
+    case "project_retirement_provider_configuration_unavailable":
+      return "Cleanup is waiting for platform configuration. Contact support, then check status.";
+    case "project_retirement_worker_unavailable":
+      return "Cleanup verification is temporarily unavailable. Check status and try again shortly.";
+    case "project_retirement_retry_not_allowed":
+    case "project_retirement_not_found":
+      return "Cleanup needs support review before restoration. Contact support with this project and its cleanup reference.";
+    case "project_purge_in_progress":
+      return "Permanent deletion has started. This project can no longer be restored.";
+    default:
+      return "This project's earlier cleanup needs verification before it can be restored.";
+  }
+}
+
+function ProjectRestoreRecoveryControl({
+  project,
+  onStateRefresh,
+  onVerified,
+}: {
+  project: TrashedProject;
+  onStateRefresh: () => Promise<void>;
+  onVerified: () => void;
+}) {
+  const [status, setStatus] = useState<RetirementRecoveryStatus | null>(null);
+  const [blockedCode, setBlockedCode] = useState(project.reconciliationBlockedCode ?? null);
+  const [message, setMessage] = useState(() => cleanupRecoveryMessage(blockedCode));
+  const [busy, setBusy] = useState(false);
+  const actionInFlight = useRef(false);
+  const polls = useRef(0);
+  const eligible =
+    !blockedCode && (status?.reconciliationEligible ?? project.reconciliationEligible) === true;
+  const operationId = status?.operationId ?? project.retirementOperationId;
+  const isPending =
+    status &&
+    (status.state === "accepted" ||
+      status.state === "running" ||
+      (status.state === "failed" && status.completedAt === null));
+
+  const readStatus = useCallback(async () => {
+    const response = await authFetch(`/api/projects/${project.id}/retirement`);
+    const body = record(await response.json());
+    if (
+      !response.ok ||
+      body.projectId !== project.id ||
+      typeof body.operationId !== "string" ||
+      body.operationId.length > 200 ||
+      !["accepted", "running", "failed", "completed", "canceled"].includes(String(body.state)) ||
+      typeof body.reconciliationEligible !== "boolean"
+    ) {
+      throw new Error("cleanup_status_unavailable");
+    }
+    const next: RetirementRecoveryStatus = {
+      operationId: body.operationId,
+      state: String(body.state),
+      completedAt: typeof body.completedAt === "string" ? body.completedAt : null,
+      reconciliationEligible: body.reconciliationEligible,
+      reconciliationBlockedCode:
+        typeof body.reconciliationBlockedCode === "string" ? body.reconciliationBlockedCode : null,
+      completionEvidenceCurrent: body.completionEvidenceCurrent === true,
+    };
+    setStatus(next);
+    setBlockedCode(next.reconciliationBlockedCode);
+    if (next.state === "completed" && next.completionEvidenceCurrent) {
+      setMessage("Cleanup is verified. Refreshing Trash...");
+      onVerified();
+      await onStateRefresh();
+    } else if (
+      next.state === "accepted" ||
+      next.state === "running" ||
+      (next.state === "failed" && next.completedAt === null)
+    ) {
+      setMessage(
+        "Cleanup verification is in progress. Restore will be available after verification finishes.",
+      );
+    } else {
+      setMessage(cleanupRecoveryMessage(next.reconciliationBlockedCode));
+    }
+  }, [project.id, onStateRefresh, onVerified]);
+
+  useEffect(() => {
+    if (!isPending || busy) return;
+    if (polls.current >= 30) {
+      setMessage(
+        "Cleanup is still pending. Automatic status checks paused; use Check status to continue.",
+      );
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      polls.current += 1;
+      void readStatus().catch(() =>
+        setMessage("Could not check cleanup. Use Check status to try again."),
+      );
+    }, 2_000);
+    return () => window.clearTimeout(timer);
+  }, [isPending, status, busy, readStatus]);
+
+  async function runAction(retry: boolean) {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
+    setBusy(true);
+    polls.current = 0;
+    try {
+      if (retry) {
+        const response = await authFetch(`/api/projects/${project.id}/retirement/retry`, {
+          method: "POST",
+        });
+        const body = record(await response.json());
+        const recorded =
+          body.projectId === project.id &&
+          body.state === "accepted" &&
+          typeof body.operationId === "string" &&
+          body.operationId.length <= 200 &&
+          ((response.status === 202 &&
+            body.code === "project_retirement_reconciliation_accepted") ||
+            (response.status === 503 && body.code === "project_retirement_cleanup_pending"));
+        if (!recorded) {
+          setBlockedCode(typeof body.code === "string" ? body.code : "unavailable");
+          setMessage(cleanupRecoveryMessage(body.code));
+          if (body.code === "project_retirement_not_terminal") await readStatus();
+          return;
+        }
+        setStatus({
+          operationId: body.operationId as string,
+          state: "accepted",
+          completedAt: null,
+          reconciliationEligible: false,
+          reconciliationBlockedCode: null,
+          completionEvidenceCurrent: false,
+        });
+        setBlockedCode(null);
+        setMessage("Cleanup verification was recorded. Checking its progress...");
+        await onStateRefresh();
+      }
+      await readStatus();
+    } catch {
+      setMessage("Could not check cleanup. Use Check status to try again.");
+    } finally {
+      actionInFlight.current = false;
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="mt-2 space-y-2 text-xs"
+      aria-label={`Cleanup recovery for project "${project.name}"`}
+    >
+      <p role="status">{message}</p>
+      {operationId && (
+        <p className="text-muted-foreground [overflow-wrap:anywhere]">
+          Cleanup reference: {operationId}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {eligible && !isPending && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void runAction(true)}
+            className="rounded-md border border-border px-3 py-1.5 disabled:opacity-50"
+          >
+            {busy ? "Verifying cleanup..." : "Verify cleanup"}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void runAction(false)}
+          className="rounded-md border border-border px-3 py-1.5 disabled:opacity-50"
+        >
+          Check status
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function readMonotonicNow(): number {
   return typeof performance === "undefined" ? 0 : performance.now();
@@ -37,6 +240,7 @@ export default function TrashPage() {
   const { toast } = useToast();
   const listQuery = useListTrashedProjects();
   const restoreMutation = useRestoreProject();
+  const [restoreDeniedIds, setRestoreDeniedIds] = useState<ReadonlySet<number>>(new Set());
   const [locallyPurgingProjectIds, setLocallyPurgingProjectIds] = useState<ReadonlySet<number>>(
     new Set(),
   );
@@ -86,12 +290,22 @@ export default function TrashPage() {
           });
           void refreshProjectLists();
         },
-        onError: () => {
+        onError: (error) => {
+          const code = record(record(error).data).code;
+          if (code === "project_retirement_cleanup_unverified") {
+            setRestoreDeniedIds((current) => new Set([...current, p.id]));
+          }
           toast({
             title: "Restore failed",
-            description: "This project could not be restored. Try again shortly.",
+            description:
+              code === "project_retirement_cleanup_unverified"
+                ? "Earlier cleanup needs verification. Use cleanup recovery on this project before restoring."
+                : code === "project_purge_in_progress"
+                  ? "Permanent deletion has started. This project can no longer be restored."
+                  : "This project could not be restored. Check its cleanup status and try again.",
             variant: "destructive",
           });
+          void refreshProjectLists();
         },
       },
     );
@@ -159,7 +373,12 @@ export default function TrashPage() {
             const isRestoring = restoreMutation.isPending && restoreMutation.variables?.id === p.id;
             const purgeInProgress =
               locallyPurgingProjectIds.has(p.id) || isPurgeInProgress(p.purgeState);
-            const restoreAllowed = p.restoreAllowed === true && !purgeInProgress;
+            const restoreAllowed =
+              p.restoreAllowed === true && !purgeInProgress && !restoreDeniedIds.has(p.id);
+            const showCleanupRecovery =
+              !restoreAllowed &&
+              !purgeInProgress &&
+              (!p.purgeState || p.purgeState === "scheduled");
             const purgeStatus = describePurgeState(p);
             return (
               <li
@@ -190,10 +409,19 @@ export default function TrashPage() {
                       {purgeStatus.message}
                     </p>
                   )}
-                  {!p.restoreAllowed && !purgeInProgress && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Restoration is unavailable for this project.
-                    </p>
+                  {showCleanupRecovery && (
+                    <ProjectRestoreRecoveryControl
+                      project={p}
+                      onStateRefresh={refreshProjectLists}
+                      onVerified={() =>
+                        setRestoreDeniedIds((current) => {
+                          if (!current.has(p.id)) return current;
+                          const next = new Set(current);
+                          next.delete(p.id);
+                          return next;
+                        })
+                      }
+                    />
                   )}
                 </div>
                 <div className="flex flex-col items-stretch gap-2 sm:items-end">

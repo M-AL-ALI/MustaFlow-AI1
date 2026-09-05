@@ -73,27 +73,119 @@ export async function sendEmail(opts: {
 
 export type EmailDeliveryStatus = "sent" | "skipped" | "failed";
 
-/**
- * Like sendEmail, but reports the delivery outcome so callers (e.g. support
- * ticket escalation) can persist an accurate emailStatus. Never throws.
- *   - "skipped" — RESEND_API_KEY is not configured.
- *   - "sent"    — the message was handed to Resend successfully.
- *   - "failed"  — Resend returned an error or threw.
- */
-export async function sendEmailWithStatus(opts: {
+export const EMAIL_DELIVERY_FAILURE_KINDS = [
+  "provider_unconfigured",
+  "provider_rate_limited",
+  "provider_quota_exceeded",
+  "provider_rejected",
+  "provider_transient",
+  "provider_idempotency_conflict",
+  "provider_request_in_progress",
+  "provider_timeout",
+  "provider_transport_error",
+  "provider_response_invalid",
+  "provider_failure_unclassified",
+] as const;
+
+export type EmailDeliveryReceipt = {
+  status: EmailDeliveryStatus;
+  /** Acceptance by Resend is not proof of delivery to the recipient's inbox. */
+  acceptance: "accepted" | "not_accepted" | "unknown";
+  providerMessageId: string | null;
+  failureKind: (typeof EMAIL_DELIVERY_FAILURE_KINDS)[number] | null;
+  retryable: boolean | null;
+  providerStatusCode: number | null;
+};
+
+type EmailDeliveryOptions = {
   to: string;
   subject: string;
   html: string;
   text?: string;
   signal?: AbortSignal;
   idempotencyKey?: string;
-}): Promise<EmailDeliveryStatus> {
+};
+
+function failedEmailReceipt(
+  failureKind: NonNullable<EmailDeliveryReceipt["failureKind"]>,
+  acceptance: "not_accepted" | "unknown",
+  retryable: boolean | null,
+  providerStatusCode: number | null = null,
+): EmailDeliveryReceipt {
+  return {
+    status: "failed",
+    acceptance,
+    providerMessageId: null,
+    failureKind,
+    retryable,
+    providerStatusCode,
+  };
+}
+
+/** Classify only documented codes/statuses; never persist raw provider messages. */
+function classifyEmailError(error: unknown): EmailDeliveryReceipt {
+  const facts =
+    error && typeof error === "object" && !Array.isArray(error)
+      ? (error as { name?: unknown; statusCode?: unknown })
+      : {};
+  const status =
+    typeof facts.statusCode === "number" &&
+    Number.isInteger(facts.statusCode) &&
+    facts.statusCode >= 400 &&
+    facts.statusCode <= 599
+      ? facts.statusCode
+      : null;
+  const name = typeof facts.name === "string" ? facts.name : "";
+  // A conflicting or in-flight key may already identify an accepted request.
+  if (name === "invalid_idempotent_request") {
+    return failedEmailReceipt("provider_idempotency_conflict", "unknown", false, status);
+  }
+  if (name === "concurrent_idempotent_requests" || name === "resource_locked") {
+    return failedEmailReceipt("provider_request_in_progress", "unknown", true, status);
+  }
+  if (["daily_quota_exceeded", "monthly_quota_exceeded"].includes(name)) {
+    return failedEmailReceipt("provider_quota_exceeded", "not_accepted", true, status);
+  }
+  if (status === 429 || name === "rate_limit_exceeded") {
+    return failedEmailReceipt("provider_rate_limited", "not_accepted", true, status);
+  }
+  if (status !== null && status >= 500) {
+    return failedEmailReceipt("provider_transient", "unknown", true, status);
+  }
+  if (status === 408) return failedEmailReceipt("provider_timeout", "unknown", true, status);
+  if (status !== null && status !== 409) {
+    return failedEmailReceipt("provider_rejected", "not_accepted", false, status);
+  }
+  // SDK 6.16 also maps fetch failures to application_error with no status.
+  // That does not establish whether the provider accepted the request.
+  return failedEmailReceipt("provider_failure_unclassified", "unknown", null, status);
+}
+
+/**
+ * Backward-compatible string API. "sent" requires a concrete acceptance ID;
+ * it does not mean that the message reached an external inbox.
+ */
+export async function sendEmailWithStatus(
+  opts: EmailDeliveryOptions,
+): Promise<EmailDeliveryStatus> {
+  return (await sendEmailWithReceipt(opts)).status;
+}
+
+/**
+ * One provider request, with the original payload and idempotency key.
+ * Callers own retry timing. Resend keys expire after 24 hours, so an old
+ * uncertain outcome must not be treated as proof that a resend is safe.
+ * https://resend.com/docs/dashboard/emails/idempotency-keys
+ * https://resend.com/docs/api-reference/errors
+ */
+export async function sendEmailWithReceipt(
+  opts: EmailDeliveryOptions,
+): Promise<EmailDeliveryReceipt> {
   if (!resendEnabled()) {
-    logger.debug(
-      { to: opts.to, subject: opts.subject },
-      "email: RESEND_API_KEY not configured; skipping",
-    );
-    return "skipped";
+    return {
+      ...failedEmailReceipt("provider_unconfigured", "not_accepted", false),
+      status: "skipped",
+    };
   }
   try {
     const from = resolveDefaultSender("SMTP_FROM");
@@ -105,7 +197,7 @@ export async function sendEmailWithStatus(opts: {
       ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
     };
-    const { error } = await client.emails.send(
+    const { data, error } = await client.emails.send(
       {
         from,
         to: opts.to,
@@ -115,18 +207,42 @@ export async function sendEmailWithStatus(opts: {
       },
       requestOptions,
     );
-    if (error) {
-      logger.warn(
-        { err: error, to: opts.to, subject: opts.subject },
-        "email: send failed (non-fatal)",
-      );
-      return "failed";
+    if (error !== null && error !== undefined) {
+      const receipt =
+        data != null
+          ? failedEmailReceipt("provider_response_invalid", "unknown", null)
+          : opts.signal?.aborted
+            ? failedEmailReceipt("provider_timeout", "unknown", true)
+            : classifyEmailError(error);
+      logger.warn(receipt, "email: provider acceptance not confirmed");
+      return receipt;
     }
-    logger.info({ to: opts.to, subject: opts.subject }, "email: sent");
-    return "sent";
-  } catch (err) {
-    logger.warn({ err, to: opts.to, subject: opts.subject }, "email: send failed (non-fatal)");
-    return "failed";
+    if (
+      !data ||
+      typeof data.id !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(data.id)
+    ) {
+      const receipt = failedEmailReceipt("provider_response_invalid", "unknown", null);
+      logger.warn(receipt, "email: provider acceptance ID missing or invalid");
+      return receipt;
+    }
+    logger.info({ providerMessageId: data.id }, "email: provider accepted");
+    return {
+      status: "sent",
+      acceptance: "accepted",
+      providerMessageId: data.id,
+      failureKind: null,
+      retryable: false,
+      providerStatusCode: null,
+    };
+  } catch {
+    const receipt = failedEmailReceipt(
+      opts.signal?.aborted ? "provider_timeout" : "provider_transport_error",
+      "unknown",
+      true,
+    );
+    logger.warn(receipt, "email: provider acceptance not confirmed");
+    return receipt;
   }
 }
 

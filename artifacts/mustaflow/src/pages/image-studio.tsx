@@ -296,7 +296,10 @@ export default function ImageStudioPage() {
   const [error, setError] = useState<string | null>(null);
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [loadingImages, setLoadingImages] = useState(true);
+  const [imagesLoadError, setImagesLoadError] = useState<string | null>(null);
   const [assets, setAssets] = useState<UnifiedAsset[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(true);
+  const [assetsLoadError, setAssetsLoadError] = useState<string | null>(null);
   const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
   const [usingAsset, setUsingAsset] = useState<{ assetId: number; label: string } | null>(null);
   const [useProjectId, setUseProjectId] = useState<number | null>(null);
@@ -306,12 +309,16 @@ export default function ImageStudioPage() {
     reservedBytes: number;
     limitBytes: number;
   }>();
+  const [loadingStorage, setLoadingStorage] = useState(true);
+  const [storageLoadError, setStorageLoadError] = useState<string | null>(null);
   const [storagePlans, setStoragePlans] = useState<StoragePlan[]>([]);
   const [storageBusy, setStorageBusy] = useState<string | null>(null);
   const [analysisUsage, setAnalysisUsage] = useState<{
     count: number;
     estimatedProviderCostMicros: number;
   }>();
+  const [loadingAnalysisUsage, setLoadingAnalysisUsage] = useState(true);
+  const [analysisUsageLoadError, setAnalysisUsageLoadError] = useState<string | null>(null);
   const [assetNotice, setAssetNotice] = useState<string | null>(null);
   const [assetBusy, setAssetBusy] = useState<number | null>(null);
   const [usageAsset, setUsageAsset] = useState<UnifiedAsset | null>(null);
@@ -341,26 +348,30 @@ export default function ImageStudioPage() {
   const totalCost = selectedQuality.cost * variationCount;
 
   const fetchImages = useCallback(async () => {
+    setLoadingImages(true);
+    setImagesLoadError(null);
     try {
       const res = await authFetch("/api/images?limit=40");
-      if (res.ok) {
-        const data = (await res.json()) as { images: GeneratedImage[] };
-        setImages(data.images);
-      }
+      if (!res.ok) throw new Error("Image library request failed");
+      const data = (await res.json()) as { images: GeneratedImage[] };
+      if (!Array.isArray(data.images)) throw new Error("Image library response unavailable");
+      setImages(data.images);
+    } catch {
+      setImagesLoadError("Generated images could not be loaded. Please try again.");
     } finally {
       setLoadingImages(false);
     }
   }, []);
 
-  const fetchAssets = useCallback(async () => {
-    const [assetResponse, storageResponse, analysisResponse] = await Promise.all([
-      authFetch("/api/assets?limit=100"),
-      authFetch("/api/assets/storage-plans"),
-      authFetch("/api/assets/analysis-usage"),
-    ]);
-    if (assetResponse.ok) {
-      const body = (await assetResponse.json()) as { assets?: UnifiedAsset[] };
-      const nextAssets = body.assets ?? [];
+  const fetchAssetLibrary = useCallback(async () => {
+    setLoadingAssets(true);
+    setAssetsLoadError(null);
+    try {
+      const response = await authFetch("/api/assets?limit=100");
+      if (!response.ok) throw new Error("Asset library request failed");
+      const body = (await response.json()) as { assets?: UnifiedAsset[] };
+      if (!Array.isArray(body.assets)) throw new Error("Asset library response unavailable");
+      const nextAssets = body.assets;
       setAssets(nextAssets);
       setAssetDrafts((current) =>
         Object.fromEntries(
@@ -378,22 +389,55 @@ export default function ImageStudioPage() {
           ]),
         ),
       );
+    } catch {
+      setAssetsLoadError("Your private asset library could not be loaded. Please try again.");
+    } finally {
+      setLoadingAssets(false);
     }
-    if (storageResponse.ok) {
-      const body = (await storageResponse.json()) as {
+  }, []);
+
+  const fetchStorage = useCallback(async () => {
+    setLoadingStorage(true);
+    setStorageLoadError(null);
+    try {
+      const response = await authFetch("/api/assets/storage-plans");
+      if (!response.ok) throw new Error("Storage allowance request failed");
+      const body = (await response.json()) as {
         quota?: { usedBytes: number; reservedBytes: number; limitBytes: number };
         plans?: StoragePlan[];
       };
+      if (!body.quota || !Array.isArray(body.plans))
+        throw new Error("Storage allowance response unavailable");
       setQuota(body.quota);
-      setStoragePlans(body.plans ?? []);
-    }
-    if (analysisResponse.ok) {
-      const body = (await analysisResponse.json()) as {
-        total?: { count: number; estimatedProviderCostMicros: number };
-      };
-      setAnalysisUsage(body.total);
+      setStoragePlans(body.plans);
+    } catch {
+      setStorageLoadError("Your storage allowance could not be loaded. Please try again.");
+    } finally {
+      setLoadingStorage(false);
     }
   }, []);
+
+  const fetchAnalysisUsage = useCallback(async () => {
+    setLoadingAnalysisUsage(true);
+    setAnalysisUsageLoadError(null);
+    try {
+      const response = await authFetch("/api/assets/analysis-usage");
+      if (!response.ok) throw new Error("Image analysis usage request failed");
+      const body = (await response.json()) as {
+        total?: { count: number; estimatedProviderCostMicros: number };
+      };
+      if (!body.total) throw new Error("Image analysis usage response unavailable");
+      setAnalysisUsage(body.total);
+    } catch {
+      setAnalysisUsageLoadError("Image analysis usage could not be loaded. Please try again.");
+    } finally {
+      setLoadingAnalysisUsage(false);
+    }
+  }, []);
+
+  const fetchAssets = useCallback(async () => {
+    await Promise.all([fetchAssetLibrary(), fetchStorage(), fetchAnalysisUsage()]);
+  }, [fetchAssetLibrary, fetchStorage, fetchAnalysisUsage]);
 
   useEffect(() => {
     void fetchImages();
@@ -639,10 +683,14 @@ export default function ImageStudioPage() {
         }),
       });
 
-      const body = (await res.json()) as GenerateResponse & { error?: string };
+      const body = (await res.json()) as GenerateResponse & { error?: string; code?: string };
 
       if (!res.ok) {
-        setError(body.error ?? "Generation failed");
+        setError(
+          body.code === "asset_storage_reconciliation_required"
+            ? "Your storage total is still being verified. Please try again after storage reconciliation finishes."
+            : (body.error ?? "Generation failed"),
+        );
         return;
       }
 
@@ -1082,26 +1130,43 @@ export default function ImageStudioPage() {
               <HardDrive className="h-3.5 w-3.5 text-primary" />
               <p className="text-xs font-medium text-foreground">Storage</p>
             </div>
+            {storageLoadError && (
+              <div role="alert" className="space-y-1 text-[10px] text-destructive">
+                <p>{storageLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => void fetchStorage()}
+                  disabled={loadingStorage}
+                  className="underline disabled:opacity-50"
+                >
+                  Retry storage
+                </button>
+              </div>
+            )}
             <p className="text-[10px] text-muted-foreground">
               {quota
-                ? `${formatAssetBytes(quota.usedBytes + quota.reservedBytes)} used of ${formatAssetBytes(quota.limitBytes)}`
-                : "Reading your private storage allowance…"}
+                ? `${formatAssetBytes(quota.usedBytes + quota.reservedBytes)} used of ${formatAssetBytes(quota.limitBytes)}${storageLoadError ? " (last read)" : ""}`
+                : loadingStorage
+                  ? "Reading your private storage allowance..."
+                  : null}
             </p>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full bg-primary transition-all"
-                style={{
-                  width: `${Math.min(100, quota ? ((quota.usedBytes + quota.reservedBytes) / quota.limitBytes) * 100 : 0)}%`,
-                }}
-              />
-            </div>
+            {quota && (
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{
+                    width: `${Math.min(100, quota ? ((quota.usedBytes + quota.reservedBytes) / quota.limitBytes) * 100 : 0)}%`,
+                  }}
+                />
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-1.5 pt-1">
               {storagePlans.map((plan) => (
                 <button
                   key={plan.sku}
                   type="button"
                   onClick={() => void startStorageCheckout(plan.sku)}
-                  disabled={storageBusy !== null}
+                  disabled={storageBusy !== null || loadingStorage || storageLoadError !== null}
                   className="flex items-center justify-between rounded-lg border border-border bg-muted px-2.5 py-2 text-[10px] hover:text-foreground disabled:opacity-50"
                 >
                   <span>Add {plan.label}</span>
@@ -1113,10 +1178,25 @@ export default function ImageStudioPage() {
             </div>
             <div className="rounded-lg border border-border bg-muted px-2.5 py-2 text-[10px] text-muted-foreground">
               <p className="font-medium text-foreground">Image analysis · separate meter</p>
+              {analysisUsageLoadError && (
+                <div role="alert" className="space-y-1 text-destructive">
+                  <p>{analysisUsageLoadError}</p>
+                  <button
+                    type="button"
+                    onClick={() => void fetchAnalysisUsage()}
+                    disabled={loadingAnalysisUsage}
+                    className="underline disabled:opacity-50"
+                  >
+                    Retry analysis usage
+                  </button>
+                </div>
+              )}
               <p>
                 {analysisUsage
-                  ? `${analysisUsage.count} analyses · $${(analysisUsage.estimatedProviderCostMicros / 1_000_000).toFixed(4)} estimated provider cost`
-                  : "No image analysis usage yet."}
+                  ? `${analysisUsage.count} analyses · $${(analysisUsage.estimatedProviderCostMicros / 1_000_000).toFixed(4)} estimated provider cost${analysisUsageLoadError ? " (last read)" : ""}`
+                  : loadingAnalysisUsage
+                    ? "Reading image analysis usage..."
+                    : null}
               </p>
               <p>No customer credit price is active while real usage is being measured.</p>
             </div>
@@ -1134,9 +1214,28 @@ export default function ImageStudioPage() {
                   deleted.
                 </p>
               </div>
-              <span className="text-[10px] text-muted-foreground">{assets.length} recent</span>
+              {!loadingAssets && !assetsLoadError && (
+                <span className="text-[10px] text-muted-foreground">{assets.length} recent</span>
+              )}
             </div>
-            {assets.length === 0 ? (
+            {assetsLoadError && (
+              <div role="alert" className="mb-3 space-y-2 text-xs text-destructive">
+                <p>{assetsLoadError}</p>
+                <button
+                  type="button"
+                  onClick={() => void fetchAssetLibrary()}
+                  disabled={loadingAssets}
+                  className="underline disabled:opacity-50"
+                >
+                  Retry asset library
+                </button>
+              </div>
+            )}
+            {loadingAssets && assets.length === 0 ? (
+              <p role="status" className="p-5 text-center text-xs text-muted-foreground">
+                Loading private asset library...
+              </p>
+            ) : assets.length === 0 && !assetsLoadError ? (
               <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
                 Upload an asset or ask Zero to observe a preview. It will appear here.
               </div>
@@ -1308,11 +1407,24 @@ export default function ImageStudioPage() {
           <div className="mb-3 border-t border-border pt-4">
             <h2 className="text-sm font-semibold">Generated images</h2>
           </div>
-          {loadingImages ? (
+          {imagesLoadError && (
+            <div role="alert" className="mb-3 space-y-2 text-xs text-destructive">
+              <p>{imagesLoadError}</p>
+              <button
+                type="button"
+                onClick={() => void fetchImages()}
+                disabled={loadingImages}
+                className="underline disabled:opacity-50"
+              >
+                Retry generated images
+              </button>
+            </div>
+          )}
+          {loadingImages && images.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
-          ) : images.length === 0 ? (
+          ) : images.length === 0 && !imagesLoadError ? (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
               <div className="p-5 rounded-2xl bg-muted">
                 <ImagePlus className="h-10 w-10 text-muted-foreground/40" />

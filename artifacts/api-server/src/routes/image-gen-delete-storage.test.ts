@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => {
     poolConnect: vi.fn(),
     poolQuery: vi.fn(),
     poolRelease: vi.fn(),
-    canonicalizeSurvivingAssetAliases: vi.fn(async () => undefined),
+    canonicalizeSurvivingAssetAliases:
+      vi.fn<typeof import("../lib/project-purge-resources").canonicalizeSurvivingAssetAliases>(),
     txUpdateReturning: vi.fn(async () => [{ id: 7 }]),
     txDeleteWhere: vi.fn(async () => []),
     deleteReadyAsset: vi.fn(),
@@ -74,6 +75,20 @@ vi.mock("../lib/asset-registry", () => {
 vi.mock("../lib/project-purge-resources", () => ({
   canonicalizeSurvivingAssetAliases: mocks.canonicalizeSurvivingAssetAliases,
 }));
+vi.mock("../lib/asset-r2", () => ({
+  deleteAssetObject: vi.fn(),
+  headAssetObject: vi.fn(),
+  openAsset: vi.fn(),
+  putAssetStream: vi.fn(),
+}));
+vi.mock("../lib/snapshot-storage", () => ({
+  deleteSnapshotBlob: vi.fn(),
+  snapshotBlobExists: vi.fn(),
+}));
+vi.mock("../lib/objectStorage", () => ({
+  ObjectNotFoundError: class extends Error {},
+  ObjectStorageService: class {},
+}));
 vi.mock("../lib/asset-storage-cleanup", () => ({
   deleteTrackedAssetStorageObjects: mocks.deleteTrackedAssetStorageObjects,
 }));
@@ -110,6 +125,7 @@ function appAsOwner() {
 describe("DELETE /images/:id physical storage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.canonicalizeSurvivingAssetAliases.mockReset().mockResolvedValue(undefined);
     mocks.select.mockImplementation((selection: Record<string, unknown>) => {
       const rows = Object.hasOwn(selection, "assetId")
         ? [{ id: 7, assetId: 71, projectId: null }]
@@ -217,6 +233,291 @@ describe("DELETE /images/:id physical storage", () => {
     );
     expect(mocks.poolQuery.mock.calls.at(-1)?.[0]).toBe("COMMIT");
   });
+
+  it.each([
+    { label: "foreign Nabu", userId: "foreign-owner", scope: "nabuflow", allowed: false },
+    { label: "same-owner Ora", userId: "owner", scope: "ora", allowed: false },
+    { label: "foreign Ora", userId: "foreign-owner", scope: "ora", allowed: false },
+    { label: "same-owner unknown-scope", userId: "owner", scope: null, allowed: false },
+    { label: "same-owner Nabu", userId: "owner", scope: "nabuflow", allowed: true },
+  ])(
+    "keeps $label NULL-project aliases within authority during source gallery deletion",
+    async ({ userId, scope, allowed }) => {
+      const actual = await vi.importActual<typeof import("../lib/project-purge-resources")>(
+        "../lib/project-purge-resources",
+      );
+      mocks.canonicalizeSurvivingAssetAliases.mockImplementationOnce(
+        actual.canonicalizeSurvivingAssetAliases,
+      );
+      mocks.deleteReadyAsset.mockRejectedValueOnce(
+        new mocks.AssetAdmissionError("asset_referenced", 409),
+      );
+      const alias = "/api/images/7/file";
+      const canonical = "/api/assets/71/content";
+      const images: Array<{
+        id: number;
+        asset_id: number;
+        project_id: number | null;
+        user_id: string;
+        product_scope: string | null;
+        file_url: string | null;
+        thumbnail_url: string | null;
+        deleted_at: string | null;
+        updated_at: string;
+      }> = [
+        {
+          id: 7,
+          asset_id: 71,
+          project_id: null,
+          user_id: "owner",
+          product_scope: "nabuflow",
+          file_url: alias,
+          thumbnail_url: null,
+          deleted_at: null,
+          updated_at: "before",
+        },
+        {
+          id: 8,
+          asset_id: 72,
+          project_id: null,
+          user_id: userId,
+          product_scope: scope,
+          file_url: alias,
+          thumbnail_url: null,
+          deleted_at: null,
+          updated_at: "before",
+        },
+        {
+          id: 9,
+          asset_id: 73,
+          project_id: null,
+          user_id: userId,
+          product_scope: scope,
+          file_url: null,
+          thumbnail_url: alias,
+          deleted_at: null,
+          updated_at: "before",
+        },
+        {
+          id: 10,
+          asset_id: 74,
+          project_id: null,
+          user_id: "foreign-owner",
+          product_scope: "ora",
+          file_url: alias,
+          thumbnail_url: alias,
+          deleted_at: "historical",
+          updated_at: "before",
+        },
+      ];
+      const before = images.map((row) => ({ ...row }));
+      let usageRemoved = false;
+      // Stateful SQL-contract substitute, not PostgreSQL or trigger validation.
+      // In particular, NULL IS DISTINCT FROM NULL is false unless the query
+      // explicitly admits NULL as "exclude no project".
+      mocks.poolQuery.mockImplementation(
+        async (statement: string, values: readonly unknown[] = []) => {
+          const sql = statement.replace(/\s+/gu, " ").trim();
+          if (sql.startsWith("SELECT id FROM assets")) {
+            return { rows: [{ id: 71 }], rowCount: 1 };
+          }
+          if (sql.startsWith("SELECT '/api/images/'")) {
+            return { rows: [{ alias }], rowCount: 1 };
+          }
+          if (sql.startsWith("SELECT product_scope, storage_backend FROM assets")) {
+            return {
+              rows: [{ product_scope: "nabuflow", storage_backend: "r2" }],
+              rowCount: 1,
+            };
+          }
+          if (sql.startsWith("WITH durable_reference_rows")) {
+            const includesAccountRows = sql.includes(
+              "($1::integer IS NULL OR image_row.project_id IS DISTINCT FROM $1)",
+            );
+            const exactAccountScope = sql.includes(
+              "OR reference_row.reference_product_scope IS DISTINCT FROM authority.product_scope",
+            );
+            const candidates = images.filter(
+              (row) =>
+                row.deleted_at === null &&
+                (row.project_id !== values[0] || (values[0] === null && includesAccountRows)) &&
+                [row.file_url, row.thumbnail_url].some((url) => url?.includes(alias)),
+            );
+            const forbidden = candidates.some(
+              (row) =>
+                (row.product_scope !== null && row.product_scope !== "nabuflow") ||
+                (row.project_id === null &&
+                  (row.user_id !== "owner" ||
+                    (exactAccountScope && row.product_scope !== "nabuflow"))),
+            );
+            return { rows: [{ allowed: !forbidden }], rowCount: 1 };
+          }
+          if (sql.startsWith("UPDATE generated_images SET file_url=")) {
+            const liveOnly = sql.includes("generated_images.deleted_at IS NULL");
+            const scopeGuard = sql.includes(
+              "generated_images.product_scope=authority.product_scope",
+            );
+            const ownerGuard = sql.includes("generated_images.user_id=authority.owner_user_id");
+            let rowCount = 0;
+            for (const row of images) {
+              if (
+                (values[0] !== null && row.project_id === values[0]) ||
+                (liveOnly && row.deleted_at !== null) ||
+                (scopeGuard && row.product_scope !== "nabuflow") ||
+                (ownerGuard && row.project_id === null && row.user_id !== "owner") ||
+                ![row.file_url, row.thumbnail_url].some((url) => url?.includes(alias))
+              ) {
+                continue;
+              }
+              row.file_url = row.file_url?.replaceAll(String(values[1]), String(values[2])) ?? null;
+              row.thumbnail_url =
+                row.thumbnail_url?.replaceAll(String(values[1]), String(values[2])) ?? null;
+              row.updated_at = "rewritten";
+              rowCount++;
+            }
+            return { rows: [], rowCount };
+          }
+          if (sql.startsWith("UPDATE generated_images SET deleted_at=")) {
+            images[0]!.deleted_at = "hidden";
+            images[0]!.updated_at = "hidden";
+            return { rows: [{ id: 7 }], rowCount: 1 };
+          }
+          if (sql.startsWith("DELETE FROM asset_usage")) usageRemoved = true;
+          return { rows: [], rowCount: 0 };
+        },
+      );
+
+      const response = await request(appAsOwner()).delete("/api/images/7");
+      const statements = mocks.poolQuery.mock.calls.map(([sql]) =>
+        String(sql).replace(/\s+/gu, " ").trim(),
+      );
+      expect(response.status).toBe(allowed ? 200 : 500);
+      expect(mocks.canonicalizeSurvivingAssetAliases).toHaveBeenCalledWith(
+        expect.any(Object),
+        null,
+        71,
+      );
+      expect(statements[0]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(statements[1]).toContain("owner_user_id=$2 AND state='ready'");
+      expect(statements[1]).toContain("FOR UPDATE");
+      expect(mocks.poolRelease).toHaveBeenCalledOnce();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(mocks.deleteTrackedAssetStorageObjects).not.toHaveBeenCalled();
+      expect(mocks.recordAssetDeleted).not.toHaveBeenCalled();
+      expect(usageRemoved).toBe(allowed);
+      if (allowed) {
+        expect(response.body).toEqual({
+          success: true,
+          storageCleanup: "retained-while-referenced",
+        });
+        expect(images[0]!.deleted_at).toBe("hidden");
+        expect(images[1]).toEqual({ ...before[1], file_url: canonical, updated_at: "rewritten" });
+        expect(images[2]).toEqual({
+          ...before[2],
+          thumbnail_url: canonical,
+          updated_at: "rewritten",
+        });
+        expect(images[3]).toEqual(before[3]);
+        expect(statements.at(-1)).toBe("COMMIT");
+        expect(
+          statements.findIndex((sql) => sql.startsWith("WITH durable_reference_rows")),
+        ).toBeLessThan(
+          statements.findIndex((sql) => sql.startsWith("UPDATE generated_images SET file_url=")),
+        );
+        expect(
+          statements.findIndex((sql) => sql.startsWith("UPDATE generated_images SET file_url=")),
+        ).toBeLessThan(
+          statements.findIndex((sql) => sql.startsWith("UPDATE generated_images SET deleted_at=")),
+        );
+      } else {
+        expect(images).toEqual(before);
+        expect(statements.some((sql) => /^(UPDATE|DELETE|INSERT) /u.test(sql))).toBe(false);
+        expect(statements.at(-1)).toBe("ROLLBACK");
+        expect(statements).not.toContain("COMMIT");
+      }
+    },
+  );
+
+  it.each(["transcript", "attachments", "subject"] as const)(
+    "keeps the Nabu source gallery row live when a historical Ora ticket retains its %s alias",
+    async (field) => {
+      const actual = await vi.importActual<typeof import("../lib/project-purge-resources")>(
+        "../lib/project-purge-resources",
+      );
+      mocks.canonicalizeSurvivingAssetAliases.mockImplementationOnce(
+        actual.canonicalizeSurvivingAssetAliases,
+      );
+      mocks.deleteReadyAsset.mockRejectedValueOnce(
+        new mocks.AssetAdmissionError("asset_referenced", 409),
+      );
+      const alias = "/api/images/7/file";
+      const ticket = {
+        id: 201,
+        user_id: "owner",
+        project_id: field === "attachments" ? 51 : null,
+        status: "resolved",
+        subject: field === "subject" ? alias : "Historical support request",
+        transcript: field === "transcript" ? [{ role: "user", content: alias }] : [],
+        attachments: field === "attachments" ? [{ url: alias }] : [],
+      };
+      const before = JSON.stringify(ticket);
+      let sourceHidden = false;
+      let usageRemoved = false;
+      // Real route/canonicalizer with a SQL-contract substitute, not a live DB.
+      mocks.poolQuery.mockImplementation(
+        async (statement: string, values: readonly unknown[] = []) => {
+          const sql = statement.replace(/\s+/gu, " ").trim();
+          if (sql.startsWith("SELECT id FROM assets")) {
+            return { rows: [{ id: 71 }], rowCount: 1 };
+          }
+          if (sql.startsWith("SELECT '/api/images/'")) {
+            return { rows: [{ alias }], rowCount: 1 };
+          }
+          if (sql.startsWith("SELECT product_scope, storage_backend FROM assets")) {
+            return { rows: [{ product_scope: "nabuflow", storage_backend: "r2" }], rowCount: 1 };
+          }
+          if (sql.startsWith("WITH durable_reference_rows")) {
+            const observesOraAccountTicket = sql.includes(
+              "SELECT NULL::integer, ticket_row.user_id, 'ora'::text, to_jsonb(ticket_row)::text",
+            );
+            const survives = values[0] === null || ticket.project_id !== values[0];
+            return {
+              rows: [{ allowed: !(observesOraAccountTicket && survives) }],
+              rowCount: 1,
+            };
+          }
+          if (sql.startsWith("UPDATE generated_images SET deleted_at=")) {
+            sourceHidden = true;
+            return { rows: [{ id: 7 }], rowCount: 1 };
+          }
+          if (sql.startsWith("DELETE FROM asset_usage")) usageRemoved = true;
+          return { rows: [], rowCount: 0 };
+        },
+      );
+
+      const response = await request(appAsOwner()).delete("/api/images/7");
+      const statements = mocks.poolQuery.mock.calls.map(([statement]) =>
+        String(statement).replace(/\s+/gu, " ").trim(),
+      );
+      expect(response.status).toBe(500);
+      expect(mocks.canonicalizeSurvivingAssetAliases).toHaveBeenCalledWith(
+        expect.any(Object),
+        null,
+        71,
+      );
+      expect(sourceHidden).toBe(false);
+      expect(usageRemoved).toBe(false);
+      expect(JSON.stringify(ticket)).toBe(before);
+      expect(statements[0]).toBe("BEGIN ISOLATION LEVEL READ COMMITTED");
+      expect(statements[1]).toContain("FOR UPDATE");
+      expect(statements.some((sql) => /^(UPDATE|DELETE|INSERT) /u.test(sql))).toBe(false);
+      expect(statements.at(-1)).toBe("ROLLBACK");
+      expect(statements).not.toContain("COMMIT");
+      expect(mocks.poolRelease).toHaveBeenCalledOnce();
+      expect(mocks.deleteTrackedAssetStorageObjects).not.toHaveBeenCalled();
+      expect(mocks.recordAssetDeleted).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["007", "+7", "7e0", "7.0"])(
     "denies non-canonical image id %s without reading storage",

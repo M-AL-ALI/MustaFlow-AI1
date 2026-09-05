@@ -29,15 +29,20 @@ function isMethodCall(call: ts.CallExpression, receiver: string, method: string)
   );
 }
 
-function expectTransactionalWrites(scope: ts.Node): ts.Block {
+function expectTransactionalWrites(scope: ts.Node, boundary: readonly [string, string]): ts.Block {
   const transactions = findNodes(scope, ts.isCallExpression).filter(
     (call) =>
-      isMethodCall(call, "db", "transaction") &&
+      ts.isIdentifier(call.expression) &&
+      call.expression.text === "withResponseProjectLifecycleTransaction" &&
       ts.isAwaitExpression(call.parent) &&
       call.parent.expression === call,
   );
   expect(transactions).toHaveLength(1);
-  const callback = transactions[0]!.arguments[0];
+  expect(transactions[0]!.arguments).toHaveLength(3);
+  expect(transactions[0]!.arguments.slice(0, 2).map((argument) => argument.getText())).toEqual(
+    boundary,
+  );
+  const callback = transactions[0]!.arguments[2];
   if (
     !callback ||
     !(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) ||
@@ -68,6 +73,42 @@ function expectTransactionalWrites(scope: ts.Node): ts.Block {
 }
 
 describe("unified brand kit asset contract", () => {
+  it("keeps place_upload's real materialization inside the active lifecycle callback", () => {
+    const start = agentLoop.indexOf('case "place_upload":');
+    expect(start).toBeGreaterThan(-1);
+    const placement = agentLoop.slice(start, agentLoop.indexOf('case "list_files":', start));
+    const ast = ts.createSourceFile(
+      "placement.ts",
+      "switch (tool) {\n" + placement + "\n}",
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const allCalls: ts.CallExpression[] = [];
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) allCalls.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(ast);
+    const lifecycle = allCalls.filter(
+      (call) =>
+        ts.isIdentifier(call.expression) && call.expression.text === "withActiveProjectLifecycle",
+    );
+    expect(lifecycle).toHaveLength(1);
+    expect(ts.isAwaitExpression(lifecycle[0]!.parent)).toBe(true);
+    expect(lifecycle[0]!.arguments[0]?.getText()).toBe("input.projectId");
+    const callback = lifecycle[0]!.arguments[1];
+    if (!callback || !ts.isArrowFunction(callback))
+      throw new Error("Missing active placement callback");
+    const materializations = findNodes(callback.body, ts.isCallExpression).filter(
+      (call) =>
+        ts.isIdentifier(call.expression) && call.expression.text === "materializeProjectAsset",
+    );
+    expect(materializations).toHaveLength(1);
+    expect(ts.isAwaitExpression(materializations[0]!.parent)).toBe(true);
+    expect(materializations[0]!.arguments).toHaveLength(1);
+    expect(placement).not.toContain("EXPLICIT_MATERIALIZE_ACTION");
+  });
+
   it("accepts only a ready image owned by the caller as the account logo", () => {
     expect(knowledgeRoute).toContain("eq(assetsTable.ownerUserId, userId)");
     expect(knowledgeRoute).toContain('eq(assetsTable.state, "ready")');
@@ -92,6 +133,6 @@ describe("unified brand kit asset contract", () => {
         ts.isFunctionDeclaration(node) && node.name?.text === "materializeProjectAsset",
     );
     if (!method?.body) throw new Error("Missing materializeProjectAsset implementation");
-    expectTransactionalWrites(method.body);
+    expectTransactionalWrites(method.body, ["lifecycleResponse", "input.projectId"]);
   });
 });

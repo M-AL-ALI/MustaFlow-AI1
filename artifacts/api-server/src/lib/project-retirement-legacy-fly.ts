@@ -1,6 +1,7 @@
 const LEGACY_FLY_MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 const LEGACY_FLY_VOLUME_ID = /^vol_[A-Za-z0-9_-]{1,128}$/u;
 const MAX_VOLUME_CATALOG_ROWS = 1_000;
+const MAX_MACHINE_CATALOG_ROWS = 1_000;
 const MAX_PROVIDER_BODY_BYTES = 1_048_576;
 const MAX_PROVIDER_NODES = 16_384;
 const MAX_PROVIDER_DEPTH = 32;
@@ -22,7 +23,11 @@ export type LegacyFlyRetirementRetentionReason =
 export type LegacyFlyRuntimeReconciliation =
   | {
       state: "verified_absent";
-      proof: "initial_get_404" | "delete_then_get_404";
+      proof:
+        | "initial_get_404"
+        | "delete_then_get_404"
+        | "initial_destroyed_tombstone_active_catalog_absent"
+        | "delete_then_destroyed_tombstone_active_catalog_absent";
     }
   | {
       state: "retained";
@@ -43,6 +48,7 @@ export type LegacyFlyRetirementRequest = (
         leaseNonce: string;
       }
     | { resource: "volumes"; method: "GET"; machineId?: never }
+    | { resource: "machines"; method: "GET"; machineId?: never }
     | {
         resource: "lease";
         machineId: string;
@@ -322,6 +328,36 @@ function hasUnknownVolumeRelationship(volume: Record<string, unknown>): boolean 
   return ambiguous;
 }
 
+/** Both fixed-app catalogs must be unpaginated, bounded, complete arrays. */
+async function readCompleteCatalog(response: Response, maxRows: number): Promise<unknown[]> {
+  if (response.status !== 200) throw new Error("Incomplete provider catalog");
+  for (const name of [
+    "link",
+    "content-range",
+    "x-next-page",
+    "x-next-cursor",
+    "next-cursor",
+    "x-pagination-next-page",
+    "x-page",
+    "x-per-page",
+    "x-page-size",
+    "x-has-more",
+  ]) {
+    if (response.headers.get(name) !== null) throw new Error("Paginated provider catalog");
+  }
+  const body = await readBoundedJson(response);
+  if (!Array.isArray(body) || body.length >= maxRows) {
+    throw new Error("Incomplete provider catalog");
+  }
+  for (const name of ["x-total-count", "x-total"]) {
+    const total = response.headers.get(name);
+    if (total !== null && (!/^\d+$/u.test(total) || Number(total) !== body.length)) {
+      throw new Error("Incomplete provider catalog");
+    }
+  }
+  return body;
+}
+
 async function observeUnmountedVolumeCatalog(
   machineId: string,
   request: LegacyFlyRetirementRequest,
@@ -333,28 +369,7 @@ async function observeUnmountedVolumeCatalog(
   const blocked = () => retained("storage_ownership_ambiguous", false);
   if (!observation || observation.status !== 200) return blocked();
   try {
-    for (const name of [
-      "link",
-      "content-range",
-      "x-next-page",
-      "x-next-cursor",
-      "next-cursor",
-      "x-pagination-next-page",
-      "x-page",
-      "x-per-page",
-      "x-page-size",
-      "x-has-more",
-    ]) {
-      if (observation.headers.get(name) !== null) return blocked();
-    }
-    const body = await readBoundedJson(observation);
-    if (!Array.isArray(body) || body.length >= MAX_VOLUME_CATALOG_ROWS) return blocked();
-    for (const name of ["x-total-count", "x-total"]) {
-      const total = observation.headers.get(name);
-      if (total !== null && (!/^\d+$/u.test(total) || Number(total) !== body.length)) {
-        return blocked();
-      }
-    }
+    const body = await readCompleteCatalog(observation, MAX_VOLUME_CATALOG_ROWS);
     const ids = new Set<string>();
     const volumes: Array<Record<string, unknown> & { id: string }> = [];
     for (const volume of body) {
@@ -401,6 +416,146 @@ function isSafeLeaseNonce(value: unknown): value is string {
   return typeof value === "string" && /^[\x21-\x7E]{1,256}$/u.test(value);
 }
 
+async function observeActiveMachineAbsence(
+  input: { machineId: string; projectId: number },
+  request: LegacyFlyRetirementRequest,
+): Promise<
+  | { state: "complete"; fingerprint: string }
+  | Extract<LegacyFlyRuntimeReconciliation, { state: "retained" }>
+> {
+  const blocked = () => retained("absence_unverified", true);
+  const observation = await requestSafely(request, { resource: "machines", method: "GET" });
+  if (!observation) return blocked();
+  try {
+    const body = await readCompleteCatalog(observation, MAX_MACHINE_CATALOG_ROWS);
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    const identities: Array<{ id: string; name: string; projectId: string | null }> = [];
+    for (const row of body) {
+      if (
+        !isRecord(row) ||
+        typeof row.id !== "string" ||
+        !LEGACY_FLY_MACHINE_ID.test(row.id) ||
+        typeof row.name !== "string" ||
+        !LEGACY_FLY_MACHINE_ID.test(row.name) ||
+        typeof row.state !== "string" ||
+        !LEGACY_FLY_MACHINE_ID.test(row.state) ||
+        row.state === "destroyed" ||
+        !isRecord(row.config) ||
+        ("env" in row.config && !isRecord(row.config.env)) ||
+        ids.has(row.id) ||
+        names.has(row.name) ||
+        row.id === input.machineId ||
+        row.name === "project-" + input.projectId
+      ) {
+        return blocked();
+      }
+      const projectIds = new Set<string>();
+      const namedProject = /^project-([1-9]\d*)$/u.exec(row.name)?.[1];
+      if (namedProject !== undefined) projectIds.add(namedProject);
+      let ambiguous = false;
+      walkDocument(row, (value, path) => {
+        const key = path[path.length - 1];
+        if (typeof key !== "string") return;
+        const marker = normalizedMarker(key);
+        if (["hasmore", "nextcursor", "nextpage"].includes(marker)) ambiguous = true;
+        if (marker === "machineid" && value !== row.id) ambiguous = true;
+        if (marker === "projectname" && value !== row.name) ambiguous = true;
+        if (marker.endsWith("projectid")) {
+          const projectId =
+            typeof value === "string"
+              ? value
+              : typeof value === "number" && Number.isSafeInteger(value)
+                ? String(value)
+                : "";
+          if (!/^[1-9]\d*$/u.test(projectId) || !Number.isSafeInteger(Number(projectId))) {
+            ambiguous = true;
+          } else {
+            projectIds.add(projectId);
+          }
+        }
+      });
+      const projectId = projectIds.values().next().value ?? null;
+      if (ambiguous || projectIds.size > 1 || projectId === String(input.projectId)) {
+        return blocked();
+      }
+      ids.add(row.id);
+      names.add(row.name);
+      // Preview and production machines may share an unrelated project owner.
+      // Uniqueness belongs to machine IDs/names, never to other owners' IDs.
+      // Repeat the catalog's identity set, without unrelated lifecycle telemetry.
+      // Every row's complete document is still bounded and checked above.
+      identities.push({ id: row.id, name: row.name, projectId });
+    }
+    return {
+      state: "complete",
+      fingerprint: observationFingerprint(identities.sort((a, b) => a.id.localeCompare(b.id))),
+    };
+  } catch {
+    return blocked();
+  }
+}
+
+/**
+ * Fly's unversioned GET can retain a destroyed tombstone ("No longer exists").
+ * A 200 or a version-terminal migrated/replaced state is never absence proof.
+ * Require repeated exact owned tombstones, active catalog absence and storage
+ * absence under durable authority; never acquire a lease or mutate a tombstone.
+ * https://fly.io/docs/machines/machine-states/
+ * https://fly.io/docs/machines/api/machines-resource/#list-machines
+ */
+async function verifyDestroyedTombstone(
+  input: { machineId: string; projectId: number; assertAuthority: () => Promise<void> },
+  machine: Extract<Awaited<ReturnType<typeof observeMachine>>, { state: "complete" }>,
+  request: LegacyFlyRetirementRequest,
+  leaseNonce?: string,
+  previousVolumeFingerprint?: string,
+): Promise<{ state: "complete" } | Extract<LegacyFlyRuntimeReconciliation, { state: "retained" }>> {
+  if (
+    machine.machineState !== "destroyed" ||
+    (leaseNonce !== undefined && machine.nonce !== undefined && machine.nonce !== leaseNonce)
+  ) {
+    return retained("absence_unverified", true);
+  }
+  await input.assertAuthority();
+  const active = await observeActiveMachineAbsence(input, request);
+  if (active.state === "retained") return active;
+  const volumes = await observeUnmountedVolumeCatalog(input.machineId, request);
+  if (volumes.state === "retained") return volumes;
+  if (
+    previousVolumeFingerprint !== undefined &&
+    volumes.fingerprint !== previousVolumeFingerprint
+  ) {
+    return retained("storage_ownership_ambiguous", false);
+  }
+  await input.assertAuthority();
+  const response = await requestSafely(request, {
+    machineId: input.machineId,
+    method: "GET",
+    ...(leaseNonce !== undefined ? { leaseNonce } : {}),
+  });
+  if (response?.status !== 200) return retained("absence_unverified", true);
+  const fresh = await observeMachine(response, input);
+  if (fresh.state === "retained") return fresh;
+  if (
+    fresh.machineState !== "destroyed" ||
+    fresh.fingerprint !== machine.fingerprint ||
+    (leaseNonce !== undefined && fresh.nonce !== undefined && fresh.nonce !== leaseNonce)
+  ) {
+    return retained("absence_unverified", true);
+  }
+  const freshActive = await observeActiveMachineAbsence(input, request);
+  if (freshActive.state === "retained") return freshActive;
+  if (freshActive.fingerprint !== active.fingerprint) return retained("absence_unverified", true);
+  const freshVolumes = await observeUnmountedVolumeCatalog(input.machineId, request);
+  if (freshVolumes.state === "retained") return freshVolumes;
+  if (freshVolumes.fingerprint !== volumes.fingerprint) {
+    return retained("storage_ownership_ambiguous", false);
+  }
+  await input.assertAuthority();
+  return { state: "complete" };
+}
+
 /**
  * Internal authority checks deliberately propagate the coordinator's native
  * lease-lost error. Provider failures are sanitized; authority failures must
@@ -435,6 +590,14 @@ export async function reconcileLegacyFlyRuntime(
   if (observation.status !== 200) return retained("provider_observation_unavailable", true);
   const machine = await observeMachine(observation, input);
   if (machine.state === "retained") return machine;
+  if (machine.machineState === "destroyed") {
+    const proof = await verifyDestroyedTombstone(input, machine, request);
+    if (proof.state === "retained") return proof;
+    return {
+      state: "verified_absent",
+      proof: "initial_destroyed_tombstone_active_catalog_absent",
+    };
+  }
   const catalog = await observeUnmountedVolumeCatalog(input.machineId, request);
   if (catalog.state === "retained") return catalog;
 
@@ -451,6 +614,8 @@ export async function reconcileLegacyFlyRuntime(
 
   let leaseNonce: string | null = null;
   let expiresAt: number;
+  let proof: Extract<LegacyFlyRuntimeReconciliation, { state: "verified_absent" }>["proof"] =
+    "delete_then_get_404";
   try {
     try {
       const leaseDocument = await readBoundedJson(lease);
@@ -601,11 +766,27 @@ export async function reconcileLegacyFlyRuntime(
       method: "GET",
       leaseNonce,
     });
-    if (verification?.status !== 404) return retained("absence_unverified", true);
-    const finalCatalog = await observeUnmountedVolumeCatalog(input.machineId, request);
-    if (finalCatalog.state === "retained") return finalCatalog;
-    if (currentCatalog.fingerprint !== finalCatalog.fingerprint) {
-      return retained("storage_ownership_ambiguous", false);
+    if (verification?.status === 200) {
+      const tombstone = await observeMachine(verification, input);
+      if (tombstone.state === "retained" || tombstone.machineState !== "destroyed") {
+        return retained("absence_unverified", true);
+      }
+      const verified = await verifyDestroyedTombstone(
+        input,
+        tombstone,
+        request,
+        leaseNonce,
+        currentCatalog.fingerprint,
+      );
+      if (verified.state === "retained") return verified;
+      proof = "delete_then_destroyed_tombstone_active_catalog_absent";
+    } else {
+      if (verification?.status !== 404) return retained("absence_unverified", true);
+      const finalCatalog = await observeUnmountedVolumeCatalog(input.machineId, request);
+      if (finalCatalog.state === "retained") return finalCatalog;
+      if (currentCatalog.fingerprint !== finalCatalog.fingerprint) {
+        return retained("storage_ownership_ambiguous", false);
+      }
     }
     if (expiresAt <= Date.now()) return retained("absence_unverified", true);
   } finally {
@@ -622,5 +803,5 @@ export async function reconcileLegacyFlyRuntime(
   }
   await input.assertAuthority();
   if (expiresAt <= Date.now()) return retained("absence_unverified", true);
-  return { state: "verified_absent", proof: "delete_then_get_404" };
+  return { state: "verified_absent", proof };
 }

@@ -10,6 +10,7 @@ export type AssetStorageReconciliationReceipt = {
   inspected: number;
   measured: number;
   measuredBytes: number;
+  /** Missing-provider observations only; no thumbnail metadata is removed. */
   absentThumbnails: number;
   remainingUnmeasured: number;
   admissionUnlocked: boolean;
@@ -17,7 +18,7 @@ export type AssetStorageReconciliationReceipt = {
     assetId: number;
     objectId: number;
     role: string;
-    outcome: "primary-missing";
+    outcome: "primary-missing" | "thumbnail-missing";
   }>;
 };
 
@@ -64,6 +65,8 @@ async function headTrackedStorageObject(
  * Governed, bounded adoption of provider metadata for historical objects whose
  * byte size was never recorded.  It reads HEAD only and applies each resulting
  * quota delta in the same transaction as the physical-object receipt.
+ * Missing objects remain ready and unmeasured; observation alone never authorizes
+ * lifecycle, gallery-alias, or ownership changes.
  */
 export async function reconcileUnmeasuredR2AssetObjects(input?: {
   limit?: number;
@@ -107,44 +110,13 @@ export async function reconcileUnmeasuredR2AssetObjects(input?: {
   for (const candidate of candidates.rows) {
     const provider = await headObject(candidate.storage_key, candidate.storage_backend);
     if (!provider) {
-      if (candidate.role !== "thumbnail") {
-        receipt.terminals.push({
-          assetId: candidate.asset_id,
-          objectId: candidate.object_id,
-          role: candidate.role,
-          outcome: "primary-missing",
-        });
-        continue;
-      }
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        const changed = await client.query(
-          `UPDATE asset_storage_objects
-              SET state='deleted', deleted_at=NOW()
-            WHERE id=$1 AND asset_id=$2 AND role='thumbnail'
-              AND state='ready' AND size_measured_at IS NULL`,
-          [candidate.object_id, candidate.asset_id],
-        );
-        if (changed.rowCount) {
-          await client.query(
-            `UPDATE generated_images SET thumbnail_url=NULL, updated_at=NOW()
-              WHERE asset_id=$1`,
-            [candidate.asset_id],
-          );
-          receipt.absentThumbnails += 1;
-        }
-        await client.query("COMMIT");
-      } catch (error) {
-        try {
-          await client.query("ROLLBACK");
-        } catch {
-          // Preserve the original error.
-        }
-        throw error;
-      } finally {
-        client.release();
-      }
+      if (candidate.role === "thumbnail") receipt.absentThumbnails += 1;
+      receipt.terminals.push({
+        assetId: candidate.asset_id,
+        objectId: candidate.object_id,
+        role: candidate.role,
+        outcome: candidate.role === "thumbnail" ? "thumbnail-missing" : "primary-missing",
+      });
       continue;
     }
 
@@ -233,7 +205,8 @@ function errorClass(error: unknown): AssetStorageReconciliationTerminal["errorCl
 /**
  * Give the governed mutation a durable request identity and serialize provider
  * observation globally. A repeated completed identity replays its exact receipt;
- * a crashed running identity becomes reclaimable only after the typed lease.
+ * a crashed running identity becomes reclaimable only after the typed lease and
+ * acquisition of the global lock. Terminal writes are fenced to that exact claim.
  */
 export async function runDurableAssetStorageReconciliation(input: {
   requestId: string;
@@ -243,64 +216,61 @@ export async function runDurableAssetStorageReconciliation(input: {
   const client = await pool.connect();
   let lockHeld = false;
   try {
-    const inserted = await client.query(
-      `INSERT INTO asset_storage_reconciliation_runs (request_id, state)
-       VALUES ($1, 'running')
-       ON CONFLICT (request_id) DO NOTHING
-       RETURNING request_id`,
-      [input.requestId],
-    );
-    if (!inserted.rowCount) {
-      const existing = await client.query<{
-        state: string;
-        receipt: AssetStorageReconciliationReceipt | null;
-        terminal: AssetStorageReconciliationTerminal | null;
-      }>(
-        `SELECT state, receipt, terminal
-           FROM asset_storage_reconciliation_runs
-          WHERE request_id=$1`,
-        [input.requestId],
-      );
-      const row = existing.rows[0];
-      if (row?.state === "completed" && row.receipt) return row.receipt;
-      if (row?.state === "failed" && row.terminal) {
-        throw new AssetStorageReconciliationError(row.terminal);
-      }
-      const reclaimed = await client.query(
-        `UPDATE asset_storage_reconciliation_runs
-            SET updated_at=NOW()
-          WHERE request_id=$1 AND state='running'
-            AND updated_at < NOW() - ($2::integer * INTERVAL '1 minute')
-        RETURNING request_id`,
-        [input.requestId, RECONCILIATION_STALE_AFTER_MINUTES],
-      );
-      if (!reclaimed.rowCount) {
-        throw new AssetStorageReconciliationError({
-          code: "asset_storage_reconciliation_failed",
-          retryable: true,
-          errorClass: "database",
-        });
-      }
-    }
-
     const lock = await client.query<{ acquired: boolean }>(
       `SELECT pg_try_advisory_lock($1, 1) AS acquired`,
       [ASSET_STORAGE_RECONCILIATION_LOCK_NAMESPACE],
     );
     lockHeld = lock.rows[0]?.acquired === true;
+
+    // Replays are read-only and remain available while another run holds the lock.
+    const existing = await client.query<{
+      state: string;
+      receipt: AssetStorageReconciliationReceipt | null;
+      terminal: AssetStorageReconciliationTerminal | null;
+    }>(
+      `SELECT state, receipt, terminal
+         FROM asset_storage_reconciliation_runs
+        WHERE request_id=$1`,
+      [input.requestId],
+    );
+    const row = existing.rows[0];
+    if (row?.state === "completed" && row.receipt) return row.receipt;
+    if (row?.state === "failed" && row.terminal) {
+      throw new AssetStorageReconciliationError(row.terminal);
+    }
     if (!lockHeld) {
-      const terminal: AssetStorageReconciliationTerminal = {
+      // Contention is not an admitted run and cannot terminalize another claim.
+      throw new AssetStorageReconciliationError({
         code: "asset_storage_reconciliation_failed",
         retryable: true,
         errorClass: "database",
-      };
-      await client.query(
-        `UPDATE asset_storage_reconciliation_runs
-            SET state='failed', terminal=$2::jsonb, updated_at=NOW(), completed_at=NOW()
-          WHERE request_id=$1 AND state='running'`,
-        [input.requestId, JSON.stringify(terminal)],
-      );
-      throw new AssetStorageReconciliationError(terminal);
+      });
+    }
+
+    const claimed = row
+      ? await client.query<{ claim_token: string }>(
+          `UPDATE asset_storage_reconciliation_runs
+              SET updated_at=NOW()
+            WHERE request_id=$1 AND state='running'
+              AND updated_at < NOW() - ($2::integer * INTERVAL '1 minute')
+          RETURNING request_id, updated_at::text AS claim_token`,
+          [input.requestId, RECONCILIATION_STALE_AFTER_MINUTES],
+        )
+      : await client.query<{ claim_token: string }>(
+          `INSERT INTO asset_storage_reconciliation_runs (request_id, state)
+           VALUES ($1, 'running')
+           ON CONFLICT (request_id) DO NOTHING
+           RETURNING request_id, updated_at::text AS claim_token`,
+          [input.requestId],
+        );
+    // Keep PostgreSQL timestamp precision; a JavaScript Date would truncate it.
+    const claimToken = claimed.rows[0]?.claim_token;
+    if (claimed.rowCount !== 1 || typeof claimToken !== "string" || claimToken.length === 0) {
+      throw new AssetStorageReconciliationError({
+        code: "asset_storage_reconciliation_failed",
+        retryable: true,
+        errorClass: "database",
+      });
     }
 
     try {
@@ -308,13 +278,21 @@ export async function runDurableAssetStorageReconciliation(input: {
         limit: input.limit,
         headObject: input.headObject,
       });
-      await client.query(
+      const completed = await client.query(
         `UPDATE asset_storage_reconciliation_runs
             SET state='completed', receipt=$2::jsonb, terminal=NULL,
                 updated_at=NOW(), completed_at=NOW()
-          WHERE request_id=$1 AND state='running'`,
-        [input.requestId, JSON.stringify(receipt)],
+          WHERE request_id=$1 AND state='running' AND updated_at=$3::timestamptz
+        RETURNING request_id`,
+        [input.requestId, JSON.stringify(receipt), claimToken],
       );
+      if (completed.rowCount !== 1) {
+        throw new AssetStorageReconciliationError({
+          code: "asset_storage_reconciliation_failed",
+          retryable: true,
+          errorClass: "database",
+        });
+      }
       return receipt;
     } catch (error) {
       const terminal: AssetStorageReconciliationTerminal = {
@@ -325,8 +303,8 @@ export async function runDurableAssetStorageReconciliation(input: {
       await client.query(
         `UPDATE asset_storage_reconciliation_runs
             SET state='failed', terminal=$2::jsonb, updated_at=NOW(), completed_at=NOW()
-          WHERE request_id=$1 AND state='running'`,
-        [input.requestId, JSON.stringify(terminal)],
+          WHERE request_id=$1 AND state='running' AND updated_at=$3::timestamptz`,
+        [input.requestId, JSON.stringify(terminal), claimToken],
       );
       throw new AssetStorageReconciliationError(terminal);
     }

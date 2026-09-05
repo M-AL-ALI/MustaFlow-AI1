@@ -8,6 +8,7 @@ import {
   type ProductScope,
 } from "@workspace/db";
 import { PROJECT_LIFECYCLE_LOCK_NAMESPACE } from "./project-retirement-contract";
+import { transactionHoldsProjectLifecycleLock } from "./project-lifecycle";
 import {
   AssetProductScopeError,
   EXPLICIT_PROJECT_ASSET_USE_CONSUMER,
@@ -51,8 +52,13 @@ async function admitProjectAssetUse(
   ].sort((a, b) => a - b);
   // Lifecycle/project locks precede assets, storage rows and physical key locks.
   for (const projectId of projectIds) {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock_shared(
-      ${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${projectId})`);
+    // A mounted asset mutation already holds this project's exclusive session
+    // key. Only a server-registered, pinned transaction can reuse that lock.
+    // Standalone transactions and every other project still acquire their own.
+    if (!transactionHoldsProjectLifecycleLock(tx, projectId)) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock_shared(
+        ${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${projectId})`);
+    }
     const [project] = await tx
       .select({ id: projectsTable.id })
       .from(projectsTable)

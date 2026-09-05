@@ -12,6 +12,10 @@ describe("legacy retirement fixed-app adapter contract", () => {
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     expect(adapter).toContain('input.resource === "volumes"');
+    expect(adapter).toContain('input.resource === "machines"');
+    expect(adapter).toContain(
+      "`/apps/${encodeURIComponent(FLY_APP)}/machines?include_deleted=false`",
+    );
     expect(adapter).toContain("`/apps/${encodeURIComponent(FLY_APP)}/volumes`");
     expect(adapter).toContain(
       "`/apps/${encodeURIComponent(FLY_APP)}/machines/${encodeURIComponent(",
@@ -150,18 +154,64 @@ describe("legacy retirement lease transport", () => {
     expect(transport.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps bounded GET retries and the original default for unrelated callers", async () => {
+  it.each(["volumes", "machines"] as const)("keeps bounded %s GET retries", async (resource) => {
     const { requestLegacyFlyMachineForRetirement } = await import("./container");
     transport.fetch
       .mockResolvedValueOnce(new Response(null, { status: 503 }))
       .mockResolvedValueOnce(new Response("[]", { status: 200 }));
-    await requestLegacyFlyMachineForRetirement({ resource: "volumes", method: "GET" });
+    await requestLegacyFlyMachineForRetirement({ resource, method: "GET" });
     expect(transport.fetch).toHaveBeenCalledTimes(2);
     expect(transport.withRetry).toHaveBeenCalledWith(
       expect.any(Function),
       expect.objectContaining({ maxAttempts: 3 }),
     );
     expect(source).toContain("maxAttempts = 3,");
+  });
+
+  it("observes only the complete active fixed-app catalog with a bounded GET", async () => {
+    const { requestLegacyFlyMachineForRetirement } = await import("./container");
+    transport.fetch.mockResolvedValue(new Response("[]", { status: 200 }));
+    const deadline = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await requestLegacyFlyMachineForRetirement({ resource: "machines", method: "GET" });
+      const [url, init] = transport.fetch.mock.calls[0]!;
+      expect(url).toBe(
+        "https://api.machines.dev/v1/apps/retirement-test-app/machines?include_deleted=false",
+      );
+      expect(init?.method).toBe("GET");
+      expect(init?.redirect).toBe("error");
+      expect(init?.body).toBeUndefined();
+      expect(new Headers(init?.headers).has("fly-machine-lease-nonce")).toBe(false);
+      expect(deadline).toHaveBeenCalledWith(10_000);
+    } finally {
+      deadline.mockRestore();
+    }
+  });
+
+  it.each([
+    { method: "DELETE" },
+    { method: "POST" },
+    { machineId: "test-machine" },
+    { app: "other-app" },
+    { url: "https://other.example/machines" },
+    { path: "/machines" },
+    { include_deleted: true },
+    { query: "include_deleted=true" },
+    { region: "iad" },
+    { metadata: { project_id: "77" } },
+    { cursor: "next" },
+    { page: 1 },
+    { leaseNonce: "test-private-nonce" },
+  ])("rejects caller-controlled machine catalog input %j", async (extra) => {
+    const { requestLegacyFlyMachineForRetirement } = await import("./container");
+    await expect(
+      requestLegacyFlyMachineForRetirement({
+        resource: "machines",
+        method: "GET",
+        ...extra,
+      } as Parameters<LegacyFlyRetirementRequest>[0]),
+    ).rejects.toThrow("Unsupported retirement machine operation");
+    expect(transport.fetch).not.toHaveBeenCalled();
   });
 
   it("encodes exact machine identifiers and includes the nonce on GET", async () => {

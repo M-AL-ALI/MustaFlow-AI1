@@ -65,6 +65,7 @@ import { deleteTrackedAssetStorageObjects } from "../lib/asset-storage-cleanup";
 import {
   holdResponseProjectLifecycleSession,
   requireActiveProjectLifecycleFor,
+  withResponseProjectLifecycleTransaction,
 } from "../lib/project-lifecycle";
 import {
   PROJECT_FILE_ASSET_USAGE_CONSUMER,
@@ -221,6 +222,7 @@ export async function materializeProjectAsset(
     path?: unknown;
   },
   explicitAction?: symbol,
+  lifecycleResponse?: Response,
 ): Promise<{ path: string; src: string; assetId: number }> {
   const asset = await loadMaterializableAsset(input);
   const path = requestedAssetPath(input.path, asset.id, asset.filename);
@@ -244,82 +246,79 @@ export async function materializeProjectAsset(
     sizeBytes: asset.sizeBytes,
     sha256: asset.sha256,
   });
-  await db.transaction(
-    async (tx) => {
-      const admission = {
-        actorUserId: input.userId,
+  await withResponseProjectLifecycleTransaction(lifecycleResponse, input.projectId, async (tx) => {
+    const admission = {
+      actorUserId: input.userId,
+      assetId: asset.id,
+      targetProjectId: input.projectId,
+      productScope: "nabuflow" as const,
+    };
+    if (explicitAction === EXPLICIT_MATERIALIZE_ACTION) {
+      await grantExplicitProjectAssetUse(tx, admission);
+    } else {
+      await assertExistingProjectAssetUse(tx, admission);
+    }
+    // History retains bytes only; admission above establishes target authority.
+    await tx
+      .insert(assetUsageTable)
+      .values({
         assetId: asset.id,
-        targetProjectId: input.projectId,
-        productScope: "nabuflow" as const,
-      };
-      if (explicitAction === EXPLICIT_MATERIALIZE_ACTION) {
-        await grantExplicitProjectAssetUse(tx, admission);
-      } else {
-        await assertExistingProjectAssetUse(tx, admission);
-      }
-      // History retains bytes only; admission above establishes target authority.
+        projectId: input.projectId,
+        consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
+      })
+      .onConflictDoNothing();
+    const [existing] = await tx
+      .select({ id: projectFilesTable.id })
+      .from(projectFilesTable)
+      .where(
+        and(
+          eq(projectFilesTable.projectId, input.projectId),
+          eq(projectFilesTable.artifactId, artifactId),
+          eq(projectFilesTable.path, path),
+        ),
+      );
+    if (existing) {
       await tx
-        .insert(assetUsageTable)
-        .values({
+        .update(projectFilesTable)
+        .set({
+          content: encoded,
+          mimeType: asset.mimeType,
+          updatedAt: new Date(),
+        })
+        .where(eq(projectFilesTable.id, existing.id));
+    } else {
+      await tx.insert(projectFilesTable).values({
+        projectId: input.projectId,
+        artifactId,
+        path,
+        content: encoded,
+        mimeType: asset.mimeType,
+      });
+    }
+    await reconcileProjectFileAssetUsage(tx, {
+      projectId: input.projectId,
+      artifactId,
+      filePath: path,
+      nextContent: encoded,
+    });
+    await tx
+      .insert(assetUsageTable)
+      .values([
+        {
+          assetId: asset.id,
+          projectId: input.projectId,
+          artifactId,
+          filePath: path,
+          consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
+        },
+        {
           assetId: asset.id,
           projectId: input.projectId,
           consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
-        })
-        .onConflictDoNothing();
-      const [existing] = await tx
-        .select({ id: projectFilesTable.id })
-        .from(projectFilesTable)
-        .where(
-          and(
-            eq(projectFilesTable.projectId, input.projectId),
-            eq(projectFilesTable.artifactId, artifactId),
-            eq(projectFilesTable.path, path),
-          ),
-        );
-      if (existing) {
-        await tx
-          .update(projectFilesTable)
-          .set({
-            content: encoded,
-            mimeType: asset.mimeType,
-            updatedAt: new Date(),
-          })
-          .where(eq(projectFilesTable.id, existing.id));
-      } else {
-        await tx.insert(projectFilesTable).values({
-          projectId: input.projectId,
-          artifactId,
-          path,
-          content: encoded,
-          mimeType: asset.mimeType,
-        });
-      }
-      await reconcileProjectFileAssetUsage(tx, {
-        projectId: input.projectId,
-        artifactId,
-        filePath: path,
-        nextContent: encoded,
-      });
-      await tx
-        .insert(assetUsageTable)
-        .values([
-          {
-            assetId: asset.id,
-            projectId: input.projectId,
-            artifactId,
-            filePath: path,
-            consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
-          },
-          {
-            assetId: asset.id,
-            projectId: input.projectId,
-            consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
-          },
-        ])
-        .onConflictDoNothing();
-    },
-    { isolationLevel: "read committed" },
-  );
+        },
+      ])
+      .onConflictDoNothing();
+  });
   const src = path.startsWith("public/") ? `/${path.slice("public/".length)}` : path;
   return { path, src, assetId: asset.id };
 }
@@ -463,61 +462,6 @@ router.get("/assets/analysis-usage", async (req, res) => {
   });
 });
 
-router.use("/assets/:assetId", requireAssetProjectLifecycle);
-
-router.post("/assets/:assetId/alt-text-proposal", async (req, res): Promise<void> => {
-  const assetId = Number(req.params.assetId);
-  if (!req.userId || !Number.isSafeInteger(assetId) || assetId < 1) {
-    res.status(400).json({ error: "Choose a valid image." });
-    return;
-  }
-  const [asset] = await db
-    .select()
-    .from(assetsTable)
-    .where(and(eq(assetsTable.id, assetId), eq(assetsTable.ownerUserId, req.userId)))
-    .limit(1);
-  if (!asset || asset.state !== "ready" || !asset.mimeType.startsWith("image/")) {
-    res.status(404).json({ error: "That image is not available." });
-    return;
-  }
-  const eventId = await createAssetAltTextEvent({
-    userId: req.userId,
-    projectId: asset.projectId,
-    assetId,
-  });
-  const result = await runAssetAltTextAnalysis({
-    eventId,
-    userId: req.userId,
-    assetId,
-    projectId: asset.projectId,
-  });
-  if (result.status === "completed") {
-    res.json({
-      assetId,
-      proposedAltText: result.proposedAltText,
-      metering: { customerCreditPrice: null, status: "recorded" },
-    });
-    return;
-  }
-  if (result.status === "blocked") {
-    res.status(402).json({ error: "Image analysis is paused by the account spending limit." });
-    return;
-  }
-  res.status(503).json({ error: "Zero could not suggest alt text right now. Try again." });
-});
-
-router.get("/projects/:id/assets/quota", requireProjectAccess("viewer"), async (req, res) => {
-  const [project] = await db
-    .select({ ownerUserId: projectsTable.ownerId })
-    .from(projectsTable)
-    .where(eq(projectsTable.id, Number(req.params.id)));
-  if (!project) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-  res.json(await getQuota(project.ownerUserId));
-});
-
 router.get("/assets/storage-plans", async (req, res) => {
   if (!req.userId) {
     res.status(401).json({ error: "Unauthenticated" });
@@ -573,6 +517,61 @@ router.post("/assets/storage-checkout", async (req, res) => {
   } catch {
     res.status(503).json({ error: "Storage checkout is temporarily unavailable." });
   }
+});
+
+router.use("/assets/:assetId", requireAssetProjectLifecycle);
+
+router.post("/assets/:assetId/alt-text-proposal", async (req, res): Promise<void> => {
+  const assetId = Number(req.params.assetId);
+  if (!req.userId || !Number.isSafeInteger(assetId) || assetId < 1) {
+    res.status(400).json({ error: "Choose a valid image." });
+    return;
+  }
+  const [asset] = await db
+    .select()
+    .from(assetsTable)
+    .where(and(eq(assetsTable.id, assetId), eq(assetsTable.ownerUserId, req.userId)))
+    .limit(1);
+  if (!asset || asset.state !== "ready" || !asset.mimeType.startsWith("image/")) {
+    res.status(404).json({ error: "That image is not available." });
+    return;
+  }
+  const eventId = await createAssetAltTextEvent({
+    userId: req.userId,
+    projectId: asset.projectId,
+    assetId,
+  });
+  const result = await runAssetAltTextAnalysis({
+    eventId,
+    userId: req.userId,
+    assetId,
+    projectId: asset.projectId,
+  });
+  if (result.status === "completed") {
+    res.json({
+      assetId,
+      proposedAltText: result.proposedAltText,
+      metering: { customerCreditPrice: null, status: "recorded" },
+    });
+    return;
+  }
+  if (result.status === "blocked") {
+    res.status(402).json({ error: "Image analysis is paused by the account spending limit." });
+    return;
+  }
+  res.status(503).json({ error: "Zero could not suggest alt text right now. Try again." });
+});
+
+router.get("/projects/:id/assets/quota", requireProjectAccess("viewer"), async (req, res) => {
+  const [project] = await db
+    .select({ ownerUserId: projectsTable.ownerId })
+    .from(projectsTable)
+    .where(eq(projectsTable.id, Number(req.params.id)));
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+  res.json(await getQuota(project.ownerUserId));
 });
 
 router.put("/assets/:assetId/content", async (req, res) => {
@@ -1117,6 +1116,7 @@ router.post(
           path: (req.body as { path?: unknown } | null)?.path,
         },
         EXPLICIT_MATERIALIZE_ACTION,
+        res,
       );
       res.status(201).json({
         ...receipt,
@@ -1230,83 +1230,80 @@ router.post(
       });
       const priorUrl = `/api/assets/${assetId}/content`;
       const replacementUrl = `/api/assets/${replacement.id}/content`;
-      await db.transaction(
-        async (tx) => {
-          await grantExplicitProjectAssetUse(tx, {
-            actorUserId: req.userId!,
+      await withResponseProjectLifecycleTransaction(res, projectId, async (tx) => {
+        await grantExplicitProjectAssetUse(tx, {
+          actorUserId: req.userId!,
+          assetId: replacement.id,
+          targetProjectId: projectId,
+          productScope: "nabuflow",
+        });
+        await tx
+          .insert(assetUsageTable)
+          .values({
             assetId: replacement.id,
-            targetProjectId: projectId,
-            productScope: "nabuflow",
+            projectId,
+            consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
+          })
+          .onConflictDoNothing();
+        for (const receipt of receipts) {
+          const [existing] = await tx
+            .select({
+              id: projectFilesTable.id,
+              content: projectFilesTable.content,
+              mimeType: projectFilesTable.mimeType,
+            })
+            .from(projectFilesTable)
+            .where(
+              and(
+                eq(projectFilesTable.projectId, projectId),
+                eq(projectFilesTable.artifactId, artifactId),
+                eq(projectFilesTable.path, receipt.path),
+              ),
+            );
+          const replacesContentUrl = existing?.content.includes(priorUrl) === true;
+          const nextContent = replacesContentUrl
+            ? existing.content.split(priorUrl).join(replacementUrl)
+            : encoded;
+          const nextMimeType = replacesContentUrl ? existing.mimeType : replacement.mimeType;
+          if (existing) {
+            await tx
+              .update(projectFilesTable)
+              .set({ content: nextContent, mimeType: nextMimeType, updatedAt: new Date() })
+              .where(eq(projectFilesTable.id, existing.id));
+          } else {
+            await tx.insert(projectFilesTable).values({
+              projectId,
+              artifactId,
+              path: receipt.path,
+              content: nextContent,
+              mimeType: nextMimeType,
+            });
+          }
+          await reconcileProjectFileAssetUsage(tx, {
+            projectId,
+            artifactId,
+            filePath: receipt.path,
+            nextContent,
           });
           await tx
             .insert(assetUsageTable)
-            .values({
-              assetId: replacement.id,
-              projectId,
-              consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
-            })
-            .onConflictDoNothing();
-          for (const receipt of receipts) {
-            const [existing] = await tx
-              .select({
-                id: projectFilesTable.id,
-                content: projectFilesTable.content,
-                mimeType: projectFilesTable.mimeType,
-              })
-              .from(projectFilesTable)
-              .where(
-                and(
-                  eq(projectFilesTable.projectId, projectId),
-                  eq(projectFilesTable.artifactId, artifactId),
-                  eq(projectFilesTable.path, receipt.path),
-                ),
-              );
-            const replacesContentUrl = existing?.content.includes(priorUrl) === true;
-            const nextContent = replacesContentUrl
-              ? existing.content.split(priorUrl).join(replacementUrl)
-              : encoded;
-            const nextMimeType = replacesContentUrl ? existing.mimeType : replacement.mimeType;
-            if (existing) {
-              await tx
-                .update(projectFilesTable)
-                .set({ content: nextContent, mimeType: nextMimeType, updatedAt: new Date() })
-                .where(eq(projectFilesTable.id, existing.id));
-            } else {
-              await tx.insert(projectFilesTable).values({
+            .values([
+              {
+                assetId: replacement.id,
                 projectId,
                 artifactId,
-                path: receipt.path,
-                content: nextContent,
-                mimeType: nextMimeType,
-              });
-            }
-            await reconcileProjectFileAssetUsage(tx, {
-              projectId,
-              artifactId,
-              filePath: receipt.path,
-              nextContent,
-            });
-            await tx
-              .insert(assetUsageTable)
-              .values([
-                {
-                  assetId: replacement.id,
-                  projectId,
-                  artifactId,
-                  filePath: receipt.path,
-                  consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
-                },
-                {
-                  assetId: replacement.id,
-                  projectId,
-                  consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
-                },
-              ])
-              .onConflictDoNothing();
-          }
-        },
-        { isolationLevel: "read committed" },
-      );
+                filePath: receipt.path,
+                consumer: PROJECT_FILE_ASSET_USAGE_CONSUMER,
+              },
+              {
+                assetId: replacement.id,
+                projectId,
+                consumer: PROJECT_FILE_ASSET_HISTORY_CONSUMER,
+              },
+            ])
+            .onConflictDoNothing();
+        }
+      });
       res.json({ replaced: true, replacements: receipts });
     } catch (error) {
       respondError(res, error);

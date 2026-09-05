@@ -19,7 +19,199 @@ function addon(overrides: Partial<ProjectManagedAddonBinding> = {}): ProjectMana
   };
 }
 
+function sqlitePredecessorFixture(generation = 1) {
+  type Dependencies = NonNullable<Parameters<typeof preserveProjectSqliteForRetirement>[1]>;
+  type Operation = NonNullable<
+    Awaited<ReturnType<NonNullable<Dependencies["readRetirementOperation"]>>>
+  >;
+  const deletedAt = new Date("2026-09-01T00:00:00Z");
+  const createdAt = new Date("2026-09-01T01:00:00Z");
+  const dump = "BEGIN; CREATE TABLE restored(id); COMMIT;";
+  const snapshot = {
+    id: 91,
+    projectId: 49,
+    label: "trash-recovery:op-0",
+    provider: "sqlite",
+    dumpContent: dump as string | null,
+    objectKey: null as string | null,
+    isPartial: false,
+    sizeBytes: Buffer.byteLength(dump),
+  };
+  const operations = new Map<string, Operation>();
+  for (let current = 0; current <= generation; current += 1) {
+    operations.set(`op-${current}`, {
+      id: `op-${current}`,
+      projectId: 49,
+      state: current === generation ? "running" : "completed",
+      createdAt,
+      completedAt: current === generation ? null : createdAt,
+      progress: {
+        ...(current > 0
+          ? { reconciliation: { generation: current, parentOperationId: `op-${current - 1}` } }
+          : {}),
+        ...(current === 0
+          ? {
+              sqliteRecovery: {
+                state: "preserved",
+                snapshotId: 91,
+                sizeBytes: snapshot.sizeBytes,
+                storage: "inline",
+                failureCode: null,
+              },
+            }
+          : {}),
+      },
+    });
+  }
+  const dependencies = {
+    readProject: vi.fn(async () => ({
+      dbProvider: "sqlite",
+      dbStatus: "ready",
+      containerId: null,
+      deletedAt,
+    })),
+    readSnapshots: vi.fn(async (projectId: number, label: string, snapshotId?: number) =>
+      snapshot.projectId === projectId &&
+      snapshot.label === label &&
+      (snapshotId === undefined || snapshot.id === snapshotId)
+        ? [snapshot]
+        : [],
+    ),
+    readRetirementOperation: vi.fn(
+      async (_projectId: number, operationId: string) => operations.get(operationId) ?? null,
+    ),
+    exec: vi.fn(),
+    upload: vi.fn(),
+    objectExists: vi.fn(async () => true),
+    insertSnapshot: vi.fn(),
+    deleteObject: vi.fn(),
+  } satisfies Dependencies;
+  return {
+    dependencies,
+    snapshot,
+    operations,
+    input: { projectId: 49, operationId: `op-${generation}` },
+  };
+}
+
 describe("project retirement owned resources", () => {
+  it("reproduces current-label-only failure and reuses a revalidated server-recorded parent snapshot", async () => {
+    const fixture = sqlitePredecessorFixture();
+    const { readRetirementOperation: _lineage, ...oldLookup } = fixture.dependencies;
+    expect(await preserveProjectSqliteForRetirement(fixture.input, oldLookup)).toEqual({
+      ok: false,
+      code: "project_retirement_sqlite_snapshot_unverified",
+      retryable: true,
+    });
+    const recovered = await preserveProjectSqliteForRetirement(fixture.input, fixture.dependencies);
+    expect(recovered).toMatchObject({
+      ok: true,
+      receipt: { state: "preserved", snapshotId: 91, storage: "inline" },
+    });
+    expect(fixture.dependencies.readSnapshots).toHaveBeenCalledWith(49, "trash-recovery:op-0", 91);
+    expect(fixture.dependencies.exec).not.toHaveBeenCalled();
+    expect(fixture.dependencies.upload).not.toHaveBeenCalled();
+    expect(fixture.dependencies.insertSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("follows at most four same-project predecessors through the approved repair generation", async () => {
+    const fixture = sqlitePredecessorFixture(4);
+    expect(
+      await preserveProjectSqliteForRetirement(fixture.input, fixture.dependencies),
+    ).toMatchObject({ ok: true });
+    expect(fixture.dependencies.readRetirementOperation.mock.calls).toEqual([
+      [49, "op-4"],
+      [49, "op-3"],
+      [49, "op-2"],
+      [49, "op-1"],
+      [49, "op-0"],
+    ]);
+    expect(fixture.dependencies.exec).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "missing_parent",
+    "cross_project",
+    "cross_cycle",
+    "restored_parent",
+    "cycle",
+    "generation_gap",
+    "nonterminal_parent",
+    "missing_server_receipt",
+    "active_project",
+    "over_limit",
+  ])("never reuses a snapshot across invalid lineage: %s", async (variant) => {
+    const fixture = sqlitePredecessorFixture(variant === "over_limit" ? 5 : 1);
+    const parent = fixture.operations.get("op-0")!;
+    if (variant === "missing_parent") fixture.operations.delete("op-0");
+    if (variant === "cross_project") parent.projectId = 50;
+    if (variant === "cross_cycle") parent.createdAt = new Date("2026-08-01T00:00:00Z");
+    if (variant === "restored_parent")
+      Object.assign(parent.progress as object, { restore: { state: "restored" } });
+    if (variant === "cycle")
+      fixture.operations.get("op-1")!.progress = {
+        reconciliation: { generation: 1, parentOperationId: "op-1" },
+      };
+    if (variant === "generation_gap")
+      Object.assign(parent.progress as object, { reconciliation: { generation: 2 } });
+    if (variant === "nonterminal_parent") parent.completedAt = null;
+    if (variant === "missing_server_receipt") parent.progress = {};
+    if (variant === "active_project")
+      fixture.dependencies.readProject.mockResolvedValueOnce({
+        dbProvider: "sqlite",
+        dbStatus: "ready",
+        containerId: null,
+        deletedAt: null as unknown as Date,
+      });
+    expect(
+      await preserveProjectSqliteForRetirement(fixture.input, fixture.dependencies),
+    ).toMatchObject({ ok: false });
+    expect(fixture.dependencies.readRetirementOperation.mock.calls.length).toBeLessThanOrEqual(5);
+    expect(fixture.dependencies.exec).not.toHaveBeenCalled();
+    expect(fixture.dependencies.insertSnapshot).not.toHaveBeenCalled();
+  });
+
+  it.each(["partial", "wrong_id", "wrong_size", "wrong_project", "wrong_label", "missing_object"])(
+    "requires current snapshot evidence even with valid lineage: %s",
+    async (variant) => {
+      const fixture = sqlitePredecessorFixture();
+      if (variant === "partial") fixture.snapshot.isPartial = true;
+      if (variant === "wrong_id") fixture.snapshot.id = 92;
+      if (variant === "wrong_size") fixture.snapshot.sizeBytes += 1;
+      if (variant === "wrong_project") fixture.snapshot.projectId = 50;
+      if (variant === "wrong_label") fixture.snapshot.label = "user-backup";
+      if (variant === "missing_object") {
+        fixture.snapshot.dumpContent = null;
+        fixture.snapshot.objectKey = "snapshot-object";
+        (
+          fixture.operations.get("op-0")!.progress as { sqliteRecovery: { storage: string } }
+        ).sqliteRecovery.storage = "object";
+        fixture.dependencies.objectExists.mockResolvedValue(false);
+      }
+      expect(
+        await preserveProjectSqliteForRetirement(fixture.input, fixture.dependencies),
+      ).toMatchObject({ ok: false });
+      expect(fixture.dependencies.deleteObject).not.toHaveBeenCalled();
+      expect(fixture.dependencies.insertSnapshot).not.toHaveBeenCalled();
+    },
+  );
+
+  it("revalidates object presence before reusing a predecessor object snapshot", async () => {
+    const fixture = sqlitePredecessorFixture();
+    fixture.snapshot.dumpContent = null;
+    fixture.snapshot.objectKey = "verified-parent-object";
+    (
+      fixture.operations.get("op-0")!.progress as { sqliteRecovery: { storage: string } }
+    ).sqliteRecovery.storage = "object";
+    expect(
+      await preserveProjectSqliteForRetirement(fixture.input, fixture.dependencies),
+    ).toMatchObject({
+      ok: true,
+      receipt: { state: "preserved", snapshotId: 91, storage: "object" },
+    });
+    expect(fixture.dependencies.objectExists).toHaveBeenCalledWith("verified-parent-object");
+    expect(fixture.dependencies.deleteObject).not.toHaveBeenCalled();
+  });
   it("detaches every known binding, removes only its project secrets, and proves absence", async () => {
     let rows = [
       addon(),

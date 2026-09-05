@@ -69,6 +69,7 @@ vi.mock("./objectStorage", () => ({
 
 import {
   applyProjectRelationalPurge,
+  canonicalizeSurvivingAssetAliases,
   inventoryProjectPurgeResources,
   migrateRetainedLegacyAssetsForPurge,
   projectPurgeLegacyMigrationTargetKey,
@@ -213,6 +214,87 @@ function assetClaimClient(
     return { rows: [], rowCount: 0 };
   });
   return { query, release: vi.fn(), statements };
+}
+
+function supportTicketAliasClient(input: {
+  assetScope: "nabuflow" | "ora";
+  ticketUserId?: string;
+  ticketProjectId?: number | null;
+  unsupportedField?: "subject" | "resolution_evidence";
+  alias?: string;
+}) {
+  const alias = input.alias ?? "/api/images/91/file";
+  const ticket = {
+    id: 201,
+    user_id: input.ticketUserId ?? "owner-user",
+    project_id: input.ticketProjectId ?? null,
+    status: "closed",
+    subject: input.unsupportedField === "subject" ? alias : "Historical support request",
+    transcript: [{ role: "user", content: "Original reference: " + alias }],
+    attachments: [{ fileName: "original.webp", mimeType: "image/webp", size: 20, url: alias }],
+    resolution_evidence: {
+      note: input.unsupportedField === "resolution_evidence" ? alias : "Retained evidence",
+    },
+    email_status: "failed",
+    created_at: "2026-09-02T00:00:00.000Z",
+    updated_at: "2026-09-02T00:00:00.000Z",
+  };
+  const before = JSON.parse(JSON.stringify(ticket)) as typeof ticket;
+  const statements: Array<{ sql: string; values: readonly unknown[] }> = [];
+  const query = vi.fn(async (statement: string, values: readonly unknown[] = []) => {
+    const sql = statement.replace(/\s+/gu, " ").trim();
+    statements.push({ sql, values });
+    if (sql.startsWith("SELECT '/api/images/'")) {
+      return { rows: [{ alias }], rowCount: 1 };
+    }
+    if (sql.startsWith("SELECT product_scope, storage_backend FROM assets")) {
+      return { rows: [{ product_scope: input.assetScope, storage_backend: "r2" }], rowCount: 1 };
+    }
+    const survives = values[0] === null || ticket.project_id !== values[0];
+    if (sql.startsWith("WITH durable_reference_rows")) {
+      const ticketAccountAuthority = sql.includes(
+        "SELECT NULL::integer, ticket_row.user_id, 'ora'::text, to_jsonb(ticket_row)::text",
+      );
+      const references = (values[2] as string[]).some((token) =>
+        JSON.stringify(ticket).includes(token),
+      );
+      const unsupported = { ...ticket, transcript: undefined, attachments: undefined };
+      const unsupportedChecked = sql.includes(
+        "(to_jsonb(ticket_row) - 'transcript' - 'attachments')::text",
+      );
+      const forbidden =
+        survives &&
+        references &&
+        ((ticketAccountAuthority &&
+          (input.assetScope !== "ora" || ticket.user_id !== "owner-user")) ||
+          (unsupportedChecked &&
+            (values[3] as string[]).some((token) => JSON.stringify(unsupported).includes(token))));
+      return { rows: [{ allowed: !forbidden }], rowCount: 1 };
+    }
+    if (sql.startsWith("UPDATE support_tickets")) {
+      const authorized =
+        (!sql.includes("authority.product_scope='ora'") || input.assetScope === "ora") &&
+        (!sql.includes("ticket_row.user_id=authority.owner_user_id") ||
+          ticket.user_id === "owner-user");
+      if (survives && authorized) {
+        ticket.transcript = JSON.parse(
+          JSON.stringify(ticket.transcript).replaceAll(String(values[1]), String(values[2])),
+        );
+        ticket.attachments = JSON.parse(
+          JSON.stringify(ticket.attachments).replaceAll(String(values[1]), String(values[2])),
+        );
+        return { rows: [], rowCount: 1 };
+      }
+    }
+    return { rows: [], rowCount: 0 };
+  });
+  return {
+    client: { query } as unknown as import("pg").PoolClient,
+    alias,
+    ticket,
+    before,
+    statements,
+  };
 }
 
 function legacyMigrationClient(input: { digest: string; sourceKey: string; targetKey: string }) {
@@ -1842,6 +1924,183 @@ describe("project purge resource safety", () => {
     expect(mocks.getLegacyObject).not.toHaveBeenCalled();
   });
 
+  it.each([null, 51])(
+    "covers every canonicalization rewrite candidate when excluded project is %s",
+    async (excludedProjectId) => {
+      const client = assetClaimClient(true, "ready", ["/api/images/91/file"]);
+      await canonicalizeSurvivingAssetAliases(
+        client as unknown as import("pg").PoolClient,
+        excludedProjectId,
+        2,
+      );
+
+      const authority = client.statements.find(({ sql }) =>
+        sql.startsWith("WITH durable_reference_rows"),
+      )!;
+      expect(authority.values).toEqual([
+        excludedProjectId,
+        2,
+        ["/api/images/91/file"],
+        ["/api/images/91/file"],
+      ]);
+      for (const row of [
+        "message_row",
+        "task_row",
+        "call_row",
+        "queue_row",
+        "knowledge_row",
+        "file_row",
+        "version_row",
+        "variant_row",
+        "inbox_row",
+        "activity_row",
+        "edit_row",
+        "image_row",
+        "ticket_row",
+      ]) {
+        expect(authority.sql).toContain(
+          "($1::integer IS NULL OR " + row + ".project_id IS DISTINCT FROM $1)",
+        );
+      }
+      expect(
+        authority.sql.match(
+          /\(\$1::integer IS NULL OR [a-z_]+\.project_id IS DISTINCT FROM \$1\)/gu,
+        ),
+      ).toHaveLength(15);
+      expect(authority.sql).toContain("FROM canvas_variant_library library_row UNION ALL");
+      expect(authority.sql).toContain("FROM gallery_templates template_row UNION ALL");
+      expect(authority.sql).toContain(
+        "reference_row.project_id IS NULL AND ( " +
+          "reference_row.reference_user_id IS DISTINCT FROM authority.owner_user_id OR " +
+          "reference_row.reference_product_scope IS DISTINCT FROM authority.product_scope",
+      );
+
+      const imageWrite = client.statements.find(({ sql }) =>
+        sql.startsWith("UPDATE generated_images"),
+      )!;
+      expect(imageWrite.values).toEqual([
+        excludedProjectId,
+        "/api/images/91/file",
+        "/api/assets/2/content",
+        2,
+      ]);
+      expect(imageWrite.sql).toContain("generated_images.deleted_at IS NULL");
+      expect(imageWrite.sql).toContain("authority.id=$4");
+      expect(imageWrite.sql).toContain("generated_images.product_scope=authority.product_scope");
+      expect(imageWrite.sql).toContain(
+        "generated_images.project_id IS NOT NULL OR " +
+          "generated_images.user_id=authority.owner_user_id",
+      );
+
+      expect(authority.sql).toContain(
+        "SELECT NULL::integer, ticket_row.user_id, 'ora'::text, to_jsonb(ticket_row)::text",
+      );
+      expect(authority.sql).toContain(
+        "(to_jsonb(ticket_row) - 'transcript' - 'attachments')::text",
+      );
+      const ticketWrite = client.statements.find(({ sql }) =>
+        sql.startsWith("UPDATE support_tickets"),
+      )!;
+      expect(ticketWrite.values).toEqual(imageWrite.values);
+      expect(ticketWrite.sql).toContain("authority.id=$4 AND authority.product_scope='ora'");
+      expect(ticketWrite.sql).toContain("ticket_row.user_id=authority.owner_user_id");
+      expect(ticketWrite.sql).toContain(
+        "($1::integer IS NULL OR ticket_row.project_id IS DISTINCT FROM $1)",
+      );
+      expect(ticketWrite.sql).not.toMatch(/updated_at=|status=|SET user_id=|SET project_id=/u);
+
+      const eventWrite = client.statements.find(({ sql }) => sql.startsWith("UPDATE task_events"))!;
+      expect(eventWrite.sql).toContain(
+        "WHERE EXISTS ( SELECT 1 FROM agent_tasks task WHERE task.id=event_row.task_id " +
+          "AND ($1::integer IS NULL OR task.project_id IS DISTINCT FROM $1) )",
+      );
+      expect(eventWrite.sql).not.toContain("WHERE ($1::integer IS NULL OR EXISTS");
+      expect(client.statements.indexOf(authority)).toBeLessThan(
+        client.statements.findIndex(({ sql }) => sql.startsWith("UPDATE ")),
+      );
+      expect(mocks.deleteAssetObject).not.toHaveBeenCalled();
+      expect(mocks.getLegacyObject).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, 77])(
+    "preserves same-owner Ora ticket history while canonicalizing its aliases (project %s)",
+    async (ticketProjectId) => {
+      const fixture = supportTicketAliasClient({ assetScope: "ora", ticketProjectId });
+      await canonicalizeSurvivingAssetAliases(fixture.client, null, 2);
+      const canonical = "/api/ora/canonical-assets/2/content";
+      expect(fixture.ticket).toEqual({
+        ...fixture.before,
+        transcript: [{ role: "user", content: "Original reference: " + canonical }],
+        attachments: [
+          { fileName: "original.webp", mimeType: "image/webp", size: 20, url: canonical },
+        ],
+      });
+      // Both retained payloads are independent of the removed legacy image row.
+      expect(JSON.stringify(fixture.ticket)).not.toContain(fixture.alias);
+      expect(
+        fixture.statements.findIndex(({ sql }) => sql.startsWith("WITH durable_reference_rows")),
+      ).toBeLessThan(
+        fixture.statements.findIndex(({ sql }) => sql.startsWith("UPDATE support_tickets")),
+      );
+      expect(mocks.deleteAssetObject).not.toHaveBeenCalled();
+      expect(mocks.getLegacyObject).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { label: "Nabu source asset", assetScope: "nabuflow" },
+    { label: "foreign account ticket", assetScope: "ora", ticketUserId: "foreign-user" },
+    {
+      label: "foreign ticket with a project association",
+      assetScope: "ora",
+      ticketUserId: "foreign-user",
+      ticketProjectId: 77,
+    },
+    { label: "unsupported subject alias", assetScope: "ora", unsupportedField: "subject" },
+    {
+      label: "unsupported historical evidence alias",
+      assetScope: "ora",
+      unsupportedField: "resolution_evidence",
+    },
+  ] as const)("fails closed before rewriting a support ticket with $label", async (input) => {
+    const fixture = supportTicketAliasClient(input);
+    await expect(canonicalizeSurvivingAssetAliases(fixture.client, null, 2)).rejects.toThrow(
+      "project_purge_asset_reference_forbidden",
+    );
+    expect(fixture.ticket).toEqual(fixture.before);
+    expect(fixture.statements.some(({ sql }) => /^(UPDATE|DELETE|INSERT) /u.test(sql))).toBe(false);
+    expect(mocks.deleteAssetObject).not.toHaveBeenCalled();
+    expect(mocks.getLegacyObject).not.toHaveBeenCalled();
+  });
+
+  it("uses a ticket project only for the existing source-project exclusion", async () => {
+    const fixture = supportTicketAliasClient({
+      assetScope: "nabuflow",
+      ticketUserId: "foreign-user",
+      ticketProjectId: 51,
+    });
+    await canonicalizeSurvivingAssetAliases(fixture.client, 51, 2);
+    expect(fixture.ticket).toEqual(fixture.before);
+    const write = fixture.statements.find(({ sql }) => sql.startsWith("UPDATE support_tickets"))!;
+    expect(write.values).toEqual([51, fixture.alias, "/api/assets/2/content", 2]);
+  });
+
+  it("does not reject stable canonical ticket metadata when no alias will be rewritten", async () => {
+    const fixture = supportTicketAliasClient({
+      assetScope: "ora",
+      alias: "/api/ora/canonical-assets/2/content",
+      unsupportedField: "subject",
+    });
+    await canonicalizeSurvivingAssetAliases(fixture.client, null, 2);
+    expect(fixture.ticket).toEqual(fixture.before);
+    expect(
+      fixture.statements.find(({ sql }) => sql.startsWith("WITH durable_reference_rows"))!
+        .values[3],
+    ).toEqual([]);
+    expect(fixture.statements.some(({ sql }) => sql.startsWith("UPDATE "))).toBe(false);
+  });
+
   it("canonicalizes every surviving legacy alias before source metadata can disappear", async () => {
     const claim = assetClaimClient(true, "ready", [
       "/api/images/91/file",
@@ -1882,6 +2141,7 @@ describe("project purge resource safety", () => {
       "project_activity",
       "visual_edit_changes",
       "generated_images",
+      "support_tickets",
     ]) {
       expect(updates.some((entry) => entry.sql.startsWith(`UPDATE ${table}`))).toBe(true);
     }

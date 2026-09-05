@@ -38,7 +38,12 @@ const POINTER_REASONS = [
   "legacy_runtime_provider",
 ] as const;
 const LEGACY_RUNTIME_RESOLUTION_STATES = ["verified_absent", "retained"] as const;
-const LEGACY_RUNTIME_PROOFS = ["initial_get_404", "delete_then_get_404"] as const;
+const LEGACY_RUNTIME_PROOFS = [
+  "initial_get_404",
+  "delete_then_get_404",
+  "initial_destroyed_tombstone_active_catalog_absent",
+  "delete_then_destroyed_tombstone_active_catalog_absent",
+] as const;
 const LEGACY_RUNTIME_RETENTION_REASONS = [
   "legacy_pointer_malformed",
   "provider_observation_unavailable",
@@ -302,7 +307,13 @@ export function sanitizeProjectRetirementProgress(value: unknown): Record<string
   const tasks = isRecord(progress.tasks) ? progress.tasks : {};
   const access = isRecord(progress.access) ? progress.access : {};
   const legacyR2 = isRecord(progress.legacyR2) ? progress.legacyR2 : {};
+  const managedAddons = isRecord(progress.managedAddons) ? progress.managedAddons : null;
+  const sqliteRecovery = isRecord(progress.sqliteRecovery) ? progress.sqliteRecovery : null;
   const reconciliation = isRecord(progress.reconciliation) ? progress.reconciliation : null;
+  const verificationRepair =
+    reconciliation && isRecord(reconciliation.verificationRepair)
+      ? reconciliation.verificationRepair
+      : null;
   const restore = isRecord(progress.restore) ? progress.restore : null;
 
   return {
@@ -317,6 +328,16 @@ export function sanitizeProjectRetirementProgress(value: unknown): Record<string
           ]),
           configurationRecoveryUsed: reconciliation.configurationRecoveryUsed === true,
           hasParent: typeof reconciliation.parentOperationId === "string",
+          verificationRepair: verificationRepair
+            ? {
+                version: closedValue(verificationRepair.version, ["fly-destroyed-tombstone-v1"]),
+                pointer: closedValue(verificationRepair.pointer, POINTERS),
+                predecessorGeneration: verificationRepair.predecessorGeneration === 3 ? 3 : null,
+                failureCode: sanitizeProjectRetirementFailureCode(verificationRepair.failureCode),
+                reason: closedValue(verificationRepair.reason, ["absence_unverified"]),
+                hasParent: typeof verificationRepair.parentOperationId === "string",
+              }
+            : null,
         }
       : null,
     restore:
@@ -362,6 +383,35 @@ export function sanitizeProjectRetirementProgress(value: unknown): Record<string
       deletedCount: safeCount(legacyR2.deletedCount),
       failureCode: sanitizeProjectRetirementFailureCode(legacyR2.failureCode),
     },
+    managedAddons: managedAddons
+      ? {
+          state: closedValue(managedAddons.state, [
+            "pending",
+            "detaching",
+            "verified_detached",
+            "failed",
+          ]),
+          discoveredCount: safeCount(managedAddons.discoveredCount),
+          detachedCount: safeCount(managedAddons.detachedCount),
+          secretsRemoved: safeCount(managedAddons.secretsRemoved),
+          bindingsRemaining: safeCount(managedAddons.bindingsRemaining),
+          failureCode: sanitizeProjectRetirementFailureCode(managedAddons.failureCode),
+        }
+      : null,
+    sqliteRecovery: sqliteRecovery
+      ? {
+          state: closedValue(sqliteRecovery.state, [
+            "pending",
+            "not_applicable",
+            "not_present",
+            "preserved",
+            "failed",
+          ]),
+          sizeBytes: safeCount(sqliteRecovery.sizeBytes),
+          storage: closedValue(sqliteRecovery.storage, ["inline", "object"]),
+          failureCode: sanitizeProjectRetirementFailureCode(sqliteRecovery.failureCode),
+        }
+      : null,
     domains: summarizeReceipts(progress.domains, RESOURCE_STATES),
     hostnameCertificates: summarizeReceipts(progress.hostnameCertificates, RESOURCE_STATES),
     securityResources: summarizeReceipts(progress.securityResources, RESOURCE_STATES, {

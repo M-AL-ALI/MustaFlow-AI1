@@ -27,6 +27,16 @@ export type ProjectRetirementProgress = {
     requestedBy: string;
     reason: "retryable_terminal" | "legacy_admin_reconciliation" | "configuration_recovery";
     configurationRecoveryUsed?: boolean;
+    /** One admission for the corrected Fly tombstone checker; never an absence proof. */
+    verificationRepair?: {
+      version: "fly-destroyed-tombstone-v1";
+      parentOperationId: string;
+      requestedBy: string;
+      pointer: "containerId" | "prodContainerId" | "testContainerId";
+      predecessorGeneration: 3;
+      failureCode: "project_retirement_legacy_runtime_absence_unverified";
+      reason: "absence_unverified";
+    };
   };
   route: {
     state: "pending" | "deactivating" | "verified_absent" | "failed";
@@ -146,7 +156,11 @@ export type ProjectRetirementProgress = {
     | {
         pointer: "containerId" | "prodContainerId" | "testContainerId";
         state: "verified_absent";
-        proof: "initial_get_404" | "delete_then_get_404";
+        proof:
+          | "initial_get_404"
+          | "delete_then_get_404"
+          | "initial_destroyed_tombstone_active_catalog_absent"
+          | "delete_then_destroyed_tombstone_active_catalog_absent";
       }
     | {
         pointer: "containerId" | "prodContainerId" | "testContainerId";

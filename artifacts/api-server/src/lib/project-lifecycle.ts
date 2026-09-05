@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, pool, projectsTable } from "@workspace/db";
 import type { NextFunction, Request, Response } from "express";
@@ -17,6 +18,8 @@ export interface ActiveProjectLifecycleSession {
   assertActive(): Promise<boolean>;
   release(): Promise<void>;
 }
+
+const heldProjectLifecycleSessions = new WeakSet<ActiveProjectLifecycleSession>();
 
 /**
  * Metadata-only project admission check. This never acquires a lock and never writes.
@@ -85,12 +88,13 @@ export async function acquireProjectLifecycleSession(
       return null;
     }
 
-    return {
+    const session: ActiveProjectLifecycleSession = {
       projectId,
       assertActive,
       async release(): Promise<void> {
         if (released) return;
         released = true;
+        heldProjectLifecycleSessions.delete(session);
         try {
           if (locked) {
             await client.query("SELECT pg_advisory_unlock($1::integer, $2::integer)", [
@@ -104,6 +108,8 @@ export async function acquireProjectLifecycleSession(
         }
       },
     };
+    heldProjectLifecycleSessions.add(session);
+    return session;
   } catch (error) {
     try {
       if (locked) {
@@ -126,10 +132,22 @@ export async function withActiveProjectLifecycle<T>(
 ): Promise<{ state: "active"; value: T } | { state: "inactive" }> {
   const session = await acquireProjectLifecycleSession(projectId);
   if (!session) return { state: "inactive" };
+  const state: ResponseProjectLifecycleState = {
+    session,
+    responseEnded: false,
+    holds: 0,
+    releaseStarted: false,
+  };
   try {
-    return { state: "active", value: await work(session) };
+    // Background placement has no HTTP response. Carry only this genuinely
+    // acquired session into nested transactions, never caller-supplied data.
+    return {
+      state: "active",
+      value: await activeProjectLifecycleStates.run(state, () => work(session)),
+    };
   } finally {
-    await session.release();
+    state.responseEnded = true;
+    await maybeReleaseResponseProjectLifecycleSession(state);
   }
 }
 
@@ -168,6 +186,74 @@ type ResponseProjectLifecycleState = {
   holds: number;
   releaseStarted: boolean;
 };
+
+type LifecycleTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// Only admission and withActiveProjectLifecycle mint session witnesses.
+// Request data and res.locals cannot install this private async context.
+const activeProjectLifecycleStates = new AsyncLocalStorage<ResponseProjectLifecycleState>();
+const admittedResponseLifecycleStates = new WeakMap<Response, ResponseProjectLifecycleState>();
+const transactionLifecycleStates = new WeakMap<object, ResponseProjectLifecycleState>();
+
+/** Reuse only the exact project key held for this registered transaction. */
+export function transactionHoldsProjectLifecycleLock(tx: object, projectId: number): boolean {
+  const state = transactionLifecycleStates.get(tx);
+  return (
+    state !== undefined &&
+    heldProjectLifecycleSessions.has(state.session) &&
+    !state.releaseStarted &&
+    state.holds > 0 &&
+    state.session.projectId === projectId
+  );
+}
+
+/**
+ * Compose a transaction with an admitted HTTP session without reacquiring its
+ * exclusive advisory key on a different connection. Pin the session through
+ * COMMIT/ROLLBACK, including socket close; the normal finish/close boundary
+ * still owns the eventual unlock. Without an HTTP response, a nested background
+ * placement may reuse withActiveProjectLifecycle's genuine active session.
+ * Outside either boundary no witness is minted: standalone helpers stay fenced.
+ */
+export async function withResponseProjectLifecycleTransaction<T>(
+  res: Response | undefined,
+  projectId: number,
+  work: (tx: LifecycleTransaction) => Promise<T>,
+): Promise<T> {
+  const state =
+    res === undefined
+      ? activeProjectLifecycleStates.getStore()
+      : admittedResponseLifecycleStates.get(res);
+  if (
+    (res !== undefined || state !== undefined) &&
+    (!state ||
+      !heldProjectLifecycleSessions.has(state.session) ||
+      state.session.projectId !== projectId ||
+      state.responseEnded ||
+      state.releaseStarted)
+  ) {
+    throw new Error("project_lifecycle_session_missing");
+  }
+  if (state) state.holds += 1;
+  try {
+    return await db.transaction(
+      async (tx) => {
+        if (state) transactionLifecycleStates.set(tx, state);
+        try {
+          return await work(tx);
+        } finally {
+          transactionLifecycleStates.delete(tx);
+        }
+      },
+      { isolationLevel: "read committed" },
+    );
+  } finally {
+    if (state) {
+      state.holds -= 1;
+      await maybeReleaseResponseProjectLifecycleSession(state);
+    }
+  }
+}
 
 async function maybeReleaseResponseProjectLifecycleSession(
   state: ResponseProjectLifecycleState,
@@ -249,6 +335,7 @@ async function admitResponseProjectLifecycleSession(
     releaseStarted: false,
   };
   (res.locals as Record<string, unknown>)[LIFECYCLE_SESSION_STATE_LOCAL] = state;
+  admittedResponseLifecycleStates.set(res, state);
   const markResponseEnded = (): void => {
     state.responseEnded = true;
     void maybeReleaseResponseProjectLifecycleSession(state).catch(() => undefined);

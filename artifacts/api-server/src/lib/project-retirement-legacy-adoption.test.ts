@@ -34,7 +34,7 @@ describe("governed legacy project retirement adoption", () => {
     expect(batch).not.toMatch(/projectId\s*[:=]\s*51/u);
   });
 
-  it("reuses current receipts, upgrades terminal old receipts, and creates one new receipt", () => {
+  it("reuses current receipts, requires bounded terminal recovery, and creates only new lifecycle roots", () => {
     const accept = block(
       retirement,
       "export async function acceptProjectRetirement",

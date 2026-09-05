@@ -1660,18 +1660,9 @@ export type ProjectRetirementReconciliationRequest =
         | "project_retirement_not_terminal"
         | "project_retirement_retry_not_allowed"
         | "project_retirement_provider_configuration_unavailable"
-        | "project_retirement_reconciliation_limit_reached";
+        | "project_retirement_reconciliation_limit_reached"
+        | "project_purge_in_progress";
     };
-
-type ReconciliableRetirementProgress = ProjectRetirementProgress & {
-  reconciliation?: {
-    generation: number;
-    parentOperationId: string;
-    requestedBy: string;
-    reason: "retryable_terminal" | "legacy_admin_reconciliation" | "configuration_recovery";
-    configurationRecoveryUsed?: boolean;
-  };
-};
 
 /**
  * Mint a fresh bounded operation after a terminal cleanup failure. Each
@@ -1685,71 +1676,11 @@ export async function requestProjectRetirementReconciliation(input: {
   allowLegacyAdminReconciliation: boolean;
   allowConfigurationRecovery?: boolean;
 }): Promise<ProjectRetirementReconciliationRequest> {
-  const operationId = crypto.randomUUID();
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${input.projectId})`,
-    );
-    const projectPredicates = [
-      eq(projectsTable.id, input.projectId),
-      isNotNull(projectsTable.deletedAt),
-      ...(input.ownerId ? [eq(projectsTable.ownerId, input.ownerId)] : []),
-    ];
-    const [project] = await tx
-      .select({ id: projectsTable.id })
-      .from(projectsTable)
-      .where(and(...projectPredicates))
-      .limit(1);
-    if (!project) return { code: "project_retirement_not_found" as const };
-
-    const [latest] = await tx
-      .select()
-      .from(projectRetirementOperationsTable)
-      .where(eq(projectRetirementOperationsTable.projectId, input.projectId))
-      .orderBy(desc(projectRetirementOperationsTable.createdAt))
-      .limit(1);
-    if (!latest) return { code: "project_retirement_not_found" as const };
-    const latestProgress = latest.progress as ReconciliableRetirementProgress;
-    const generation = latestProgress.reconciliation?.generation ?? 0;
-    const currentCloudflareCachePurgeConfigured =
-      resolveCurrentCloudflareRetirementPosture().state === "configured";
-    const configurationRecoveryUsed =
-      latestProgress.reconciliation?.configurationRecoveryUsed === true;
-    const decision = decideProjectRetirementReconciliation({
-      state: latest.state,
-      completedAt: latest.completedAt,
-      failureCode: latest.failureCode,
-      generation,
-      allowLegacyAdminReconciliation: input.allowLegacyAdminReconciliation,
-      allowConfigurationRecovery: input.allowConfigurationRecovery === true,
-      currentCloudflareCachePurgeConfigured,
-      configurationRecoveryUsed,
-    });
-    if (!decision.allowed) return { code: decision.code };
-
-    let progress = initialProjectRetirementProgress() as ReconciliableRetirementProgress;
-    progress.reconciliation = {
-      generation: generation + 1,
-      parentOperationId: latest.id,
-      requestedBy: input.requestedBy,
-      reason: decision.reason,
-      configurationRecoveryUsed:
-        configurationRecoveryUsed || decision.reason === "configuration_recovery",
-    };
-    progress = (await retireProjectAccessSurfaces(tx, {
-      projectId: input.projectId,
-      actorUserId: input.requestedBy,
-      progress,
-    })) as ReconciliableRetirementProgress;
-    await tx.insert(projectRetirementOperationsTable).values({
-      id: operationId,
-      projectId: input.projectId,
-      requestedBy: input.requestedBy,
-      state: "accepted",
-      progress,
-    });
-    return { operationId, projectId: input.projectId, state: "accepted" as const };
-  });
+  // Keep older callers on the same authorization, budget and witness policy as
+  // the HTTP retry route. Dynamic import avoids a module initialization cycle.
+  const { requestProjectRetirementEvidenceReconciliation } =
+    await import("./project-retirement-reconciliation");
+  return requestProjectRetirementEvidenceReconciliation(input);
 }
 
 export async function runProjectRetirementOperation(operationId: string): Promise<void> {

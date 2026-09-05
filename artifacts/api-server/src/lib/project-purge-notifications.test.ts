@@ -1,13 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
+import type { EmailDeliveryReceipt } from "./emailClient";
 
 import {
   PROJECT_PURGE_EMAIL_LEASE_MINUTES,
   PROJECT_PURGE_CLERK_LOOKUP_TIMEOUT_MS,
   PROJECT_PURGE_EMAIL_MAX_ATTEMPTS,
+  PROJECT_PURGE_EMAIL_RETRY_DELAYS_MS,
   PROJECT_PURGE_NOTIFICATION_SEMANTICS,
   deliverProjectPurgeMilestone,
   presentProjectPurgeMilestone,
   retryProjectPurgeEmailDeliveries,
+  databaseProjectPurgeNotificationStore,
+  type ProjectPurgeEmailDeliveryReceipt,
   type ProjectPurgeMilestoneInput,
   type ProjectPurgeNotificationMetadata,
   type ProjectPurgeNotificationRecord,
@@ -51,6 +56,8 @@ class MemoryNotificationStore implements ProjectPurgeNotificationStore {
     } else if (previousEmail.attempts >= maxAttempts) {
       return null;
     }
+    if (previousEmail.nextAttemptAt && Date.parse(previousEmail.nextAttemptAt) > this.nowMs)
+      return null;
     const attempt =
       previousEmail.status === "sending" ? previousEmail.attempts : previousEmail.attempts + 1;
     const leaseId = `lease-${++this.leaseSequence}`;
@@ -64,6 +71,7 @@ class MemoryNotificationStore implements ProjectPurgeNotificationStore {
         leaseExpiresAt: new Date(
           this.nowMs + PROJECT_PURGE_EMAIL_LEASE_MINUTES * 60_000,
         ).toISOString(),
+        nextAttemptAt: null,
       },
     };
     return { ...record, attempt, leaseId };
@@ -74,6 +82,7 @@ class MemoryNotificationStore implements ProjectPurgeNotificationStore {
     attempt: number,
     leaseId: string,
     status: "sent" | "skipped" | "failed",
+    receipt?: ProjectPurgeEmailDeliveryReceipt,
   ): Promise<void> {
     const record = this.records.get(notificationId);
     if (
@@ -86,7 +95,17 @@ class MemoryNotificationStore implements ProjectPurgeNotificationStore {
     }
     record.metadata = {
       ...record.metadata,
-      email: { ...record.metadata.email, status, leaseId: null, leaseExpiresAt: null },
+      email: {
+        ...record.metadata.email,
+        status,
+        leaseId: null,
+        leaseExpiresAt: null,
+        nextAttemptAt:
+          status !== "sent" && attempt < PROJECT_PURGE_EMAIL_MAX_ATTEMPTS
+            ? new Date(this.nowMs + PROJECT_PURGE_EMAIL_RETRY_DELAYS_MS[attempt - 1]!).toISOString()
+            : null,
+        lastDelivery: receipt ?? null,
+      },
     };
   }
 
@@ -98,7 +117,10 @@ class MemoryNotificationStore implements ProjectPurgeNotificationStore {
         if (email.status === "sending") {
           return Date.parse(email.leaseExpiresAt!) <= this.nowMs;
         }
-        return email.attempts < email.maxAttempts;
+        return (
+          email.attempts < email.maxAttempts &&
+          (!email.nextAttemptAt || Date.parse(email.nextAttemptAt) <= this.nowMs)
+        );
       })
       .slice(0, limit);
   }
@@ -114,6 +136,22 @@ function input(
     projectId: milestone === "completed" ? null : 42,
     projectName: milestone === "completed" ? null : "Weather desk",
     dueAt: milestone === "completed" ? null : "2026-10-01T00:00:00.000Z",
+  };
+}
+
+function providerReceipt(status: "sent" | "skipped" | "failed"): EmailDeliveryReceipt {
+  return {
+    status,
+    acceptance: status === "sent" ? "accepted" : status === "skipped" ? "not_accepted" : "unknown",
+    providerMessageId: status === "sent" ? "provider-message-1" : null,
+    failureKind:
+      status === "sent"
+        ? null
+        : status === "skipped"
+          ? "provider_unconfigured"
+          : "provider_failure_unclassified",
+    retryable: status === "failed" ? null : false,
+    providerStatusCode: null,
   };
 }
 
@@ -146,7 +184,7 @@ function deps(
         text?: string;
         signal?: AbortSignal;
         idempotencyKey?: string;
-      }) => status,
+      }) => providerReceipt(status),
     ),
   };
 }
@@ -213,6 +251,8 @@ describe("project purge notifications", () => {
       maxAttempts: PROJECT_PURGE_EMAIL_MAX_ATTEMPTS,
       leaseId: null,
       leaseExpiresAt: null,
+      nextAttemptAt: null,
+      lastDelivery: providerReceipt("sent"),
     });
   });
 
@@ -351,8 +391,8 @@ describe("project purge notifications", () => {
     let releaseSend!: (status: "sent") => void;
     dependencies.sendEmail.mockImplementation(
       () =>
-        new Promise<"sent">((resolve) => {
-          releaseSend = resolve;
+        new Promise<EmailDeliveryReceipt>((resolve) => {
+          releaseSend = (status) => resolve(providerReceipt(status));
         }),
     );
 
@@ -414,6 +454,444 @@ describe("project purge notifications", () => {
       maxAttempts: PROJECT_PURGE_EMAIL_MAX_ATTEMPTS,
       leaseId: null,
       leaseExpiresAt: null,
+      nextAttemptAt: null,
+      lastDelivery: providerReceipt("sent"),
     });
   });
+
+  it("prevents direct dispatch and polling from burning three attempts in one burst", async () => {
+    const store = new MemoryNotificationStore();
+    const dependencies = deps(store, "failed");
+    await deliverProjectPurgeMilestone(input(), dependencies);
+    await deliverProjectPurgeMilestone(input(), dependencies);
+    expect(await retryProjectPurgeEmailDeliveries(dependencies)).toEqual({
+      inspected: 0,
+      sent: 0,
+      stillUnsent: 0,
+    });
+    expect(dependencies.sendEmail).toHaveBeenCalledTimes(1);
+    store.nowMs += PROJECT_PURGE_EMAIL_RETRY_DELAYS_MS[0];
+    await retryProjectPurgeEmailDeliveries(dependencies);
+    await deliverProjectPurgeMilestone(input(), dependencies);
+    expect(dependencies.sendEmail).toHaveBeenCalledTimes(2);
+    store.nowMs += PROJECT_PURGE_EMAIL_RETRY_DELAYS_MS[1];
+    dependencies.sendEmail.mockResolvedValue(providerReceipt("sent"));
+    await retryProjectPurgeEmailDeliveries(dependencies);
+    expect(store.records.get(1)?.metadata.email).toMatchObject({
+      status: "sent",
+      attempts: 3,
+      nextAttemptAt: null,
+    });
+    expect(dependencies.sendEmail.mock.calls.map(([call]) => call)).toEqual([
+      expect.objectContaining({ idempotencyKey: "project-purge-notification:1" }),
+      expect.objectContaining({ idempotencyKey: "project-purge-notification:1" }),
+      expect.objectContaining({ idempotencyKey: "project-purge-notification:1" }),
+    ]);
+    const payloads = dependencies.sendEmail.mock.calls.map(
+      ([{ signal: _signal, ...payload }]) => payload,
+    );
+    expect(payloads[1]).toEqual(payloads[0]);
+    expect(payloads[2]).toEqual(payloads[0]);
+  });
+
+  it.each([
+    ["null lookup", null, "recipient_lookup_unavailable"],
+    [
+      "missing email",
+      { userId: "user_owner", email: null, displayName: null, imageUrl: null },
+      "recipient_email_missing",
+    ],
+    [
+      "wrong owner",
+      { userId: "another_owner", email: "other@example.com", displayName: null, imageUrl: null },
+      "recipient_identity_mismatch",
+    ],
+  ] as const)(
+    "records %s without claiming the provider rejected an email",
+    async (_label, user, kind) => {
+      const store = new MemoryNotificationStore();
+      const dependencies = { ...deps(store), getUser: vi.fn(async () => user) };
+      await deliverProjectPurgeMilestone(input(), dependencies);
+      expect(dependencies.sendEmail).not.toHaveBeenCalled();
+      expect(store.records.get(1)?.metadata.email.lastDelivery).toMatchObject({
+        status: "failed",
+        acceptance: "not_attempted",
+        failureKind: kind,
+        providerMessageId: null,
+      });
+    },
+  );
+
+  it("sanitizes thrown lookup errors and persists the stage", async () => {
+    const store = new MemoryNotificationStore();
+    const dependencies = deps(store);
+    dependencies.getUser.mockRejectedValue(new Error("secret owner@example.com"));
+    await deliverProjectPurgeMilestone(input(), dependencies);
+    const diagnostic = store.records.get(1)?.metadata.email.lastDelivery;
+    expect(diagnostic).toMatchObject({
+      failureKind: "recipient_lookup_failed",
+      acceptance: "not_attempted",
+    });
+    expect(JSON.stringify(diagnostic)).not.toMatch(/secret|@/u);
+  });
+
+  it("persists rate-limit evidence and does not equate it with mailbox delivery", async () => {
+    const store = new MemoryNotificationStore();
+    const dependencies = deps(store);
+    dependencies.sendEmail.mockResolvedValue({
+      status: "failed",
+      acceptance: "not_accepted",
+      failureKind: "provider_rate_limited",
+      providerMessageId: null,
+      providerStatusCode: 429,
+      retryable: true,
+    });
+    await deliverProjectPurgeMilestone(input(), dependencies);
+    expect(store.records.get(1)?.metadata.email.lastDelivery).toMatchObject({
+      failureKind: "provider_rate_limited",
+      providerStatusCode: 429,
+      acceptance: "not_accepted",
+    });
+  });
+
+  it.each(["sent", { ...providerReceipt("sent"), providerMessageId: null }])(
+    "does not persist unsubstantiated success from an injected sender: %j",
+    async (receipt) => {
+      const store = new MemoryNotificationStore();
+      const dependencies = deps(store);
+      dependencies.sendEmail.mockResolvedValue(receipt as EmailDeliveryReceipt);
+      expect((await deliverProjectPurgeMilestone(input(), dependencies)).emailStatus).toBe(
+        "failed",
+      );
+      expect(store.records.get(1)?.metadata.email.lastDelivery).toMatchObject({
+        acceptance: "unknown",
+        failureKind: "provider_response_invalid",
+        providerMessageId: null,
+      });
+    },
+  );
+
+  it("receipts a thrown sender error once without leaving an endlessly stale sending lease", async () => {
+    const store = new MemoryNotificationStore();
+    const dependencies = deps(store);
+    dependencies.sendEmail.mockRejectedValue(new Error("secret-provider-body"));
+    await deliverProjectPurgeMilestone(input(), dependencies);
+    expect(store.records.get(1)?.metadata.email).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      leaseId: null,
+      lastDelivery: { acceptance: "unknown", failureKind: "provider_transport_error" },
+    });
+    expect(JSON.stringify(store.records.get(1)?.metadata)).not.toContain("secret-provider-body");
+  });
+
+  it("keeps the six historical failed3/3 candidates held without resetting or resending", async () => {
+    const store = new MemoryNotificationStore();
+    for (const id of [160, 166, 172, 174, 176, 186]) {
+      store.records.set(id, {
+        id,
+        recipientUserId: "user_owner",
+        title: "Project moved to Trash",
+        body: "Historical notice",
+        metadata: {
+          ...presentProjectPurgeMilestone(input()).metadata,
+          email: {
+            status: "failed",
+            attempts: 3,
+            maxAttempts: 3,
+            leaseId: null,
+            leaseExpiresAt: null,
+          },
+        },
+      });
+    }
+    const before = JSON.stringify([...store.records.values()]);
+    const dependencies = deps(store);
+    expect(await retryProjectPurgeEmailDeliveries(dependencies)).toEqual({
+      inspected: 0,
+      sent: 0,
+      stillUnsent: 0,
+    });
+    expect(JSON.stringify([...store.records.values()])).toBe(before);
+    expect(dependencies.sendEmail).not.toHaveBeenCalled();
+  });
+});
+
+const databaseMock = vi.hoisted(() => ({ execute: vi.fn(), update: vi.fn() }));
+vi.mock("@workspace/db", () => ({
+  notificationsTable: { id: "id" },
+  db: {
+    execute: databaseMock.execute,
+    transaction: async (run: (tx: unknown) => Promise<unknown>) =>
+      run({
+        execute: databaseMock.execute,
+        update: () => ({
+          set: (change: unknown) => ({ where: async () => databaseMock.update(change) }),
+        }),
+      }),
+  },
+}));
+
+describe("purge email database-clock retry fencing", () => {
+  let databaseNow: number;
+  let row: {
+    id: number;
+    recipient_id: string;
+    title: string;
+    body: string;
+    metadata: ProjectPurgeNotificationMetadata;
+  };
+  beforeEach(() => {
+    vi.stubEnv("REPLIT_DEPLOYMENT", "1");
+    databaseNow = Date.parse("2026-09-05T12:00:00.000Z");
+    row = {
+      id: 1,
+      recipient_id: "user_owner",
+      title: "Project moved to Trash",
+      body: "Exact durable body",
+      metadata: presentProjectPurgeMilestone(input()).metadata,
+    };
+    databaseMock.execute.mockReset().mockImplementation(async () => ({
+      rows: [
+        {
+          ...row,
+          database_now: new Date(databaseNow).toISOString(),
+          lease_expires_at: new Date(databaseNow + 120_000).toISOString(),
+        },
+      ],
+    }));
+    databaseMock.update
+      .mockReset()
+      .mockImplementation((change: { metadata: ProjectPurgeNotificationMetadata }) => {
+        row.metadata = change.metadata;
+      });
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function productionClaim() {
+    const claim = await databaseProjectPurgeNotificationStore.claimEmailAttempt(1, 3);
+    if (!claim || "suppressed" in claim) throw new Error("Expected production claim");
+    return claim;
+  }
+
+  it("enforces both 5m and 30m delays on locked direct claims using DB time despite host clock skew", async () => {
+    const hostClock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2030-01-01T00:00:00Z"));
+    try {
+      for (const delay of PROJECT_PURGE_EMAIL_RETRY_DELAYS_MS) {
+        const claim = await productionClaim();
+        expect(claim).not.toBeNull();
+        await databaseProjectPurgeNotificationStore.completeEmailAttempt(
+          1,
+          claim!.attempt,
+          claim!.leaseId,
+          "failed",
+          providerReceipt("failed"),
+        );
+        expect(row.metadata.email.nextAttemptAt).toBe(new Date(databaseNow + delay).toISOString());
+        databaseNow += delay - 1;
+        expect(await databaseProjectPurgeNotificationStore.claimEmailAttempt(1, 3)).toBeNull();
+        databaseNow += 1;
+      }
+      const final = await productionClaim();
+      expect(final?.attempt).toBe(3);
+      await databaseProjectPurgeNotificationStore.completeEmailAttempt(
+        1,
+        final!.attempt,
+        final!.leaseId,
+        "failed",
+        providerReceipt("failed"),
+      );
+      expect(row.metadata.email.nextAttemptAt).toBeNull();
+      databaseNow += 7 * 86_400_000;
+      expect(await databaseProjectPurgeNotificationStore.claimEmailAttempt(1, 3)).toBeNull();
+    } finally {
+      hostClock.mockRestore();
+    }
+  });
+
+  it("requires provider acceptance evidence for a new durable sent receipt", async () => {
+    const claim = await productionClaim();
+    await expect(
+      databaseProjectPurgeNotificationStore.completeEmailAttempt(
+        1,
+        claim!.attempt,
+        claim!.leaseId,
+        "sent",
+      ),
+    ).rejects.toThrow("project_purge_email_delivery_receipt_invalid");
+    await databaseProjectPurgeNotificationStore.completeEmailAttempt(
+      1,
+      claim!.attempt,
+      claim!.leaseId,
+      "sent",
+      providerReceipt("sent"),
+    );
+    expect(row.metadata.email.lastDelivery?.providerMessageId).toBe("provider-message-1");
+    expect(await databaseProjectPurgeNotificationStore.claimEmailAttempt(1, 3)).toBeNull();
+  });
+
+  it("does not let an expired holder overwrite the current lease or its diagnostics", async () => {
+    const old = await productionClaim();
+    databaseNow += 120_001;
+    const current = await productionClaim();
+    await databaseProjectPurgeNotificationStore.completeEmailAttempt(
+      1,
+      old!.attempt,
+      old!.leaseId,
+      "failed",
+      providerReceipt("failed"),
+    );
+    expect(row.metadata.email.leaseId).toBe(current!.leaseId);
+    await databaseProjectPurgeNotificationStore.completeEmailAttempt(
+      1,
+      current!.attempt,
+      current!.leaseId,
+      "sent",
+      providerReceipt("sent"),
+    );
+    expect(row.metadata.email.status).toBe("sent");
+  });
+
+  it("filters future deadlines in the bounded retry query as well as the locked claim", async () => {
+    databaseMock.execute.mockResolvedValueOnce({ rows: [] });
+    await databaseProjectPurgeNotificationStore.listRetryable(50);
+    const query = new PgDialect().sqlToQuery(databaseMock.execute.mock.calls[0]![0]);
+    expect(query.sql).toContain("nextAttemptAt");
+    expect(query.sql).toContain("CURRENT_TIMESTAMP");
+    expect(query.sql).toContain("leaseExpiresAt");
+    expect(query.sql).toContain("suppressionReason");
+    expect(query.sql).toContain("nonproduction_suppressed");
+    expect(query.sql).toContain("LIMIT");
+    expect(query.params).toContain(3);
+    expect(query.params).toContain(50);
+  });
+
+  it.each(["not-a-time", "2026-09-05 12:05:00+00", 123])(
+    "fails closed on a malformed deadline %j",
+    async (deadline) => {
+      row.metadata.email = {
+        status: "failed",
+        attempts: 1,
+        maxAttempts: 3,
+        leaseId: null,
+        leaseExpiresAt: null,
+        nextAttemptAt: deadline as string,
+      };
+      await expect(databaseProjectPurgeNotificationStore.claimEmailAttempt(1, 3)).rejects.toThrow(
+        "project_purge_notification_metadata_invalid",
+      );
+      expect(databaseMock.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, "", "0", "true", "production", " 1 "])(
+    "keeps an in-app preview without contacting Clerk or email when deployment=%j",
+    async (deployment) => {
+      vi.stubEnv("REPLIT_DEPLOYMENT", deployment);
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CLERK_SECRET_KEY", "test-only-present");
+      vi.stubEnv("RESEND_API_KEY", "test-only-present");
+      const createOrGet = vi.fn(async () => ({
+        id: row.id,
+        recipientUserId: row.recipient_id,
+        title: row.title,
+        body: row.body,
+        metadata: row.metadata,
+      }));
+      const dependencies = deps({ ...databaseProjectPurgeNotificationStore, createOrGet });
+      expect(await deliverProjectPurgeMilestone(input(), dependencies)).toEqual({
+        notificationId: 1,
+        emailStatus: "skipped",
+      });
+      expect(createOrGet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipientUserId: "user_owner",
+          resourceId: "purge_abc:trash",
+        }),
+      );
+      expect(row.metadata.email).toMatchObject({
+        status: "skipped",
+        attempts: 0,
+        maxAttempts: 3,
+        leaseId: null,
+        leaseExpiresAt: null,
+        suppressionReason: "nonproduction_suppressed",
+        lastDelivery: null,
+      });
+      expect(dependencies.getUser).not.toHaveBeenCalled();
+      expect(dependencies.sendEmail).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows an actual Replit deployment through the production adapter", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const dependencies = deps(databaseProjectPurgeNotificationStore);
+    expect(await retryProjectPurgeEmailDeliveries(dependencies)).toEqual({
+      inspected: 1,
+      sent: 1,
+      stillUnsent: 0,
+    });
+    expect(dependencies.getUser).toHaveBeenCalledExactlyOnceWith("user_owner");
+    expect(dependencies.sendEmail).toHaveBeenCalledTimes(1);
+    expect(row.metadata.email).toMatchObject({
+      status: "sent",
+      attempts: 1,
+      suppressionReason: null,
+      lastDelivery: { acceptance: "accepted", providerMessageId: "provider-message-1" },
+    });
+  });
+
+  it("does not release a development preview for automatic email on a later deployment", async () => {
+    vi.stubEnv("REPLIT_DEPLOYMENT", undefined);
+    const dependencies = deps(databaseProjectPurgeNotificationStore);
+    await retryProjectPurgeEmailDeliveries(dependencies);
+    vi.stubEnv("REPLIT_DEPLOYMENT", "1");
+    await retryProjectPurgeEmailDeliveries(dependencies);
+    expect(row.metadata.email.attempts).toBe(0);
+    expect(row.metadata.email.suppressionReason).toBe("nonproduction_suppressed");
+    expect(databaseMock.update).toHaveBeenCalledTimes(1);
+    expect(dependencies.getUser).not.toHaveBeenCalled();
+    expect(dependencies.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("preserves an earlier uncertain provider outcome when suppressing future development sends", async () => {
+    vi.stubEnv("REPLIT_DEPLOYMENT", undefined);
+    row.metadata.email = {
+      status: "failed",
+      attempts: 1,
+      maxAttempts: 3,
+      leaseId: null,
+      leaseExpiresAt: null,
+      lastDelivery: providerReceipt("failed"),
+    };
+    expect(await databaseProjectPurgeNotificationStore.claimEmailAttempt(1, 3)).toEqual({
+      suppressed: true,
+    });
+    expect(row.metadata.email).toMatchObject({
+      status: "failed",
+      attempts: 1,
+      suppressionReason: "nonproduction_suppressed",
+      lastDelivery: { acceptance: "unknown", failureKind: "provider_failure_unclassified" },
+    });
+  });
+
+  it.each(["sent", "failed"] as const)(
+    "does not rewrite historical terminal %s receipts in development",
+    async (status) => {
+      vi.stubEnv("REPLIT_DEPLOYMENT", undefined);
+      row.metadata.email = {
+        status,
+        attempts: 3,
+        maxAttempts: 3,
+        leaseId: null,
+        leaseExpiresAt: null,
+      };
+      const before = JSON.stringify(row.metadata);
+      expect(await databaseProjectPurgeNotificationStore.claimEmailAttempt(1, 3)).toBeNull();
+      expect(JSON.stringify(row.metadata)).toBe(before);
+      expect(databaseMock.update).not.toHaveBeenCalled();
+    },
+  );
 });

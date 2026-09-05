@@ -246,10 +246,13 @@ type SqliteProjectFacts = {
   dbProvider: string;
   dbStatus: string;
   containerId: string | null;
+  deletedAt?: Date | null;
 };
 
 type SqliteSnapshotRow = {
   id: number;
+  projectId?: number;
+  label?: string;
   provider: string;
   dumpContent: string | null;
   objectKey: string | null;
@@ -257,9 +260,26 @@ type SqliteSnapshotRow = {
   sizeBytes: number;
 };
 
+type SqliteRetirementOperation = {
+  id: string;
+  projectId: number;
+  state: string;
+  createdAt: Date;
+  completedAt: Date | null;
+  progress: unknown;
+};
+
 type SqliteRetirementDependencies = {
   readProject(projectId: number): Promise<SqliteProjectFacts | null>;
-  readSnapshots(projectId: number, label: string): Promise<SqliteSnapshotRow[]>;
+  readSnapshots(
+    projectId: number,
+    label: string,
+    snapshotId?: number,
+  ): Promise<SqliteSnapshotRow[]>;
+  readRetirementOperation?(
+    projectId: number,
+    operationId: string,
+  ): Promise<SqliteRetirementOperation | null>;
   exec(runtimeId: string, projectId: number): Promise<{ ok: boolean; output: string }>;
   upload(projectId: number, content: string): Promise<string | null>;
   objectExists(objectKey: string): Promise<boolean>;
@@ -274,6 +294,114 @@ type SqliteRetirementDependencies = {
 };
 
 const SQLITE_ABSENT_MARKER = "__NABUFLOW_SQLITE_ABSENT__";
+// Two ordinary reconciliations, one configuration recovery, one versioned repair.
+const MAX_SQLITE_RECOVERY_PREDECESSORS = 4;
+
+function sqliteRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Follow only durable server-owned lineage in this project's current tombstone. */
+async function verifiedPredecessorSqliteReceipt(
+  input: { projectId: number; operationId: string },
+  project: SqliteProjectFacts,
+  dependencies: SqliteRetirementDependencies,
+): Promise<ProjectSqliteRetirementReceipt | null> {
+  if (
+    !dependencies.readRetirementOperation ||
+    !(project.deletedAt instanceof Date) ||
+    !Number.isFinite(project.deletedAt.getTime())
+  )
+    return null;
+  const inCurrentTrash = (operation: SqliteRetirementOperation) =>
+    operation.projectId === input.projectId &&
+    operation.createdAt instanceof Date &&
+    Number.isFinite(operation.createdAt.getTime()) &&
+    operation.createdAt >= project.deletedAt!;
+  let current = await dependencies.readRetirementOperation(input.projectId, input.operationId);
+  if (
+    !current ||
+    current.id !== input.operationId ||
+    !inCurrentTrash(current) ||
+    current.state !== "running" ||
+    current.completedAt !== null
+  )
+    return null;
+  const visited = new Set([current.id]);
+  for (let depth = 0; depth < MAX_SQLITE_RECOVERY_PREDECESSORS; depth += 1) {
+    const reconciliation = sqliteRecord(sqliteRecord(current.progress)?.reconciliation);
+    if (
+      !reconciliation ||
+      !Number.isSafeInteger(reconciliation.generation) ||
+      Number(reconciliation.generation) < 1 ||
+      Number(reconciliation.generation) > MAX_SQLITE_RECOVERY_PREDECESSORS ||
+      typeof reconciliation.parentOperationId !== "string" ||
+      reconciliation.parentOperationId.length === 0 ||
+      visited.has(reconciliation.parentOperationId)
+    )
+      return null;
+    const parent = await dependencies.readRetirementOperation(
+      input.projectId,
+      reconciliation.parentOperationId,
+    );
+    if (
+      !parent ||
+      parent.id !== reconciliation.parentOperationId ||
+      !inCurrentTrash(parent) ||
+      !["completed", "failed"].includes(parent.state) ||
+      !(parent.completedAt instanceof Date) ||
+      !Number.isFinite(parent.completedAt.getTime()) ||
+      parent.createdAt > current.createdAt
+    )
+      return null;
+    visited.add(parent.id);
+    const parentProgress = sqliteRecord(parent.progress);
+    if (!parentProgress || parentProgress.restore !== undefined) return null;
+    const parentReconciliation = sqliteRecord(parentProgress.reconciliation);
+    const parentGeneration =
+      parentProgress.reconciliation === undefined ? 0 : parentReconciliation?.generation;
+    if (
+      !Number.isSafeInteger(parentGeneration) ||
+      parentGeneration !== Number(reconciliation.generation) - 1
+    )
+      return null;
+    const preserved = sqliteRecord(parentProgress.sqliteRecovery);
+    if (
+      preserved?.state === "preserved" &&
+      preserved.failureCode === null &&
+      Number.isSafeInteger(preserved.snapshotId) &&
+      Number(preserved.snapshotId) > 0
+    ) {
+      const label = `trash-recovery:${parent.id}`;
+      const snapshots = await dependencies.readSnapshots(
+        input.projectId,
+        label,
+        Number(preserved.snapshotId),
+      );
+      for (const snapshot of snapshots) {
+        // Labels are user-supplied in the generic snapshot API. They are not
+        // ownership evidence without this exact persisted preservation receipt.
+        if (
+          snapshot.id !== preserved.snapshotId ||
+          snapshot.projectId !== input.projectId ||
+          snapshot.label !== label
+        )
+          continue;
+        const receipt = await verifiedSqliteReceipt(snapshot, dependencies);
+        if (
+          receipt?.state === "preserved" &&
+          receipt.sizeBytes === preserved.sizeBytes &&
+          receipt.storage === preserved.storage
+        )
+          return receipt;
+      }
+    }
+    current = parent;
+  }
+  return null;
+}
 
 async function verifiedSqliteReceipt(
   snapshot: SqliteSnapshotRow,
@@ -322,17 +450,41 @@ const defaultSqliteRetirementDependencies: SqliteRetirementDependencies = {
         dbProvider: projectsTable.dbProvider,
         dbStatus: projectsTable.dbStatus,
         containerId: projectsTable.containerId,
+        deletedAt: projectsTable.deletedAt,
       })
       .from(projectsTable)
       .where(eq(projectsTable.id, projectId))
       .limit(1);
     return project ?? null;
   },
-  readSnapshots: async (projectId, label) => {
+  readRetirementOperation: async (projectId, operationId) => {
+    const { db, projectRetirementOperationsTable } = await import("@workspace/db");
+    const [operation] = await db
+      .select({
+        id: projectRetirementOperationsTable.id,
+        projectId: projectRetirementOperationsTable.projectId,
+        state: projectRetirementOperationsTable.state,
+        createdAt: projectRetirementOperationsTable.createdAt,
+        completedAt: projectRetirementOperationsTable.completedAt,
+        progress: projectRetirementOperationsTable.progress,
+      })
+      .from(projectRetirementOperationsTable)
+      .where(
+        and(
+          eq(projectRetirementOperationsTable.projectId, projectId),
+          eq(projectRetirementOperationsTable.id, operationId),
+        ),
+      )
+      .limit(1);
+    return operation ?? null;
+  },
+  readSnapshots: async (projectId, label, snapshotId) => {
     const { db, dbSnapshotsTable } = await import("@workspace/db");
     return db
       .select({
         id: dbSnapshotsTable.id,
+        projectId: dbSnapshotsTable.projectId,
+        label: dbSnapshotsTable.label,
         provider: dbSnapshotsTable.provider,
         dumpContent: dbSnapshotsTable.dumpContent,
         objectKey: dbSnapshotsTable.objectKey,
@@ -340,7 +492,13 @@ const defaultSqliteRetirementDependencies: SqliteRetirementDependencies = {
         sizeBytes: dbSnapshotsTable.sizeBytes,
       })
       .from(dbSnapshotsTable)
-      .where(and(eq(dbSnapshotsTable.projectId, projectId), eq(dbSnapshotsTable.label, label)))
+      .where(
+        and(
+          eq(dbSnapshotsTable.projectId, projectId),
+          eq(dbSnapshotsTable.label, label),
+          ...(snapshotId === undefined ? [] : [eq(dbSnapshotsTable.id, snapshotId)]),
+        ),
+      )
       .orderBy(dbSnapshotsTable.id);
   },
   exec: async (runtimeId, projectId) => {
@@ -413,6 +571,9 @@ export async function preserveProjectSqliteForRetirement(
       const receipt = await verifiedSqliteReceipt(snapshot, dependencies);
       if (receipt) return { ok: true, receipt };
     }
+
+    const predecessorReceipt = await verifiedPredecessorSqliteReceipt(input, project, dependencies);
+    if (predecessorReceipt) return { ok: true, receipt: predecessorReceipt };
 
     if (project.containerId === null) {
       if (project.dbStatus !== "none") {

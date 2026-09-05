@@ -326,7 +326,13 @@ describe("governed project retirement coordinator", () => {
     const source = readFileSync(new URL("./project-retirement.ts", import.meta.url), "utf8");
     const start = source.indexOf("export async function requestProjectRetirementReconciliation");
     const end = source.indexOf("export async function runProjectRetirementOperation", start);
-    const reconciliation = source.slice(start, end);
+    expect(source.slice(start, end)).toContain(
+      "requestProjectRetirementEvidenceReconciliation(input)",
+    );
+    const reconciliation = readFileSync(
+      new URL("./project-retirement-reconciliation.ts", import.meta.url),
+      "utf8",
+    );
     const lock = reconciliation.indexOf("pg_advisory_xact_lock");
     const access = reconciliation.indexOf("retireProjectAccessSurfaces(tx", lock);
     const insert = reconciliation.indexOf("tx.insert(projectRetirementOperationsTable)", access);

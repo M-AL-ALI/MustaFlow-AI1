@@ -173,6 +173,7 @@ export type ProjectRetirementReconciliationDecision =
 export function decideProjectRetirementReconciliation(input: {
   state: string;
   completedAt: Date | null;
+  progress?: unknown;
   failureCode: string | null;
   generation: number;
   allowLegacyAdminReconciliation: boolean;
@@ -180,16 +181,39 @@ export function decideProjectRetirementReconciliation(input: {
   currentCloudflareCachePurgeConfigured?: boolean;
   configurationRecoveryUsed?: boolean;
 }): ProjectRetirementReconciliationDecision {
-  if (input.state !== "failed" || input.completedAt === null) {
+  const incompleteCompletion =
+    input.state === "completed" &&
+    input.progress !== undefined &&
+    (!hasCurrentProjectRetirementCompletionEvidence(input.progress) ||
+      hasProjectRestoreReplayReceipt({ state: input.state, progress: input.progress }));
+  if ((input.state !== "failed" && !incompleteCompletion) || input.completedAt == null) {
     return { allowed: false, code: "project_retirement_not_terminal" };
+  }
+  if (!Number.isSafeInteger(input.generation) || input.generation < 0) {
+    return { allowed: false, code: "project_retirement_reconciliation_limit_reached" };
   }
   const isRouteOrCacheFailure =
     input.failureCode === "project_retirement_route_deactivation_failed" ||
     input.failureCode === "project_retirement_route_deactivation_unverified";
-  if (isRouteOrCacheFailure && input.currentCloudflareCachePurgeConfigured === false) {
+  if (
+    (isRouteOrCacheFailure || incompleteCompletion) &&
+    input.currentCloudflareCachePurgeConfigured === false
+  ) {
     return { allowed: false, code: "project_retirement_provider_configuration_unavailable" };
   }
   if (input.generation >= PROJECT_RETIREMENT_MAX_RECONCILIATIONS) {
+    if (
+      input.state === "failed" &&
+      input.generation === 3 &&
+      input.failureCode === "project_retirement_legacy_runtime_absence_unverified" &&
+      input.allowLegacyAdminReconciliation === true &&
+      input.allowConfigurationRecovery === true &&
+      input.currentCloudflareCachePurgeConfigured === true &&
+      input.configurationRecoveryUsed === true &&
+      projectRetirementVerificationRepairPointer(input.progress) !== null
+    ) {
+      return { allowed: true, reason: "retryable_terminal" };
+    }
     if (
       isRouteOrCacheFailure &&
       input.allowConfigurationRecovery === true &&
@@ -200,6 +224,9 @@ export function decideProjectRetirementReconciliation(input: {
     }
     return { allowed: false, code: "project_retirement_reconciliation_limit_reached" };
   }
+  // An old completed label can earn fresh evidence through the ordinary bounded
+  // worker path. It never authorizes restore or grants an extra generation.
+  if (incompleteCompletion) return { allowed: true, reason: "retryable_terminal" };
   if (
     input.failureCode &&
     RETRYABLE_TERMINAL_FAILURE_CODES.has(input.failureCode as ProjectRetirementFailureCode)
@@ -213,6 +240,44 @@ export function decideProjectRetirementReconciliation(input: {
     return { allowed: true, reason: "legacy_admin_reconciliation" };
   }
   return { allowed: false, code: "project_retirement_retry_not_allowed" };
+}
+
+/** Exact stale-checker witness. This is admission evidence, never provider absence evidence. */
+export function projectRetirementVerificationRepairPointer(
+  progress: unknown,
+): "containerId" | "prodContainerId" | "testContainerId" | null {
+  if (!isRecord(progress) || !isRecord(progress.reconciliation)) return null;
+  const metadata = progress.reconciliation;
+  if (
+    metadata.generation !== 3 ||
+    metadata.reason !== "configuration_recovery" ||
+    metadata.configurationRecoveryUsed !== true ||
+    "verificationRepair" in metadata ||
+    typeof metadata.parentOperationId !== "string" ||
+    metadata.parentOperationId.length === 0 ||
+    !Array.isArray(progress.legacyRuntimeResolutions) ||
+    progress.legacyRuntimeResolutions.length !== 1 ||
+    !Array.isArray(progress.retainedLegacyRuntimePointers) ||
+    progress.retainedLegacyRuntimePointers.length !== 1
+  )
+    return null;
+  const resolution = progress.legacyRuntimeResolutions[0];
+  const retained = progress.retainedLegacyRuntimePointers[0];
+  if (
+    !isRecord(resolution) ||
+    !isRecord(retained) ||
+    resolution.state !== "retained" ||
+    resolution.reason !== "absence_unverified" ||
+    resolution.retryable !== true ||
+    resolution.proof !== undefined ||
+    !["containerId", "prodContainerId", "testContainerId"].includes(String(resolution.pointer)) ||
+    retained.pointer !== resolution.pointer ||
+    retained.reason !== "runtime_identity_malformed" ||
+    typeof retained.identity !== "string" ||
+    retained.identity.length === 0
+  )
+    return null;
+  return resolution.pointer as "containerId" | "prodContainerId" | "testContainerId";
 }
 
 export type ProjectJobAdmission =
@@ -537,16 +602,16 @@ export function decideProjectRetirementReceiptMode(input: {
     // describes an earlier lifecycle. A later tombstone must earn a fresh
     // retirement and new absence proofs; it may never reuse stale evidence.
     if (hasProjectRestoreReplayReceipt({ state: operation.state, progress: operation.progress })) {
-      return "replace_incompatible_terminal";
+      return "refuse_terminal_reconciliation_required";
     }
     return decideProjectRestoreAdmission({ state: operation.state, progress: operation.progress })
       .allowed
       ? "reuse_completed"
-      : "replace_incompatible_terminal";
+      : "refuse_terminal_reconciliation_required";
   }
-  return currentSemantics
-    ? "refuse_terminal_reconciliation_required"
-    : "replace_incompatible_terminal";
+  // Every existing terminal tombstone needing a successor uses bounded
+  // reconciliation. Batch adoption must never manufacture a new budget root.
+  return "refuse_terminal_reconciliation_required";
 }
 
 export type ProjectRetirementSchedulingReceipt =

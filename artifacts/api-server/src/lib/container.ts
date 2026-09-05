@@ -392,10 +392,18 @@ export async function requestLegacyFlyMachineForRetirement(
     throw new ContainerUnavailableError();
   }
   // The fixed-app catalog must be complete. Only GET observations may retry.
-  if (input.resource === "volumes") {
-    if (input.method !== "GET") throw new Error("Unsupported retirement machine operation");
+  if (input.resource === "volumes" || input.resource === "machines") {
+    if (
+      input.method !== "GET" ||
+      (input.resource === "machines" &&
+        Object.keys(input).some((key) => key !== "resource" && key !== "method"))
+    ) {
+      throw new Error("Unsupported retirement machine operation");
+    }
     return flyFetch(
-      `/apps/${encodeURIComponent(FLY_APP)}/volumes`,
+      input.resource === "machines"
+        ? `/apps/${encodeURIComponent(FLY_APP)}/machines?include_deleted=false`
+        : `/apps/${encodeURIComponent(FLY_APP)}/volumes`,
       {
         method: "GET",
         redirect: "error",

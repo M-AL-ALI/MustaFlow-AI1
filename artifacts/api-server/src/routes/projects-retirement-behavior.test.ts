@@ -257,9 +257,11 @@ import {
 } from "@workspace/db";
 import {
   initialProjectRetirementProgress,
+  requestProjectRetirementReconciliation,
   RESTORED_PROJECT_CONTROL_PLANE_STATE,
 } from "../lib/project-retirement";
 import projectsRouter from "./projects";
+import { readProjectRetirementReconciliationMetadata } from "../lib/project-retirement-reconciliation";
 
 const NOW = new Date("2026-08-31T12:00:00.000Z");
 
@@ -357,6 +359,62 @@ function assertNoProviderCall() {
   expect(mocks.providerDeploy).not.toHaveBeenCalled();
 }
 
+// Shape of the raw Sep 5 project 49 receipt, completed Aug 31 before these
+// required evidence fields existed. No provider receipt is synthesized by recovery.
+function liveIncompleteCompletion() {
+  const {
+    managedAddons: _addons,
+    sqliteRecovery: _sqlite,
+    legacyRuntimeResolutions: _legacy,
+    ...progress
+  } = completedProgress();
+  progress.legacyR2.state = "verified_absent";
+  progress.runtimes.forEach((runtime) => {
+    runtime.attempts = 1;
+  });
+  return {
+    id: "19657e2d-3982-4ff1-8273-f4c3af794fff",
+    projectId: 49,
+    state: "completed",
+    completedAt: NOW,
+    createdAt: NOW,
+    startedAt: NOW,
+    attemptCount: 1,
+    failureCode: null,
+    failureTarget: null,
+    progress,
+  };
+}
+
+function staleFlyCheckerCompletion() {
+  const progress = completedProgress();
+  progress.reconciliation = {
+    generation: 3,
+    parentOperationId: "generation-two-27",
+    requestedBy: "staff-owner",
+    reason: "configuration_recovery",
+    configurationRecoveryUsed: true,
+  };
+  progress.legacyRuntimeResolutions = [
+    { pointer: "containerId", state: "retained", reason: "absence_unverified", retryable: true },
+  ];
+  progress.retainedLegacyRuntimePointers = [
+    {
+      pointer: "containerId",
+      identity: "historical-machine-27",
+      reason: "runtime_identity_malformed",
+    },
+  ];
+  return {
+    ...liveIncompleteCompletion(),
+    id: "stale-checker-generation-three-27",
+    projectId: 27,
+    state: "failed",
+    failureCode: "project_retirement_legacy_runtime_absence_unverified",
+    progress,
+  };
+}
+
 describe("project retirement route behavior", () => {
   beforeEach(() => {
     process.env.CF_ZONE_ID = "test-zone";
@@ -439,6 +497,453 @@ describe("project retirement route behavior", () => {
       expect(mocks.readPreflight).not.toHaveBeenCalled();
       expect(mocks.transaction).not.toHaveBeenCalled();
       expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.insert).not.toHaveBeenCalled();
+      expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports the live completed receipt as unrestorable and eligible for owner recovery", async () => {
+    const operation = liveIncompleteCompletion();
+    mocks.resolveStaff.mockResolvedValue(null);
+    mocks.selectResults = [[project({ id: 49 })], [], [operation], [{ id: 49 }], [operation]];
+    const listed = await request(appAs("owner-77")).get("/projects/trash");
+    expect(listed.status).toBe(200);
+    expect(listed.body[0]).toMatchObject({
+      id: 49,
+      retirementState: "completed",
+      restoreAllowed: false,
+      restoreBlockedCode: "project_retirement_cleanup_unverified",
+      reconciliationEligible: true,
+    });
+    const status = await request(appAs("owner-77")).get("/projects/49/retirement");
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({
+      completionEvidenceCurrent: false,
+      reconciliationEligible: true,
+      progress: { reconciliation: null, managedAddons: null, sqliteRecovery: null },
+    });
+    expect(mocks.insert).not.toHaveBeenCalled();
+    assertNoProviderCall();
+  });
+
+  it.each([0, 2, 4])(
+    "admin batch cannot reset generation %s on incomplete completed evidence",
+    async (generation) => {
+      const original = liveIncompleteCompletion();
+      const operation = {
+        ...original,
+        progress: {
+          ...original.progress,
+          reconciliation: {
+            generation,
+            parentOperationId: "earlier-operation",
+            requestedBy: "staff-owner",
+            reason: "retryable_terminal",
+            configurationRecoveryUsed: true,
+            verificationRepair: {
+              version: "fly-destroyed-tombstone-v1",
+              parentOperationId: "repair-parent",
+            },
+          },
+        },
+      };
+      const before = JSON.stringify(operation);
+      mocks.selectResults = [[project({ id: 49 })], [operation]];
+      const response = await request(appAs("staff-owner"))
+        .post("/admin/projects/retirement/batch")
+        .send({ projectIds: [49] });
+      expect(response.status).toBe(409);
+      expect(response.body.receipts[0]).toMatchObject({
+        state: "refused",
+        code: "project_retirement_reconciliation_required",
+      });
+      expect(JSON.stringify(operation)).toBe(before);
+      expect(mocks.insert).not.toHaveBeenCalled();
+      expect(mocks.retireAccess).not.toHaveBeenCalled();
+      expect(mocks.cancelLocalJobs).not.toHaveBeenCalled();
+      expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it("repeats the no-reset batch decision under the lifecycle lock", async () => {
+    const old = liveIncompleteCompletion();
+    const current = { ...old, progress: completedProgress() };
+    mocks.selectResults = [[project({ id: 49 })], [current], [project({ id: 49 })], [old]];
+    const response = await request(appAs("staff-owner"))
+      .post("/admin/projects/retirement/batch")
+      .send({ projectIds: [49] });
+    expect(response.status).toBe(409);
+    expect(response.body.receipts[0].code).toBe("project_retirement_reconciliation_required");
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.cancelLocalJobs).not.toHaveBeenCalled();
+  });
+
+  it("keeps old direct reconciliation callers on the same bounded witness-preserving coordinator", async () => {
+    const progress = completedProgress();
+    const verificationRepair = {
+      version: "fly-destroyed-tombstone-v1" as const,
+      parentOperationId: "original-repair-parent",
+      requestedBy: "staff-owner",
+      pointer: "containerId" as const,
+      predecessorGeneration: 3 as const,
+      failureCode: "project_retirement_legacy_runtime_absence_unverified" as const,
+      reason: "absence_unverified" as const,
+    };
+    progress.reconciliation = {
+      generation: 1,
+      parentOperationId: "root",
+      requestedBy: "owner-77",
+      reason: "retryable_terminal",
+      configurationRecoveryUsed: true,
+      verificationRepair,
+    };
+    mocks.selectResults = [
+      [{ id: 49 }],
+      [
+        {
+          ...liveIncompleteCompletion(),
+          state: "failed",
+          failureCode: "project_retirement_runtime_destroy_unverified",
+          progress,
+        },
+      ],
+    ];
+    const result = await requestProjectRetirementReconciliation({
+      projectId: 49,
+      requestedBy: "owner-77",
+      ownerId: "owner-77",
+      allowLegacyAdminReconciliation: false,
+    });
+    expect(result).toMatchObject({ state: "accepted" });
+    expect(mocks.insertCalls[0]!.values.progress).toMatchObject({
+      reconciliation: { generation: 2, verificationRepair },
+    });
+    mocks.selectResults = [
+      [{ id: 49 }],
+      [
+        {
+          ...liveIncompleteCompletion(),
+          state: "failed",
+          failureCode: "project_retirement_runtime_destroy_unverified",
+          progress: mocks.insertCalls[0]!.values.progress,
+        },
+      ],
+    ];
+    expect(
+      await requestProjectRetirementReconciliation({
+        projectId: 49,
+        requestedBy: "owner-77",
+        ownerId: "owner-77",
+        allowLegacyAdminReconciliation: false,
+      }),
+    ).toEqual({ code: "project_retirement_reconciliation_limit_reached" });
+    expect(mocks.insertCalls).toHaveLength(1);
+  });
+
+  it("requires authentication before retirement status or recovery work", async () => {
+    const app = appAs("");
+    expect((await request(app).get("/projects/49/retirement")).status).toBe(401);
+    expect((await request(app).post("/projects/49/retirement/retry")).status).toBe(401);
+    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("keeps the live project blocked during recovery and restores only a newly complete receipt", async () => {
+    const original = liveIncompleteCompletion();
+    const deleted = project({ id: 49 });
+    const app = appAs("owner-77");
+    mocks.selectResults = [[deleted], [original]];
+    const oldRestore = await request(app).post("/projects/49/restore");
+    expect(oldRestore.status).toBe(409);
+    expect(oldRestore.body).toMatchObject({
+      code: "project_retirement_cleanup_unverified",
+      statusUrl: "/api/projects/49/retirement",
+    });
+    const current = {
+      ...original,
+      id: "fresh-recovery-49",
+      state: "accepted",
+      progress: initialProjectRetirementProgress(),
+    };
+    mocks.selectResults = [[deleted], [current]];
+    expect((await request(app).post("/projects/49/restore")).status).toBe(409);
+    expect(mocks.update).not.toHaveBeenCalled();
+    const restored = project({ id: 49, ...RESTORED_PROJECT_CONTROL_PLANE_STATE, deletedAt: null });
+    mocks.selectResults = [
+      [deleted],
+      [{ ...current, state: "completed", progress: completedProgress() }],
+    ];
+    mocks.updateReturningResults = [[{ id: current.id }], [restored]];
+    const response = await request(app).post("/projects/49/restore");
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ id: 49, status: "draft" });
+    assertNoProviderCall();
+  });
+
+  it("recovers the live receipt through one locked fresh durable operation without copying absence claims", async () => {
+    mocks.resolveStaff.mockResolvedValue(null);
+    const original = liveIncompleteCompletion();
+    const originalJson = JSON.stringify(original);
+    mocks.selectResults = [[{ id: 49 }], [{ id: 49 }], [original], []];
+    const response = await request(appAs("owner-77")).post("/projects/49/retirement/retry");
+    expect(response.status).toBe(202);
+    expect(response.body.operationId).not.toBe(original.id);
+    const inserted = mocks.insertCalls.find(
+      (call) => call.table === projectRetirementOperationsTable,
+    )!;
+    expect(inserted.values).toMatchObject({
+      projectId: 49,
+      requestedBy: "owner-77",
+      state: "accepted",
+      progress: {
+        route: { state: "pending" },
+        legacyR2: { state: "pending" },
+        managedAddons: { state: "pending" },
+        sqliteRecovery: { state: "pending" },
+        runtimes: expect.arrayContaining([
+          expect.objectContaining({ state: "pending", attempts: 0 }),
+        ]),
+        reconciliation: {
+          generation: 1,
+          parentOperationId: original.id,
+          requestedBy: "owner-77",
+          configurationRecoveryUsed: false,
+        },
+      },
+    });
+    expect(JSON.stringify(original)).toBe(originalJson);
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    const lock = new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]![0] as SQL);
+    expect(lock.sql).toContain("pg_advisory_xact_lock");
+    expect(lock.params).toContain(49);
+    const authority = new PgDialect().sqlToQuery(mocks.selectCalls[1]!.predicate as SQL);
+    expect(authority.sql).toMatch(/"deleted_at" is not null/iu);
+    expect(authority.params).toEqual([49, "owner-77"]);
+    expect(mocks.events).toEqual(["access", "insert", "enqueue"]);
+    expect(mocks.durableEnqueue).toHaveBeenCalledWith(
+      "project-retirement",
+      { operationId: response.body.operationId },
+      response.body.operationId,
+      expect.objectContaining({ retryLimit: 3, dedupeMode: "active" }),
+    );
+    expect(mocks.update).not.toHaveBeenCalled();
+    assertNoProviderCall();
+  });
+
+  it("keeps a recorded recovery durable when scheduling is temporarily unavailable", async () => {
+    mocks.resolveStaff.mockResolvedValue(null);
+    mocks.selectResults = [[{ id: 49 }], [{ id: 49 }], [liveIncompleteCompletion()], []];
+    mocks.durableEnqueue.mockResolvedValueOnce({ status: "unavailable" });
+    const response = await request(appAs("owner-77")).post("/projects/49/retirement/retry");
+    expect(response.status).toBe(503);
+    expect(response.body).toMatchObject({
+      code: "project_retirement_cleanup_pending",
+      state: "accepted",
+      cleanupScheduled: false,
+    });
+    expect(mocks.insertCalls).toHaveLength(1);
+    expect(response.body.operationId).toBe(mocks.insertCalls[0]!.values.id);
+  });
+
+  it.each(["accepted", "running"])(
+    "does not create another recovery while the latest is %s",
+    async (state) => {
+      mocks.resolveStaff.mockResolvedValue(null);
+      mocks.selectResults = [
+        [{ id: 49 }],
+        [{ id: 49 }],
+        [{ ...liveIncompleteCompletion(), state, completedAt: null }],
+      ];
+      const response = await request(appAs("owner-77")).post("/projects/49/retirement/retry");
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe("project_retirement_not_terminal");
+      expect(mocks.insert).not.toHaveBeenCalled();
+      expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["another-owner", "collaborator", "hostile-id"])(
+    "hides recovery status and mutation from %s",
+    async (userId) => {
+      mocks.resolveStaff.mockResolvedValue(null);
+      mocks.selectResults = [[], []];
+      const app = appAs(userId);
+      expect((await request(app).get("/projects/49/retirement")).status).toBe(404);
+      const response = await request(app).post("/projects/49/retirement/retry");
+      expect(response.status).toBe(404);
+      expect(response.body).toEqual({ error: "Project not found" });
+      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(mocks.insert).not.toHaveBeenCalled();
+      expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rechecks the tombstone and owner under lock before reading the receipt", async () => {
+    mocks.resolveStaff.mockResolvedValue(null);
+    mocks.selectResults = [[{ id: 49 }], []];
+    const response = await request(appAs("owner-77")).post("/projects/49/retirement/retry");
+    expect(response.status).toBe(404);
+    expect(response.body.code).toBe("project_retirement_not_found");
+    expect(mocks.selectCalls).toHaveLength(2);
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("does not reconcile old completion after permanent deletion starts", async () => {
+    mocks.resolveStaff.mockResolvedValue(null);
+    mocks.selectResults = [
+      [{ id: 49 }],
+      [{ id: 49 }],
+      [liveIncompleteCompletion()],
+      [{ state: "running" }],
+    ];
+    const response = await request(appAs("owner-77")).post("/projects/49/retirement/retry");
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe("project_purge_in_progress");
+    expect(mocks.retireAccess).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    { generation: -1 },
+    { generation: "0" },
+    { generation: 0.5 },
+    { generation: 3, configurationRecoveryUsed: true },
+  ])("never resets malformed or spent reconciliation metadata %j", async (reconciliation) => {
+    const original = liveIncompleteCompletion();
+    const operation = { ...original, progress: { ...original.progress, reconciliation } };
+    mocks.resolveStaff.mockResolvedValue(null);
+    mocks.selectResults = [[{ id: 49 }], [operation], [{ id: 49 }], [{ id: 49 }], [operation]];
+    const app = appAs("owner-77");
+    const status = await request(app).get("/projects/49/retirement");
+    expect(status.body.reconciliationEligible).toBe(false);
+    const retry = await request(app).post("/projects/49/retirement/retry");
+    expect(retry.status).toBe(409);
+    expect(retry.body.code).toBe("project_retirement_reconciliation_limit_reached");
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(
+      readProjectRetirementReconciliationMetadata(operation.progress).generation,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reports restore admission truthfully after current cleanup succeeds", async () => {
+    const operation = { ...liveIncompleteCompletion(), progress: completedProgress() };
+    mocks.selectResults = [
+      [project({ id: 49 })],
+      [{ projectId: 49, state: "scheduled" }],
+      [operation],
+    ];
+    const response = await request(appAs("owner-77")).get("/projects/trash");
+    expect(response.body[0]).toMatchObject({
+      restoreAllowed: true,
+      restoreBlockedCode: null,
+      reconciliationEligible: false,
+    });
+  });
+
+  it("admits one platform-owner checker repair with the exact persisted witness and current pointer", async () => {
+    const predecessor = staleFlyCheckerCompletion();
+    mocks.selectResults = [
+      [],
+      [{ id: 27, containerId: "historical-machine-27" }],
+      [predecessor],
+      [],
+    ];
+    const response = await request(appAs("staff-owner")).post("/projects/27/retirement/retry");
+    expect(response.status).toBe(202);
+    const inserted = mocks.insertCalls.find(
+      (call) => call.table === projectRetirementOperationsTable,
+    )!;
+    expect(inserted.values.progress).toMatchObject({
+      route: { state: "pending" },
+      sqliteRecovery: { state: "pending" },
+      managedAddons: { state: "pending" },
+      retainedLegacyRuntimePointers: [],
+      legacyRuntimeResolutions: [],
+      reconciliation: {
+        generation: 4,
+        configurationRecoveryUsed: true,
+        verificationRepair: {
+          version: "fly-destroyed-tombstone-v1",
+          parentOperationId: predecessor.id,
+          requestedBy: "staff-owner",
+          pointer: "containerId",
+          predecessorGeneration: 3,
+          failureCode: predecessor.failureCode,
+          reason: "absence_unverified",
+        },
+      },
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+    assertNoProviderCall();
+    const next = {
+      ...predecessor,
+      id: response.body.operationId,
+      progress: inserted.values.progress,
+    };
+    mocks.selectResults = [[], [{ id: 27, containerId: "historical-machine-27" }], [next]];
+    const repeat = await request(appAs("staff-owner")).post("/projects/27/retirement/retry");
+    expect(repeat.status).toBe(409);
+    expect(repeat.body.code).toBe("project_retirement_reconciliation_limit_reached");
+    expect(mocks.insertCalls).toHaveLength(1);
+  });
+
+  it.each(["owner-77", "staff-operator"])(
+    "keeps checker repair unavailable to %s",
+    async (actor) => {
+      mocks.resolveStaff.mockResolvedValue(
+        actor === "staff-operator" ? { role: "operator" } : null,
+      );
+      mocks.selectResults = [
+        [{ id: 27 }],
+        [{ id: 27, containerId: "historical-machine-27" }],
+        [staleFlyCheckerCompletion()],
+      ];
+      const response = await request(appAs(actor)).post("/projects/27/retirement/retry");
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe("project_retirement_reconciliation_limit_reached");
+      expect(mocks.insert).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not borrow a predecessor witness after its native pointer changes", async () => {
+    mocks.selectResults = [
+      [],
+      [{ id: 27, containerId: "replacement-other-environment" }],
+      [staleFlyCheckerCompletion()],
+    ];
+    const response = await request(appAs("staff-owner")).post("/projects/27/retirement/retry");
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe("project_retirement_retry_not_allowed");
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.durableEnqueue).not.toHaveBeenCalled();
+  });
+
+  it.each(["already_used", "wrong_failure", "wrong_reason", "wrong_pointer", "still_retrying"])(
+    "refuses checker repair for a mismatched predecessor: %s",
+    async (variant) => {
+      const operation = staleFlyCheckerCompletion();
+      if (variant === "already_used")
+        Object.assign(operation.progress.reconciliation!, { verificationRepair: null });
+      if (variant === "wrong_failure")
+        operation.failureCode = "project_retirement_legacy_runtime_provider_unavailable";
+      if (variant === "wrong_reason")
+        operation.progress.legacyRuntimeResolutions = [
+          {
+            pointer: "containerId",
+            state: "retained",
+            reason: "storage_ownership_ambiguous",
+            retryable: true,
+          },
+        ];
+      if (variant === "wrong_pointer")
+        operation.progress.retainedLegacyRuntimePointers[0]!.pointer = "prodContainerId";
+      if (variant === "still_retrying") Object.assign(operation, { completedAt: null });
+      mocks.selectResults = [[], [{ id: 27, containerId: "historical-machine-27" }], [operation]];
+      const response = await request(appAs("staff-owner")).post("/projects/27/retirement/retry");
+      expect(response.status).toBe(409);
       expect(mocks.insert).not.toHaveBeenCalled();
       expect(mocks.durableEnqueue).not.toHaveBeenCalled();
     },

@@ -79,6 +79,534 @@ function machineDeletes(request: ReturnType<typeof vi.fn<LegacyFlyRetirementRequ
   return request.mock.calls.filter(([call]) => call.method === "DELETE" && !call.resource);
 }
 
+describe("destroyed Fly tombstone absence proof", () => {
+  const tombstone = (extra: Record<string, unknown> = {}) =>
+    ownedMachine({ state: "destroyed", ...extra });
+  const otherMachine = {
+    id: "other-machine",
+    name: "project-78",
+    state: "started",
+    config: { env: { PROJECT_ID: "78" } },
+  };
+  type Observation = () => Response;
+
+  function tombstoneRequest(
+    options: {
+      afterDelete?: boolean;
+      running?: boolean;
+      tombstones?: Observation[];
+      activeCatalogs?: Observation[];
+      volumeCatalogs?: Observation[];
+      onRelease?: () => void;
+    } = {},
+  ) {
+    let deleted = false;
+    let liveReads = 0;
+    let tombstoneReads = 0;
+    let activeReads = 0;
+    let volumeReads = 0;
+    return vi.fn<LegacyFlyRetirementRequest>().mockImplementation(async (call) => {
+      if (call.resource === "lease") {
+        if (call.method === "POST") return leaseResponse();
+        options.onRelease?.();
+        return response(404);
+      }
+      if (call.resource === "machines")
+        return options.activeCatalogs?.[activeReads++]?.() ?? response(200, []);
+      if (call.resource === "volumes")
+        return options.volumeCatalogs?.[volumeReads++]?.() ?? response(200, []);
+      if (call.resource === "stop" || call.resource === "wait") return response(200, { ok: true });
+      if (call.method === "DELETE") {
+        deleted = true;
+        return response(204);
+      }
+      if (options.afterDelete && !deleted) {
+        return response(
+          200,
+          options.running
+            ? ownedMachine({
+                state: liveReads++ < 2 ? "started" : "stopped",
+                instance_id: "A".repeat(26),
+                config: {
+                  env: { PROJECT_ID: String(PROJECT_ID) },
+                  mounts: [],
+                  auto_destroy: false,
+                },
+              })
+            : ownedMachine(),
+        );
+      }
+      return options.tombstones?.[tombstoneReads++]?.() ?? response(200, tombstone());
+    });
+  }
+
+  it("proves an already destroyed machine using two owned GETs and two complete catalogs of each kind", async () => {
+    const input = authorizedInput();
+    const request = tombstoneRequest();
+    expect(await reconcileLegacyFlyRuntime(input, request)).toEqual({
+      state: "verified_absent",
+      proof: "initial_destroyed_tombstone_active_catalog_absent",
+    });
+    expect(request.mock.calls.map(([call]) => call)).toEqual([
+      { machineId: MACHINE_ID, method: "GET" },
+      { resource: "machines", method: "GET" },
+      { resource: "volumes", method: "GET" },
+      { machineId: MACHINE_ID, method: "GET" },
+      { resource: "machines", method: "GET" },
+      { resource: "volumes", method: "GET" },
+    ]);
+    expect(input.assertAuthority).toHaveBeenCalledTimes(3);
+  });
+
+  it("accepts the Project 27 tombstone shape without auto_destroy and a complete 40-row active catalog", async () => {
+    const machineId = "18551d6b7229e8";
+    const input = { ...authorizedInput(), machineId, projectId: 27 };
+    const machine = {
+      id: machineId,
+      name: "project-27",
+      state: "destroyed",
+      config: { env: { PROJECT_ID: "27" } },
+    };
+    const rows = Array.from({ length: 40 }, (_, index) => ({
+      id: "other-" + index,
+      name: "project-" + (100 + index),
+      state: "started",
+      config: { env: { PROJECT_ID: String(100 + index) } },
+    }));
+    const request = vi.fn<LegacyFlyRetirementRequest>().mockImplementation(async (call) => {
+      if (call.resource === "machines") return response(200, rows, { "x-total-count": "40" });
+      if (call.resource === "volumes") return response(200, []);
+      if (call.method !== "GET" || call.resource) throw new Error("Unexpected mutation");
+      return response(200, machine);
+    });
+    expect(await reconcileLegacyFlyRuntime(input, request)).toEqual({
+      state: "verified_absent",
+      proof: "initial_destroyed_tombstone_active_catalog_absent",
+    });
+    expect(request).toHaveBeenCalledTimes(6);
+    expect(request.mock.calls.every(([call]) => call.method === "GET")).toBe(true);
+  });
+
+  it.each([false, true])(
+    "proves a post-delete tombstone after ordinary running=%s deletion",
+    async (running) => {
+      const input = authorizedInput();
+      const request = tombstoneRequest({ afterDelete: true, running });
+      expect(await reconcileLegacyFlyRuntime(input, request)).toEqual({
+        state: "verified_absent",
+        proof: "delete_then_destroyed_tombstone_active_catalog_absent",
+      });
+      expect(machineDeletes(request).map(([call]) => call)).toEqual([
+        { machineId: MACHINE_ID, method: "DELETE", leaseNonce: LEASE_NONCE },
+      ]);
+      expect(request.mock.calls.filter(([call]) => call.resource === "stop")).toHaveLength(
+        running ? 1 : 0,
+      );
+      expect(request.mock.calls.filter(([call]) => call.resource === "machines")).toHaveLength(2);
+      expect(request.mock.calls.at(-1)?.[0]).toEqual({
+        resource: "lease",
+        machineId: MACHINE_ID,
+        method: "DELETE",
+        leaseNonce: LEASE_NONCE,
+      });
+      expect(input.assertAuthority).toHaveBeenCalledTimes(running ? 9 : 6);
+    },
+  );
+
+  const unsafeCatalogs: Array<[string, Observation]> = [
+    ["unavailable", () => response(503)],
+    ["partial", () => response(206, [])],
+    ["404 catalog", () => response(404)],
+    ["missing body", () => response(200)],
+    ["malformed JSON", () => new Response("{provider-secret", { status: 200 })],
+    ["envelope", () => response(200, { machines: [], next_cursor: null })],
+    ["scalar row", () => response(200, [null])],
+    ["invalid id", () => response(200, [{ ...otherMachine, id: "bad/id" }])],
+    ["missing name", () => response(200, [{ ...otherMachine, name: null }])],
+    ["missing config", () => response(200, [{ ...otherMachine, config: null }])],
+    ["malformed environment", () => response(200, [{ ...otherMachine, config: { env: [] } }])],
+    ["deleted catalog row", () => response(200, [{ ...otherMachine, state: "destroyed" }])],
+    ["target id", () => response(200, [{ ...otherMachine, id: MACHINE_ID }])],
+    [
+      "target name on another id",
+      () => response(200, [{ ...otherMachine, name: `project-${PROJECT_ID}` }]),
+    ],
+    [
+      "target env on another id",
+      () =>
+        response(200, [{ ...otherMachine, config: { env: { PROJECT_ID: String(PROJECT_ID) } } }]),
+    ],
+    [
+      "hidden target owner",
+      () => response(200, [{ ...otherMachine, metadata: { nabu_project_id: PROJECT_ID } }]),
+    ],
+    [
+      "contradictory owner",
+      () => response(200, [{ ...otherMachine, metadata: { project_id: "79" } }]),
+    ],
+    [
+      "malformed owner",
+      () => response(200, [{ ...otherMachine, metadata: { project_id: { value: "78" } } }]),
+    ],
+    ["machine identity alias", () => response(200, [{ ...otherMachine, machine_id: MACHINE_ID }])],
+    [
+      "project name alias",
+      () => response(200, [{ ...otherMachine, project_name: `project-${PROJECT_ID}` }]),
+    ],
+    [
+      "duplicate id",
+      () => response(200, [otherMachine, { ...otherMachine, name: "another-name" }]),
+    ],
+    ["duplicate name", () => response(200, [otherMachine, { ...otherMachine, id: "another-id" }])],
+    [
+      "target production alias",
+      () =>
+        response(200, [
+          otherMachine,
+          {
+            id: "target-production",
+            name: `prod-${PROJECT_ID}-12345`,
+            state: "started",
+            config: { env: { PROJECT_ID: String(PROJECT_ID) } },
+          },
+        ]),
+    ],
+    [
+      "body pagination marker",
+      () => response(200, [{ ...otherMachine, metadata: { next_cursor: "next" } }]),
+    ],
+    [
+      "catalog row bound",
+      () =>
+        response(
+          200,
+          Array.from({ length: 1_000 }, () => otherMachine),
+        ),
+    ],
+    [
+      "transport error",
+      () => {
+        throw new Error("provider-secret");
+      },
+    ],
+  ];
+  for (const header of [
+    "link",
+    "content-range",
+    "x-next-page",
+    "x-next-cursor",
+    "next-cursor",
+    "x-pagination-next-page",
+    "x-page",
+    "x-per-page",
+    "x-page-size",
+    "x-has-more",
+  ])
+    unsafeCatalogs.push([header, () => response(200, [], { [header]: "0" })]);
+  for (const header of ["x-total-count", "x-total"]) {
+    for (const value of ["1", "-1", "0.0", "unknown"]) {
+      unsafeCatalogs.push([header + "=" + value, () => response(200, [], { [header]: value })]);
+    }
+  }
+  for (const value of ["1048577", "unknown"]) {
+    unsafeCatalogs.push([
+      "content-length=" + value,
+      () => response(200, [], { "content-length": value }),
+    ]);
+  }
+
+  describe.each([false, true])("afterDelete=%s", (afterDelete) => {
+    describe.each([0, 1])("catalog observation %s", (index) => {
+      it.each(unsafeCatalogs)("refuses %s without further mutations", async (_label, catalog) => {
+        const activeCatalogs = [() => response(200, []), () => response(200, [])];
+        activeCatalogs[index] = catalog;
+        const request = tombstoneRequest({ afterDelete, activeCatalogs });
+        const result = await reconcileLegacyFlyRuntime(authorizedInput(), request);
+        expect(result).toEqual({
+          state: "retained",
+          reason: "absence_unverified",
+          retryable: true,
+        });
+        expect(machineDeletes(request)).toHaveLength(afterDelete ? 1 : 0);
+        expect(JSON.stringify(result)).not.toContain("provider-secret");
+      });
+    });
+
+    it.each([
+      ["id", { id: "wrong-machine" }],
+      ["name", { name: "project-51" }],
+      ["environment", { config: { env: { PROJECT_ID: "51" } } }],
+      ["nested owner", { metadata: { project_id: "51" } }],
+      [
+        "mounted storage",
+        { config: { env: { PROJECT_ID: String(PROJECT_ID) }, mounts: ["vol_data"] } },
+      ],
+      ["hidden storage", { "config.mounts": [] }],
+    ])("retains a tombstone with wrong %s", async (_label, extra) => {
+      const request = tombstoneRequest({
+        afterDelete,
+        tombstones: [() => response(200, tombstone(extra))],
+      });
+      expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe("retained");
+      expect(machineDeletes(request)).toHaveLength(afterDelete ? 1 : 0);
+      expect(request.mock.calls.some(([call]) => call.resource === "machines")).toBe(false);
+    });
+
+    it.each(["started", "stopped", "migrated", "replaced", "destroying", "DESTROYED", null])(
+      "does not accept a repeated tombstone in state %j",
+      async (state) => {
+        const request = tombstoneRequest({
+          afterDelete,
+          tombstones: [() => response(200, tombstone()), () => response(200, tombstone({ state }))],
+        });
+        expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe(
+          "retained",
+        );
+        expect(machineDeletes(request)).toHaveLength(afterDelete ? 1 : 0);
+      },
+    );
+
+    it.each([404, 503])(
+      "does not relabel a repeated GET %s as a tombstone proof",
+      async (status) => {
+        const request = tombstoneRequest({
+          afterDelete,
+          tombstones: [() => response(200, tombstone()), () => response(status)],
+        });
+        expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe(
+          "retained",
+        );
+      },
+    );
+
+    it("retains config drift between destroyed observations", async () => {
+      const request = tombstoneRequest({
+        afterDelete,
+        tombstones: [
+          () => response(200, tombstone()),
+          () =>
+            response(
+              200,
+              tombstone({
+                config: { env: { PROJECT_ID: String(PROJECT_ID), EXTRA: "changed" }, mounts: [] },
+              }),
+            ),
+        ],
+      });
+      expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe("retained");
+    });
+
+    it("retains changes to the complete active identity set", async () => {
+      const request = tombstoneRequest({
+        afterDelete,
+        activeCatalogs: [() => response(200, []), () => response(200, [otherMachine])],
+      });
+      expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe("retained");
+    });
+
+    it.each([0, 1])("retains unsafe volumes at tombstone observation %s", async (index) => {
+      const volumeCatalogs = Array.from(
+        { length: afterDelete ? 4 : 2 },
+        () => () => response(200, []),
+      );
+      volumeCatalogs[(afterDelete ? 2 : 0) + index] = () =>
+        response(200, [{ id: "vol_data", attached_machine_id: null }]);
+      const request = tombstoneRequest({ afterDelete, volumeCatalogs });
+      expect(await reconcileLegacyFlyRuntime(authorizedInput(), request)).toEqual({
+        state: "retained",
+        reason: "storage_ownership_ambiguous",
+        retryable: false,
+      });
+      expect(machineDeletes(request)).toHaveLength(afterDelete ? 1 : 0);
+    });
+
+    it("requires repeat volume facts, including after an acknowledged deletion", async () => {
+      const volumeCatalogs = Array.from(
+        { length: afterDelete ? 4 : 2 },
+        () => () => response(200, []),
+      );
+      volumeCatalogs[volumeCatalogs.length - 1] = () =>
+        response(200, [{ id: "vol_other", attached_machine_id: "another-machine" }]);
+      const request = tombstoneRequest({ afterDelete, volumeCatalogs });
+      expect(await reconcileLegacyFlyRuntime(authorizedInput(), request)).toEqual({
+        state: "retained",
+        reason: "storage_ownership_ambiguous",
+        retryable: false,
+      });
+    });
+
+    it.each([1, 2, 3])("propagates authority loss at tombstone assertion %s", async (assertion) => {
+      const input = authorizedInput();
+      input.assertAuthority.mockImplementation(async () => {
+        if (input.assertAuthority.mock.calls.length === assertion + (afterDelete ? 2 : 0)) {
+          throw new Error("authority_lost");
+        }
+      });
+      const request = tombstoneRequest({ afterDelete });
+      await expect(reconcileLegacyFlyRuntime(input, request)).rejects.toThrow("authority_lost");
+      expect(machineDeletes(request)).toHaveLength(afterDelete ? 1 : 0);
+      if (afterDelete)
+        expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+          resource: "lease",
+          method: "DELETE",
+        });
+    });
+  });
+
+  it.each(["stopped", "migrated", "replaced", "started"])(
+    "does not infer post-delete absence from GET 200 state=%s",
+    async (state) => {
+      const request = tombstoneRequest({
+        afterDelete: true,
+        tombstones: [() => response(200, tombstone({ state }))],
+      });
+      expect(await reconcileLegacyFlyRuntime(authorizedInput(), request)).toEqual({
+        state: "retained",
+        reason: "absence_unverified",
+        retryable: true,
+      });
+      expect(machineDeletes(request)).toHaveLength(1);
+      expect(request.mock.calls.some(([call]) => call.resource === "machines")).toBe(false);
+    },
+  );
+
+  it("permits catalog ordering and unrelated telemetry changes with the same identities", async () => {
+    const second = {
+      ...otherMachine,
+      id: "second",
+      name: "project-79",
+      config: { env: { PROJECT_ID: "79" } },
+    };
+    const request = tombstoneRequest({
+      activeCatalogs: [
+        () => response(200, [otherMachine, second], { "x-total": "2" }),
+        () =>
+          response(200, [
+            second,
+            { ...otherMachine, state: "stopped", updated_at: "2026-09-05T00:00:00Z" },
+          ]),
+      ],
+    });
+    expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe(
+      "verified_absent",
+    );
+  });
+
+  it.each([false, true])(
+    "allows distinct preview and production machines of another owner afterDelete=%s",
+    async (afterDelete) => {
+      const preview = {
+        ...otherMachine,
+        name: "project-20",
+        config: { env: { PROJECT_ID: "20" } },
+      };
+      const production = { ...preview, id: "other-production", name: "prod-20-12345" };
+      const request = tombstoneRequest({
+        afterDelete,
+        activeCatalogs: [
+          () => response(200, [preview, production]),
+          () => response(200, [production, preview]),
+        ],
+      });
+      expect(await reconcileLegacyFlyRuntime(authorizedInput(), request)).toEqual({
+        state: "verified_absent",
+        proof: afterDelete
+          ? "delete_then_destroyed_tombstone_active_catalog_absent"
+          : "initial_destroyed_tombstone_active_catalog_absent",
+      });
+    },
+  );
+
+  it.each(["depth", "nodes", "bytes"])(
+    "bounds active catalog %s before accepting absence",
+    async (kind) => {
+      let metadata: unknown = Array.from({ length: 16_384 }, () => null);
+      if (kind === "depth") {
+        metadata = null;
+        for (let depth = 0; depth < 34; depth++) metadata = { child: metadata };
+      }
+      const cancel = vi.fn();
+      const catalog = () =>
+        kind === "bytes"
+          ? new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode("x".repeat(1_048_577)));
+                },
+                cancel,
+              }),
+              { status: 200, headers: { "content-length": "1", "content-encoding": "gzip" } },
+            )
+          : response(200, [{ ...otherMachine, metadata }]);
+      const request = tombstoneRequest({ activeCatalogs: [catalog] });
+      expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe("retained");
+      if (kind === "bytes") expect(cancel).toHaveBeenCalledTimes(1);
+      expect(machineDeletes(request)).toEqual([]);
+    },
+  );
+
+  it.each([0, 1])("rejects a mismatched tombstone lease nonce at observation %s", async (index) => {
+    const tombstones = [() => response(200, tombstone()), () => response(200, tombstone())];
+    tombstones[index] = () => response(200, tombstone({ nonce: "another-lease" }));
+    const request = tombstoneRequest({ afterDelete: true, tombstones });
+    expect((await reconcileLegacyFlyRuntime(authorizedInput(), request)).state).toBe("retained");
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({ resource: "lease", method: "DELETE" });
+  });
+
+  it.each(["before release", "during release", "after release"])(
+    "does not return a proof if the Fly lease expires %s",
+    async (stage) => {
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+      try {
+        const input = authorizedInput();
+        input.assertAuthority.mockImplementation(async () => {
+          const calls = input.assertAuthority.mock.calls.length;
+          if (
+            (stage === "before release" && calls === 5) ||
+            (stage === "after release" && calls === 6)
+          ) {
+            clock.mockReturnValue(now + 301_000);
+          }
+        });
+        const request = tombstoneRequest({
+          afterDelete: true,
+          onRelease: () => {
+            if (stage === "during release") clock.mockReturnValue(now + 301_000);
+          },
+        });
+        expect(await reconcileLegacyFlyRuntime(input, request)).toEqual({
+          state: "retained",
+          reason: "absence_unverified",
+          retryable: true,
+        });
+        expect(
+          request.mock.calls.filter(
+            ([call]) => call.resource === "lease" && call.method === "DELETE",
+          ),
+        ).toHaveLength(1);
+      } finally {
+        clock.mockRestore();
+      }
+    },
+  );
+
+  it("requires terminal durable authority after releasing the deleted machine lease", async () => {
+    const input = authorizedInput();
+    const request = tombstoneRequest({ afterDelete: true });
+    input.assertAuthority.mockImplementation(async () => {
+      if (input.assertAuthority.mock.calls.length === 6) {
+        expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+          resource: "lease",
+          method: "DELETE",
+        });
+        throw new Error("authority_lost");
+      }
+    });
+    await expect(reconcileLegacyFlyRuntime(input, request)).rejects.toThrow("authority_lost");
+  });
+});
+
 describe("running historical Fly retirement", () => {
   const instanceId = "A".repeat(26);
   const runningMachine = (override: Record<string, unknown> = {}) =>

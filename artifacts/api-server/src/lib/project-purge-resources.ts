@@ -1074,75 +1074,82 @@ async function assertCanonicalizationReferenceAuthority(
   excludedProjectId: number | null,
   assetId: number,
   aliases: readonly { alias: string }[],
+  aliasesToRewrite: readonly string[] = [],
 ): Promise<void> {
   const tokens = [...new Set(aliases.map((row) => row.alias).filter(Boolean))];
   if (tokens.length === 0) return;
+  // NULL excludes no project. The precheck must cover every rewrite candidate,
+  // including detached library/template rows with no provable owner authority.
   const result = await client.query<{ allowed: boolean }>(
     `WITH durable_reference_rows (
        project_id, reference_user_id, reference_product_scope, payload
      ) AS (
        SELECT message_row.project_id, NULL::text, NULL::text, to_jsonb(message_row)::text
          FROM chat_messages message_row
-        WHERE message_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR message_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT task_row.project_id, NULL::text, NULL::text, to_jsonb(task_row)::text
          FROM agent_tasks task_row
-        WHERE task_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR task_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT call_row.project_id, NULL::text, NULL::text, to_jsonb(call_row)::text
          FROM agent_tool_calls call_row
-        WHERE call_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR call_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT queue_row.project_id, NULL::text, NULL::text, to_jsonb(queue_row)::text
          FROM zero_prompt_queue_items queue_row
-        WHERE queue_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR queue_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT knowledge_row.project_id, NULL::text, NULL::text, to_jsonb(knowledge_row)::text
          FROM knowledge_entries knowledge_row
-        WHERE knowledge_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR knowledge_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT file_row.project_id, NULL::text, NULL::text, to_jsonb(file_row)::text
          FROM project_files file_row
-        WHERE file_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR file_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT version_row.project_id, NULL::text, NULL::text, to_jsonb(version_row)::text
          FROM project_versions version_row
-        WHERE version_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR version_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT variant_row.project_id, NULL::text, NULL::text, to_jsonb(variant_row)::text
          FROM canvas_variants variant_row
-        WHERE variant_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR variant_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT library_row.source_project_id, NULL::text, NULL::text, to_jsonb(library_row)::text
          FROM canvas_variant_library library_row
-        WHERE library_row.source_project_id IS DISTINCT FROM $1
        UNION ALL
        SELECT template_row.source_project_id, NULL::text, NULL::text, to_jsonb(template_row)::text
          FROM gallery_templates template_row
-        WHERE template_row.source_project_id IS DISTINCT FROM $1
        UNION ALL
        SELECT inbox_row.project_id, NULL::text, NULL::text, to_jsonb(inbox_row)::text
          FROM agent_inbox inbox_row
-        WHERE inbox_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR inbox_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT task_row.project_id, NULL::text, NULL::text, to_jsonb(event_row)::text
          FROM task_events event_row
          JOIN agent_tasks task_row ON task_row.id=event_row.task_id
-        WHERE task_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR task_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT activity_row.project_id, NULL::text, NULL::text, to_jsonb(activity_row)::text
          FROM project_activity activity_row
-        WHERE activity_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR activity_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT edit_row.project_id, NULL::text, NULL::text, to_jsonb(edit_row)::text
          FROM visual_edit_changes edit_row
-        WHERE edit_row.project_id IS DISTINCT FROM $1
+        WHERE ($1::integer IS NULL OR edit_row.project_id IS DISTINCT FROM $1)
        UNION ALL
        SELECT image_row.project_id, image_row.user_id, image_row.product_scope,
               to_jsonb(image_row)::text
          FROM generated_images image_row
         WHERE image_row.deleted_at IS NULL
-          AND image_row.project_id IS DISTINCT FROM $1
+          AND ($1::integer IS NULL OR image_row.project_id IS DISTINCT FROM $1)
+       UNION ALL
+       -- The ticket's project is exclusion metadata, not asset authority.
+       -- The durable attachability trigger treats tickets as Ora account data.
+       SELECT NULL::integer, ticket_row.user_id, 'ora'::text, to_jsonb(ticket_row)::text
+         FROM support_tickets ticket_row
+        WHERE ($1::integer IS NULL OR ticket_row.project_id IS DISTINCT FROM $1)
      ), matched_references AS (
        SELECT reference_row.*
          FROM durable_reference_rows reference_row
@@ -1161,7 +1168,10 @@ async function assertCanonicalizationReferenceAuthority(
         WHERE reference_row.reference_product_scope IS DISTINCT FROM NULL
               AND reference_row.reference_product_scope IS DISTINCT FROM authority.product_scope
            OR reference_row.project_id IS NULL
-              AND reference_row.reference_user_id IS DISTINCT FROM authority.owner_user_id
+              AND (
+                reference_row.reference_user_id IS DISTINCT FROM authority.owner_user_id
+                OR reference_row.reference_product_scope IS DISTINCT FROM authority.product_scope
+              )
            OR reference_row.project_id IS NOT NULL
               AND (
                 project_row.id IS NULL
@@ -1178,9 +1188,18 @@ async function assertCanonicalizationReferenceAuthority(
                   )
                 )
               )
+     ) AND NOT EXISTS (
+       SELECT 1 FROM support_tickets ticket_row
+        WHERE ($1::integer IS NULL OR ticket_row.project_id IS DISTINCT FROM $1)
+          AND EXISTS (
+            SELECT 1 FROM unnest($4::text[]) alias_row(alias)
+             WHERE position(
+               alias_row.alias in (to_jsonb(ticket_row) - 'transcript' - 'attachments')::text
+             ) > 0
+          )
      ) AS allowed
        FROM asset_authority`,
-    [excludedProjectId, assetId, tokens],
+    [excludedProjectId, assetId, tokens, aliasesToRewrite],
   );
   if (result.rows[0]?.allowed !== true) {
     throw new Error("project_purge_asset_reference_forbidden");
@@ -1214,8 +1233,14 @@ async function canonicalizeLockedAssetAliases(
     }
     return;
   }
-  await assertCanonicalizationReferenceAuthority(client, excludedProjectId, assetId, aliases);
   const canonical = canonicalAssetContentUrl(assetId, productScope);
+  await assertCanonicalizationReferenceAuthority(
+    client,
+    excludedProjectId,
+    assetId,
+    aliases,
+    aliases.filter(({ alias }) => alias !== canonical).map(({ alias }) => alias),
+  );
   for (const row of aliases) {
     if (row.alias === canonical) continue;
     const values = [excludedProjectId, row.alias, canonical];
@@ -1304,10 +1329,11 @@ async function canonicalizeLockedAssetAliases(
           SET message=replace(event_row.message, $2, $3),
               data=CASE WHEN position($2 in coalesce(event_row.data::text, '')) > 0
                         THEN replace(event_row.data::text, $2, $3)::jsonb ELSE event_row.data END
-        WHERE ($1::integer IS NULL OR EXISTS (
+        WHERE EXISTS (
           SELECT 1 FROM agent_tasks task
-           WHERE task.id=event_row.task_id AND task.project_id IS DISTINCT FROM $1
-        )) AND (position($2 in coalesce(event_row.message, '')) > 0
+           WHERE task.id=event_row.task_id
+             AND ($1::integer IS NULL OR task.project_id IS DISTINCT FROM $1)
+        ) AND (position($2 in coalesce(event_row.message, '')) > 0
             OR position($2 in coalesce(event_row.data::text, '')) > 0)`,
       values,
     );
@@ -1331,9 +1357,33 @@ async function canonicalizeLockedAssetAliases(
               thumbnail_url=replace(thumbnail_url, $2, $3),
               updated_at=NOW()
         WHERE ($1::integer IS NULL OR project_id IS DISTINCT FROM $1)
+          AND generated_images.deleted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM assets authority
+             WHERE authority.id=$4
+               AND generated_images.product_scope=authority.product_scope
+               AND (generated_images.project_id IS NOT NULL
+                 OR generated_images.user_id=authority.owner_user_id)
+          )
           AND (position($2 in coalesce(file_url, '')) > 0
             OR position($2 in coalesce(thumbnail_url, '')) > 0)`,
-      values,
+      [...values, assetId],
+    );
+    // Preserve ticket identity/history; only these guarded payload columns may
+    // be canonicalized, and a project association never supplies user authority.
+    await client.query(
+      `UPDATE support_tickets ticket_row
+          SET transcript=replace(ticket_row.transcript::text, $2, $3)::jsonb,
+              attachments=replace(ticket_row.attachments::text, $2, $3)::jsonb
+        WHERE ($1::integer IS NULL OR ticket_row.project_id IS DISTINCT FROM $1)
+          AND EXISTS (
+            SELECT 1 FROM assets authority
+             WHERE authority.id=$4 AND authority.product_scope='ora'
+               AND ticket_row.user_id=authority.owner_user_id
+          )
+          AND (position($2 in ticket_row.transcript::text) > 0
+            OR position($2 in ticket_row.attachments::text) > 0)`,
+      [...values, assetId],
     );
   }
 }

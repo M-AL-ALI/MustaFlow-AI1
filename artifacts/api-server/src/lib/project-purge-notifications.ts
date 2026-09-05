@@ -2,10 +2,16 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 
 import { getClerkUserById } from "./clerk-users";
-import { sendEmailWithStatus, type EmailDeliveryStatus } from "./emailClient";
+import {
+  EMAIL_DELIVERY_FAILURE_KINDS,
+  sendEmailWithReceipt,
+  type EmailDeliveryReceipt,
+  type EmailDeliveryStatus,
+} from "./emailClient";
 
 export const PROJECT_PURGE_NOTIFICATION_SEMANTICS = "project-purge-notification-v1" as const;
 export const PROJECT_PURGE_EMAIL_MAX_ATTEMPTS = 3 as const;
+export const PROJECT_PURGE_EMAIL_RETRY_DELAYS_MS = [5 * 60_000, 30 * 60_000] as const;
 export const PROJECT_PURGE_NOTIFICATION_RETRY_LIMIT = 50 as const;
 export const PROJECT_PURGE_EMAIL_LEASE_MINUTES = 2 as const;
 export const PROJECT_PURGE_EMAIL_SEND_TIMEOUT_MS = 90_000 as const;
@@ -29,7 +35,30 @@ export type ProjectPurgeEmailReceipt = {
   maxAttempts: typeof PROJECT_PURGE_EMAIL_MAX_ATTEMPTS;
   leaseId: string | null;
   leaseExpiresAt: string | null;
+  /** Optional on historical receipts; all new deadlines use the database clock. */
+  nextAttemptAt?: string | null;
+  lastDelivery?: ProjectPurgeEmailDeliveryReceipt | null;
+  suppressionReason?: "nonproduction_suppressed" | null;
 };
+
+const RECIPIENT_FAILURE_KINDS = [
+  "recipient_lookup_timeout",
+  "recipient_lookup_failed",
+  "recipient_lookup_unavailable",
+  "recipient_email_missing",
+  "recipient_identity_mismatch",
+] as const;
+
+export type ProjectPurgeEmailDeliveryReceipt =
+  | EmailDeliveryReceipt
+  | {
+      status: "failed";
+      acceptance: "not_attempted";
+      providerMessageId: null;
+      failureKind: (typeof RECIPIENT_FAILURE_KINDS)[number];
+      retryable: boolean | null;
+      providerStatusCode: null;
+    };
 
 export type ProjectPurgeNotificationMetadata = {
   semantics: typeof PROJECT_PURGE_NOTIFICATION_SEMANTICS;
@@ -61,12 +90,17 @@ export type ProjectPurgeNotificationStore = {
   claimEmailAttempt(
     notificationId: number,
     maxAttempts: number,
-  ): Promise<(ProjectPurgeNotificationRecord & { attempt: number; leaseId: string }) | null>;
+  ): Promise<
+    | (ProjectPurgeNotificationRecord & { attempt: number; leaseId: string })
+    | { suppressed: true }
+    | null
+  >;
   completeEmailAttempt(
     notificationId: number,
     attempt: number,
     leaseId: string,
     status: EmailDeliveryStatus,
+    receipt?: ProjectPurgeEmailDeliveryReceipt,
   ): Promise<void>;
   listRetryable(limit: number): Promise<ProjectPurgeNotificationRecord[]>;
 };
@@ -74,13 +108,71 @@ export type ProjectPurgeNotificationStore = {
 export type ProjectPurgeNotificationDependencies = {
   store: ProjectPurgeNotificationStore;
   getUser: typeof getClerkUserById;
-  sendEmail: typeof sendEmailWithStatus;
+  sendEmail: typeof sendEmailWithReceipt;
 };
 
 const defaultDependencies: Omit<ProjectPurgeNotificationDependencies, "store"> = {
   getUser: getClerkUserById,
-  sendEmail: sendEmailWithStatus,
+  sendEmail: sendEmailWithReceipt,
 };
+
+function parseDeliveryReceipt(value: unknown): ProjectPurgeEmailDeliveryReceipt {
+  const invalid = () => new Error("project_purge_email_delivery_receipt_invalid");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
+  const receipt = value as Record<string, unknown>;
+  const kinds: readonly string[] = [...EMAIL_DELIVERY_FAILURE_KINDS, ...RECIPIENT_FAILURE_KINDS];
+  const recipientFailure = (RECIPIENT_FAILURE_KINDS as readonly unknown[]).includes(
+    receipt.failureKind,
+  );
+  if (
+    typeof receipt.status !== "string" ||
+    !["sent", "skipped", "failed"].includes(receipt.status) ||
+    typeof receipt.acceptance !== "string" ||
+    !["accepted", "not_accepted", "unknown", "not_attempted"].includes(receipt.acceptance) ||
+    (receipt.retryable !== null && typeof receipt.retryable !== "boolean") ||
+    (receipt.providerStatusCode !== null &&
+      (typeof receipt.providerStatusCode !== "number" ||
+        !Number.isInteger(receipt.providerStatusCode) ||
+        receipt.providerStatusCode < 400 ||
+        receipt.providerStatusCode > 599)) ||
+    (receipt.failureKind !== null &&
+      (typeof receipt.failureKind !== "string" || !kinds.includes(receipt.failureKind)))
+  )
+    throw invalid();
+  if (receipt.status === "sent") {
+    if (
+      receipt.acceptance !== "accepted" ||
+      receipt.failureKind !== null ||
+      typeof receipt.providerMessageId !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u.test(receipt.providerMessageId) ||
+      receipt.providerStatusCode !== null
+    )
+      throw invalid();
+  } else if (
+    receipt.acceptance === "accepted" ||
+    receipt.failureKind === null ||
+    receipt.providerMessageId !== null
+  ) {
+    throw invalid();
+  }
+  if (
+    recipientFailure !== (receipt.acceptance === "not_attempted") ||
+    (recipientFailure && (receipt.status !== "failed" || receipt.providerStatusCode !== null)) ||
+    (receipt.status === "skipped" &&
+      (receipt.failureKind !== "provider_unconfigured" || receipt.acceptance !== "not_accepted"))
+  ) {
+    throw invalid();
+  }
+  // Only these bounded fields reach durable metadata, even for injected senders.
+  return {
+    status: receipt.status,
+    acceptance: receipt.acceptance,
+    providerMessageId: receipt.providerMessageId,
+    failureKind: receipt.failureKind,
+    retryable: receipt.retryable,
+    providerStatusCode: receipt.providerStatusCode,
+  } as ProjectPurgeEmailDeliveryReceipt;
+}
 
 function parseMetadata(value: unknown): ProjectPurgeNotificationMetadata {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -102,6 +194,21 @@ function parseMetadata(value: unknown): ProjectPurgeNotificationMetadata {
   }
   const leaseId = email.leaseId ?? null;
   const leaseExpiresAt = email.leaseExpiresAt ?? null;
+  const nextAttemptAt = email.nextAttemptAt ?? null;
+  const lastDelivery = email.lastDelivery == null ? null : parseDeliveryReceipt(email.lastDelivery);
+  const suppressionReason = email.suppressionReason ?? null;
+  if (
+    (suppressionReason !== null && suppressionReason !== "nonproduction_suppressed") ||
+    (nextAttemptAt !== null &&
+      (typeof nextAttemptAt !== "string" ||
+        !Number.isFinite(Date.parse(nextAttemptAt)) ||
+        new Date(nextAttemptAt).toISOString() !== nextAttemptAt ||
+        !["failed", "skipped"].includes(email.status) ||
+        email.attempts >= PROJECT_PURGE_EMAIL_MAX_ATTEMPTS)) ||
+    (lastDelivery !== null && email.status !== "sending" && lastDelivery.status !== email.status)
+  ) {
+    throw new Error("project_purge_notification_metadata_invalid");
+  }
   const hasValidLease =
     typeof leaseId === "string" &&
     leaseId.length >= 1 &&
@@ -120,6 +227,9 @@ function parseMetadata(value: unknown): ProjectPurgeNotificationMetadata {
       ...email,
       leaseId,
       leaseExpiresAt,
+      nextAttemptAt,
+      lastDelivery,
+      suppressionReason,
     } as ProjectPurgeEmailReceipt,
   };
 }
@@ -230,7 +340,10 @@ function currentEmailStatus(
 async function getPurgeRecipientBounded(
   getUser: ProjectPurgeNotificationDependencies["getUser"],
   userId: string,
-): Promise<Awaited<ReturnType<ProjectPurgeNotificationDependencies["getUser"]>>> {
+): Promise<
+  | { kind: "user"; user: Awaited<ReturnType<ProjectPurgeNotificationDependencies["getUser"]>> }
+  | { kind: "failed" | "timeout" }
+> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const lookup = Promise.resolve()
     .then(() => getUser(userId))
@@ -244,7 +357,7 @@ async function getPurgeRecipientBounded(
   });
   try {
     const outcome = await Promise.race([lookup, deadline]);
-    return outcome.kind === "user" ? outcome.user : null;
+    return outcome;
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
@@ -259,25 +372,74 @@ async function attemptProjectPurgeEmail(
     PROJECT_PURGE_EMAIL_MAX_ATTEMPTS,
   );
   if (!claimed) return "pending";
+  if ("suppressed" in claimed) return "skipped";
 
-  const user = await getPurgeRecipientBounded(dependencies.getUser, claimed.recipientUserId);
-  const emailStatus = user?.email
-    ? await dependencies.sendEmail({
+  const lookup = await getPurgeRecipientBounded(dependencies.getUser, claimed.recipientUserId);
+  const user = lookup.kind === "user" ? lookup.user : null;
+  let delivery: ProjectPurgeEmailDeliveryReceipt;
+  if (!user || user.userId !== claimed.recipientUserId || !user.email?.trim()) {
+    delivery = {
+      status: "failed",
+      acceptance: "not_attempted",
+      providerMessageId: null,
+      failureKind:
+        lookup.kind === "timeout"
+          ? "recipient_lookup_timeout"
+          : lookup.kind === "failed"
+            ? "recipient_lookup_failed"
+            : !user
+              ? "recipient_lookup_unavailable"
+              : user.userId !== claimed.recipientUserId
+                ? "recipient_identity_mismatch"
+                : "recipient_email_missing",
+      // Clerk null includes configuration and transport failures; it is not
+      // proof that an account is missing. No account or provider error is stored.
+      retryable: lookup.kind === "timeout" || lookup.kind === "failed" ? true : null,
+      providerStatusCode: null,
+    };
+  } else {
+    const signal = AbortSignal.timeout(PROJECT_PURGE_EMAIL_SEND_TIMEOUT_MS);
+    try {
+      const receipt = await dependencies.sendEmail({
         to: user.email,
         subject: claimed.title,
         text: claimed.body,
         html: `<p>${escapeHtml(claimed.body)}</p>`,
         idempotencyKey: `project-purge-notification:${claimed.id}`,
-        signal: AbortSignal.timeout(PROJECT_PURGE_EMAIL_SEND_TIMEOUT_MS),
-      })
-    : "failed";
+        signal,
+      });
+      try {
+        delivery = parseDeliveryReceipt(receipt);
+        if (delivery.acceptance === "not_attempted") throw new Error("invalid_provider_receipt");
+      } catch {
+        delivery = {
+          status: "failed",
+          acceptance: "unknown",
+          providerMessageId: null,
+          failureKind: "provider_response_invalid",
+          retryable: null,
+          providerStatusCode: null,
+        };
+      }
+    } catch {
+      delivery = {
+        status: "failed",
+        acceptance: "unknown",
+        providerMessageId: null,
+        failureKind: signal.aborted ? "provider_timeout" : "provider_transport_error",
+        retryable: true,
+        providerStatusCode: null,
+      };
+    }
+  }
   await dependencies.store.completeEmailAttempt(
     claimed.id,
     claimed.attempt,
     claimed.leaseId,
-    emailStatus,
+    delivery.status,
+    delivery,
   );
-  return emailStatus;
+  return delivery.status;
 }
 
 /**
@@ -336,8 +498,11 @@ type NotificationRow = {
   metadata: unknown;
 };
 
-type NotificationClaimRow = NotificationRow & {
+type NotificationClockRow = NotificationRow & {
   database_now: string;
+};
+
+type NotificationClaimRow = NotificationClockRow & {
   lease_expires_at: string;
 };
 
@@ -414,6 +579,9 @@ export const databaseProjectPurgeNotificationStore: ProjectPurgeNotificationStor
   },
 
   async claimEmailAttempt(notificationId, maxAttempts) {
+    if (maxAttempts !== PROJECT_PURGE_EMAIL_MAX_ATTEMPTS) {
+      throw new Error("project_purge_notification_attempt_limit_invalid");
+    }
     const { db, notificationsTable } = await import("@workspace/db");
     return db.transaction(async (tx) => {
       const selected = await tx.execute<NotificationClaimRow>(sql`
@@ -434,11 +602,39 @@ export const databaseProjectPurgeNotificationStore: ProjectPurgeNotificationStor
       const record = recordFromRow(row);
       const previousEmail = record.metadata.email;
       if (previousEmail.status === "sent") return null;
+      if (previousEmail.suppressionReason === "nonproduction_suppressed") {
+        return { suppressed: true };
+      }
       if (previousEmail.status === "sending") {
         if (Date.parse(previousEmail.leaseExpiresAt!) > Date.parse(row.database_now)) return null;
       } else if (previousEmail.attempts >= maxAttempts) {
         return null;
       }
+      // Match the existing Replit production selector used by billing/Stripe.
+      // NODE_ENV and working provider credentials do not establish deployment
+      // authority. Gate before acquiring an email attempt or contacting Clerk.
+      if (process.env.REPLIT_DEPLOYMENT !== "1") {
+        const metadata: ProjectPurgeNotificationMetadata = {
+          ...record.metadata,
+          email: {
+            ...previousEmail,
+            // A new in-app preview has not attempted any external delivery.
+            // Preserve prior uncertain/provider evidence on historical rows.
+            ...(previousEmail.attempts === 0 ? { status: "skipped" as const } : {}),
+            suppressionReason: "nonproduction_suppressed",
+          },
+        };
+        await tx
+          .update(notificationsTable)
+          .set({ metadata })
+          .where(eq(notificationsTable.id, notificationId));
+        return { suppressed: true };
+      }
+      if (
+        previousEmail.nextAttemptAt &&
+        Date.parse(previousEmail.nextAttemptAt) > Date.parse(row.database_now)
+      )
+        return null;
       // A stale lease resumes the same provider attempt. That preserves the
       // bounded attempt count while the provider's stable idempotency key
       // makes a crash-after-send retry safe.
@@ -453,6 +649,7 @@ export const databaseProjectPurgeNotificationStore: ProjectPurgeNotificationStor
           attempts: attempt,
           leaseId,
           leaseExpiresAt: row.lease_expires_at,
+          nextAttemptAt: null,
         },
       };
       await tx
@@ -463,11 +660,12 @@ export const databaseProjectPurgeNotificationStore: ProjectPurgeNotificationStor
     });
   },
 
-  async completeEmailAttempt(notificationId, attempt, leaseId, status) {
+  async completeEmailAttempt(notificationId, attempt, leaseId, status, receipt) {
     const { db, notificationsTable } = await import("@workspace/db");
     await db.transaction(async (tx) => {
-      const selected = await tx.execute<NotificationRow>(sql`
+      const selected = await tx.execute<NotificationClockRow>(sql`
         SELECT id, recipient_id, title, body, metadata
+             , to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS database_now
         FROM notifications
         WHERE id = ${notificationId}
           AND resource_type = 'project_purge'
@@ -483,6 +681,20 @@ export const databaseProjectPurgeNotificationStore: ProjectPurgeNotificationStor
       ) {
         return;
       }
+      const lastDelivery = receipt === undefined ? null : parseDeliveryReceipt(receipt);
+      if (
+        (lastDelivery !== null && lastDelivery.status !== status) ||
+        (status === "sent" && lastDelivery?.acceptance !== "accepted")
+      ) {
+        throw new Error("project_purge_email_delivery_receipt_invalid");
+      }
+      // Keep the three-attempt budget, but do not spend it during one burst or
+      // outage. Both direct dispatch and polling enforce this DB-clock delay.
+      const delay = PROJECT_PURGE_EMAIL_RETRY_DELAYS_MS[attempt - 1];
+      const nextAttemptAt =
+        status !== "sent" && delay !== undefined
+          ? new Date(Date.parse(row.database_now) + delay).toISOString()
+          : null;
       await tx
         .update(notificationsTable)
         .set({
@@ -493,6 +705,8 @@ export const databaseProjectPurgeNotificationStore: ProjectPurgeNotificationStor
               status,
               leaseId: null,
               leaseExpiresAt: null,
+              nextAttemptAt,
+              lastDelivery,
             },
           },
         })
@@ -507,10 +721,16 @@ export const databaseProjectPurgeNotificationStore: ProjectPurgeNotificationStor
       FROM notifications
       WHERE resource_type = 'project_purge'
         AND metadata ->> 'semantics' = ${PROJECT_PURGE_NOTIFICATION_SEMANTICS}
+        AND COALESCE(metadata -> 'email' ->> 'suppressionReason', '') <> 'nonproduction_suppressed'
         AND (
           (
             metadata -> 'email' ->> 'status' IN ('pending', 'skipped', 'failed')
             AND (metadata -> 'email' ->> 'attempts')::int < ${PROJECT_PURGE_EMAIL_MAX_ATTEMPTS}
+            AND (
+              metadata -> 'email' ->> 'nextAttemptAt' IS NULL
+              OR metadata -> 'email' ->> 'nextAttemptAt'
+                <= to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+            )
           )
           OR (
             metadata -> 'email' ->> 'status' = 'sending'

@@ -146,8 +146,8 @@ export async function headAssetObject(
       abortSignal: boundedProviderSignal(signal),
       requestTimeout: ASSET_R2_PROVIDER_TIMEOUT_MS,
     });
-    const sizeBytes = Number(response.ContentLength ?? 0);
-    if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    const sizeBytes = response.ContentLength;
+    if (typeof sizeBytes !== "number" || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
       throw new Error("asset_storage_size_invalid");
     }
     return { sizeBytes };

@@ -58,6 +58,65 @@ function completedRetirementProgress() {
 }
 
 describe("project retirement foundation", () => {
+  it.each(["managedAddons", "sqliteRecovery"] as const)(
+    "keeps missing %s fail-closed while admitting bounded fresh evidence",
+    (field) => {
+      const progress = { ...completedRetirementProgress() } as Record<string, unknown>;
+      delete progress[field];
+      const input = {
+        state: "completed",
+        completedAt: new Date("2026-08-31T12:00:00Z"),
+        progress,
+        failureCode: null,
+        generation: 0,
+        allowLegacyAdminReconciliation: false,
+        currentCloudflareCachePurgeConfigured: true,
+      };
+      expect(retirement.decideProjectRestoreAdmission(input).allowed).toBe(false);
+      expect(retirement.decideProjectRetirementReconciliation(input)).toEqual({
+        allowed: true,
+        reason: "retryable_terminal",
+      });
+      expect(retirement.decideProjectRetirementReconciliation({ ...input, generation: 2 })).toEqual(
+        {
+          allowed: false,
+          code: "project_retirement_reconciliation_limit_reached",
+        },
+      );
+      expect(
+        retirement.decideProjectRetirementReconciliation({ ...input, completedAt: null }).allowed,
+      ).toBe(false);
+      expect(
+        retirement.decideProjectRetirementReconciliation({
+          ...input,
+          currentCloudflareCachePurgeConfigured: false,
+        }),
+      ).toEqual({ allowed: false, code: "project_retirement_provider_configuration_unavailable" });
+    },
+  );
+
+  it("never spends reconciliation on complete evidence or uncaps generation-three recovery", () => {
+    const input = {
+      state: "completed",
+      completedAt: new Date(),
+      progress: completedRetirementProgress(),
+      failureCode: null,
+      generation: 0,
+      allowLegacyAdminReconciliation: true,
+      allowConfigurationRecovery: true,
+      currentCloudflareCachePurgeConfigured: true,
+    };
+    expect(retirement.decideProjectRetirementReconciliation(input).allowed).toBe(false);
+    expect(
+      retirement.decideProjectRetirementReconciliation({
+        ...input,
+        state: "failed",
+        failureCode: "project_retirement_legacy_runtime_absence_unverified",
+        generation: 3,
+        configurationRecoveryUsed: true,
+      }),
+    ).toEqual({ allowed: false, code: "project_retirement_reconciliation_limit_reached" });
+  });
   it("denies background work when the active-project read does not find the project", () => {
     expect(retirement.decideProjectJobAdmission({ projectId: 51, activeProjectId: null })).toEqual({
       allowed: false,
@@ -481,7 +540,7 @@ describe("project retirement foundation", () => {
           progress: restoredProgress,
         },
       }),
-    ).toBe("replace_incompatible_terminal");
+    ).toBe("refuse_terminal_reconciliation_required");
     expect(
       retirement.decideProjectRetirementReceiptMode({
         deleted: true,
@@ -492,7 +551,7 @@ describe("project retirement foundation", () => {
           progress: {},
         },
       }),
-    ).toBe("replace_incompatible_terminal");
+    ).toBe("refuse_terminal_reconciliation_required");
     expect(
       retirement.decideProjectRetirementReceiptMode({
         deleted: true,

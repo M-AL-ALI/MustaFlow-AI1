@@ -51,8 +51,8 @@ import {
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
 import {
+  requestProjectRetirementReconciliation,
   acceptProjectRetirement,
-  decideProjectRetirementReconciliation,
   decideProjectRestoreAdmission,
   enqueueProjectRetirementOperation,
   hasProjectRestoreReplayReceipt,
@@ -60,11 +60,10 @@ import {
   presentProjectRetirementPreflightRefusal,
   preflightProjectRetirement,
   PROJECT_LIFECYCLE_LOCK_NAMESPACE,
-  PROJECT_RETIREMENT_MAX_RECONCILIATIONS,
   readProjectRetirementOperation,
   RESTORED_PROJECT_CONTROL_PLANE_STATE,
-  requestProjectRetirementReconciliation,
 } from "../lib/project-retirement";
+import { decideStoredProjectRetirementReconciliation } from "../lib/project-retirement-reconciliation";
 import {
   getDurableWorkerReadiness,
   isDurableWorkerReady,
@@ -78,7 +77,6 @@ import {
   sanitizeProjectRetirementProgress,
   sanitizeProjectRetirementState,
 } from "../lib/project-retirement-status";
-import { resolveCurrentCloudflareRetirementPosture } from "../lib/project-retirement-activation";
 import {
   canOwnerReadmitProjectPurge,
   cancelScheduledProjectPurgeForRestore,
@@ -1563,12 +1561,31 @@ router.get("/projects/trash", async (req, res): Promise<void> => {
   res.json(
     parsed.map((project) => {
       const purge = latestPurge.get(project.id);
+      const retirement = latestRetirement.get(project.id);
+      const restore = decideProjectRestoreAdmission({
+        state: retirement?.state ?? null,
+        progress: retirement?.progress,
+      });
+      const purgeAllowsRestore = !purge || purge.state === "scheduled";
+      const reconciliation = decideStoredProjectRetirementReconciliation(retirement);
       return {
         ...project,
         serverNow: trashTimestampToIso(rows[0]?.serverNow),
         purgeDueAt: trashTimestampToIso(purge?.dueAt),
-        restoreAllowed: !purge || purge.state === "scheduled",
-        retirementState: latestRetirement.get(project.id)?.state ?? "not_started",
+        restoreAllowed: purgeAllowsRestore && restore.allowed,
+        restoreBlockedCode: !purgeAllowsRestore
+          ? "project_purge_in_progress"
+          : restore.allowed
+            ? null
+            : restore.code,
+        retirementState: retirement?.state ?? "not_started",
+        retirementOperationId: retirement?.id ?? null,
+        reconciliationEligible: purgeAllowsRestore && reconciliation.allowed,
+        reconciliationBlockedCode: !purgeAllowsRestore
+          ? "project_purge_in_progress"
+          : reconciliation.allowed
+            ? null
+            : reconciliation.code,
         purgeState: purge?.state ?? null,
         purgeOperationId: purge?.id ?? null,
         purgeTrigger: purge?.trigger ?? null,
@@ -1684,8 +1701,10 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
   if (restoreResult.kind === "blocked") {
     res.status(409).json({
       code: "project_retirement_cleanup_unverified",
-      error: "This project cannot be restored until its Trash cleanup is verified.",
+      error:
+        "This project's earlier cleanup needs verification. Open cleanup recovery in Trash before restoring.",
       operationId: restoreResult.operation?.id ?? null,
+      statusUrl: `/api/projects/${params.data.id}/retirement`,
     });
     return;
   }
@@ -1740,40 +1759,9 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
     });
     return;
   }
-  const persistedProgress = operation.progress as unknown;
-  const persistedReconciliation =
-    persistedProgress && typeof persistedProgress === "object" && !Array.isArray(persistedProgress)
-      ? (persistedProgress as Record<string, unknown>).reconciliation
-      : null;
-  const persistedReconciliationGeneration =
-    persistedReconciliation &&
-    typeof persistedReconciliation === "object" &&
-    !Array.isArray(persistedReconciliation)
-      ? (persistedReconciliation as Record<string, unknown>).generation
-      : persistedReconciliation === undefined
-        ? 0
-        : null;
-  const reconciliationGeneration =
-    Number.isSafeInteger(persistedReconciliationGeneration) &&
-    (persistedReconciliationGeneration as number) >= 0
-      ? (persistedReconciliationGeneration as number)
-      : PROJECT_RETIREMENT_MAX_RECONCILIATIONS;
-  const configurationRecoveryUsed = Boolean(
-    persistedReconciliation &&
-    typeof persistedReconciliation === "object" &&
-    !Array.isArray(persistedReconciliation) &&
-    (persistedReconciliation as Record<string, unknown>).configurationRecoveryUsed === true,
-  );
-  const reconciliation = decideProjectRetirementReconciliation({
-    state: operationState,
-    completedAt: operation.completedAt,
-    failureCode: operation.failureCode,
-    generation: reconciliationGeneration,
+  const reconciliation = decideStoredProjectRetirementReconciliation(operation, {
     allowLegacyAdminReconciliation: staffPrincipal?.role === "owner",
     allowConfigurationRecovery: staffPrincipal?.role === "owner",
-    currentCloudflareCachePurgeConfigured:
-      resolveCurrentCloudflareRetirementPosture().state === "configured",
-    configurationRecoveryUsed,
   });
   res.json({
     operationId: operation.id,
@@ -1786,7 +1774,13 @@ router.get("/projects/:id/retirement", async (req, res): Promise<void> => {
     createdAt: operation.createdAt,
     startedAt: operation.startedAt,
     completedAt: operation.completedAt,
-    reconciliationEligible: reconciliation.allowed,
+    reconciliationEligible:
+      Boolean(owned || staffPrincipal?.role === "owner") && reconciliation.allowed,
+    reconciliationBlockedCode: reconciliation.allowed ? null : reconciliation.code,
+    completionEvidenceCurrent: decideProjectRestoreAdmission({
+      state: operationState,
+      progress: operation.progress,
+    }).allowed,
   });
 });
 

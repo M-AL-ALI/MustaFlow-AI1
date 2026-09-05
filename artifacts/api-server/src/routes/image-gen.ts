@@ -211,6 +211,10 @@ router.post("/images/generate", async (req, res): Promise<void> => {
       });
     }
   } catch (err) {
+    if (err instanceof AssetAdmissionError) {
+      res.status(err.status).json({ error: err.message, code: err.code });
+      return;
+    }
     const e = err as {
       code?: string;
       message?: string;
@@ -893,6 +897,10 @@ const imageEditHandler =
       });
     } catch (err) {
       if (reservedOraImageQuota) await refundOraQuota(userId, "image");
+      if (err instanceof AssetAdmissionError) {
+        res.status(err.status).json({ error: err.message, code: err.code });
+        return;
+      }
       const e = err as {
         code?: string;
         message?: string;

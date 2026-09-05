@@ -4,6 +4,7 @@ import * as ts from "typescript";
 
 const routeSource = readFileSync(new URL("../routes/assets.ts", import.meta.url), "utf8");
 const routeIndexSource = readFileSync(new URL("../routes/index.ts", import.meta.url), "utf8");
+const lifecycleSource = readFileSync(new URL("./project-lifecycle.ts", import.meta.url), "utf8");
 
 const routeAst = ts.createSourceFile("assets.ts", routeSource, ts.ScriptTarget.Latest, true);
 
@@ -28,15 +29,20 @@ function isMethodCall(call: ts.CallExpression, receiver: string, method: string)
   );
 }
 
-function expectTransactionalWrites(scope: ts.Node): ts.Block {
+function expectTransactionalWrites(scope: ts.Node, boundary: readonly [string, string]): ts.Block {
   const transactions = findNodes(scope, ts.isCallExpression).filter(
     (call) =>
-      isMethodCall(call, "db", "transaction") &&
+      ts.isIdentifier(call.expression) &&
+      call.expression.text === "withResponseProjectLifecycleTransaction" &&
       ts.isAwaitExpression(call.parent) &&
       call.parent.expression === call,
   );
   expect(transactions).toHaveLength(1);
-  const callback = transactions[0]!.arguments[0];
+  expect(transactions[0]!.arguments).toHaveLength(3);
+  expect(transactions[0]!.arguments.slice(0, 2).map((argument) => argument.getText())).toEqual(
+    boundary,
+  );
+  const callback = transactions[0]!.arguments[2];
   if (
     !callback ||
     !(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) ||
@@ -67,6 +73,48 @@ function expectTransactionalWrites(scope: ts.Node): ts.Block {
 }
 
 describe("unified asset delivery contract", () => {
+  it("keeps the composed placement callback inside one awaited database transaction", () => {
+    const lifecycleAst = ts.createSourceFile(
+      "project-lifecycle.ts",
+      lifecycleSource,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const wrapper = lifecycleAst.statements.find(
+      (node): node is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(node) &&
+        node.name?.text === "withResponseProjectLifecycleTransaction",
+    );
+    if (!wrapper?.body) throw new Error("Missing lifecycle transaction composition");
+    const transactions = findNodes(wrapper.body, ts.isCallExpression).filter(
+      (call) => isMethodCall(call, "db", "transaction") && ts.isAwaitExpression(call.parent),
+    );
+    expect(transactions).toHaveLength(1);
+    expect(ts.isReturnStatement(transactions[0]!.parent.parent)).toBe(true);
+    const callback = transactions[0]!.arguments[0];
+    if (!callback || !ts.isArrowFunction(callback) || !ts.isBlock(callback.body)) {
+      throw new Error("Missing awaited database transaction callback");
+    }
+    const work = findNodes(callback.body, ts.isCallExpression).filter(
+      (call) => ts.isIdentifier(call.expression) && call.expression.text === "work",
+    );
+    expect(work).toHaveLength(1);
+    expect(work[0]!.arguments.map((argument) => argument.getText())).toEqual(["tx"]);
+    expect(ts.isAwaitExpression(work[0]!.parent)).toBe(true);
+    expect(ts.isReturnStatement(work[0]!.parent.parent)).toBe(true);
+    expect(wrapper.body.getText()).toContain('isolationLevel: "read committed"');
+    const lifecycleImport = routeAst.statements
+      .filter(ts.isImportDeclaration)
+      .find(
+        (node) =>
+          ts.isStringLiteral(node.moduleSpecifier) &&
+          node.moduleSpecifier.text === "../lib/project-lifecycle",
+      );
+    expect(lifecycleImport?.importClause?.namedBindings?.getText()).toContain(
+      "withResponseProjectLifecycleTransaction",
+    );
+  });
+
   it("keeps unified asset routes reachable through the authenticated API guard", () => {
     const knownPrefixes = routeIndexSource.slice(
       routeIndexSource.indexOf("const KNOWN_PREFIXES"),
@@ -91,7 +139,7 @@ describe("unified asset delivery contract", () => {
         ts.isFunctionDeclaration(node) && node.name?.text === "materializeProjectAsset",
     );
     if (!method?.body) throw new Error("Missing materializeProjectAsset implementation");
-    expectTransactionalWrites(method.body);
+    expectTransactionalWrites(method.body, ["lifecycleResponse", "input.projectId"]);
   });
 
   it("replaces every supported reference atomically and refuses unsupported references", () => {
@@ -114,7 +162,7 @@ describe("unified asset delivery contract", () => {
     expect(handler.body.getText(routeAst)).toMatch(
       /usages\s*\.some\(\s*\(?usage\)?\s*=>\s*!usage\.filePath\s*\)/,
     );
-    const transactionBody = expectTransactionalWrites(handler.body);
+    const transactionBody = expectTransactionalWrites(handler.body, ["res", "projectId"]);
     const calls = findNodes(transactionBody, ts.isCallExpression);
     expect(
       calls.some(
