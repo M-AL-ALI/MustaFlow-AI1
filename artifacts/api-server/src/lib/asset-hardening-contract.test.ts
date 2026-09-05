@@ -44,9 +44,15 @@ describe("unified asset hardening contracts", () => {
 
     expect(registry).toContain("UPDATE generated_images");
     expect(registry).toContain("AND (asset_id IS NULL OR asset_id=$2)");
-    expect(registry.indexOf("UPDATE generated_images")).toBeLessThan(
-      registry.indexOf('await client.query("COMMIT")', registry.indexOf("UPDATE generated_images")),
-    );
+    const ready = registry.indexOf("SET state='ready'");
+    const attach = registry.indexOf("SET asset_id=$2, updated_at=NOW()");
+    const publish = registry.indexOf("SET status='completed'");
+    const commit = registry.indexOf('await client.query("COMMIT")', publish);
+    expect(ready).toBeLessThan(attach);
+    expect(attach).toBeLessThan(publish);
+    expect(publish).toBeLessThan(commit);
+    expect(registry.slice(attach, publish)).toContain("AND (asset_id IS NULL OR asset_id=$2)");
+    expect(registry.slice(publish, commit)).toContain("AND asset_id=$2");
     for (const consumer of [jobs, uploadRoute, oraChat]) {
       expect(consumer).toContain("generatedImage: {");
       expect(consumer).toMatch(/completionCommitted|editableCompletionCommitted/u);

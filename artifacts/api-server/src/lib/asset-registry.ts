@@ -580,13 +580,27 @@ export async function completeAsset(input: {
       ) {
         throw new AssetAdmissionError("asset_link_mismatch", 409);
       }
+      // Bind the now-ready asset before publishing the self-referential image
+      // URLs. The durable-reference trigger resolves /api/images/:id/file via
+      // the current generated_images row, so doing both in one BEFORE UPDATE
+      // would still observe the old null asset_id. Both statements remain in
+      // this transaction and are invisible until the final COMMIT.
+      const attached = await client.query(
+        `UPDATE generated_images
+            SET asset_id=$2, updated_at=NOW()
+          WHERE id=$1 AND user_id=$3 AND deleted_at IS NULL
+            AND status IN ('pending', 'generating')
+            AND (asset_id IS NULL OR asset_id=$2)
+        RETURNING id`,
+        [input.generatedImage.imageId, input.assetId, input.ownerUserId],
+      );
+      if (!attached.rowCount) throw new AssetAdmissionError("asset_link_mismatch", 409);
       const generated = await client.query(
         `UPDATE generated_images
             SET status='completed',
                 file_url=$4,
                 thumbnail_url=$5,
                 storage_key=$6,
-                asset_id=$2,
                 revised_prompt=COALESCE($7, revised_prompt),
                 provider_name=COALESCE($8, provider_name),
                 model_name=COALESCE($9, model_name),
@@ -594,7 +608,7 @@ export async function completeAsset(input: {
                 updated_at=NOW()
           WHERE id=$1 AND user_id=$3 AND deleted_at IS NULL
             AND status IN ('pending', 'generating')
-            AND (asset_id IS NULL OR asset_id=$2)
+            AND asset_id=$2
         RETURNING id`,
         [
           input.generatedImage.imageId,
