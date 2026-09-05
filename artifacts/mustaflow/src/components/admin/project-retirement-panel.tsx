@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { HardDrive, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { authFetch } from "@/lib/api-fetch";
 
 export const AUTHORIZED_PROJECT_RETIREMENT_IDS = [
@@ -87,6 +87,26 @@ type ProjectRetirementStatus = {
 type SingleProjectRetirementResult =
   | { kind: "status"; status: ProjectRetirementStatus }
   | { kind: "accepted"; receipt: AcceptedRetirementReceipt };
+
+type AssetStorageReconciliationTerminal = {
+  assetId: number;
+  objectId: number;
+  role: "primary" | "thumbnail";
+  outcome: string;
+};
+
+type AssetStorageReconciliationResponse = {
+  requestId: string;
+  receipt: {
+    inspected: number;
+    measured: number;
+    measuredBytes: number;
+    absentThumbnails: number;
+    remainingUnmeasured: number;
+    admissionUnlocked: boolean;
+    terminals: AssetStorageReconciliationTerminal[];
+  };
+};
 
 const REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   project_retirement_legacy_runtime_requires_migration:
@@ -530,6 +550,68 @@ function receiptStatusUrl(receipt: RetirementReceipt): string | null {
   return `/api/projects/${receipt.projectId}/retirement`;
 }
 
+function parseAssetStorageReconciliationResponse(
+  value: unknown,
+  expectedRequestId: string,
+): AssetStorageReconciliationResponse | null {
+  if (!isRecord(value) || value.requestId !== expectedRequestId || !isRecord(value.receipt)) {
+    return null;
+  }
+  const inspected = safeCount(value.receipt.inspected);
+  const measured = safeCount(value.receipt.measured);
+  const measuredBytes = safeCount(value.receipt.measuredBytes);
+  const absentThumbnails = safeCount(value.receipt.absentThumbnails);
+  const remainingUnmeasured = safeCount(value.receipt.remainingUnmeasured);
+  if (
+    inspected === null ||
+    measured === null ||
+    measuredBytes === null ||
+    absentThumbnails === null ||
+    remainingUnmeasured === null ||
+    typeof value.receipt.admissionUnlocked !== "boolean" ||
+    !Array.isArray(value.receipt.terminals)
+  ) {
+    return null;
+  }
+
+  const terminals: AssetStorageReconciliationTerminal[] = [];
+  for (const candidate of value.receipt.terminals) {
+    if (!isRecord(candidate)) return null;
+    const assetId = safeCount(candidate.assetId);
+    const objectId = safeCount(candidate.objectId);
+    const role = closedValue(candidate.role, ["primary", "thumbnail"] as const);
+    const outcome =
+      typeof candidate.outcome === "string" && /^[a-z][a-z0-9_-]{0,63}$/u.test(candidate.outcome)
+        ? candidate.outcome
+        : null;
+    if (assetId === null || objectId === null || !role || !outcome) return null;
+    terminals.push({ assetId, objectId, role, outcome });
+  }
+
+  return {
+    requestId: expectedRequestId,
+    receipt: {
+      inspected,
+      measured,
+      measuredBytes,
+      absentThumbnails,
+      remainingUnmeasured,
+      admissionUnlocked: value.receipt.admissionUnlocked,
+      terminals,
+    },
+  };
+}
+
+function storageTerminalSummary(terminal: AssetStorageReconciliationTerminal): string {
+  if (terminal.outcome === "primary-missing") {
+    return `Managed image ${terminal.assetId} has no primary storage object. It was left unchanged for investigation.`;
+  }
+  if (terminal.outcome === "thumbnail-missing") {
+    return `Managed image ${terminal.assetId} has no thumbnail storage object. It was left unchanged for investigation.`;
+  }
+  return `Managed image ${terminal.assetId} could not be measured safely. It was left unchanged for investigation.`;
+}
+
 export function ProjectRetirementPanel() {
   const [confirmation, setConfirmation] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -542,10 +624,49 @@ export function ProjectRetirementPanel() {
   const [lookupFailure, setLookupFailure] = useState<string | null>(null);
   const [singleProjectResult, setSingleProjectResult] =
     useState<SingleProjectRetirementResult | null>(null);
+  const [storageLimit, setStorageLimit] = useState(20);
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageFailure, setStorageFailure] = useState<string | null>(null);
+  const [storageResult, setStorageResult] = useState<AssetStorageReconciliationResponse | null>(
+    null,
+  );
   const submissionLock = useRef(false);
   const retryLocks = useRef(new Set<number>());
   const lookupLock = useRef(false);
+  const storageLock = useRef(false);
   const confirmed = confirmation === PROJECT_RETIREMENT_CONFIRMATION;
+
+  async function reconcileAssetStorageMetadata() {
+    if (storageLock.current) return;
+    storageLock.current = true;
+    setStorageBusy(true);
+    setStorageFailure(null);
+    setStorageResult(null);
+    const requestId = crypto.randomUUID();
+
+    try {
+      const response = await authFetch("/api/admin/assets/reconcile-storage-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: storageLimit, requestId }),
+      });
+      const parsed = parseAssetStorageReconciliationResponse(await response.json(), requestId);
+      if (!parsed) throw new Error("invalid_storage_reconciliation_response");
+      setStorageResult(parsed);
+      if (!response.ok) {
+        setStorageFailure(
+          "Storage accounting stopped safely. Review the unchanged items below before retrying.",
+        );
+      }
+    } catch {
+      setStorageFailure(
+        "Storage accounting could not be verified. No image was deleted, moved, shared, or reassigned.",
+      );
+    } finally {
+      storageLock.current = false;
+      setStorageBusy(false);
+    }
+  }
 
   async function retireAuthorizedProjects() {
     if (!confirmed || submissionLock.current) return;
@@ -692,7 +813,7 @@ export function ProjectRetirementPanel() {
           type="button"
           aria-label={`Retry governed cleanup for Project ${projectId}`}
           onClick={() => void retryGovernedCleanup(projectId)}
-          disabled={retrying || submitting || lookupBusy}
+          disabled={retrying || submitting || lookupBusy || storageBusy}
           className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
         >
           {retrying ? (
@@ -768,7 +889,7 @@ export function ProjectRetirementPanel() {
             <button
               type="button"
               onClick={() => void retireAuthorizedProjects()}
-              disabled={!confirmed || submitting || retryingProjectIds.size > 0}
+              disabled={!confirmed || submitting || retryingProjectIds.size > 0 || storageBusy}
               className="inline-flex items-center gap-1.5 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? (
@@ -817,7 +938,7 @@ export function ProjectRetirementPanel() {
             <button
               type="button"
               onClick={() => void lookupRetirementStatus()}
-              disabled={lookupBusy || submitting || retryingProjectIds.size > 0}
+              disabled={lookupBusy || submitting || retryingProjectIds.size > 0 || storageBusy}
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
             >
               {lookupBusy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -874,6 +995,108 @@ export function ProjectRetirementPanel() {
                   >
                     {receiptStatusUrl(singleProjectResult.receipt)}
                   </a>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-3 border-t border-border pt-4">
+          <div className="flex items-start gap-3">
+            <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 text-sky-700">
+              <HardDrive className="h-4 w-4" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold">Verify image storage accounting</h4>
+              <p className="max-w-3xl text-xs text-muted-foreground">
+                Measure managed image-object sizes directly with the storage provider and repair
+                only quota accounting metadata. This never deletes, moves, shares, or reassigns
+                images, and it cannot cross the NabuFlow/Aura platform boundary.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="space-y-1 text-xs font-medium" htmlFor="asset-storage-batch-limit">
+              <span className="block">Objects per accounting batch</span>
+              <select
+                id="asset-storage-batch-limit"
+                value={storageLimit}
+                onChange={(event) => setStorageLimit(Number(event.target.value))}
+                disabled={storageBusy}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => void reconcileAssetStorageMetadata()}
+              disabled={storageBusy || submitting || lookupBusy || retryingProjectIds.size > 0}
+              className="inline-flex items-center gap-1.5 rounded-md bg-sky-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {storageBusy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {storageBusy ? "Verifying storage accounting…" : "Verify storage accounting"}
+            </button>
+          </div>
+          <div aria-live="polite" className="space-y-2">
+            {storageFailure && (
+              <p className="text-sm text-destructive" role="alert">
+                {storageFailure}
+              </p>
+            )}
+            {storageResult && (
+              <div
+                className="space-y-3 rounded-lg border border-border bg-background p-3"
+                data-testid="asset-storage-reconciliation-result"
+              >
+                <div className="grid gap-2 text-sm sm:grid-cols-3">
+                  <p>
+                    <span className="font-semibold">Inspected:</span>{" "}
+                    {storageResult.receipt.inspected}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Measured:</span>{" "}
+                    {storageResult.receipt.measured}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Bytes accounted:</span>{" "}
+                    {storageResult.receipt.measuredBytes.toLocaleString()}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Missing thumbnails:</span>{" "}
+                    {storageResult.receipt.absentThumbnails}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Still unmeasured:</span>{" "}
+                    {storageResult.receipt.remainingUnmeasured}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Image creation:</span>{" "}
+                    {storageResult.receipt.admissionUnlocked ? "unlocked" : "still protected"}
+                  </p>
+                </div>
+                {storageResult.receipt.admissionUnlocked && (
+                  <p className="text-sm font-medium text-emerald-700">
+                    Storage accounting is complete. New image creation is unlocked.
+                  </p>
+                )}
+                {storageResult.receipt.terminals.length > 0 && (
+                  <ul className="space-y-1 text-xs text-muted-foreground">
+                    {storageResult.receipt.terminals.map((terminal) => (
+                      <li key={`${terminal.objectId}-${terminal.role}`}>
+                        {storageTerminalSummary(terminal)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="break-all text-xs text-muted-foreground">
+                  Durable request receipt: <code>{storageResult.requestId}</code>
                 </p>
               </div>
             )}

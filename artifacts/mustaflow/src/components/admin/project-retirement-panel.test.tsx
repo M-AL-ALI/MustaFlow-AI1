@@ -779,6 +779,98 @@ describe("ProjectRetirementPanel", () => {
     expect(screen.queryByText(rawError)).not.toBeInTheDocument();
   });
 
+  it("reconciles storage accounting with a unique bounded request and renders its durable receipt", async () => {
+    const user = userEvent.setup();
+    let resolveRequest!: (response: Response) => void;
+    vi.mocked(authFetch).mockImplementation((_url, init) => {
+      const request = JSON.parse(String(init?.body)) as { limit: number; requestId: string };
+      return new Promise<Response>((resolve) => {
+        resolveRequest = () =>
+          resolve(
+            jsonResponse(
+              {
+                requestId: request.requestId,
+                receipt: {
+                  inspected: 20,
+                  measured: 20,
+                  measuredBytes: 616256,
+                  absentThumbnails: 0,
+                  remainingUnmeasured: 0,
+                  admissionUnlocked: true,
+                  terminals: [],
+                },
+              },
+              200,
+            ),
+          );
+      });
+    });
+    render(<ProjectRetirementPanel />);
+    const submit = screen.getByRole("button", { name: "Verify storage accounting" });
+
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    expect(authFetch).toHaveBeenCalledTimes(1);
+    expect(authFetch).toHaveBeenCalledWith(
+      "/api/admin/assets/reconcile-storage-metadata",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const request = JSON.parse(String(vi.mocked(authFetch).mock.calls[0]?.[1]?.body)) as {
+      limit: number;
+      requestId: string;
+    };
+    expect(request.limit).toBe(20);
+    expect(request.requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+
+    resolveRequest(jsonResponse({}, 200));
+    expect(
+      await screen.findByText("Storage accounting is complete. New image creation is unlocked."),
+    ).toBeVisible();
+    expect(screen.getByText(request.requestId)).toBeVisible();
+    expect(screen.getByText("616,256")).toBeVisible();
+
+    await user.selectOptions(screen.getByLabelText("Objects per accounting batch"), "50");
+    await user.click(screen.getByRole("button", { name: "Verify storage accounting" }));
+    expect(authFetch).toHaveBeenCalledTimes(2);
+    const nextRequest = JSON.parse(String(vi.mocked(authFetch).mock.calls[1]?.[1]?.body)) as {
+      limit: number;
+      requestId: string;
+    };
+    expect(nextRequest.limit).toBe(50);
+    expect(nextRequest.requestId).not.toBe(request.requestId);
+  });
+
+  it("fails closed on an unreadable storage receipt without exposing technical details", async () => {
+    const user = userEvent.setup();
+    const rawError = "SQLSTATE_XX000: provider password=should-not-render";
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          requestId: "spoofed-request-id",
+          receipt: { error: rawError },
+        },
+        500,
+      ),
+    );
+    render(<ProjectRetirementPanel />);
+
+    await user.click(screen.getByRole("button", { name: "Verify storage accounting" }));
+
+    expect(
+      await screen.findByText(
+        "Storage accounting could not be verified. No image was deleted, moved, shared, or reassigned.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(rawError)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("asset-storage-reconciliation-result")).not.toBeInTheDocument();
+  });
+
   it("does not expose technical, long, or unexpectedly thrown error text", async () => {
     const user = userEvent.setup();
     const technicalError = "SQLSTATE_23505: duplicate_key stack trace";
