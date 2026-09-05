@@ -402,6 +402,31 @@ describe("bounded legacy zero-volume configuration recovery", () => {
       configurationRecoveryUsed: false,
     });
   });
+
+  it("converts the exact migration sentinel with legacy progress into a bounded child operation", async () => {
+    mocks.selectResults.push(
+      [{ id: 77 }],
+      [
+        {
+          id: "project-retirement:legacy:v1:77",
+          projectId: 77,
+          state: "failed",
+          completedAt: decisionInput.completedAt,
+          failureCode: "project_retirement_operation_unavailable",
+          progress: initialProjectRetirementProgress(),
+        },
+      ],
+    );
+
+    const result = await requestProjectRetirementReconciliation({
+      projectId: 77,
+      requestedBy: "platform-owner",
+      allowLegacyAdminReconciliation: true,
+      allowConfigurationRecovery: true,
+    });
+
+    expect(result).toMatchObject({ projectId: 77, state: "accepted" });
+  });
 });
 
 function completionProgress(): ProjectRetirementProgress {

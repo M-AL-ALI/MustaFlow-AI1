@@ -58,10 +58,6 @@ function readStoredProjectRetirementReconciliationMetadata(
   >,
 ) {
   if (
-    (operation.progress == null ||
-      (typeof operation.progress === "object" &&
-        !Array.isArray(operation.progress) &&
-        Object.keys(operation.progress).length === 0)) &&
     operation.state === "failed" &&
     operation.completedAt != null &&
     operation.failureCode === "project_retirement_operation_unavailable" &&
