@@ -1547,7 +1547,11 @@ router.get("/projects/trash", async (req, res): Promise<void> => {
     .select()
     .from(projectRetirementOperationsTable)
     .where(inArray(projectRetirementOperationsTable.projectId, projectIds))
-    .orderBy(desc(projectRetirementOperationsTable.createdAt));
+    .orderBy(
+      desc(projectRetirementOperationsTable.createdAt),
+      desc(projectRetirementOperationsTable.updatedAt),
+      desc(projectRetirementOperationsTable.id),
+    );
   const latestPurge = new Map<number, (typeof purgeOperations)[number]>();
   for (const operation of purgeOperations) {
     if (!latestPurge.has(operation.projectId)) latestPurge.set(operation.projectId, operation);
@@ -1629,7 +1633,11 @@ router.post("/projects/:id/restore", async (req, res): Promise<void> => {
       .select()
       .from(projectRetirementOperationsTable)
       .where(eq(projectRetirementOperationsTable.projectId, params.data.id))
-      .orderBy(desc(projectRetirementOperationsTable.createdAt))
+      .orderBy(
+        desc(projectRetirementOperationsTable.createdAt),
+        desc(projectRetirementOperationsTable.updatedAt),
+        desc(projectRetirementOperationsTable.id),
+      )
       .limit(1);
     const retirementEvidence = {
       state: latestRetirement?.state ?? null,

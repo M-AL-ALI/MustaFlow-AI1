@@ -131,7 +131,11 @@ export async function requestProjectRetirementEvidenceReconciliation(input: {
       .select()
       .from(projectRetirementOperationsTable)
       .where(eq(projectRetirementOperationsTable.projectId, input.projectId))
-      .orderBy(desc(projectRetirementOperationsTable.createdAt))
+      .orderBy(
+        desc(projectRetirementOperationsTable.createdAt),
+        desc(projectRetirementOperationsTable.updatedAt),
+        desc(projectRetirementOperationsTable.id),
+      )
       .limit(1);
     if (!latest) return { code: "project_retirement_not_found" as const };
     const decision = decideStoredProjectRetirementReconciliation(latest, input);

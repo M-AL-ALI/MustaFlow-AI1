@@ -140,7 +140,11 @@ async function readLatestProjectRetirementOperation(
     })
     .from(projectRetirementOperationsTable)
     .where(eq(projectRetirementOperationsTable.projectId, projectId))
-    .orderBy(desc(projectRetirementOperationsTable.createdAt))
+    .orderBy(
+      desc(projectRetirementOperationsTable.createdAt),
+      desc(projectRetirementOperationsTable.updatedAt),
+      desc(projectRetirementOperationsTable.id),
+    )
     .limit(1);
   return operation ?? null;
 }
@@ -1954,7 +1958,11 @@ export async function readProjectRetirementOperation(
     .select()
     .from(projectRetirementOperationsTable)
     .where(eq(projectRetirementOperationsTable.projectId, projectId))
-    .orderBy(desc(projectRetirementOperationsTable.createdAt))
+    .orderBy(
+      desc(projectRetirementOperationsTable.createdAt),
+      desc(projectRetirementOperationsTable.updatedAt),
+      desc(projectRetirementOperationsTable.id),
+    )
     .limit(1);
   return operation ?? null;
 }
