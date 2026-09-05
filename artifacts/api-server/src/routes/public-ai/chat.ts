@@ -2006,10 +2006,6 @@ router.post("/public-ai/chat", async (req, res) => {
           fileName: `ora-image-${imageRow.id}.webp`,
           mimeType: "image/webp",
         });
-        await db
-          .update(generatedImagesTable)
-          .set({ assetId: pendingEditableAsset.id, updatedAt: sql`now()` })
-          .where(eq(generatedImagesTable.id, imageRow.id));
       }
       const result = await generateImage({
         prompt: imageProfile.prompt,

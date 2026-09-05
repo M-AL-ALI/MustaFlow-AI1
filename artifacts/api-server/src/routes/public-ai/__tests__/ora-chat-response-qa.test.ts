@@ -5,6 +5,7 @@ import request from "supertest";
 import jwt from "jsonwebtoken";
 import { evaluateOraResponseQuality } from "../../../lib/public-ai/response-quality";
 import { storeFile } from "../../../lib/public-ai/file-store";
+import { completeAsset } from "../../../lib/asset-registry";
 
 const TEST_SECRET = "ora-chat-response-qa-secret";
 
@@ -286,10 +287,22 @@ vi.mock("@workspace/db", () => {
     return query;
   }
 
-  function makeMutation(returnedId = 1) {
+  function makeMutation(target: unknown, returnedId = 1) {
     const query: Record<string, unknown> = {
       values: () => query,
-      set: () => query,
+      set: (values: unknown) => {
+        // Mirror the production trigger: a reserved asset cannot be attached to
+        // a generated image before completeAsset atomically marks it ready.
+        if (
+          target === generatedImageTable &&
+          values !== null &&
+          typeof values === "object" &&
+          "assetId" in values
+        ) {
+          throw new Error("asset_not_ready");
+        }
+        return query;
+      },
       where: () => query,
       returning: () => Promise.resolve([{ id: returnedId }]),
       then: (resolve: (rows: unknown[]) => unknown) => resolve([]),
@@ -303,8 +316,8 @@ vi.mock("@workspace/db", () => {
   return {
     db: {
       select: (selection?: unknown) => makeSelect(selection),
-      insert: (target: unknown) => makeMutation(target === generatedImageTable ? 2 : 1),
-      update: (target: unknown) => makeMutation(target === generatedImageTable ? 2 : 1),
+      insert: (target: unknown) => makeMutation(target, target === generatedImageTable ? 2 : 1),
+      update: (target: unknown) => makeMutation(target, target === generatedImageTable ? 2 : 1),
     },
     knowledgeEntriesTable: table,
     oraProfilesTable: table,
@@ -618,7 +631,7 @@ What should I tell Replit?`;
     expect(format).toBe("docx");
   });
 
-  it("returns inline image fields for signed-in image generation without sign-in hedging", async () => {
+  it("completes the reserved asset before returning signed-in inline image fields", async () => {
     authState.user = { userId: "ora-user-1", tier: "core", isPaid: true };
 
     const res = await request(app)
@@ -632,6 +645,12 @@ What should I tell Replit?`;
     expect(res.body.imageUrl).toBe("/api/ora/canonical-assets/1/content");
     expect(res.body.imageUrl).not.toBe("/api/ora/canonical-assets/2/content");
     expect(res.body.imageUrl).not.toBe("/api/images/2/file");
+    expect(completeAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetId: 1,
+        generatedImage: expect.objectContaining({ imageId: 2 }),
+      }),
+    );
     expect(res.body.imageMeta).toEqual({
       kind: "logo",
       aspectRatio: "1:1",
