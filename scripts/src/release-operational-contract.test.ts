@@ -79,6 +79,7 @@ assert.ok(
   "dynamic prerender must evaluate the explicit skip gate before loading the database",
 );
 for (const requiredRegistryGuard of [
+  "git --no-optional-locks diff --name-only refs/remotes/origin/main..HEAD",
   "/^artifacts\\/mustaflow\\/src\\/pages\\/(?:.*\\/)?ora(?:x)?(?:[-./]|$)/i",
   "/^artifacts\\/mustaflow\\/src\\/pages\\/projects\\/components\\/(?:collaboration-card|project-collaboration)/i",
   "/project-collaboration/i",

@@ -1297,6 +1297,8 @@ function gitInfo(requireClean: boolean): CheckResult[] {
 
 function changedFiles(): string[] {
   const candidates = [
+    runShell("git --no-optional-locks diff --name-only refs/remotes/origin/main..HEAD", 20_000)
+      .output,
     runShell("git --no-optional-locks diff --name-only HEAD~1..HEAD", 20_000).output,
     runShell("git --no-optional-locks diff --name-only --cached", 20_000).output,
     runShell("git --no-optional-locks diff --name-only", 20_000).output,
