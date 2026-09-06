@@ -705,6 +705,18 @@ export function stepFailure(
   return new ProjectPurgeStepError(stage, code, true, causeCode);
 }
 
+export async function releaseProductionDatabasesForProjectPurge(
+  provider: Parameters<typeof releaseProductionDatabasesForHardDelete>[0],
+  projectIds: Parameters<typeof releaseProductionDatabasesForHardDelete>[1],
+  options: Parameters<typeof releaseProductionDatabasesForHardDelete>[2],
+): Promise<void> {
+  try {
+    await releaseProductionDatabasesForHardDelete(provider, projectIds, options);
+  } catch (error) {
+    throw stepFailure("database", "project_purge_database_release_failed", error);
+  }
+}
+
 async function setOperationStage(
   operationId: string,
   leaseVersion: number,
@@ -733,6 +745,7 @@ async function setOperationStage(
 type DurableProjectPurgeResourceProgress = {
   schema: "project-purge-resource-progress-v1";
   inventoryDigestSha256: string;
+  releasePlanDigestSha256: string;
   assetCursor: ProjectPurgeAssetReleaseCursor;
   snapshotCursor: ProjectPurgeSnapshotReleaseCursor;
   providerRemoved: number;
@@ -742,9 +755,41 @@ type DurableProjectPurgeResourceProgress = {
   readmissionAudit?: ProjectPurgeReadmissionAudit;
 };
 
+export function projectPurgeReleasePlanDigestSha256(
+  inventory: ProjectPurgeResourceInventory,
+): string {
+  return sha256(
+    JSON.stringify({
+      schema: "project-purge-release-plan/v1",
+      projectId: inventory.projectId,
+      assetObjects: inventory.assetTargets.map((target) => ({
+        assetId: target.assetId,
+        backend: target.inventoryStorageBackend ?? target.storageBackend,
+        storageKey: target.inventoryStorageKey ?? target.storageKey,
+        shared: target.shared,
+      })),
+      legacyImageObjects: inventory.legacyGeneratedImageTargets.map((target) => ({
+        backend: target.storageBackend,
+        storageKey: target.storageKey,
+        shared: target.shared,
+      })),
+      uploadObjects: inventory.uploadTargets.map((target) => ({
+        objectPath: target.objectPath,
+        shared: target.shared,
+      })),
+      snapshotObjects: inventory.snapshotObjectKeys,
+      neonProjectIds: inventory.neonProjectIds,
+      productionNeonProjectName: inventory.productionNeonProjectName,
+      previewNeonProjectName: inventory.previewNeonProjectName,
+      activeAddonCount: inventory.activeAddonCount,
+    }),
+  );
+}
+
 export function parseDurableProjectPurgeResourceProgress(
   value: unknown,
   inventoryDigestSha256: string,
+  releasePlanDigestSha256 = inventoryDigestSha256,
 ): DurableProjectPurgeResourceProgress {
   const readmissionAudit = parseProjectPurgeReadmissionAudit(value);
   if (!readmissionAudit.ok) {
@@ -759,6 +804,7 @@ export function parseDurableProjectPurgeResourceProgress(
     return {
       schema: "project-purge-resource-progress-v1",
       inventoryDigestSha256,
+      releasePlanDigestSha256,
       assetCursor: { assetIndex: 0, legacyImageIndex: 0, uploadIndex: 0 },
       snapshotCursor: { snapshotIndex: 0 },
       providerRemoved: 0,
@@ -773,11 +819,17 @@ export function parseDurableProjectPurgeResourceProgress(
   const candidate = value as Partial<DurableProjectPurgeResourceProgress>;
   const asset = candidate.assetCursor;
   const snapshot = candidate.snapshotCursor;
+  const validDigest = (entry: unknown): entry is string =>
+    typeof entry === "string" && /^[a-f0-9]{64}$/u.test(entry);
   const validNonnegative = (entry: unknown): entry is number =>
     typeof entry === "number" && Number.isSafeInteger(entry) && entry >= 0;
   if (
     candidate.schema !== "project-purge-resource-progress-v1" ||
+    !validDigest(candidate.inventoryDigestSha256) ||
     candidate.inventoryDigestSha256 !== inventoryDigestSha256 ||
+    (candidate.releasePlanDigestSha256 !== undefined &&
+      (!validDigest(candidate.releasePlanDigestSha256) ||
+        candidate.releasePlanDigestSha256 !== releasePlanDigestSha256)) ||
     !asset ||
     !snapshot ||
     !validNonnegative(asset.assetIndex) ||
@@ -790,7 +842,54 @@ export function parseDurableProjectPurgeResourceProgress(
   ) {
     throw new Error("project_purge_resource_progress_invalid");
   }
-  return candidate as DurableProjectPurgeResourceProgress;
+  return {
+    ...(candidate as DurableProjectPurgeResourceProgress),
+    releasePlanDigestSha256,
+  };
+}
+
+export function resolveDurableProjectPurgeResourceProgress(
+  value: unknown,
+  inventoryDigestSha256: string,
+  releasePlanDigestSha256 = inventoryDigestSha256,
+): { progress: DurableProjectPurgeResourceProgress; rebased: boolean } {
+  try {
+    return {
+      progress: parseDurableProjectPurgeResourceProgress(
+        value,
+        inventoryDigestSha256,
+        releasePlanDigestSha256,
+      ),
+      rebased: false,
+    };
+  } catch (error) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw error;
+    const previousDigest = Reflect.get(value, "inventoryDigestSha256");
+    if (typeof previousDigest !== "string" || !/^[a-f0-9]{64}$/u.test(previousDigest)) {
+      throw error;
+    }
+    const previousReleasePlanDigest = Reflect.get(value, "releasePlanDigestSha256");
+    if (
+      typeof previousReleasePlanDigest !== "string" ||
+      !/^[a-f0-9]{64}$/u.test(previousReleasePlanDigest) ||
+      previousReleasePlanDigest !== releasePlanDigestSha256
+    ) {
+      throw error;
+    }
+    const previous = parseDurableProjectPurgeResourceProgress(
+      value,
+      previousDigest,
+      previousReleasePlanDigest,
+    );
+    if (previous.inventoryDigestSha256 === inventoryDigestSha256) throw error;
+    return {
+      progress: {
+        ...previous,
+        inventoryDigestSha256,
+      },
+      rebased: true,
+    };
+  }
 }
 
 async function checkpointProjectPurgeResources(
@@ -1051,10 +1150,20 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
 
     let progress: DurableProjectPurgeResourceProgress;
     try {
-      progress = parseDurableProjectPurgeResourceProgress(
+      const releasePlanDigestSha256 = projectPurgeReleasePlanDigestSha256(inventory);
+      const resolution = resolveDurableProjectPurgeResourceProgress(
         operation.resourceProgress,
         inventory.digestSha256,
+        releasePlanDigestSha256,
       );
+      progress = resolution.progress;
+      if (resolution.rebased) {
+        heartbeat.assertActive("inventory");
+        // Audit/control rows may change during governed reconciliation. Advance
+        // only the full inventory fence when the independently persisted release
+        // plan proves every destructive target is unchanged.
+        await checkpointProjectPurgeResources(operation, "inventory", progress);
+      }
     } catch (error) {
       throw stepFailure("inventory", "project_purge_inventory_unavailable", error);
     }
@@ -1134,7 +1243,7 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
       ) {
         heartbeat.assertActive("database");
         try {
-          await releaseProductionDatabasesForHardDelete(
+          await releaseProductionDatabasesForProjectPurge(
             tenantRuntimeProvider,
             [operation.projectId],
             {
@@ -1142,9 +1251,9 @@ export async function runProjectPurgeOperation(operationId: string): Promise<voi
               operationTimeoutMs: PROJECT_PURGE_PROVIDER_OPERATION_TIMEOUT_MS,
             },
           );
-        } catch {
+        } catch (error) {
           heartbeat.assertActive("database");
-          throw new Error("project_purge_production_database_release_failed");
+          throw error;
         }
         heartbeat.assertActive("database");
         const previewDatabaseEvidence = await releasePreviewDatabaseAllocation({

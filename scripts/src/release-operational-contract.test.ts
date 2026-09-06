@@ -55,6 +55,10 @@ const startupMigrationRunnerSource = readFileSync(
   new URL("./run-startup-migrations.ts", import.meta.url),
   "utf8",
 );
+const productionReleaseCliSource = readFileSync(
+  new URL("./verify-production-release.ts", import.meta.url),
+  "utf8",
+);
 
 assert.equal(
   rootPackage.scripts["test:api:serial"],
@@ -94,6 +98,22 @@ assert.equal(
   scriptsPackage.scripts["verify:production-release"],
   "tsx ./src/verify-production-release.ts",
 );
+assert.ok(
+  scriptsPackage.scripts["test:release-contracts"].includes(
+    "cloudflare-runtime-release-verifier.test.ts",
+  ),
+  "Cloudflare runtime parity must remain part of the release contract suite",
+);
+for (const runtimeReleaseGuard of [
+  "verifyCloudflareRuntimeRelease",
+  "expectedCommit: receipt.version.commit",
+  "expectedTree: receipt.version.tree",
+]) {
+  assert.ok(
+    productionReleaseCliSource.includes(runtimeReleaseGuard),
+    `missing Cloudflare runtime release guard: ${runtimeReleaseGuard}`,
+  );
+}
 assert.equal(gateSource.includes("--minWorkers"), false);
 assert.ok(
   drizzleConfigSource.includes('.replaceAll("\\\\", "/")'),

@@ -1,4 +1,5 @@
 import { verifyProductionRelease } from "./production-release-verifier";
+import { verifyCloudflareRuntimeRelease } from "./cloudflare-runtime-release-verifier";
 
 function argument(name: string): string | undefined {
   const prefix = `--${name}=`;
@@ -11,6 +12,7 @@ function argument(name: string): string | undefined {
 const baseUrl = argument("base-url");
 const expectedTree = argument("expected-tree");
 const timeoutText = argument("timeout-ms");
+const runtimeConfig = argument("runtime-config");
 
 if (!baseUrl || !expectedTree) {
   process.stderr.write(
@@ -24,9 +26,20 @@ if (!baseUrl || !expectedTree) {
       expectedTree,
       timeoutMs: timeoutText == null ? undefined : Number(timeoutText),
     });
-    process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+    const cloudflareRuntime = await verifyCloudflareRuntimeRelease({
+      expectedCommit: receipt.version.commit,
+      expectedTree: receipt.version.tree,
+      configPath: runtimeConfig,
+      timeoutMs: timeoutText == null ? undefined : Number(timeoutText),
+    });
+    process.stdout.write(`${JSON.stringify({ ...receipt, cloudflareRuntime }, null, 2)}\n`);
   } catch (error) {
-    const candidate = error as { code?: unknown; endpoint?: unknown; status?: unknown };
+    const candidate = error as {
+      code?: unknown;
+      command?: unknown;
+      endpoint?: unknown;
+      status?: unknown;
+    };
     process.stderr.write(
       `${JSON.stringify({
         code:
@@ -34,6 +47,7 @@ if (!baseUrl || !expectedTree) {
             ? candidate.code
             : "release_verification_unexpected_failure",
         endpoint: typeof candidate.endpoint === "string" ? candidate.endpoint : null,
+        command: typeof candidate.command === "string" ? candidate.command : null,
         status: typeof candidate.status === "number" ? candidate.status : null,
       })}\n`,
     );

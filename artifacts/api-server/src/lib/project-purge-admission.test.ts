@@ -126,6 +126,26 @@ describe("project purge failure diagnostics", () => {
       }).causeCode,
     ).toBeNull();
   });
+
+  it("preserves the production database provider cause through durable classification", async () => {
+    const lifecycle = await import("./production-database-lifecycle");
+    vi.mocked(lifecycle.releaseProductionDatabasesForHardDelete).mockRejectedValueOnce(
+      new Error("production_database_admission_epoch_not_active"),
+    );
+    const { releaseProductionDatabasesForProjectPurge } = await import("./project-purge");
+
+    await expect(
+      releaseProductionDatabasesForProjectPurge({} as never, [8], {
+        signal: new AbortController().signal,
+        operationTimeoutMs: 300_000,
+      }),
+    ).rejects.toMatchObject({
+      stage: "database",
+      code: "project_purge_database_release_failed",
+      retryable: true,
+      causeCode: "production_database_admission_epoch_not_active",
+    });
+  });
 });
 
 vi.mock("@workspace/db", () => {
@@ -180,6 +200,7 @@ import {
   hashProjectPurgeIdempotency,
   hashProjectPurgeRequester,
   parseDurableProjectPurgeResourceProgress,
+  resolveDurableProjectPurgeResourceProgress,
   runProjectPurgeOperation,
   startProjectPurgeLeaseHeartbeat,
   validProjectPurgeIdempotencyKey,
@@ -627,6 +648,7 @@ describe("owner-governed project purge admission", () => {
     expect(initial).toEqual({
       schema: "project-purge-resource-progress-v1",
       inventoryDigestSha256: digest,
+      releasePlanDigestSha256: digest,
       assetCursor: { assetIndex: 0, legacyImageIndex: 0, uploadIndex: 0 },
       snapshotCursor: { snapshotIndex: 0 },
       providerRemoved: 0,
@@ -637,6 +659,12 @@ describe("owner-governed project purge admission", () => {
       parseDurableProjectPurgeResourceProgress(
         { ...initial, inventoryDigestSha256: "e".repeat(64) },
         digest,
+      ),
+    ).toThrow("project_purge_resource_progress_invalid");
+    expect(() =>
+      parseDurableProjectPurgeResourceProgress(
+        { ...initial, inventoryDigestSha256: "not-a-digest" },
+        "not-a-digest",
       ),
     ).toThrow("project_purge_resource_progress_invalid");
     expect(JSON.stringify(initial)).not.toContain("storageKey");
@@ -656,6 +684,54 @@ describe("owner-governed project purge admission", () => {
         oldCheckpoint.previewDatabaseEvidence,
       ),
     ).toBe(false);
+  });
+
+  it("advances only the full inventory fence when the destructive release plan is unchanged", () => {
+    const previousDigest = "d".repeat(64);
+    const currentDigest = "e".repeat(64);
+    const releasePlanDigest = "f".repeat(64);
+    const finalFenceReconciliation = {
+      schema: "project-purge-final-fence-reconciliation/v1",
+      removedStorageKeys: ["sha256:removed"],
+      removedProviderDetachedStorageKeys: [],
+      latePreservedStorageKeys: [],
+    };
+    const previous = {
+      ...parseDurableProjectPurgeResourceProgress({}, previousDigest, releasePlanDigest),
+      assetCursor: { assetIndex: 12, legacyImageIndex: 7, uploadIndex: 4 },
+      snapshotCursor: { snapshotIndex: 9 },
+      providerRemoved: 3,
+      providerDetached: 2,
+      databaseComplete: true,
+      finalFenceReconciliation,
+    };
+
+    expect(
+      resolveDurableProjectPurgeResourceProgress(previous, currentDigest, releasePlanDigest),
+    ).toEqual({
+      progress: {
+        ...previous,
+        inventoryDigestSha256: currentDigest,
+      },
+      rebased: true,
+    });
+    expect(
+      resolveDurableProjectPurgeResourceProgress(previous, previousDigest, releasePlanDigest),
+    ).toEqual({
+      progress: previous,
+      rebased: false,
+    });
+    expect(() =>
+      resolveDurableProjectPurgeResourceProgress(previous, currentDigest, "0".repeat(64)),
+    ).toThrow("project_purge_resource_progress_invalid");
+    const { releasePlanDigestSha256: _omitted, ...legacyCheckpoint } = previous;
+    expect(() =>
+      resolveDurableProjectPurgeResourceProgress(
+        legacyCheckpoint,
+        currentDigest,
+        releasePlanDigest,
+      ),
+    ).toThrow("project_purge_resource_progress_invalid");
   });
 
   it("proves a durable trash recipient after a Clerk or email channel failure", async () => {
@@ -718,13 +794,15 @@ describe("owner-governed project purge admission", () => {
 
   it("revisits an old databaseComplete checkpoint and writes preview-bound evidence before relational purge", async () => {
     const digest = "a".repeat(64);
+    const { releasePlanDigestSha256: _legacyOmission, ...legacyProgress } =
+      parseDurableProjectPurgeResourceProgress({}, digest);
     const claimed = {
       ...operation,
       state: "running",
       attemptCount: 1,
       leaseVersion: 3,
       resourceProgress: {
-        ...parseDurableProjectPurgeResourceProgress({}, digest),
+        ...legacyProgress,
         databaseComplete: true,
       },
     };
