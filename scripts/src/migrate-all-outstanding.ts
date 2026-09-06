@@ -5,15 +5,24 @@
  * dev database (or any database with partial schema drift) can be brought
  * fully up-to-date in a single command.
  *
- * Every constituent migration uses IF NOT EXISTS / ADD COLUMN IF NOT EXISTS so
- * the script is safe to re-run at any time — already-applied steps are no-ops.
+ * Every selected migration is safe to re-run at any time. Destructive cutovers
+ * and heuristic one-time data repairs are explicitly excluded below and must be
+ * run through their dedicated, evidence-backed procedures.
  *
  * Run: pnpm --filter @workspace/scripts run migrate-all-outstanding
  */
 
 import { execSync } from "child_process";
 
-const MIGRATIONS = [
+export const MIGRATION_EXCLUSIONS = {
+  "migrate-drop-conversations": "Destructive cutover; requires its dedicated retirement procedure.",
+  "migrate-drop-ora-daily-usage":
+    "Destructive cutover; requires its dedicated retirement procedure.",
+  "migrate-recover-ora-memories":
+    "Heuristic data repair; requires a scoped historical-data review.",
+} as const;
+
+export const MIGRATIONS = [
   "migrate-containers",
   "migrate-production-container",
   "migrate-prod-containers",
@@ -77,12 +86,37 @@ const MIGRATIONS = [
   "migrate-pat-rotation",
   "migrate-message-origin",
   "migrate-command-approval",
-  "migrate-reinforced-count",
   "migrate-voice-lang",
+  "migrate-auto-read-replies",
+  "migrate-reinforced-count",
+  "migrate-canvas-state",
+  "migrate-brainstorm-context",
+  "migrate-gdpr-erasure-job",
+  "migrate-low-credit-email",
+  "migrate-ora-project-description",
+  "migrate-mobile-deployment-columns",
+  "migrate-preferred-mode",
+  "migrate-project-mode",
+  "migrate-provisioning-steps",
+  "migrate-stripe-events-status",
+  "migrate-agent-tool-calls",
   "migrate-ora-transcripts",
+  "migrate-ora-transcript-cleanup",
+  "migrate-vault",
+  "migrate-vault-phase81",
   "migrate-vault-embeddings",
+  "migrate-image-studio",
+  "migrate-image-studio-v2",
+  "migrate-image-edit-lineage",
+  "migrate-tier-rename",
+  "migrate-knowledge-usage-events",
+  "migrate-task-events-data",
+  "migrate-ora-conversations",
+  "migrate-ora-assets",
+  "migrate-ora-asset-storage",
   "migrate-ora-memory-center",
   "migrate-knowledge-origin",
+  "migrate-ora-usage-windows",
   "migrate-ora-memory-category",
   "migrate-ora-project-memory",
   "migrate-help-center",
@@ -94,14 +128,22 @@ const MIGRATIONS = [
   "migrate-orax-desktop",
   "migrate-orax-projects",
   "migrate-ora-memory-supersede",
+  "migrate-ora-conversation-summary",
+  "migrate-ora-spend-ledger",
   "migrate-ora-realtime-usage",
+  "migrate-ora-file-contexts",
   "migrate-ora-asset-versions",
   "migrate-ora-project-spaces",
+  "migrate-brand-kits",
+  "migrate-ora-asset-reference-guards",
   "migrate-ora-github",
 ] as const;
 
 async function main(): Promise<void> {
-  console.log(`Running ${MIGRATIONS.length} migrations in order…\n`);
+  console.log(
+    `Running ${MIGRATIONS.length} migrations in order; ` +
+      `${Object.keys(MIGRATION_EXCLUSIONS).length} governed migrations excluded…\n`,
+  );
   let passed = 0;
   let failed = 0;
 

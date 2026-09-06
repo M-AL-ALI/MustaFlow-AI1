@@ -1,4 +1,14 @@
-import { pgTable, serial, text, integer, timestamp, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import {
+  check,
+  index,
+  integer,
+  pgTable,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { assetsTable } from "./assets";
 
 /**
@@ -61,6 +71,10 @@ export const oraAssetsTable = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => [
+    check("ora_assets_storage_xor", sql`(${t.data} IS NOT NULL) <> (${t.storageKey} IS NOT NULL)`),
+    uniqueIndex("ora_assets_asset_id_uq")
+      .on(t.assetId)
+      .where(sql`${t.assetId} IS NOT NULL`),
     index("ora_assets_user_id_idx").on(t.userId),
     index("ora_assets_root_asset_id_idx").on(t.rootAssetId),
     index("ora_assets_user_project_idx").on(t.userId, t.oraProjectId),

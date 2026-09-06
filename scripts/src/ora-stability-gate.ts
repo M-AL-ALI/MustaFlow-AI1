@@ -14,7 +14,7 @@ interface GateCheck {
   profiles: Array<"fast" | "website" | "mobile" | "release">;
   timeoutMs?: number;
   critical?: boolean;
-  databaseMode?: "import-only" | "required";
+  databaseMode?: "required";
   why: string;
 }
 
@@ -70,9 +70,6 @@ const PROFILE_GROUPS: Record<Profile, Set<GateCheck["profiles"][number]>> = {
 
 const DEFAULT_NODE_OPTIONS = "--max-old-space-size=4096";
 const DEFAULT_TIMEOUT_MS = 180_000;
-const IMPORT_ONLY_DATABASE_URL =
-  "postgresql://ora_gate_import_only:ora_gate_import_only@127.0.0.1:1/ora_gate_import_only";
-
 const ORA_FILE_HINTS = [
   /^artifacts\/api-server\/src\/(lib|routes)\/public-ai\//,
   /^artifacts\/api-server\/src\/routes\/ora/i,
@@ -132,6 +129,7 @@ const ORA_FEATURE_REGISTRY: OraFeature[] = [
       /public-ai\/(chat|orchestrator|prompt|expertise|model-router)/i,
       /routes\/public-ai\/index\.ts$/i,
       /ora-smoke\.test\.ts$/i,
+      /routes\/public-ai\/__tests__\/phase1\.test\.ts$/i,
       /use-ora-chat/i,
       // The mobile home screen hosts the entire Ora chat surface (composer,
       // attach menu, voice entry points), so any change to it is owned here.
@@ -789,7 +787,6 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_PUBLIC_AI_CORE} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
-    databaseMode: "import-only",
     why: "Protects the routing brain, Ora identity, current date/time block, copied-report analysis, and response quality.",
   },
   {
@@ -799,7 +796,6 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_SEARCH} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
-    databaseMode: "import-only",
     why: "Protects live search, retry/fallback behavior, source links, news/current/sports routing, and no stale-current answers.",
   },
   {
@@ -809,7 +805,6 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_FILE_IMAGE} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
-    databaseMode: "import-only",
     why: "Protects image routing/quality, real file generation, PDF/Word/Excel/PPTX/CSV export, and chart/report workflows.",
   },
   {
@@ -819,7 +814,6 @@ const CHECKS: GateCheck[] = [
     command: `pnpm --filter @workspace/api-server exec vitest run ${API_REALTIME} --no-file-parallelism`,
     profiles: ["fast"],
     critical: true,
-    databaseMode: "import-only",
     why: "Protects voice-session minting, usage metering, time-budget rules, and server prompt wiring.",
   },
   {
@@ -867,7 +861,6 @@ const CHECKS: GateCheck[] = [
     profiles: ["release"],
     timeoutMs: 300_000,
     critical: true,
-    databaseMode: "import-only",
     why: "Adds broader route, memory, streaming, kill-switch, production-safety, and media-card coverage before release.",
   },
   {
@@ -878,7 +871,6 @@ const CHECKS: GateCheck[] = [
     profiles: ["release"],
     timeoutMs: 300_000,
     critical: true,
-    databaseMode: "import-only",
     why: "Protects plan sync, billing public metadata, conversation persistence, account consistency, assets, and memory.",
   },
   {
@@ -1260,12 +1252,7 @@ function commandResult(check: GateCheck): CheckResult {
     };
   }
   const { exitCode, output, durationMs } = runShell(check.command, check.timeoutMs, {
-    databaseUrl:
-      check.databaseMode === "required"
-        ? configuredDatabaseUrl
-        : check.databaseMode === "import-only"
-          ? IMPORT_ONLY_DATABASE_URL
-          : undefined,
+    databaseUrl: configuredDatabaseUrl,
     enableDatabaseIntegration: check.databaseMode === "required",
   });
   const status: GateStatus = exitCode === 0 ? "pass" : "fail";

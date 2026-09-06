@@ -42,7 +42,7 @@ describe("deployment runtime schema boundary", () => {
     });
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-ready",
       violations: [],
     });
@@ -60,7 +60,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-incomplete",
       violations: ["support_delivery_constraints_missing", "prompt_queue_missing"],
     });
@@ -78,7 +78,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "mutable",
       violations: [],
     });
@@ -90,7 +90,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-ready",
       violations: [],
     });
@@ -108,7 +108,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toMatchObject({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-incomplete",
       violations: [
         "project_retirement_operations_columns_missing",
@@ -131,7 +131,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-incomplete",
       violations: [
         "project_purge_operations_columns_missing",
@@ -160,7 +160,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-incomplete",
       violations: ["asset_usage_attachment_guard_missing"],
     });
@@ -178,7 +178,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-incomplete",
       violations: ["durable_asset_reference_guards_missing"],
     });
@@ -213,6 +213,14 @@ describe("deployment runtime schema boundary", () => {
     expect(source).toContain("trigger_row.tgtype = 23");
     expect(source).toContain("trigger_row.tgqual IS NULL");
     expect(source).toContain("trigger_row.tgattr::smallint[]");
+    expect(source).toContain("trigger_row.tgnargs = expected.argument_count");
+    expect(source).toContain("encode(trigger_row.tgargs, 'escape') = expected.argument_bytes");
+    expect(source).toContain("require_live_owned_ora_asset_reference");
+    expect(source).toContain("ora_asset_reference_guard_ora_file_contexts");
+    expect(source).toContain("ora_asset_reference_guard_brand_kits");
+    expect(source).toContain("user_id, asset_id, deleted_at");
+    expect(source).toContain("user_id, logo_asset_id");
+    expect(source).toContain("ora_asset_reference_unavailable");
   });
 
   it("rejects a read-only deployment without the nullable JSONB preview receipt", async () => {
@@ -220,7 +228,7 @@ describe("deployment runtime schema boundary", () => {
       rows: [observation({ previewDatabaseAllocationReady: false })],
     }));
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-incomplete",
       violations: ["preview_database_allocation_missing"],
     });
@@ -238,7 +246,7 @@ describe("deployment runtime schema boundary", () => {
   ])("fails closed when admission schema evidence is missing: %s", async (flag, violation) => {
     const query = vi.fn(async () => ({ rows: [observation({ [flag]: false })] }));
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v8",
+      contractId: "deployment_runtime_schema_v9",
       mode: "read-only-incomplete",
       violations: [violation],
     });

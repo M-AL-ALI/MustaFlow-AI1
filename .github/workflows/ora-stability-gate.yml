@@ -20,7 +20,7 @@ jobs:
   release-gate:
     name: Release-profile gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     services:
       postgres:
@@ -41,6 +41,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ora_gate_disposable_0123456789abcdef
+      NABUFLOW_VITEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ora_gate_disposable_0123456789abcdef
       ORA_STABILITY_GATE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ora_gate_disposable_0123456789abcdef
 
     steps:
@@ -84,6 +85,11 @@ jobs:
 
       - name: Run outstanding migrations
         run: pnpm --filter @workspace/scripts run migrate-all-outstanding
+
+      - name: Run production startup migrations twice
+        run: |
+          pnpm --filter @workspace/scripts run migrate:startup:disposable
+          pnpm --filter @workspace/scripts run migrate:startup:disposable
 
       - name: Run Ora stability gate (release profile)
         run: >-

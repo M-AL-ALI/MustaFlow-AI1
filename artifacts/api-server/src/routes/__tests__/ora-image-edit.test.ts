@@ -3,6 +3,7 @@ import express from "express";
 import request from "supertest";
 import { and, eq, like } from "drizzle-orm";
 import {
+  assetsTable,
   db,
   generatedImagesTable,
   creditTransactionsTable,
@@ -15,8 +16,8 @@ import { CREDITS_ENFORCEMENT_ENABLED } from "../credits";
 /**
  * Acceptance tests for inline image editing (Task #1279).
  *
- * Exercises the existing `POST /images/:id/edit` endpoint that powers Ora's
- * inline image Edit action. Mounts the real router behind a stub auth
+ * Exercises the product-scoped NabuFlow and Ora inline image Edit endpoints.
+ * Mounts the real router behind a stub auth
  * middleware that sets req.userId (the same contract the production auth wall
  * provides) against the real dev DB. Two distinct users prove ownership
  * scoping.
@@ -32,6 +33,7 @@ const USER_A = `test-img-edit-a-${Date.now()}`;
 const USER_B = `test-img-edit-b-${Date.now()}`;
 const USER_C = `test-img-edit-c-${Date.now()}`;
 const ORIGINAL_OPENAI_IMAGE_API_KEY = process.env.OPENAI_IMAGE_API_KEY;
+let fixtureSequence = 0;
 
 // The route checks provider availability before ownership and lineage. These
 // tests deliberately fail on the bogus parent URL before provider work, so own
@@ -59,6 +61,30 @@ async function insertParentImage(
   userId: string,
   overrides: Partial<typeof generatedImagesTable.$inferInsert> = {},
 ): Promise<number> {
+  const productScope = overrides.productScope === "ora" ? "ora" : "nabuflow";
+  const storageKey = `test/image-edit/${userId}/${Date.now()}-${++fixtureSequence}.webp`;
+  const [asset] = await db
+    .insert(assetsTable)
+    .values({
+      ownerUserId: userId,
+      actorUserId: userId,
+      productScope,
+      projectId: null,
+      threadKey: null,
+      scope: "account",
+      kind: "image",
+      source: productScope === "ora" ? "ora-inline-image" : "image-studio",
+      filename: "parent.webp",
+      mimeType: "image/webp",
+      sizeBytes: 1,
+      storageBackend: "r2",
+      storageKey,
+      state: "ready",
+      scanState: "not-required",
+      readyAt: new Date(),
+    })
+    .returning({ id: assetsTable.id });
+  if (!asset) throw new Error("failed to create canonical image-edit fixture");
   const [row] = await db
     .insert(generatedImagesTable)
     .values({
@@ -73,10 +99,13 @@ async function insertParentImage(
       safetyStatus: "passed",
       creditCost: 0,
       sourceType: "generated",
-      // Bogus but non-empty so the edit precondition passes; the async job that
-      // tries to fetch it will fail fast (and is irrelevant to these assertions).
-      fileUrl: "/api/images/0/file",
       ...overrides,
+      productScope,
+      assetId: asset.id,
+      storageKey,
+      // Canonical but intentionally absent from the test object store, so the
+      // asynchronous edit fails fast after the synchronous assertions.
+      fileUrl: `/api/assets/${asset.id}/content`,
     })
     .returning({ id: generatedImagesTable.id });
   return row!.id;
@@ -89,6 +118,7 @@ afterAll(async () => {
     await db.delete(creditTransactionsTable).where(eq(creditTransactionsTable.userId, u));
     await db.delete(userCreditsTable).where(eq(userCreditsTable.userId, u));
     await db.delete(oraUsageWindowsTable).where(eq(oraUsageWindowsTable.userId, u));
+    await db.delete(assetsTable).where(eq(assetsTable.ownerUserId, u));
   }
 });
 
@@ -164,9 +194,9 @@ describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
     });
 
     it("Ora-originated edits use Ora rolling-window image quota instead of credits", async () => {
-      const parentId = await insertParentImage(USER_A);
+      const parentId = await insertParentImage(USER_A, { productScope: "ora" });
 
-      const res = await request(appAs(USER_A)).post(`/images/${parentId}/edit`).send({
+      const res = await request(appAs(USER_A)).post(`/ora/images/${parentId}/edit`).send({
         instruction: "make the water look like glass",
         quality: "standard",
         origin: "ora",
@@ -194,9 +224,9 @@ describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
       // Fresh user so the usage-window row is uncontaminated by other tests'
       // async failures. The parent's bogus fileUrl makes the background edit job
       // fail fast (getImageBuffer can't fetch it), exercising the refund path.
-      const parentId = await insertParentImage(USER_C);
+      const parentId = await insertParentImage(USER_C, { productScope: "ora" });
 
-      const res = await request(appAs(USER_C)).post(`/images/${parentId}/edit`).send({
+      const res = await request(appAs(USER_C)).post(`/ora/images/${parentId}/edit`).send({
         instruction: "make the water look like glass",
         quality: "standard",
         origin: "ora",
@@ -214,7 +244,7 @@ describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
       let status = "pending";
       for (let attempt = 0; attempt < 60; attempt++) {
         await new Promise((r) => setTimeout(r, 250));
-        const s = await request(appAs(USER_C)).get(`/images/status/${jobId}`);
+        const s = await request(appAs(USER_C)).get(`/ora/images/status/${jobId}`);
         if (s.status === 200) {
           status = s.body.status as string;
           if (status === "failed" || status === "completed") break;
@@ -236,16 +266,27 @@ describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
       expect(usage?.imageCount ?? 0).toBe(0);
     }, 30000);
 
-    it("rejects Ora-origin quota mode for non-Ora image lineage", async () => {
+    it("does not reveal NabuFlow image lineage through the Ora route", async () => {
       const parentId = await insertParentImage(USER_A, { sourceType: "uploaded", creditCost: 0 });
 
-      const res = await request(appAs(USER_A)).post(`/images/${parentId}/edit`).send({
+      const res = await request(appAs(USER_A)).post(`/ora/images/${parentId}/edit`).send({
         instruction: "make the sky orange",
         quality: "standard",
         origin: "ora",
       });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(404);
+    });
+
+    it("does not reveal Ora image lineage through the NabuFlow route", async () => {
+      const parentId = await insertParentImage(USER_A, { productScope: "ora" });
+
+      const res = await request(appAs(USER_A)).post(`/images/${parentId}/edit`).send({
+        instruction: "make the sky orange",
+        quality: "standard",
+      });
+
+      expect(res.status).toBe(404);
     });
 
     it("returns 404 for a non-existent image id", async () => {

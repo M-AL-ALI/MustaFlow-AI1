@@ -28,6 +28,12 @@ async function run() {
         END IF;
       END $$;
     `);
+    // One Ora library row is the product-scoped metadata view for one
+    // account-wide asset. The partial form preserves nullable legacy rows.
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ora_assets_asset_id_uq
+        ON ora_assets(asset_id) WHERE asset_id IS NOT NULL
+    `);
     await client.query("COMMIT");
     console.log("migrate-ora-asset-storage: done");
   } catch (err) {

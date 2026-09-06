@@ -716,31 +716,13 @@ export async function deleteOraAsset(input: {
   let unifiedAssetId: number | null;
   let legacyStorageKey: string | null;
   try {
-    await client.query("BEGIN");
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const selected = await client.query<{
       asset_id: number | null;
       storage_key: string | null;
-      referenced: boolean;
     }>(
       `SELECT ora.asset_id,
-              ora.storage_key,
-              (
-                EXISTS (
-                  SELECT 1 FROM ora_file_contexts ctx
-                   WHERE ctx.asset_id=ora.id AND ctx.deleted_at IS NULL
-                )
-                OR EXISTS (SELECT 1 FROM brand_kits kit WHERE kit.logo_asset_id=ora.id)
-                OR EXISTS (
-                   SELECT 1 FROM support_tickets ticket
-                    WHERE ticket.user_id=ora.user_id
-                      AND (
-                        ticket.attachments::text LIKE
-                          '%/api/ora/assets/' || ora.id::text || '/download%'
-                        OR ticket.transcript::text LIKE
-                          '%/api/ora/assets/' || ora.id::text || '/download%'
-                      )
-                 )
-              ) AS referenced
+              ora.storage_key
          FROM ora_assets ora
          WHERE ora.id=$1 AND ora.user_id=$2 AND ora.deleted_at IS NULL
            AND EXISTS (
@@ -756,7 +738,30 @@ export async function deleteOraAsset(input: {
       await client.query("ROLLBACK");
       return "not-found";
     }
-    if (row.referenced) {
+    // This must be a new READ COMMITTED statement after the row lock. A writer
+    // that held the shared Ora-reference lock first may have committed while
+    // the SELECT FOR UPDATE waited, and its reference must now be visible.
+    const references = await client.query<{ referenced: boolean }>(
+      `SELECT (
+         EXISTS (
+           SELECT 1 FROM ora_file_contexts ctx
+            WHERE ctx.asset_id=$1 AND ctx.deleted_at IS NULL
+         )
+         OR EXISTS (SELECT 1 FROM brand_kits kit WHERE kit.logo_asset_id=$1)
+         OR EXISTS (
+           SELECT 1 FROM support_tickets ticket
+            WHERE ticket.user_id=$2
+              AND (
+                ticket.attachments::text LIKE
+                  '%/api/ora/assets/' || $1::text || '/download%'
+                OR ticket.transcript::text LIKE
+                  '%/api/ora/assets/' || $1::text || '/download%'
+              )
+         )
+       ) AS referenced`,
+      [input.oraAssetId, input.userId],
+    );
+    if (references.rows[0]?.referenced !== false) {
       await client.query("ROLLBACK");
       return "referenced";
     }
@@ -807,6 +812,19 @@ export async function deleteOraAsset(input: {
     if (error instanceof AssetAdmissionError && error.code === "asset_referenced") {
       return "retained";
     }
+    logger.warn(
+      {
+        component: "ora-assets",
+        oraAssetId: input.oraAssetId,
+        unifiedAssetId,
+        errorClass: error instanceof Error ? error.name : "unknown",
+        errorCode:
+          error instanceof AssetAdmissionError
+            ? error.code
+            : (error as NodeJS.ErrnoException | null)?.code,
+      },
+      "Ora asset storage cleanup remains pending",
+    );
     return "cleanup-pending";
   }
 }

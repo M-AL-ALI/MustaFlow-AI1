@@ -138,7 +138,8 @@ describe("Ora uses the account-wide asset boundary", () => {
     expect(retention).toContain("await deleteOraAsset({");
     expect(retention).not.toContain(".update(oraAssetsTable)");
     expect(cleanup).toContain("UPDATE ora_assets SET data=NULL WHERE id=$1");
-    expect(oraAssets).toContain("WHERE ticket.user_id=ora.user_id");
+    expect(oraAssets).toContain("WHERE ticket.user_id=$2");
+    expect(oraAssets).toContain("[input.oraAssetId, input.userId]");
     expect(oraAssets).toContain("ticket.transcript::text LIKE");
     const oraAliasClosure = migration.slice(
       migration.indexOf("SELECT '/api/ora/assets/'"),

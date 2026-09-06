@@ -147,6 +147,28 @@ function migrationClient(client: WorkspaceTenancyMigrationClient) {
 }
 
 describe("workspace tenancy startup migration", () => {
+  it("keeps an empty database empty without requiring a legacy adoption owner", async () => {
+    const client = new WorkspaceTenancyMigrationClient();
+    client.projects.splice(0);
+    const workspacesBefore = structuredClone(client.workspaces);
+
+    const result = await applyWorkspaceTenancyMigration(migrationClient(client), undefined);
+
+    expect(result).toEqual({
+      legacyWorkspaceCreated: 0,
+      legacyOwnerMembershipsCreatedOrCorrected: 0,
+      demoProjectsAdoptedActive: 0,
+      demoProjectsAdoptedSoftDeleted: 0,
+      projectsBackfilledActive: 0,
+      projectsBackfilledSoftDeleted: 0,
+      projectsWithNullWorkspace: 0,
+    });
+    expect(client.workspaces).toEqual(workspacesBefore);
+    expect(client.statements.join("\n")).not.toContain(
+      "INSERT INTO workspaces (owner_user_id, system_key, name, type)",
+    );
+  });
+
   it("adopts legacy rows, backfills active and deleted projects, and is a no-op on rerun", async () => {
     const client = new WorkspaceTenancyMigrationClient();
 

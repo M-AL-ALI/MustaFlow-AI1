@@ -167,6 +167,14 @@ router.put("/ora/brand-kit", async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
+    const databaseError = err as { code?: unknown; message?: unknown } | null;
+    if (
+      databaseError?.code === "55000" &&
+      databaseError.message === "ora_asset_reference_unavailable"
+    ) {
+      res.status(400).json({ error: "Logo asset not found or not owned by you" });
+      return;
+    }
     logger.error({ component: "ora-brand-kit", err }, "PUT /ora/brand-kit failed");
     res.status(500).json({ error: "Failed to save brand kit" });
   }

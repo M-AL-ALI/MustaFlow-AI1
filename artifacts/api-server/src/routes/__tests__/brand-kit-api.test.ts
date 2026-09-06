@@ -270,6 +270,34 @@ describe("PUT /ora/brand-kit validation", () => {
     const res = await request(app).put("/ora/brand-kit").send({ headingFont: "Comic Sans MS" });
     expect(res.status).toBe(400);
   });
+
+  it("maps a raced Ora asset-reference guard rejection to the existing 400 response", async () => {
+    const { db } = await import("@workspace/db");
+    vi.mocked(db.update).mockImplementationOnce(() => {
+      throw Object.assign(new Error("ora_asset_reference_unavailable"), { code: "55000" });
+    });
+    const { default: router } = await import("../ora-brand-kit");
+    const app = buildTestApp();
+    app.use(router);
+
+    const res = await request(app).put("/ora/brand-kit").send({ primaryColor: "#112233" });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "Logo asset not found or not owned by you" });
+  });
+
+  it("preserves the generic 500 response for unrelated database failures", async () => {
+    const { db } = await import("@workspace/db");
+    vi.mocked(db.update).mockImplementationOnce(() => {
+      throw Object.assign(new Error("different_database_failure"), { code: "55000" });
+    });
+    const { default: router } = await import("../ora-brand-kit");
+    const app = buildTestApp();
+    app.use(router);
+
+    const res = await request(app).put("/ora/brand-kit").send({ primaryColor: "#112233" });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: "Failed to save brand kit" });
+  });
 });
 
 describe("POST /ora/brand-kit/logo mime-type gate", () => {

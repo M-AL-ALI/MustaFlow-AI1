@@ -258,7 +258,7 @@ describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
  * (heavy provider/storage deps), so the repo convention is a static source
  * assertion. The successful-edit branch must mirror the edited result into the
  * durable Ora asset library so it shows up under Library — and only for
- * Ora-billed edits (Image Studio edits already live in generated_images).
+ * Ora-scoped edits (NabuFlow Image Studio edits stay in generated_images).
  */
 describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
   "image-generation-jobs.ts persists Ora-edited images to the asset library",
@@ -270,7 +270,7 @@ describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
 
     it("the edit-success path persists Ora edits to the library", () => {
       const body = extractNamedFunction(jobsSrc, "runImageEditJob");
-      expect(body).toContain('opts.billingMode === "ora"');
+      expect(body).toContain('opts.productScope === "ora"');
       expect(body).toContain("persistOraAsset");
       expect(body).toContain('kind: "image"');
     });

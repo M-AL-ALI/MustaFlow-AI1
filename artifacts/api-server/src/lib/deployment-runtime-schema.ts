@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 
-export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v8" as const;
+export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v9" as const;
 
 export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "admin_authority_missing",
@@ -586,9 +586,64 @@ export async function assessDeploymentRuntimeSchema(
                     )) setting
                    WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
                          'search_path=pg_catalog,public'
-                )
+                 )
            )
-      ) AS "durableAssetReferenceGuardsReady",
+           AND to_regprocedure('public.require_live_owned_ora_asset_reference()') IS NOT NULL
+            AND (SELECT COUNT(*) = 2
+                   AND bool_and(NOT trigger_row.tgisinternal)
+                   AND bool_and(trigger_row.tgenabled = ANY(ARRAY['O', 'A']::"char"[]))
+                   AND bool_and(trigger_row.tgtype = 23)
+                   AND bool_and(trigger_row.tgqual IS NULL)
+                   AND bool_and(trigger_row.tgnargs = expected.argument_count)
+                   AND bool_and(
+                     encode(trigger_row.tgargs, 'escape') = expected.argument_bytes
+                   )
+                   AND bool_and(
+                    trigger_row.tgfoid =
+                      to_regprocedure('public.require_live_owned_ora_asset_reference()')
+                  )
+                  AND bool_and(
+                    (SELECT string_agg(attribute.attname, ', ' ORDER BY trigger_column.ordinality)
+                       FROM unnest(trigger_row.tgattr::smallint[]) WITH ORDINALITY
+                            AS trigger_column(attnum, ordinality)
+                       JOIN pg_catalog.pg_attribute attribute
+                         ON attribute.attrelid=relation.oid
+                        AND attribute.attnum=trigger_column.attnum) = expected.column_list
+                  )
+                  FROM (VALUES
+                   ('ora_file_contexts', 'ora_asset_reference_guard_ora_file_contexts', 'user_id, asset_id, deleted_at', 2, 'asset_id\\000deleted_at\\000'),
+                   ('brand_kits', 'ora_asset_reference_guard_brand_kits', 'user_id, logo_asset_id', 1, 'logo_asset_id\\000')
+                 ) AS expected(table_name, trigger_name, column_list, argument_count, argument_bytes)
+                 JOIN pg_catalog.pg_class relation ON relation.relname=expected.table_name
+                 JOIN pg_catalog.pg_namespace namespace ON namespace.oid=relation.relnamespace
+                 JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid=relation.oid
+                WHERE namespace.nspname='public'
+                  AND trigger_row.tgname=expected.trigger_name)
+           AND (SELECT NOT procedure_row.prosecdef
+                  FROM pg_catalog.pg_proc procedure_row
+                 WHERE procedure_row.oid=
+                   to_regprocedure('public.require_live_owned_ora_asset_reference()'))
+           AND regexp_replace(
+                 lower(pg_get_functiondef(
+                   to_regprocedure('public.require_live_owned_ora_asset_reference()')
+                 )), '[[:space:]]+', ' ', 'g'
+               ) LIKE '%from public.ora_assets ora%ora.user_id = row_json ->> ''user_id''%ora.deleted_at is null%for share%'
+           AND regexp_replace(
+                 lower(pg_get_functiondef(
+                   to_regprocedure('public.require_live_owned_ora_asset_reference()')
+                 )), '[[:space:]]+', ' ', 'g'
+               ) LIKE '%ora_asset_reference_unavailable%errcode = ''55000''%'
+           AND EXISTS (
+             SELECT 1
+               FROM unnest(COALESCE(
+                 (SELECT proconfig FROM pg_catalog.pg_proc
+                   WHERE oid=to_regprocedure('public.require_live_owned_ora_asset_reference()')),
+                 ARRAY[]::text[]
+               )) setting
+               WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
+                     'search_path=pg_catalog,public'
+            )
+       ) AS "durableAssetReferenceGuardsReady",
       EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema='public' AND table_name='projects'

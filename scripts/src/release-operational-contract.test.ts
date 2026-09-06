@@ -35,6 +35,26 @@ const oraStabilityWorkflowSource = readFileSync(
   new URL("../../.github/workflows/ora-stability-gate.yml", import.meta.url),
   "utf8",
 );
+const migrationCoordinatorSource = readFileSync(
+  new URL("./migrate-all-outstanding.ts", import.meta.url),
+  "utf8",
+);
+const oraAssetSchemaSource = readFileSync(
+  new URL("../../lib/db/src/schema/ora-assets.ts", import.meta.url),
+  "utf8",
+);
+const oraAssetStorageMigrationSource = readFileSync(
+  new URL("./migrate-ora-asset-storage.ts", import.meta.url),
+  "utf8",
+);
+const oraAssetReferenceGuardMigrationSource = readFileSync(
+  new URL("./migrate-ora-asset-reference-guards.ts", import.meta.url),
+  "utf8",
+);
+const startupMigrationRunnerSource = readFileSync(
+  new URL("./run-startup-migrations.ts", import.meta.url),
+  "utf8",
+);
 
 assert.equal(
   rootPackage.scripts["test:api:serial"],
@@ -51,6 +71,10 @@ assert.equal(
 assert.ok(
   apiPackage.scripts["test:database"].includes("NABUFLOW_VITEST_DATABASE_URL"),
   "database test entry point must require the dedicated disposable target",
+);
+assert.equal(
+  scriptsPackage.scripts["migrate:startup:disposable"],
+  "tsx ./src/run-startup-migrations.ts",
 );
 for (const vitestDatabaseGuard of [
   "process.env.DATABASE_URL?.trim()",
@@ -134,14 +158,22 @@ for (const databaseGuard of [
   "NABUFLOW_VITEST_DATABASE_URL",
   "/^ora_gate_disposable_[a-f0-9]{16}$/u",
   'url.hostname !== "127.0.0.1"',
-  'databaseMode?: "import-only" | "required"',
-  "127.0.0.1:1/ora_gate_import_only",
+  'databaseMode?: "required"',
   "The gate never forwards ambient DATABASE_URL into mutating tests.",
   "Release database coverage is mandatory",
   'SKIP_DYNAMIC_PRERENDER: process.env.SKIP_DYNAMIC_PRERENDER ?? "1"',
 ]) {
   assert.ok(gateSource.includes(databaseGuard), `missing release database guard: ${databaseGuard}`);
 }
+assert.equal(
+  gateSource.includes("import-only"),
+  false,
+  "non-database gate checks must not receive a generic DATABASE_URL",
+);
+assert.ok(
+  gateSource.includes("phase1\\.test\\.ts$/i"),
+  "Phase 1 routing regressions must be owned by the feature registry",
+);
 const releaseDatabaseGroup = gateSource.match(
   /const API_RELEASE_DATABASE = \[([\s\S]*?)\]\.join\(" "\);/u,
 )?.[1];
@@ -174,7 +206,7 @@ for (const databaseTest of [
 }
 
 const missingDatabaseBranch = gateSource.match(
-  /if \(check\.databaseMode === "required" && !configuredDatabaseUrl\) \{([\s\S]*?)\n  \}/u,
+  /if \(check\.databaseMode === "required" && !configuredDatabaseUrl\) \{([\s\S]*?)\n {2}\}/u,
 )?.[1];
 assert.ok(missingDatabaseBranch, "missing mandatory release database branch");
 assert.ok(
@@ -197,6 +229,124 @@ assert.equal(
   false,
   "stability workflow must not target an obsolete database",
 );
+assert.equal(
+  [...oraStabilityWorkflowSource.matchAll(/run migrate:startup:disposable/g)].length,
+  2,
+  "release bootstrap must prove production startup migrations twice",
+);
+assert.ok(
+  oraStabilityWorkflowSource.indexOf("run migrate-all-outstanding") <
+    oraStabilityWorkflowSource.indexOf("run migrate:startup:disposable") &&
+    oraStabilityWorkflowSource.indexOf("run migrate:startup:disposable") <
+      oraStabilityWorkflowSource.indexOf("run ora-stability-gate"),
+  "release bootstrap ordering must converge standalone and startup migrations before tests",
+);
+for (const startupRunnerGuard of [
+  "resolveVitestDatabaseUrl(process.env)",
+  "DATABASE_URL must exactly match the approved disposable database URL",
+  "EXPECTED_STARTUP_MIGRATION_COUNT = 158",
+  "result.failed !== 0",
+  "result.passed !== EXPECTED_STARTUP_MIGRATION_COUNT",
+  "await pool.end()",
+]) {
+  assert.ok(
+    startupMigrationRunnerSource.includes(startupRunnerGuard),
+    `missing disposable startup migration guard: ${startupRunnerGuard}`,
+  );
+}
+assert.equal(
+  startupMigrationRunnerSource.includes('import { pool } from "@workspace/db"'),
+  false,
+  "the disposable URL guard must run before the shared database pool is imported",
+);
+
+const migrationBlock = migrationCoordinatorSource.match(
+  /export const MIGRATIONS = \[([\s\S]*?)\] as const;/u,
+)?.[1];
+const exclusionBlock = migrationCoordinatorSource.match(
+  /export const MIGRATION_EXCLUSIONS = \{([\s\S]*?)\} as const;/u,
+)?.[1];
+assert.ok(migrationBlock, "missing governed migration list");
+assert.ok(exclusionBlock, "missing governed migration exclusions");
+const selectedMigrations = [...migrationBlock.matchAll(/^\s*"([^"]+)",\s*$/gmu)].map(
+  (match) => match[1],
+);
+const excludedMigrations = [...exclusionBlock.matchAll(/^\s*"([^"]+)":\s*"([^"]+)",\s*$/gmu)].map(
+  (match) => ({ name: match[1], reason: match[2] }),
+);
+const registeredMigrations = Object.keys(scriptsPackage.scripts)
+  .filter((name) => name.startsWith("migrate-") && name !== "migrate-all-outstanding")
+  .sort();
+assert.equal(
+  new Set(selectedMigrations).size,
+  selectedMigrations.length,
+  "automatic migration list contains duplicates",
+);
+assert.equal(
+  new Set(excludedMigrations.map(({ name }) => name)).size,
+  excludedMigrations.length,
+  "governed migration exclusion list contains duplicates",
+);
+assert.deepEqual(
+  excludedMigrations.map(({ name }) => name).sort(),
+  ["migrate-drop-conversations", "migrate-drop-ora-daily-usage", "migrate-recover-ora-memories"],
+  "only reviewed destructive or heuristic migrations may bypass automatic convergence",
+);
+for (const { name, reason } of excludedMigrations) {
+  assert.ok(reason.length >= 20, `migration exclusion requires a durable reason: ${name}`);
+  assert.equal(
+    selectedMigrations.includes(name),
+    false,
+    `excluded migration also selected: ${name}`,
+  );
+}
+assert.deepEqual(
+  [...selectedMigrations, ...excludedMigrations.map(({ name }) => name)].sort(),
+  registeredMigrations,
+  "every registered migration must be selected or explicitly governed",
+);
+for (const migration of registeredMigrations) {
+  assert.equal(
+    scriptsPackage.scripts[migration],
+    `tsx ./src/${migration}.ts`,
+    `migration registration must resolve to its auditable source: ${migration}`,
+  );
+}
+for (const sourceGuard of [
+  'check("ora_assets_storage_xor"',
+  'uniqueIndex("ora_assets_asset_id_uq")',
+  ".where(sql`${t.assetId} IS NOT NULL`)",
+]) {
+  assert.ok(
+    oraAssetSchemaSource.includes(sourceGuard),
+    `missing Ora asset schema guard: ${sourceGuard}`,
+  );
+}
+for (const migrationGuard of [
+  "ora_assets_storage_xor",
+  "CREATE UNIQUE INDEX IF NOT EXISTS ora_assets_asset_id_uq",
+  "ON ora_assets(asset_id) WHERE asset_id IS NOT NULL",
+]) {
+  assert.ok(
+    oraAssetStorageMigrationSource.includes(migrationGuard),
+    `missing Ora asset convergence guard: ${migrationGuard}`,
+  );
+}
+for (const referenceGuard of [
+  "UPDATE public.ora_file_contexts context_row",
+  "SET asset_id = NULL",
+  "UPDATE public.brand_kits kit",
+  "SET logo_asset_id = NULL",
+  "trigger_row.tgnargs = expected.argument_count",
+  "encode(trigger_row.tgargs, 'escape') = expected.argument_bytes",
+  "ora_asset_reference_guards_missing",
+  "await pool.end()",
+]) {
+  assert.ok(
+    oraAssetReferenceGuardMigrationSource.includes(referenceGuard),
+    `missing standalone Ora reference convergence guard: ${referenceGuard}`,
+  );
+}
 
 for (const checkpointGuard of [
   "ora-stability-gate-checkpoint-v1",
