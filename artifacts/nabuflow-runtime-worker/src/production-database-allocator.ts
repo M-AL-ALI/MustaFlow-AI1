@@ -56,6 +56,8 @@ export type ProductionDatabaseFailureCause =
   | "malformed_response"
   | "integrity_failure";
 
+export type ProductionDatabaseProviderOperation = "list-projects";
+
 export class ProductionDatabaseProviderError extends Error {
   constructor(
     readonly status: 409 | 422 | 502 | 503 | 504,
@@ -69,6 +71,8 @@ export class ProductionDatabaseProviderError extends Error {
       | "production_database_cleanup_incomplete",
     readonly retryable: boolean,
     readonly causeClass: ProductionDatabaseFailureCause,
+    readonly providerOperation: ProductionDatabaseProviderOperation | null = null,
+    readonly providerStatus: number | null = null,
   ) {
     super("The production database operation could not be completed");
     this.name = "ProductionDatabaseProviderError";
@@ -364,6 +368,8 @@ export class ProductionDatabaseAllocator {
               : "production_database_provider_rejected",
             result.status >= 500,
             "provider_rejected",
+            "list-projects",
+            result.status,
           );
         }
         return result;
@@ -407,6 +413,64 @@ export class ProductionDatabaseAllocator {
       cursor = next;
     }
     throw incomplete();
+  }
+
+  async healthCheck(): Promise<{
+    provider: "neon-postgres";
+    organizationId: string;
+    operation: "list-projects";
+    checkedAt: string;
+  }> {
+    const configuration = requiredConfiguration(this.env);
+    const query = new URLSearchParams({
+      org_id: configuration.organizationId,
+      limit: "1",
+    });
+    const response = await exactOperation(async () => {
+      const result = await providerFetch(
+        this.fetchAdapter,
+        `/api/v2/projects?${query.toString()}`,
+        { method: "GET", headers: bearer(configuration.managementKey) },
+      );
+      if (result.status !== 200) {
+        throw new ProductionDatabaseProviderError(
+          result.status >= 500 ? 503 : 422,
+          result.status >= 500
+            ? "production_database_provider_unavailable"
+            : "production_database_provider_rejected",
+          result.status >= 500,
+          "provider_rejected",
+          "list-projects",
+          result.status,
+        );
+      }
+      return result;
+    });
+    const body = objectRecord(await readJson(response));
+    const malformed = () =>
+      new ProductionDatabaseProviderError(
+        502,
+        "production_database_integrity_failure",
+        false,
+        "malformed_response",
+        "list-projects",
+      );
+    if (!Array.isArray(body.projects) || body.projects.length > 1) throw malformed();
+    for (const key of ["unavailable", "unavailable_project_ids"]) {
+      if (key in body && (!Array.isArray(body[key]) || body[key].length !== 0)) throw malformed();
+    }
+    for (const value of body.projects) {
+      const project = objectRecord(value);
+      if (typeof project.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(project.id)) {
+        throw malformed();
+      }
+    }
+    return {
+      provider: "neon-postgres",
+      organizationId: configuration.organizationId,
+      operation: "list-projects",
+      checkedAt: this.now().toISOString(),
+    };
   }
 
   private async verifyRetention(

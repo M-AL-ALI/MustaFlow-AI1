@@ -92,6 +92,7 @@ function impactResponse() {
     purgeState: null,
     willDelete: ["Project code, versions, secrets, and assets", "NabuFlow runtime resources"],
     willDetach: ["External GitHub repository", "Purchased domain registration"],
+    cleanupReady: true,
     requiresReverification: true,
   });
 }
@@ -156,7 +157,8 @@ describe("Trash permanent deletion", () => {
 
     expect(await screen.findByText("Project code, versions, secrets, and assets")).toBeVisible();
     expect(screen.getByText("External GitHub repository")).toBeVisible();
-    expect(screen.getByText(/sign-in will be verified again/u)).toBeVisible();
+    expect(screen.getByText(/sign-in will be verified once/u)).toBeVisible();
+    expect(screen.getByText(/Database cleanup connection verified/u)).toBeVisible();
 
     const confirmation = screen.getByRole("textbox");
     expect(confirmation).toHaveFocus();
@@ -167,6 +169,31 @@ describe("Trash permanent deletion", () => {
     await user.clear(confirmation);
     await user.type(confirmation, PROJECT.name);
     expect(submit).toBeEnabled();
+  });
+
+  it("never starts Clerk reverification while cleanup readiness is unavailable", async () => {
+    const user = userEvent.setup();
+    vi.mocked(authFetch).mockResolvedValueOnce(
+      jsonResponse(
+        {
+          code: "project_purge_provider_unavailable",
+          error: "private provider detail must not render",
+          retryable: true,
+        },
+        503,
+      ),
+    );
+    renderControl();
+
+    await user.click(
+      screen.getByRole("button", { name: `Delete project "${PROJECT.name}" permanently` }),
+    );
+
+    expect(await screen.findByText(/Database cleanup is temporarily unavailable/u)).toBeVisible();
+    expect(screen.queryByText(/private provider detail/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(pageMocks.reverificationChallenges).toBe(0);
+    expect(authFetch).toHaveBeenCalledTimes(1);
   });
 
   it("passes Clerk's first-factor hint through useReverification and retries only after the challenge", async () => {
@@ -739,6 +766,7 @@ describe("Trash permanent deletion", () => {
         purgeState: null,
         willDelete: ["Project-owned data"],
         willDetach: [],
+        cleanupReady: true,
         requiresReverification: true,
       }),
     );

@@ -92,6 +92,7 @@ import {
   ensureProductionDatabaseRequestSchema,
   releaseProductionDatabaseRequestSchema,
   productionDatabaseAllocationResponseSchema,
+  productionDatabaseProviderHealthResponseSchema,
   productionDatabaseReleaseResponseSchema,
   productionDatabaseAllocationIdentity,
   productionDatabaseCapabilityDefinition,
@@ -280,6 +281,7 @@ type Endpoint =
   | "databaseCapabilityRevoke"
   | "productionDatabaseEnsure"
   | "productionDatabaseRelease"
+  | "productionDatabaseProviderHealth"
   | "productionDatabaseDiagnostics"
   | "stripeCapabilityProvision"
   | "stripeCapabilityRevoke"
@@ -333,7 +335,8 @@ interface WorkerDependencies {
   productionDatabaseAllocator?: Pick<
     ProductionDatabaseAllocator,
     "ensure" | "release" | "verifyGone"
-  >;
+  > &
+    Partial<Pick<ProductionDatabaseAllocator, "healthCheck">>;
 }
 
 type CommittedRuntimeArtifact =
@@ -2095,6 +2098,12 @@ function matchRoute(method: string, pathname: string): MatchedRoute {
   if (method === "GET" && pathname === `${CONTROL_PREFIX}/version`) {
     return { endpoint: "version", locator: null };
   }
+  if (pathname === `${CONTROL_PREFIX}/providers/neon-postgres/production-database/health`) {
+    if (method !== "GET") {
+      throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+    }
+    return { endpoint: "productionDatabaseProviderHealth", locator: null };
+  }
   if (pathname === `${CONTROL_PREFIX}/durable-operations`) {
     if (method !== "GET") {
       throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
@@ -2614,7 +2623,7 @@ async function proxyBuildRequest(
 }
 
 function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): ControlInput {
-  if (route.endpoint === "version") {
+  if (route.endpoint === "version" || route.endpoint === "productionDatabaseProviderHealth") {
     assertNoQuery(url);
     assertEmptyBody(rawBody);
     return {};
@@ -2965,7 +2974,8 @@ async function executeEndpoint(
   injectedProductionDatabaseAllocator?: Pick<
     ProductionDatabaseAllocator,
     "ensure" | "release" | "verifyGone"
-  >,
+  > &
+    Partial<Pick<ProductionDatabaseAllocator, "healthCheck">>,
   requestId?: string,
 ): Promise<StoredHttpResponse> {
   if (endpoint === "reconciliationAudit") {
@@ -2984,6 +2994,34 @@ async function executeEndpoint(
       status: 200,
       body: runtimeReconciliationAuditResponseSchema.parse({ ok: true, record }),
     };
+  }
+  if (endpoint === "productionDatabaseProviderHealth") {
+    try {
+      const health =
+        injectedProductionDatabaseAllocator?.healthCheck === undefined
+          ? await new ProductionDatabaseAllocator(env).healthCheck()
+          : await injectedProductionDatabaseAllocator.healthCheck();
+      return {
+        status: 200,
+        body: productionDatabaseProviderHealthResponseSchema.parse({ ok: true, ...health }),
+      };
+    } catch (error) {
+      if (error instanceof ProductionDatabaseProviderError) {
+        // Metadata-only provider trace. Never emit credentials or response bodies.
+        // eslint-disable-next-line no-console -- production control-plane diagnostics
+        console.warn(
+          JSON.stringify({
+            event: "production_database_provider_health_failed",
+            requestId: requestId ?? null,
+            code: error.code,
+            causeClass: error.causeClass,
+            providerOperation: error.providerOperation,
+            providerStatus: error.providerStatus,
+          }),
+        );
+      }
+      throw productionDatabaseControlError(error);
+    }
   }
   assertArtifactInfrastructure(env);
   if (endpoint.startsWith("layeredArtifact")) assertLayeredArtifactInfrastructure(env);
@@ -5520,6 +5558,7 @@ function validateResponse(endpoint: Endpoint, body: unknown): void {
     databaseCapabilityRevoke: capabilityRevokeResponseSchema,
     productionDatabaseEnsure: productionDatabaseAllocationResponseSchema,
     productionDatabaseRelease: productionDatabaseReleaseResponseSchema,
+    productionDatabaseProviderHealth: productionDatabaseProviderHealthResponseSchema,
     stripeCapabilityProvision: capabilityProvisionResponseSchema,
     stripeCapabilityRevoke: capabilityRevokeResponseSchema,
     capabilityBinding: capabilityBindingResponseSchema,

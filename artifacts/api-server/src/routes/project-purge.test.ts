@@ -84,6 +84,7 @@ function dependencies() {
         terminalEvidence: null,
       }),
     ),
+    readCleanupReadiness: vi.fn(async (): Promise<boolean> => true),
     recentlyReverified: vi.fn((): boolean => true),
   };
 }
@@ -202,7 +203,7 @@ describe("project permanent-deletion routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(impact());
+    expect(response.body).toEqual({ ...impact(), cleanupReady: true });
     expect(response.body.willDetach).toEqual([
       expect.stringContaining("remains yours"),
       expect.stringContaining("not deleted"),
@@ -285,6 +286,26 @@ describe("project permanent-deletion routes", () => {
       idempotencyKey: "owner-request-0001",
       recentlyReverified: true,
     });
+  });
+
+  it("checks cleanup readiness before Clerk reverification or purge admission", async () => {
+    const deps = dependencies();
+    deps.readCleanupReadiness.mockResolvedValue(false);
+    deps.recentlyReverified.mockReturnValue(false);
+
+    const response = await request(appAs("owner-77", deps))
+      .delete("/projects/77/permanent")
+      .set("Idempotency-Key", "owner-request-0001")
+      .send({ projectName: "Weather desk" });
+
+    expect(response.status).toBe(503);
+    expect(response.body).toEqual({
+      code: "project_purge_provider_unavailable",
+      error: expect.stringContaining("Sign-in verification has not started"),
+      retryable: true,
+    });
+    expect(deps.recentlyReverified).not.toHaveBeenCalled();
+    expect(deps.acceptManual).not.toHaveBeenCalled();
   });
 
   it("requires server-observed reverification before calling admission", async () => {

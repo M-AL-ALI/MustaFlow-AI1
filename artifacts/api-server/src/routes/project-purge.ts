@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import type { ProjectPurgeOperation } from "@workspace/db";
 import type { ProjectPurgeAdmission } from "../lib/project-purge";
+import { logger } from "../lib/logger";
 
 const PROJECT_PURGE_REVERIFICATION_MAX_AGE_MINUTES = 10;
 const PROJECT_NAME_MAX_LENGTH = 200;
@@ -34,6 +35,7 @@ type ProjectPurgeRouteDependencies = {
   }): Promise<ProjectPurgeAdmission>;
   readOwnedOperation(operationId: string, userId: string): Promise<ProjectPurgeOperation | null>;
   serializeOperation(operation: ProjectPurgeOperation): Promise<Record<string, unknown> | null>;
+  readCleanupReadiness(): Promise<boolean>;
   recentlyReverified(req: Request, userId: string): boolean;
 };
 
@@ -282,6 +284,43 @@ const defaultDependencies: ProjectPurgeRouteDependencies = {
     };
   },
 
+  async readCleanupReadiness() {
+    try {
+      const { tenantRuntimeProvider } = await import("../lib/tenant-runtime");
+      const candidate = tenantRuntimeProvider as unknown as {
+        probeProductionDatabaseProviderHealth?: () => Promise<unknown>;
+      };
+      if (typeof candidate.probeProductionDatabaseProviderHealth !== "function") return false;
+      await candidate.probeProductionDatabaseProviderHealth();
+      return true;
+    } catch (error) {
+      const candidate =
+        typeof error === "object" && error !== null
+          ? (error as { code?: unknown; status?: unknown; transportCause?: unknown })
+          : {};
+      logger.warn(
+        {
+          event: "project_purge_cleanup_readiness_failed",
+          code:
+            typeof candidate.code === "string" && /^[a-z0-9_]{1,120}$/u.test(candidate.code)
+              ? candidate.code
+              : "unknown",
+          status:
+            Number.isSafeInteger(candidate.status) && Number(candidate.status) >= 100
+              ? Number(candidate.status)
+              : null,
+          transportCause:
+            typeof candidate.transportCause === "string" &&
+            /^[a-z0-9_]{1,80}$/u.test(candidate.transportCause)
+              ? candidate.transportCause
+              : null,
+        },
+        "Permanent deletion cleanup readiness check failed",
+      );
+      return false;
+    }
+  },
+
   recentlyReverified(req, userId) {
     try {
       return isRecentClerkFirstFactor(getAuth(req), userId);
@@ -319,7 +358,16 @@ export function createProjectPurgeRouter(
       });
       return;
     }
-    res.json(impact);
+    if (!(await dependencies.readCleanupReadiness())) {
+      res.status(503).json({
+        code: "project_purge_provider_unavailable",
+        error:
+          "Permanent deletion database cleanup is temporarily unavailable. Sign-in verification has not started and nothing was deleted.",
+        retryable: true,
+      });
+      return;
+    }
+    res.json({ ...impact, cleanupReady: true });
   });
 
   router.delete("/projects/:id/permanent", async (req, res): Promise<void> => {
@@ -338,6 +386,34 @@ export function createProjectPurgeRouter(
       res.status(400).json({
         code: "project_purge_name_required",
         error: "Enter the project name exactly before deleting it permanently.",
+      });
+      return;
+    }
+    const impact = await dependencies.readImpact(projectId, userId);
+    if (!impact) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    if (impact.name !== projectName) {
+      res.status(409).json({
+        code: "project_purge_name_mismatch",
+        error: "The project name does not match. Nothing was deleted.",
+      });
+      return;
+    }
+    if (impact.retirementState !== "completed") {
+      res.status(409).json({
+        code: "project_purge_retirement_incomplete",
+        error: "Project cleanup must finish before permanent deletion can begin.",
+      });
+      return;
+    }
+    if (!(await dependencies.readCleanupReadiness())) {
+      res.status(503).json({
+        code: "project_purge_provider_unavailable",
+        error:
+          "Permanent deletion database cleanup is temporarily unavailable. Sign-in verification has not started and nothing was deleted.",
+        retryable: true,
       });
       return;
     }

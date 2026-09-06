@@ -1,7 +1,10 @@
 import { productionDatabaseAllocationIdentity } from "@workspace/tenant-runtime-contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleControlRequest } from "../src/worker";
-import type { ProductionDatabaseAllocator } from "../src/production-database-allocator";
+import {
+  ProductionDatabaseProviderError,
+  type ProductionDatabaseAllocator,
+} from "../src/production-database-allocator";
 import {
   MemoryCapabilityVault,
   MemoryCoordinator,
@@ -252,5 +255,80 @@ describe("production database durable control path", () => {
     });
     expect(ensureCalls).toBe(0);
     expect(vault.productionDatabaseAllocations.size).toBe(0);
+  });
+
+  it("provides a signed read-only provider health gate with sanitized failures", async () => {
+    const env = Object.assign(fakeEnv(), {
+      NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED: "enabled",
+      NABUFLOW_STAGING_PRODUCTION_DATABASE_REHEARSAL: "enabled",
+    });
+    const coordinator = new MemoryCoordinator();
+    const backend = new MockBackend();
+    const baseAllocator = {
+      async ensure() {
+        throw new Error("must not mutate");
+      },
+      async release() {
+        throw new Error("must not mutate");
+      },
+      async verifyGone() {
+        throw new Error("must not mutate");
+      },
+    };
+    const path = "/_nabuflow/control/v1/providers/neon-postgres/production-database/health";
+    const healthy = await handleControlRequest(
+      await signedRequest({ path, nonce: "production-database-provider-health-ok" }),
+      env,
+      {
+        coordinator,
+        backend,
+        nowMs: TEST_NOW_MS,
+        productionDatabaseAllocator: {
+          ...baseAllocator,
+          healthCheck: async () => ({
+            provider: "neon-postgres" as const,
+            organizationId: "org-production-rehearsal",
+            operation: "list-projects" as const,
+            checkedAt: "2026-09-06T22:45:00.000Z",
+          }),
+        },
+      },
+    );
+    expect(healthy.status).toBe(200);
+    await expect(healthy.json()).resolves.toMatchObject({
+      ok: true,
+      provider: "neon-postgres",
+      operation: "list-projects",
+    });
+
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const rejected = await handleControlRequest(
+      await signedRequest({ path, nonce: "production-database-provider-health-rejected" }),
+      env,
+      {
+        coordinator,
+        backend,
+        nowMs: TEST_NOW_MS,
+        productionDatabaseAllocator: {
+          ...baseAllocator,
+          healthCheck: async () => {
+            throw new ProductionDatabaseProviderError(
+              422,
+              "production_database_provider_rejected",
+              false,
+              "provider_rejected",
+              "list-projects",
+              401,
+            );
+          },
+        },
+      },
+    );
+    expect(rejected.status).toBe(422);
+    const rejectedBody = await rejected.text();
+    expect(rejectedBody).toContain("production_database_provider_rejected");
+    expect(rejectedBody).not.toContain("401");
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('"providerStatus":401'));
+    warning.mockRestore();
   });
 });

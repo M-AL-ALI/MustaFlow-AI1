@@ -48,6 +48,7 @@ type PermanentDeletionImpact = {
   purgeState: string | null;
   willDelete: string[];
   willDetach: string[];
+  cleanupReady: true;
   requiresReverification: true;
 };
 
@@ -272,7 +273,7 @@ function parseImpact(
   if (typeof value.restoreAllowed !== "boolean") return null;
   if (!isBoundedString(value.retirementState, 80)) return null;
   if (value.purgeState !== null && !isBoundedString(value.purgeState, 80)) return null;
-  if (value.requiresReverification !== true) return null;
+  if (value.cleanupReady !== true || value.requiresReverification !== true) return null;
   if (!Array.isArray(value.willDelete) || !Array.isArray(value.willDetach)) return null;
   if (
     value.willDelete.length === 0 ||
@@ -453,6 +454,8 @@ function failureMessage(code: unknown): string {
       return "Project cleanup must finish before permanent deletion can begin.";
     case "project_purge_project_active":
       return "Move this project to Trash before permanently deleting it.";
+    case "project_purge_provider_unavailable":
+      return "Database cleanup is temporarily unavailable. Sign-in verification was not started and nothing was deleted. Try again shortly.";
     case "project_purge_operation_conflict":
       return "Permanent deletion is already in progress for this project.";
     case "project_purge_retry_unavailable":
@@ -625,12 +628,15 @@ export function ProjectPermanentDeletionControl({
       const response = await authFetch(`/api/projects/${project.id}/permanent-deletion-impact`, {
         method: "GET",
       });
+      const body = await readJson(response);
       const parsed =
-        response.status === 200
-          ? parseImpact(await readJson(response), { id: project.id, name: project.name })
-          : null;
+        response.status === 200 ? parseImpact(body, { id: project.id, name: project.name }) : null;
       if (!parsed) {
-        setFailure("The deletion impact could not be loaded. Nothing was deleted.");
+        setFailure(
+          isRecord(body) && body.code === "project_purge_provider_unavailable"
+            ? "Database cleanup is temporarily unavailable. Sign-in verification was not started and nothing was deleted. Try again shortly."
+            : "The deletion impact could not be loaded. Nothing was deleted.",
+        );
         return;
       }
       setImpact(parsed);
@@ -916,6 +922,7 @@ export function ProjectPermanentDeletionControl({
   const canStart =
     retirementCompleted && !initialPurgeInProgress && project.purgeState !== "completed";
   const impactAllowsStart =
+    impact?.cleanupReady === true &&
     impact?.retirementState === "completed" &&
     !isPurgeInProgress(impact.purgeState) &&
     impact.purgeState !== "completed";
@@ -1002,7 +1009,9 @@ export function ProjectPermanentDeletionControl({
               Delete “{project.name}” permanently?
             </DialogTitle>
             <DialogDescription>
-              This cannot be undone. Your sign-in will be verified again before deletion starts.
+              {impact
+                ? "This cannot be undone. Database cleanup access is ready, so your sign-in will be verified once before deletion starts."
+                : "Checking database cleanup access before any sign-in verification starts."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1043,6 +1052,14 @@ export function ProjectPermanentDeletionControl({
                     </p>
                   )}
                 </section>
+              </div>
+
+              <div className="flex items-start gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-3 text-sm">
+                <ShieldCheck className="mt-0.5 h-4 w-4 text-emerald-600" aria-hidden="true" />
+                <p>
+                  Database cleanup connection verified. One sign-in verification will start
+                  deletion.
+                </p>
               </div>
 
               {!impactAllowsStart && (

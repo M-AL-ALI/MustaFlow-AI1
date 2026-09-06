@@ -144,6 +144,16 @@ export const productionDatabaseReleaseResponseSchema = z
   })
   .strict();
 
+export const productionDatabaseProviderHealthResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    provider: z.literal("neon-postgres"),
+    organizationId: neonResourceIdSchema,
+    operation: z.literal("list-projects"),
+    checkedAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
+
 export const productionDatabaseAllocationRecordSchema = z
   .object({
     format: z.literal(PRODUCTION_DATABASE_ALLOCATION_FORMAT),

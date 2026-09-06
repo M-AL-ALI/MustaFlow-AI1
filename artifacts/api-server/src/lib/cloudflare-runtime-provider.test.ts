@@ -2266,6 +2266,35 @@ describe("CloudflareRuntimeProvider", () => {
     expect(calls[1]?.body).toMatchObject({ admission: { assertion: "sealed", projectId: 42 } });
   });
 
+  it("probes production database readiness through a signed GET without mutation", async () => {
+    const provider = new CloudflareRuntimeProvider(config);
+    markDatabaseAdmissionReady(provider);
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      expect(new URL(String(input)).pathname).toBe(
+        "/_nabuflow/control/v1/providers/neon-postgres/production-database/health",
+      );
+      expect(init?.method).toBe("GET");
+      expect(init?.body).toBeUndefined();
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-nabuflow-signature")).toMatch(/^[0-9a-f]{64}$/u);
+      expect(headers.has("idempotency-key")).toBe(false);
+      return json({
+        ok: true,
+        provider: "neon-postgres",
+        organizationId: "org-production",
+        operation: "list-projects",
+        checkedAt: "2026-09-06T22:45:00.000Z",
+      });
+    });
+
+    await expect(provider.probeProductionDatabaseProviderHealth()).resolves.toMatchObject({
+      ok: true,
+      provider: "neon-postgres",
+      operation: "list-projects",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("never sends an allocation when durable admission fails or the caller is already aborted", async () => {
     const admission = databaseAdmissionFixture();
     const authorize = vi

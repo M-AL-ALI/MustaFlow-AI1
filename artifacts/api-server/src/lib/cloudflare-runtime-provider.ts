@@ -36,6 +36,7 @@ import {
   PUBLISHED_ROUTE_INVENTORY_SCAN_LIMIT,
   productionDatabaseAllocationIdentity,
   productionDatabaseAllocationResponseSchema,
+  productionDatabaseProviderHealthResponseSchema,
   productionDatabaseReleaseResponseSchema,
   PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
   PRODUCTION_DATABASE_ADMISSION_FEATURE,
@@ -1747,6 +1748,15 @@ export class CloudflareRuntimeProvider
       providerProjectId: response.providerProjectId,
       reused: response.reused,
     };
+  }
+  async probeProductionDatabaseProviderHealth(signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    await this.requireControlFeature("production-database-v1");
+    return this.request({
+      path: `${CONTROL_API_PREFIX}/providers/neon-postgres/production-database/health`,
+      signal,
+      parse: productionDatabaseProviderHealthResponseSchema,
+    });
   }
   async releaseProductionDatabaseCapability(
     input: Parameters<

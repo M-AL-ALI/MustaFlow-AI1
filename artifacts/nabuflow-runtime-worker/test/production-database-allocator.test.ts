@@ -324,6 +324,46 @@ describe("production database allocator", () => {
     expect(result.proof.catalogDigestSha256).toMatch(/^[0-9a-f]{64}$/u);
   });
 
+  it("probes Neon readiness with one bounded GET and preserves safe rejection metadata", async () => {
+    const requests: Request[] = [];
+    const healthy = new ProductionDatabaseAllocator(
+      productionEnv(),
+      {
+        async fetch(request) {
+          requests.push(request);
+          return json({
+            projects: [{ id: "owned-1", name: "nabuflow-production-owned" }],
+            pagination: { cursor: "must-not-follow" },
+          });
+        },
+      },
+      () => new Date("2026-09-06T22:45:00.000Z"),
+    );
+    await expect(healthy.healthCheck()).resolves.toEqual({
+      provider: "neon-postgres",
+      organizationId: "org-production",
+      operation: "list-projects",
+      checkedAt: "2026-09-06T22:45:00.000Z",
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("GET");
+    expect(await requests[0]?.text()).toBe("");
+    const requestUrl = new URL(requests[0]!.url);
+    expect(requestUrl.searchParams.get("org_id")).toBe("org-production");
+    expect(requestUrl.searchParams.get("limit")).toBe("1");
+
+    await expect(
+      new ProductionDatabaseAllocator(productionEnv(), {
+        fetch: async () => json({}, 401),
+      }).healthCheck(),
+    ).rejects.toMatchObject({
+      code: "production_database_provider_rejected",
+      causeClass: "provider_rejected",
+      providerOperation: "list-projects",
+      providerStatus: 401,
+    });
+  });
+
   it("stops discovery before a second page when execution authority expires", async () => {
     let lost = false;
     const fetch = vi.fn(async () => {
