@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   productionDatabaseAllocationIdentity,
+  PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
   type ProductionDatabaseAllocationRecord,
 } from "@workspace/tenant-runtime-contracts";
 import { CapabilityVaultDurableObject } from "../src/capability-vault-durable-object";
+import type {
+  ProductionDatabaseLegacyReleaseResolution,
+  ProductionDatabaseLegacyReleaseResolutionInput,
+} from "../src/production-database-allocator";
 import type { ProductionDatabaseEnsureInput } from "../src/production-database-intent";
 import { handleControlRequest } from "../src/worker";
 import {
@@ -97,6 +102,22 @@ async function fixture() {
     release: vi.fn(async (_allocation: ProductionDatabaseAllocationRecord) => undefined),
     verifyGone: vi.fn(async (_allocation: ProductionDatabaseAllocationRecord) => true),
     resolveForRelease: vi.fn(async () => null),
+    resolveLegacyForRelease: vi.fn(
+      async (
+        input: ProductionDatabaseLegacyReleaseResolutionInput,
+      ): Promise<ProductionDatabaseLegacyReleaseResolution> => ({
+        state: "absent",
+        proof: {
+          providerOrganizationId: scope.providerOrganizationId,
+          expectedProjectName: `nabuflow-production-${input.allocationIdentity.slice(0, 24)}`,
+          catalogDigestSha256: "a".repeat(64),
+          catalogProjectCount: 3,
+          catalogOwnedProjectCount: 2,
+          catalogPageCount: 1,
+          verifiedAt: new Date(Date.now()).toISOString(),
+        },
+      }),
+    ),
   };
   const authorized = productionDatabaseAdmissionFixture(owner, "authorized", true);
   const sealed = productionDatabaseAdmissionFixture(owner, "sealed", true);
@@ -315,8 +336,66 @@ describe("production database admission at HTTP and durable execution boundaries
         providerProjectId: null,
       });
       expect(complete).not.toHaveBeenCalled();
+      expect(f.allocator.resolveLegacyForRelease).not.toHaveBeenCalled();
     },
   );
+
+  it("completes a drained sealed legacy absence once, replays it, and blocks later allocation", async () => {
+    const f = await fixture();
+    const sealedLegacy = { ...f.sealed, birthRegistered: false };
+    vi.setSystemTime(TEST_NOW_MS - PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS);
+    expect((await submit(f, "release", sealedLegacy, "leg-fence")).status).toBe(503);
+    vi.setSystemTime(TEST_NOW_MS);
+    const completed = await submit(f, "release", sealedLegacy, "leg-abs");
+    expect(completed.status).toBe(200);
+    await expect(completed.json()).resolves.toMatchObject({
+      verifiedGone: true,
+      providerProjectId: null,
+    });
+    const receipt = await f.vault.getProductionDatabaseIntent(f.owner);
+    expect(receipt).toMatchObject({
+      version: 3,
+      state: "released",
+      completionEvidence: {
+        kind: "sealed-legacy-catalog-absence",
+        registrationEpoch: TEST_DATABASE_ADMISSION_EPOCH,
+        providerOrganizationId: scope.providerOrganizationId,
+        catalogDigestSha256: "a".repeat(64),
+      },
+    });
+    const replay = await submit(f, "release", sealedLegacy, "leg-replay");
+    const replayBody = await replay.json();
+    expect(replay.status, JSON.stringify(replayBody)).toBe(200);
+    expect(replayBody).toMatchObject({ verifiedGone: true, providerProjectId: null });
+    expect(f.allocator.resolveLegacyForRelease).toHaveBeenCalledOnce();
+    const late = await submit(f, "ensure", f.authorized, "leg-late");
+    expect(late.status).toBe(409);
+    expect(f.allocator.ensure).not.toHaveBeenCalled();
+  });
+
+  it("adopts and deletes an exact legacy catalog match instead of recording absence", async () => {
+    const f = await fixture();
+    const sealedLegacy = { ...f.sealed, birthRegistered: false };
+    vi.setSystemTime(TEST_NOW_MS - PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS);
+    expect((await submit(f, "release", sealedLegacy, "legacy-match-fence")).status).toBe(503);
+    vi.setSystemTime(TEST_NOW_MS);
+    f.allocator.resolveLegacyForRelease.mockResolvedValueOnce({
+      state: "found",
+      allocation: { ...f.allocation, state: "releasing" },
+    });
+    const completed = await submit(f, "release", sealedLegacy, "legacy-match-delete");
+    expect(completed.status).toBe(200);
+    await expect(completed.json()).resolves.toMatchObject({
+      verifiedGone: true,
+      providerProjectId: f.allocation.providerProjectId,
+    });
+    expect(f.allocator.release).toHaveBeenCalledOnce();
+    expect(f.allocator.verifyGone).toHaveBeenCalledOnce();
+    expect(await f.vault.getProductionDatabaseIntent(f.owner)).toMatchObject({
+      version: 1,
+      completionEvidence: { kind: "exact-provider-id-get-404" },
+    });
+  });
 
   it("rejects a contradictory capability atomically without deleting it", async () => {
     const f = await fixture();

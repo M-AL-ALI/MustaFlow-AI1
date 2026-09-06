@@ -578,7 +578,10 @@ export type CapabilityVaultInvocationResult =
       retryable: boolean;
     };
 
-import type { ProductionDatabaseIntentVault } from "./production-database-intent";
+import type {
+  ProductionDatabaseIntentVault,
+  ProductionDatabaseLegacyCatalogAbsenceProof,
+} from "./production-database-intent";
 
 export interface CapabilityVault extends ProductionDatabaseIntentVault {
   provisionEcho(input: {
@@ -635,6 +638,14 @@ export interface CapabilityVault extends ProductionDatabaseIntentVault {
     projectId: number;
     allocationIdentity: string;
     receipt: ProductionDatabaseAdmissionReceipt;
+  }): Promise<"released" | "replayed">;
+  /** Completes only a drained, sealed legacy release with full catalog absence proof. */
+  completeLegacyCatalogAbsentProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+    receipt: ProductionDatabaseAdmissionReceipt;
+    proof: ProductionDatabaseLegacyCatalogAbsenceProof;
+    expiresAtMs?: number;
   }): Promise<"released" | "replayed">;
   invokeDatabase(input: {
     projectId: number;

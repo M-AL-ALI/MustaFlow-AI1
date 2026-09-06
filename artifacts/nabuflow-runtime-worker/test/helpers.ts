@@ -73,6 +73,7 @@ import {
   assertProductionDatabaseIntentAuthority,
   beginProductionDatabaseReleaseIntent,
   claimProductionDatabaseDispatchIntent,
+  completeLegacyCatalogAbsentProductionDatabaseReleaseIntent,
   completeProductionDatabaseReleaseIntent,
   completeNeverDispatchedProductionDatabaseReleaseIntent,
   hasVerifiedProductionDatabaseRelease,
@@ -82,6 +83,7 @@ import {
   productionDatabaseIntentReleaseAllocation,
   type ProductionDatabaseIntent,
   type ProductionDatabaseIntentOwner,
+  type ProductionDatabaseLegacyCatalogAbsenceProof,
   type ProductionDatabaseProviderScope,
 } from "../src/production-database-intent";
 
@@ -1983,6 +1985,32 @@ export class MemoryCapabilityVault implements CapabilityVault {
     if (current !== null) return "replayed";
     this.productionDatabaseIntents.set(input.projectId, completed);
     return "released";
+  }
+
+  async completeLegacyCatalogAbsentProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+    receipt: ProductionDatabaseAdmissionReceipt;
+    proof: ProductionDatabaseLegacyCatalogAbsenceProof;
+    expiresAtMs?: number;
+  }): Promise<"released" | "replayed"> {
+    const current = await this.getProductionDatabaseIntent(input);
+    assertProductionDatabaseIntentAuthority(input.expiresAtMs, TEST_NOW_MS);
+    const completed = completeLegacyCatalogAbsentProductionDatabaseReleaseIntent(
+      current,
+      input,
+      input.receipt,
+      input.proof,
+      TEST_NOW_MS,
+    );
+    if (
+      this.productionDatabaseAllocations.has(input.projectId) ||
+      this.databaseRecords.has(input.projectId)
+    ) {
+      throw new Error("production_database_intent_conflict");
+    }
+    this.productionDatabaseIntents.set(input.projectId, completed);
+    return current?.state === "released" ? "replayed" : "released";
   }
 
   async invokeDatabase(input: {

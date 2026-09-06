@@ -98,6 +98,7 @@ import {
   productionDatabaseAdmissionReceiptSchema,
   PRODUCTION_DATABASE_ADMISSION_FEATURE,
   PRODUCTION_DATABASE_ADMISSION_EPOCH_BINDING,
+  PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
   runtimeArtifactSealedHash,
   runtimeLayeredArtifactContentHash,
   runtimeLayeredArtifactMergedReleaseHash,
@@ -140,6 +141,7 @@ import type {
   ReleaseProductionDatabaseRequest,
   ProductionDatabaseJobRequest,
   ProductionDatabaseAdmissionReceipt,
+  ProductionDatabaseAllocationRecord,
   RouteRecord,
 } from "@workspace/tenant-runtime-contracts";
 import { createHash } from "node:crypto";
@@ -1614,7 +1616,7 @@ async function executeProductionDatabaseJob(input: {
     const initialIntent = await input.vault.getProductionDatabaseIntent(owner);
     await authority();
     if (input.request.action === "ensure") {
-      if (initialIntent?.version === 2) {
+      if (initialIntent?.version === 2 || initialIntent?.version === 3) {
         throw new ControlHttpError(
           409,
           "production_database_release_in_progress",
@@ -1723,6 +1725,44 @@ async function executeProductionDatabaseJob(input: {
       };
     }
 
+    if (initialIntent?.version === 3) {
+      const evidence = initialIntent.completionEvidence;
+      if (
+        allocation !== null ||
+        admission?.assertion !== "sealed" ||
+        admission.birthRegistered ||
+        evidence?.kind !== "sealed-legacy-catalog-absence"
+      ) {
+        throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+      }
+      await input.vault.completeLegacyCatalogAbsentProductionDatabaseRelease({
+        ...owner,
+        receipt: admission,
+        proof: {
+          providerOrganizationId: evidence.providerOrganizationId,
+          expectedProjectName: evidence.expectedProjectName,
+          catalogDigestSha256: evidence.catalogDigestSha256,
+          catalogProjectCount: evidence.catalogProjectCount,
+          catalogOwnedProjectCount: evidence.catalogOwnedProjectCount,
+          catalogPageCount: evidence.catalogPageCount,
+          verifiedAt: evidence.verifiedAt,
+        },
+        expiresAtMs: await authority(),
+      });
+      await authority();
+      await advance("finalized");
+      return {
+        status: 200,
+        body: productionDatabaseReleaseResponseSchema.parse({
+          ok: true,
+          ...owner,
+          state: "released",
+          providerProjectId: null,
+          verifiedGone: true,
+        }),
+      };
+    }
+
     if (
       initialIntent?.version === 2 ||
       (initialIntent === null &&
@@ -1776,20 +1816,70 @@ async function executeProductionDatabaseJob(input: {
     let releaseIntent = await input.vault.getProductionDatabaseIntent(owner);
     await authority();
     if (allocation === null && !hasVerifiedProductionDatabaseRelease(releaseIntent)) {
-      // Unknown historical scope cannot be replaced with today's configuration.
-      // Discovery of zero projects cannot disprove an outstanding provider POST.
-      if (
-        releaseIntent?.state !== "releasing" ||
-        releaseIntent.scope === null ||
-        input.allocator.resolveForRelease === undefined
-      ) {
+      if (releaseIntent?.state !== "releasing") {
         throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
       }
-      const recovered = await input.allocator.resolveForRelease({
-        ...owner,
-        scope: releaseIntent.scope,
-        assertAuthority,
-      });
+      let recovered: ProductionDatabaseAllocationRecord | null;
+      if (releaseIntent.scope === null) {
+        if (
+          admission?.assertion !== "sealed" ||
+          admission.birthRegistered ||
+          input.allocator.resolveLegacyForRelease === undefined ||
+          now() - Date.parse(releaseIntent.createdAt) <
+            PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS
+        ) {
+          throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+        }
+        const legacy = await input.allocator.resolveLegacyForRelease({
+          ...owner,
+          assertAuthority,
+        });
+        await authority();
+        if (legacy.state === "absent") {
+          await input.vault.completeLegacyCatalogAbsentProductionDatabaseRelease({
+            ...owner,
+            receipt: admission,
+            proof: legacy.proof,
+            expiresAtMs: await authority(),
+          });
+          await authority();
+          const completed = await input.vault.getProductionDatabaseIntent(owner);
+          await authority();
+          if (
+            !hasVerifiedProductionDatabaseRelease(completed) ||
+            completed?.version !== 3 ||
+            completed.completionEvidence?.kind !== "sealed-legacy-catalog-absence" ||
+            completed.completionEvidence.catalogDigestSha256 !== legacy.proof.catalogDigestSha256
+          ) {
+            throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+          }
+          await advance("ownership-verified");
+          await advance("provider-complete");
+          await advance("provider-verified");
+          await advance("vault-complete");
+          await advance("finalized");
+          return {
+            status: 200,
+            body: productionDatabaseReleaseResponseSchema.parse({
+              ok: true,
+              ...owner,
+              state: "released",
+              providerProjectId: null,
+              verifiedGone: true,
+            }),
+          };
+        }
+        recovered = legacy.allocation;
+      } else {
+        if (input.allocator.resolveForRelease === undefined) {
+          throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+        }
+        recovered = await input.allocator.resolveForRelease({
+          ...owner,
+          scope: releaseIntent.scope,
+          assertAuthority,
+        });
+      }
       await authority();
       if (recovered === null)
         throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
@@ -1797,9 +1887,10 @@ async function executeProductionDatabaseJob(input: {
         recovered.projectId !== owner.projectId ||
         recovered.allocationIdentity !== owner.allocationIdentity ||
         recovered.state !== "releasing" ||
-        recovered.providerOrganizationId !== releaseIntent.scope.providerOrganizationId ||
-        recovered.regionId !== releaseIntent.scope.regionId ||
-        recovered.historyRetentionSeconds !== releaseIntent.scope.historyRetentionSeconds
+        (releaseIntent.scope !== null &&
+          (recovered.providerOrganizationId !== releaseIntent.scope.providerOrganizationId ||
+            recovered.regionId !== releaseIntent.scope.regionId ||
+            recovered.historyRetentionSeconds !== releaseIntent.scope.historyRetentionSeconds))
       ) {
         throw new ProductionDatabaseIntentError("production_database_intent_conflict");
       }

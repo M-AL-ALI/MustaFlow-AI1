@@ -1,4 +1,6 @@
 import {
+  PRODUCTION_DATABASE_PROJECT_PREFIX,
+  PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS,
   productionDatabaseAllocationRecordSchema,
   type ProductionDatabaseAllocationRecord,
   type ProductionDatabaseAdmissionReceipt,
@@ -24,17 +26,35 @@ export type ProductionDatabaseIntentOwner = {
   allocationIdentity: string;
 };
 
-export type ProductionDatabaseNegativeReleaseEvidence = {
-  version: 1;
-  kind: "sealed-birth-no-dispatch";
-  registrationEpoch: string;
-  birthToken: string;
-  receiptId: string;
+export type ProductionDatabaseLegacyCatalogAbsenceProof = {
+  providerOrganizationId: string;
+  expectedProjectName: string;
+  catalogDigestSha256: string;
+  catalogProjectCount: number;
+  catalogOwnedProjectCount: number;
+  catalogPageCount: number;
   verifiedAt: string;
 };
 
+export type ProductionDatabaseNegativeReleaseEvidence =
+  | {
+      version: 1;
+      kind: "sealed-birth-no-dispatch";
+      registrationEpoch: string;
+      birthToken: string;
+      receiptId: string;
+      verifiedAt: string;
+    }
+  | (ProductionDatabaseLegacyCatalogAbsenceProof & {
+      version: 1;
+      kind: "sealed-legacy-catalog-absence";
+      registrationEpoch: string;
+      birthToken: string;
+      receiptId: string;
+    });
+
 export type ProductionDatabaseIntent = ProductionDatabaseIntentOwner & {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   state: "dispatched" | "provider-known" | "releasing" | "released";
   scope: ProductionDatabaseProviderScope | null;
   providerProjectId: string | null;
@@ -116,29 +136,68 @@ function isAdmissionUuid(value: unknown): value is string {
 function isNegativeReleaseEvidence(
   value: unknown,
 ): value is ProductionDatabaseNegativeReleaseEvidence {
+  if (!isRecord(value) || value.version !== 1) return false;
+  if (value.kind === "sealed-birth-no-dispatch") {
+    return (
+      hasExactFields(value, [
+        "version",
+        "kind",
+        "registrationEpoch",
+        "birthToken",
+        "receiptId",
+        "verifiedAt",
+      ]) &&
+      isAdmissionUuid(value.registrationEpoch) &&
+      isAdmissionUuid(value.birthToken) &&
+      isAdmissionUuid(value.receiptId) &&
+      typeof value.verifiedAt === "string" &&
+      Number.isFinite(Date.parse(value.verifiedAt))
+    );
+  }
   return (
-    isRecord(value) &&
+    value.kind === "sealed-legacy-catalog-absence" &&
     hasExactFields(value, [
       "version",
       "kind",
       "registrationEpoch",
       "birthToken",
       "receiptId",
+      "providerOrganizationId",
+      "expectedProjectName",
+      "catalogDigestSha256",
+      "catalogProjectCount",
+      "catalogOwnedProjectCount",
+      "catalogPageCount",
       "verifiedAt",
     ]) &&
-    value.version === 1 &&
-    value.kind === "sealed-birth-no-dispatch" &&
     isAdmissionUuid(value.registrationEpoch) &&
     isAdmissionUuid(value.birthToken) &&
     isAdmissionUuid(value.receiptId) &&
+    typeof value.providerOrganizationId === "string" &&
+    value.providerOrganizationId.length >= 1 &&
+    value.providerOrganizationId.length <= 256 &&
+    typeof value.expectedProjectName === "string" &&
+    new RegExp(`^${PRODUCTION_DATABASE_PROJECT_PREFIX}[0-9a-f]{24}$`, "u").test(
+      value.expectedProjectName,
+    ) &&
+    typeof value.catalogDigestSha256 === "string" &&
+    /^[0-9a-f]{64}$/u.test(value.catalogDigestSha256) &&
+    Number.isSafeInteger(value.catalogProjectCount) &&
+    Number(value.catalogProjectCount) >= 0 &&
+    Number.isSafeInteger(value.catalogOwnedProjectCount) &&
+    Number(value.catalogOwnedProjectCount) >= 0 &&
+    Number(value.catalogOwnedProjectCount) <= Number(value.catalogProjectCount) &&
+    Number.isSafeInteger(value.catalogPageCount) &&
+    Number(value.catalogPageCount) >= 1 &&
     typeof value.verifiedAt === "string" &&
     Number.isFinite(Date.parse(value.verifiedAt))
   );
 }
 
-function assertSealedBirthReceipt(
+function assertSealedReceipt(
   value: unknown,
   owner: ProductionDatabaseIntentOwner,
+  birthRegistered: boolean,
 ): asserts value is ProductionDatabaseAdmissionReceipt {
   if (
     !isRecord(value) ||
@@ -172,7 +231,7 @@ function assertSealedBirthReceipt(
   ) {
     return conflict();
   }
-  if (value.assertion !== "sealed" || !value.birthRegistered) {
+  if (value.assertion !== "sealed" || value.birthRegistered !== birthRegistered) {
     throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
   }
 }
@@ -204,7 +263,7 @@ export function parseProductionDatabaseIntent(
   if (typeof value !== "object" || Array.isArray(value)) return conflict();
   const intent = value as ProductionDatabaseIntent;
   if (
-    (intent.version !== 1 && intent.version !== 2) ||
+    (intent.version !== 1 && intent.version !== 2 && intent.version !== 3) ||
     intent.projectId !== owner.projectId ||
     intent.allocationIdentity !== owner.allocationIdentity ||
     !Number.isSafeInteger(intent.projectId) ||
@@ -247,7 +306,19 @@ export function parseProductionDatabaseIntent(
   }
   const evidence = intent.completionEvidence;
   if (intent.version === 2) {
-    if (intent.state !== "released" || !isNegativeReleaseEvidence(evidence)) return conflict();
+    if (
+      intent.state !== "released" ||
+      !isNegativeReleaseEvidence(evidence) ||
+      evidence.kind !== "sealed-birth-no-dispatch"
+    )
+      return conflict();
+  } else if (intent.version === 3) {
+    if (
+      intent.state !== "released" ||
+      !isNegativeReleaseEvidence(evidence) ||
+      evidence.kind !== "sealed-legacy-catalog-absence"
+    )
+      return conflict();
   } else if (
     evidence !== undefined &&
     (intent.state !== "released" ||
@@ -281,11 +352,26 @@ export function parseProductionDatabaseIntent(
                   receiptId: evidence.receiptId,
                   verifiedAt: evidence.verifiedAt,
                 }
-              : {
-                  version: 1 as const,
-                  kind: "exact-provider-id-get-404" as const,
-                  verifiedAt: evidence.verifiedAt,
-                },
+              : evidence.kind === "sealed-legacy-catalog-absence"
+                ? {
+                    version: 1 as const,
+                    kind: "sealed-legacy-catalog-absence" as const,
+                    registrationEpoch: evidence.registrationEpoch,
+                    birthToken: evidence.birthToken,
+                    receiptId: evidence.receiptId,
+                    providerOrganizationId: evidence.providerOrganizationId,
+                    expectedProjectName: evidence.expectedProjectName,
+                    catalogDigestSha256: evidence.catalogDigestSha256,
+                    catalogProjectCount: evidence.catalogProjectCount,
+                    catalogOwnedProjectCount: evidence.catalogOwnedProjectCount,
+                    catalogPageCount: evidence.catalogPageCount,
+                    verifiedAt: evidence.verifiedAt,
+                  }
+                : {
+                    version: 1 as const,
+                    kind: "exact-provider-id-get-404" as const,
+                    verifiedAt: evidence.verifiedAt,
+                  },
         }),
   };
 }
@@ -306,7 +392,22 @@ export function hasVerifiedProductionDatabaseRelease(
       typeof intent.updatedAt === "string" &&
       Number.isFinite(Date.parse(intent.createdAt)) &&
       Number.isFinite(Date.parse(intent.updatedAt)) &&
-      isNegativeReleaseEvidence(intent.completionEvidence)
+      isNegativeReleaseEvidence(intent.completionEvidence) &&
+      intent.completionEvidence.kind === "sealed-birth-no-dispatch"
+    );
+  }
+  if (intent.version === 3) {
+    return (
+      Number.isSafeInteger(intent.projectId) &&
+      intent.projectId > 0 &&
+      typeof intent.allocationIdentity === "string" &&
+      /^[0-9a-f]{64}$/u.test(intent.allocationIdentity) &&
+      typeof intent.createdAt === "string" &&
+      typeof intent.updatedAt === "string" &&
+      Number.isFinite(Date.parse(intent.createdAt)) &&
+      Number.isFinite(Date.parse(intent.updatedAt)) &&
+      isNegativeReleaseEvidence(intent.completionEvidence) &&
+      intent.completionEvidence.kind === "sealed-legacy-catalog-absence"
     );
   }
   return (
@@ -339,7 +440,12 @@ function makeIntent(
 ): ProductionDatabaseIntent {
   return parseProductionDatabaseIntent(
     {
-      version: completionEvidence?.kind === "sealed-birth-no-dispatch" ? 2 : 1,
+      version:
+        completionEvidence?.kind === "sealed-birth-no-dispatch"
+          ? 2
+          : completionEvidence?.kind === "sealed-legacy-catalog-absence"
+            ? 3
+            : 1,
       projectId: owner.projectId,
       allocationIdentity: owner.allocationIdentity,
       state,
@@ -379,7 +485,7 @@ export function completeNeverDispatchedProductionDatabaseReleaseIntent(
 ): ProductionDatabaseIntent {
   // Epoch activation and signed-request authentication belong to the worker.
   // A seal closes authorization; only the vault's empty-state comparison proves no dispatch.
-  assertSealedBirthReceipt(receipt, owner);
+  assertSealedReceipt(receipt, owner, true);
   if (current !== null) {
     const parsed = parseProductionDatabaseIntent(current, owner)!;
     const evidence = parsed.completionEvidence;
@@ -405,6 +511,71 @@ export function completeNeverDispatchedProductionDatabaseReleaseIntent(
   });
 }
 
+/** The vault must additionally compare allocation and capability records atomically. */
+export function completeLegacyCatalogAbsentProductionDatabaseReleaseIntent(
+  current: ProductionDatabaseIntent | null,
+  owner: ProductionDatabaseIntentOwner,
+  receipt: ProductionDatabaseAdmissionReceipt,
+  proof: ProductionDatabaseLegacyCatalogAbsenceProof,
+  nowMs: number,
+): ProductionDatabaseIntent {
+  assertSealedReceipt(receipt, owner, false);
+  const evidence: ProductionDatabaseNegativeReleaseEvidence = {
+    version: 1,
+    kind: "sealed-legacy-catalog-absence",
+    registrationEpoch: receipt.registrationEpoch,
+    birthToken: receipt.birthToken,
+    receiptId: receipt.receiptId,
+    ...proof,
+  };
+  if (
+    !isNegativeReleaseEvidence(evidence) ||
+    evidence.kind !== "sealed-legacy-catalog-absence" ||
+    evidence.expectedProjectName !==
+      `${PRODUCTION_DATABASE_PROJECT_PREFIX}${owner.allocationIdentity.slice(0, 24)}`
+  ) {
+    return conflict();
+  }
+  if (current !== null) {
+    const parsed = parseProductionDatabaseIntent(current, owner)!;
+    const existing = parsed.completionEvidence;
+    if (
+      parsed.version === 3 &&
+      hasVerifiedProductionDatabaseRelease(parsed) &&
+      existing?.kind === "sealed-legacy-catalog-absence" &&
+      existing.registrationEpoch === evidence.registrationEpoch &&
+      existing.birthToken === evidence.birthToken &&
+      existing.receiptId === evidence.receiptId &&
+      existing.providerOrganizationId === evidence.providerOrganizationId &&
+      existing.expectedProjectName === evidence.expectedProjectName &&
+      existing.catalogDigestSha256 === evidence.catalogDigestSha256 &&
+      existing.catalogProjectCount === evidence.catalogProjectCount &&
+      existing.catalogOwnedProjectCount === evidence.catalogOwnedProjectCount &&
+      existing.catalogPageCount === evidence.catalogPageCount &&
+      existing.verifiedAt === evidence.verifiedAt
+    ) {
+      return parsed;
+    }
+    if (
+      parsed.state !== "releasing" ||
+      parsed.scope !== null ||
+      parsed.providerProjectId !== null
+    ) {
+      return conflict();
+    }
+    const createdAtMs = Date.parse(parsed.createdAt);
+    const verifiedAtMs = Date.parse(evidence.verifiedAt);
+    if (
+      verifiedAtMs < createdAtMs + PRODUCTION_DATABASE_PROVIDER_OPERATION_BOUND_MS ||
+      verifiedAtMs > nowMs
+    ) {
+      throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+    }
+    return makeIntent(owner, "released", null, null, nowMs, parsed.createdAt, evidence);
+  }
+  throw new ProductionDatabaseIntentError("production_database_allocation_uncertain");
+}
+
 export function observeProductionDatabaseProjectIntent(
   current: ProductionDatabaseIntent | null,
   owner: ProductionDatabaseIntentOwner,
@@ -417,12 +588,14 @@ export function observeProductionDatabaseProjectIntent(
     if (current.state === "released") {
       throw new ProductionDatabaseIntentError("production_database_release_in_progress");
     }
-    if (
-      current.scope === null ||
+    if (current.scope === null) {
+      if (current.state !== "releasing" || current.providerProjectId !== null) return conflict();
+    } else if (
       !sameScope(current.scope, scope) ||
       (current.providerProjectId !== null && current.providerProjectId !== providerProjectId)
-    )
+    ) {
       return conflict();
+    }
   }
   // A late response may supply cleanup evidence, but never reopen a releasing intent.
   return makeIntent(

@@ -6,6 +6,7 @@ import {
   PRODUCTION_DATABASE_NEON_ORGANIZATION_ID_BINDING,
   PRODUCTION_DATABASE_NEON_REGION_ID_BINDING,
   PRODUCTION_DATABASE_PROJECT_PREFIX,
+  sha256Hex,
   productionDatabaseAllocationRecordSchema,
   type ProductionDatabaseAllocationRecord,
 } from "@workspace/tenant-runtime-contracts";
@@ -13,6 +14,7 @@ import type { WorkerBindings } from "./bindings";
 import type {
   ProductionDatabaseEnsureInput,
   ProductionDatabaseIntentOwner,
+  ProductionDatabaseLegacyCatalogAbsenceProof,
   ProductionDatabaseProviderScope,
 } from "./production-database-intent";
 
@@ -21,11 +23,19 @@ export type ProductionDatabaseReleaseResolutionInput = ProductionDatabaseIntentO
   assertAuthority(): Promise<void>;
 };
 
+export type ProductionDatabaseLegacyReleaseResolutionInput = ProductionDatabaseIntentOwner & {
+  assertAuthority(): Promise<void>;
+};
+
+export type ProductionDatabaseLegacyReleaseResolution =
+  | { state: "found"; allocation: ProductionDatabaseAllocationRecord }
+  | { state: "absent"; proof: ProductionDatabaseLegacyCatalogAbsenceProof };
+
 export type ProductionDatabaseAllocatorDependency = Pick<
   ProductionDatabaseAllocator,
   "ensure" | "release" | "verifyGone"
 > &
-  Partial<Pick<ProductionDatabaseAllocator, "resolveForRelease">>;
+  Partial<Pick<ProductionDatabaseAllocator, "resolveForRelease" | "resolveLegacyForRelease">>;
 
 const NEON_ORIGIN = "https://console.neon.tech";
 const PROVIDER_TIMEOUT_MS = 20_000;
@@ -316,12 +326,15 @@ export class ProductionDatabaseAllocator {
     enforceCostLimit = true,
   ): Promise<{
     projects: Array<Record<string, unknown>>;
+    catalogProjectCount: number;
+    catalogPageCount: number;
   }> {
     const namePrefix = PRODUCTION_DATABASE_PROJECT_PREFIX;
     const owned: Array<Record<string, unknown>> = [];
     const ids = new Set<string>();
     const cursors = new Set<string>();
     let cursor: string | null = null;
+    let catalogProjectCount = 0;
     const incomplete = () =>
       new ProductionDatabaseProviderError(
         503,
@@ -360,6 +373,7 @@ export class ProductionDatabaseAllocator {
       if (!Array.isArray(body.projects) || body.projects.length > CATALOG_PAGE_SIZE) {
         throw incomplete();
       }
+      catalogProjectCount += body.projects.length;
       // Neon prose and its OpenAPI schema use different partial-result names.
       for (const key of ["unavailable", "unavailable_project_ids"]) {
         if (key in body && (!Array.isArray(body[key]) || body[key].length !== 0)) {
@@ -384,7 +398,7 @@ export class ProductionDatabaseAllocator {
       }
       if (!("pagination" in body)) {
         if (body.projects.length === CATALOG_PAGE_SIZE) throw incomplete();
-        return { projects: owned };
+        return { projects: owned, catalogProjectCount, catalogPageCount: page + 1 };
       }
       const pagination = objectRecord(body.pagination);
       const next = requiredString(pagination.cursor);
@@ -661,7 +675,16 @@ export class ProductionDatabaseAllocator {
       );
     }
     if (matches.length === 0) return null;
-    const id = requiredString(matches[0]?.id, 128);
+    return this.allocationFromCatalogProject(configuration, input, matches[0]!);
+  }
+
+  private async allocationFromCatalogProject(
+    configuration: ReturnType<typeof requiredConfiguration>,
+    input: ProductionDatabaseLegacyReleaseResolutionInput,
+    catalogProject: Record<string, unknown>,
+  ): Promise<ProductionDatabaseAllocationRecord> {
+    const name = projectName(input.allocationIdentity);
+    const id = requiredString(catalogProject.id, 128);
     const response = await exactOperation(async () => {
       await input.assertAuthority();
       const result = await providerFetch(
@@ -715,6 +738,69 @@ export class ProductionDatabaseAllocator {
       createdAt: timestamp,
       updatedAt: timestamp,
     });
+  }
+
+  /**
+   * Legacy-only GET recovery. Absence is meaningful only after the caller has
+   * sealed allocation and held the durable release fence for the provider bound.
+   */
+  async resolveLegacyForRelease(
+    input: ProductionDatabaseLegacyReleaseResolutionInput,
+  ): Promise<ProductionDatabaseLegacyReleaseResolution> {
+    const configuration = requiredConfiguration(this.env);
+    if (
+      !Number.isSafeInteger(input.projectId) ||
+      input.projectId < 1 ||
+      !/^[0-9a-f]{64}$/u.test(input.allocationIdentity)
+    ) {
+      throw new ProductionDatabaseProviderError(
+        409,
+        "production_database_scope_mismatch",
+        false,
+        "pre_dispatch",
+      );
+    }
+    await input.assertAuthority();
+    const listed = await this.listProjects(configuration, input.assertAuthority, false);
+    await input.assertAuthority();
+    const expectedProjectName = projectName(input.allocationIdentity);
+    const matches = listed.projects.filter((project) => project.name === expectedProjectName);
+    if (matches.length > 1) {
+      throw new ProductionDatabaseProviderError(
+        409,
+        "production_database_integrity_failure",
+        false,
+        "integrity_failure",
+      );
+    }
+    if (matches.length === 1) {
+      return {
+        state: "found",
+        allocation: await this.allocationFromCatalogProject(configuration, input, matches[0]!),
+      };
+    }
+    const ownedCatalog = listed.projects
+      .map((project) => ({
+        id: requiredString(project.id, 128),
+        name: requiredString(project.name, 1_024),
+      }))
+      .sort(
+        (left, right) => left.id.localeCompare(right.id) || left.name.localeCompare(right.name),
+      );
+    const catalogDigestSha256 = await sha256Hex(JSON.stringify(ownedCatalog));
+    await input.assertAuthority();
+    return {
+      state: "absent",
+      proof: {
+        providerOrganizationId: configuration.organizationId,
+        expectedProjectName,
+        catalogDigestSha256,
+        catalogProjectCount: listed.catalogProjectCount,
+        catalogOwnedProjectCount: ownedCatalog.length,
+        catalogPageCount: listed.catalogPageCount,
+        verifiedAt: this.now().toISOString(),
+      },
+    };
   }
 
   async release(

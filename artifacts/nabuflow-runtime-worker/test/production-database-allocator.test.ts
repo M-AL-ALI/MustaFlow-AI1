@@ -279,6 +279,51 @@ describe("production database allocator", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
+  it("produces a versioned legacy absence proof only from a complete paginated catalog", async () => {
+    let calls = 0;
+    const authority = vi.fn(async () => undefined);
+    const allocator = new ProductionDatabaseAllocator(
+      productionEnv(),
+      {
+        async fetch(request) {
+          expect(request.method).toBe("GET");
+          calls += 1;
+          return calls === 1
+            ? json({
+                projects: [{ id: "owned-other", name: "nabuflow-production-other" }],
+                pagination: { cursor: "next" },
+              })
+            : json({ projects: [{ id: "customer-project", name: "customer-project" }] });
+        },
+      },
+      () => new Date("2026-08-15T12:06:00.000Z"),
+    );
+    await expect(
+      allocator.resolveLegacyForRelease({
+        projectId: 42,
+        allocationIdentity: identity,
+        assertAuthority: authority,
+      }),
+    ).resolves.toMatchObject({
+      state: "absent",
+      proof: {
+        providerOrganizationId: "org-production",
+        expectedProjectName: `nabuflow-production-${identity.slice(0, 24)}`,
+        catalogProjectCount: 2,
+        catalogOwnedProjectCount: 1,
+        catalogPageCount: 2,
+        verifiedAt: "2026-08-15T12:06:00.000Z",
+      },
+    });
+    const result = await allocator.resolveLegacyForRelease({
+      projectId: 42,
+      allocationIdentity: identity,
+      assertAuthority: authority,
+    });
+    if (result.state !== "absent") throw new Error("expected catalog absence");
+    expect(result.proof.catalogDigestSha256).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
   it("stops discovery before a second page when execution authority expires", async () => {
     let lost = false;
     const fetch = vi.fn(async () => {

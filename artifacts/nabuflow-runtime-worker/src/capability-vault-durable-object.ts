@@ -5,6 +5,7 @@ import {
   assertProductionDatabaseIntentAuthority,
   beginProductionDatabaseReleaseIntent,
   claimProductionDatabaseDispatchIntent,
+  completeLegacyCatalogAbsentProductionDatabaseReleaseIntent,
   completeProductionDatabaseReleaseIntent,
   completeNeverDispatchedProductionDatabaseReleaseIntent,
   hasVerifiedProductionDatabaseRelease,
@@ -14,6 +15,7 @@ import {
   productionDatabaseIntentReleaseAllocation,
   type ProductionDatabaseIntent,
   type ProductionDatabaseIntentOwner,
+  type ProductionDatabaseLegacyCatalogAbsenceProof,
   type ProductionDatabaseProviderScope,
 } from "./production-database-intent";
 import {
@@ -663,6 +665,38 @@ export class CapabilityVaultDurableObject
     });
   }
 
+  async completeLegacyCatalogAbsentProductionDatabaseRelease(input: {
+    projectId: number;
+    allocationIdentity: string;
+    receipt: ProductionDatabaseAdmissionReceipt;
+    proof: ProductionDatabaseLegacyCatalogAbsenceProof;
+    expiresAtMs?: number;
+  }): Promise<"released" | "replayed"> {
+    return this.ctx.storage.transaction(async (transaction) => {
+      const [rawIntent, allocation, capability] = await Promise.all([
+        transaction.get(PRODUCTION_DATABASE_INTENT_STORAGE_KEY),
+        transaction.get(PRODUCTION_DATABASE_ALLOCATION_STORAGE_KEY),
+        transaction.get(DATABASE_STORAGE_KEY),
+      ]);
+      const current = parseProductionDatabaseIntent(rawIntent, input);
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      const completed = completeLegacyCatalogAbsentProductionDatabaseReleaseIntent(
+        current,
+        input,
+        input.receipt,
+        input.proof,
+        Date.now(),
+      );
+      if (allocation !== undefined || capability !== undefined) {
+        throw new ProductionDatabaseIntentError("production_database_intent_conflict");
+      }
+      assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
+      const replayed = current?.state === "released";
+      await transaction.put(PRODUCTION_DATABASE_INTENT_STORAGE_KEY, completed);
+      return replayed ? ("replayed" as const) : ("released" as const);
+    });
+  }
+
   async completeProductionDatabaseRelease(input: {
     projectId: number;
     allocationIdentity: string;
@@ -678,7 +712,7 @@ export class CapabilityVaultDurableObject
         input,
       );
       assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
-      if (current?.version === 2) {
+      if (current?.version === 2 || current?.version === 3) {
         const capability = await transaction.get(DATABASE_STORAGE_KEY);
         assertProductionDatabaseIntentAuthority(input.expiresAtMs, Date.now());
         if (
