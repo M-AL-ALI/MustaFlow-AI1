@@ -125,9 +125,6 @@ packages = ["chromium"]
 [userenv]
 
 [userenv.shared]
-FLY_APP_NAME = "mustaflow-containers"
-FLY_REGION = "iad"
-FLY_ORG_SLUG = "personal"
 STRIPE_PRICE_STARTER = "price_1Tae1ULqqLu7se88cTw00WRi"
 STRIPE_PRICE_BUILDER = "price_1Tae1ULqqLu7se887EoqIKpj"
 STRIPE_PRICE_POWER = "price_1Tae1VLqqLu7se88jksCkMIg"

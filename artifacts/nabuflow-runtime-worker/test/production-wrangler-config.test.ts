@@ -100,7 +100,7 @@ describe("production Wrangler configurations", () => {
     ]);
   });
 
-  it("declares the atomic production API switch while retaining Fly rollback inputs", () => {
+  it("declares Cloudflare as the sole production runtime", () => {
     expect(replit).toContain('TENANT_RUNTIME_PROVIDER = "cloudflare"');
     expect(replit).toContain(
       'CLOUDFLARE_RUNTIME_CONTROL_URL = "https://runtime.apps.mustaflow.com"',
@@ -111,7 +111,6 @@ describe("production Wrangler configurations", () => {
     expect(replit).toContain('NABUFLOW_PANTRY_TRUSTED_PUBLIC_KEYS = "{');
     expect(replit).not.toContain("PROD_HEALTH_BASE_URL");
 
-    expect(replit).toContain('FLY_APP_NAME = "mustaflow-containers"');
-    expect(replit).toContain('FLY_ORG_SLUG = "personal"');
+    expect(replit).not.toMatch(/^\s*FLY_(?:API_TOKEN|APP_NAME|ORG_SLUG|REGION)\s*=/mu);
   });
 });
