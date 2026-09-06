@@ -357,7 +357,7 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
     }
   });
 
-  it("reconciles historical active Ora pointers before certifying the guards", async () => {
+  it("reconciles historical pointers even when legacy triggers have malformed arguments", async () => {
     const { runStartupMigrations } = await import("../startup-migrations");
     const owner = `ora-reference-reconciliation-${randomUUID()}`;
     await pool.query(
@@ -382,6 +382,18 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
         "ALTER TABLE brand_kits ENABLE TRIGGER ora_asset_reference_guard_brand_kits",
       );
     }
+    await pool.query(`
+      DROP TRIGGER ora_asset_reference_guard_ora_file_contexts ON ora_file_contexts;
+      CREATE TRIGGER ora_asset_reference_guard_ora_file_contexts
+        BEFORE INSERT OR UPDATE OF user_id, asset_id, deleted_at
+        ON ora_file_contexts
+        FOR EACH ROW EXECUTE FUNCTION require_live_owned_ora_asset_reference('filename', 'deleted_at');
+      DROP TRIGGER ora_asset_reference_guard_brand_kits ON brand_kits;
+      CREATE TRIGGER ora_asset_reference_guard_brand_kits
+        BEFORE INSERT OR UPDATE OF user_id, logo_asset_id
+        ON brand_kits
+        FOR EACH ROW EXECUTE FUNCTION require_live_owned_ora_asset_reference('user_id')
+    `);
 
     try {
       const migration = await runStartupMigrations();
@@ -392,6 +404,29 @@ describeIfDb("runStartupMigrations creates tables added since the last release",
       expect(
         (await pool.query("SELECT logo_asset_id FROM brand_kits WHERE user_id=$1", [owner])).rows,
       ).toEqual([{ logo_asset_id: null }]);
+      const { rows: repairedTriggers } = await pool.query<{
+        trigger_name: string;
+        argument_bytes: string;
+      }>(`
+        SELECT trigger_row.tgname AS trigger_name,
+               encode(trigger_row.tgargs, 'escape') AS argument_bytes
+          FROM pg_trigger trigger_row
+         WHERE trigger_row.tgname IN (
+           'ora_asset_reference_guard_ora_file_contexts',
+           'ora_asset_reference_guard_brand_kits'
+         )
+         ORDER BY trigger_row.tgname
+      `);
+      expect(repairedTriggers).toEqual([
+        {
+          trigger_name: "ora_asset_reference_guard_brand_kits",
+          argument_bytes: "logo_asset_id\\000",
+        },
+        {
+          trigger_name: "ora_asset_reference_guard_ora_file_contexts",
+          argument_bytes: "asset_id\\000deleted_at\\000",
+        },
+      ]);
     } finally {
       await pool.query("DELETE FROM brand_kits WHERE user_id=$1", [owner]);
       await pool.query("DELETE FROM ora_file_contexts WHERE user_id=$1", [owner]);

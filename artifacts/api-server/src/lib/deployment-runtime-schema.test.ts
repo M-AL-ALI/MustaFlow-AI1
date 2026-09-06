@@ -38,15 +38,18 @@ describe("deployment runtime schema boundary", () => {
   it("accepts a complete read-only deployment schema without issuing DDL", async () => {
     const query = vi.fn(async (sql: string) => {
       expect(sql.trimStart().startsWith("SELECT")).toBe(true);
+      if (sql.includes('AS "oraAssetReferenceRowsReady"')) {
+        return { rows: [{ oraAssetReferenceRowsReady: true }] };
+      }
       return { rows: [observation()] };
     });
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-ready",
       violations: [],
     });
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed with allowlisted evidence when the deployed schema is incomplete", async () => {
@@ -60,7 +63,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-incomplete",
       violations: ["support_delivery_constraints_missing", "prompt_queue_missing"],
     });
@@ -78,22 +81,39 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "mutable",
       violations: [],
     });
   });
 
   it("treats a deployment role that can create but cannot alter existing objects as read-only", async () => {
-    const query = vi.fn(async () => ({
-      rows: [observation({ canCreateSchemaObjects: true })],
-    }));
+    const query = vi.fn(async (sql: string) =>
+      sql.includes('AS "oraAssetReferenceRowsReady"')
+        ? { rows: [{ oraAssetReferenceRowsReady: true }] }
+        : { rows: [observation({ canCreateSchemaObjects: true })] },
+    );
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-ready",
       violations: [],
     });
+  });
+
+  it("rejects read-only readiness when historical Ora pointers are invalid", async () => {
+    const query = vi.fn(async (sql: string) =>
+      sql.includes('AS "oraAssetReferenceRowsReady"')
+        ? { rows: [{ oraAssetReferenceRowsReady: false }] }
+        : { rows: [observation()] },
+    );
+
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
+      contractId: "deployment_runtime_schema_v10",
+      mode: "read-only-incomplete",
+      violations: ["durable_asset_reference_guards_missing"],
+    });
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed when the retirement table exists with an incomplete shape", async () => {
@@ -108,7 +128,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toMatchObject({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-incomplete",
       violations: [
         "project_retirement_operations_columns_missing",
@@ -131,7 +151,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-incomplete",
       violations: [
         "project_purge_operations_columns_missing",
@@ -160,7 +180,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-incomplete",
       violations: ["asset_usage_attachment_guard_missing"],
     });
@@ -178,7 +198,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-incomplete",
       violations: ["durable_asset_reference_guards_missing"],
     });
@@ -220,7 +240,11 @@ describe("deployment runtime schema boundary", () => {
     expect(source).toContain("ora_asset_reference_guard_brand_kits");
     expect(source).toContain("user_id, asset_id, deleted_at");
     expect(source).toContain("user_id, logo_asset_id");
+    expect(source).toContain("candidate_ora_asset_id := nullif(row_json ->> tg_argv[0]");
+    expect(source).toContain("ora.id = candidate_ora_asset_id");
     expect(source).toContain("ora_asset_reference_unavailable");
+    expect(source).toContain('AS "oraAssetReferenceRowsReady"');
+    expect(source).toContain("LEFT JOIN public.ora_assets ora");
   });
 
   it("rejects a read-only deployment without the nullable JSONB preview receipt", async () => {
@@ -228,7 +252,7 @@ describe("deployment runtime schema boundary", () => {
       rows: [observation({ previewDatabaseAllocationReady: false })],
     }));
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-incomplete",
       violations: ["preview_database_allocation_missing"],
     });
@@ -246,7 +270,7 @@ describe("deployment runtime schema boundary", () => {
   ])("fails closed when admission schema evidence is missing: %s", async (flag, violation) => {
     const query = vi.fn(async () => ({ rows: [observation({ [flag]: false })] }));
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v9",
+      contractId: "deployment_runtime_schema_v10",
       mode: "read-only-incomplete",
       violations: [violation],
     });

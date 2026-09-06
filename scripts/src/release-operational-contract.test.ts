@@ -337,6 +337,10 @@ for (const referenceGuard of [
   "SET asset_id = NULL",
   "UPDATE public.brand_kits kit",
   "SET logo_asset_id = NULL",
+  "row_json ->> TG_ARGV[0]",
+  "ora.id = candidate_ora_asset_id",
+  "NOT procedure_row.prosecdef",
+  "search_path=pg_catalog,public",
   "trigger_row.tgnargs = expected.argument_count",
   "encode(trigger_row.tgargs, 'escape') = expected.argument_bytes",
   "ora_asset_reference_guards_missing",
@@ -345,6 +349,23 @@ for (const referenceGuard of [
   assert.ok(
     oraAssetReferenceGuardMigrationSource.includes(referenceGuard),
     `missing standalone Ora reference convergence guard: ${referenceGuard}`,
+  );
+}
+for (const [tableName, repairStatement] of [
+  ["ora_file_contexts", "UPDATE public.ora_file_contexts context_row"],
+  ["brand_kits", "UPDATE public.brand_kits kit"],
+] as const) {
+  const dropTrigger = oraAssetReferenceGuardMigrationSource.indexOf(
+    `DROP TRIGGER IF EXISTS ora_asset_reference_guard_${tableName}`,
+  );
+  const repair = oraAssetReferenceGuardMigrationSource.indexOf(repairStatement);
+  const createTrigger = oraAssetReferenceGuardMigrationSource.indexOf(
+    `CREATE TRIGGER ora_asset_reference_guard_${tableName}`,
+  );
+  assert.ok(dropTrigger >= 0, `missing early trigger drop for ${tableName}`);
+  assert.ok(
+    dropTrigger < repair && repair < createTrigger,
+    `reference repair must run after trigger drop and before recreation for ${tableName}`,
   );
 }
 

@@ -8779,6 +8779,14 @@ const MIGRATION_STEPS: MigrationStep[] = [
         CREATE INDEX IF NOT EXISTS brand_kits_user_id_idx
           ON brand_kits(user_id)
       `);
+      // DROP TRIGGER takes a table lock until this transaction commits. Remove
+      // drifted legacy definitions before repair updates can invoke them.
+      await client.query(`
+        DROP TRIGGER IF EXISTS ora_asset_reference_guard_ora_file_contexts
+          ON ora_file_contexts;
+        DROP TRIGGER IF EXISTS ora_asset_reference_guard_brand_kits
+          ON brand_kits
+      `);
       await client.query(`
         CREATE OR REPLACE FUNCTION require_live_owned_ora_asset_reference()
         RETURNS TRIGGER AS $$
@@ -8853,16 +8861,12 @@ const MIGRATION_STEPS: MigrationStep[] = [
         "startup-migrations: stale Ora asset references reconciled",
       );
       await client.query(`
-        DROP TRIGGER IF EXISTS ora_asset_reference_guard_ora_file_contexts
-          ON ora_file_contexts;
         CREATE TRIGGER ora_asset_reference_guard_ora_file_contexts
           BEFORE INSERT OR UPDATE OF user_id, asset_id, deleted_at
           ON ora_file_contexts
           FOR EACH ROW EXECUTE FUNCTION require_live_owned_ora_asset_reference('asset_id', 'deleted_at')
       `);
       await client.query(`
-        DROP TRIGGER IF EXISTS ora_asset_reference_guard_brand_kits
-          ON brand_kits;
         CREATE TRIGGER ora_asset_reference_guard_brand_kits
           BEFORE INSERT OR UPDATE OF user_id, logo_asset_id
           ON brand_kits
@@ -8910,6 +8914,16 @@ const MIGRATION_STEPS: MigrationStep[] = [
                   to_regprocedure('public.require_live_owned_ora_asset_reference()')
                 )), '[[:space:]]+', ' ', 'g'
               ) LIKE '%from public.ora_assets ora%ora.user_id = row_json ->> ''user_id''%ora.deleted_at is null%for share%'
+          AND regexp_replace(
+                lower(pg_get_functiondef(
+                  to_regprocedure('public.require_live_owned_ora_asset_reference()')
+                )), '[[:space:]]+', ' ', 'g'
+              ) LIKE '%candidate_ora_asset_id := nullif(row_json ->> tg_argv[0],%'
+          AND regexp_replace(
+                lower(pg_get_functiondef(
+                  to_regprocedure('public.require_live_owned_ora_asset_reference()')
+                )), '[[:space:]]+', ' ', 'g'
+              ) LIKE '%ora.id = candidate_ora_asset_id%'
           AND regexp_replace(
                 lower(pg_get_functiondef(
                   to_regprocedure('public.require_live_owned_ora_asset_reference()')

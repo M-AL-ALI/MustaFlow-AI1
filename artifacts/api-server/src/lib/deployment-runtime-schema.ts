@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 
-export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v9" as const;
+export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v10" as const;
 
 export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "admin_authority_missing",
@@ -632,6 +632,16 @@ export async function assessDeploymentRuntimeSchema(
                  lower(pg_get_functiondef(
                    to_regprocedure('public.require_live_owned_ora_asset_reference()')
                  )), '[[:space:]]+', ' ', 'g'
+               ) LIKE '%candidate_ora_asset_id := nullif(row_json ->> tg_argv[0],%'
+           AND regexp_replace(
+                 lower(pg_get_functiondef(
+                   to_regprocedure('public.require_live_owned_ora_asset_reference()')
+                 )), '[[:space:]]+', ' ', 'g'
+               ) LIKE '%ora.id = candidate_ora_asset_id%'
+           AND regexp_replace(
+                 lower(pg_get_functiondef(
+                   to_regprocedure('public.require_live_owned_ora_asset_reference()')
+                 )), '[[:space:]]+', ' ', 'g'
                ) LIKE '%ora_asset_reference_unavailable%errcode = ''55000''%'
            AND EXISTS (
              SELECT 1
@@ -847,6 +857,40 @@ export async function assessDeploymentRuntimeSchema(
     violations.push("production_database_admission_indexes_missing");
   if (observation?.productionDatabaseAdmissionTriggersReady !== true)
     violations.push("production_database_admission_triggers_missing");
+
+  // Static catalog evidence proves that future writes are guarded. Only after
+  // that evidence is complete is it safe to reference these tables directly
+  // and certify that no historical active pointer bypassed the guards.
+  if (violations.length === 0 && observation?.durableAssetReferenceGuardsReady === true) {
+    const referenceRows = await client.query<{ oraAssetReferenceRowsReady: boolean }>(`
+      SELECT (
+        NOT EXISTS (
+          SELECT 1
+            FROM public.ora_file_contexts context_row
+            LEFT JOIN public.ora_assets ora
+              ON ora.id = context_row.asset_id
+             AND ora.user_id = context_row.user_id
+             AND ora.deleted_at IS NULL
+           WHERE context_row.asset_id IS NOT NULL
+             AND context_row.deleted_at IS NULL
+             AND ora.id IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM public.brand_kits kit
+            LEFT JOIN public.ora_assets ora
+              ON ora.id = kit.logo_asset_id
+             AND ora.user_id = kit.user_id
+             AND ora.deleted_at IS NULL
+           WHERE kit.logo_asset_id IS NOT NULL
+             AND ora.id IS NULL
+        )
+      ) AS "oraAssetReferenceRowsReady"
+    `);
+    if (referenceRows.rows[0]?.oraAssetReferenceRowsReady !== true) {
+      violations.push("durable_asset_reference_guards_missing");
+    }
+  }
 
   return violations.length === 0
     ? {

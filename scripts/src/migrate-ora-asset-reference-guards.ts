@@ -4,6 +4,14 @@ async function migrateOraAssetReferenceGuards() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // The DDL locks both writer tables until commit. Drop drifted definitions
+    // before reconciliation updates can invoke malformed legacy arguments.
+    await client.query(`
+      DROP TRIGGER IF EXISTS ora_asset_reference_guard_ora_file_contexts
+        ON ora_file_contexts;
+      DROP TRIGGER IF EXISTS ora_asset_reference_guard_brand_kits
+        ON brand_kits
+    `);
     await client.query(`
       CREATE OR REPLACE FUNCTION require_live_owned_ora_asset_reference()
       RETURNS TRIGGER AS $$
@@ -69,16 +77,12 @@ async function migrateOraAssetReferenceGuards() {
              (SELECT COUNT(*)::text FROM repaired_brand_kits) AS brand_kits_repaired
     `);
     await client.query(`
-      DROP TRIGGER IF EXISTS ora_asset_reference_guard_ora_file_contexts
-        ON ora_file_contexts;
       CREATE TRIGGER ora_asset_reference_guard_ora_file_contexts
         BEFORE INSERT OR UPDATE OF user_id, asset_id, deleted_at
         ON ora_file_contexts
         FOR EACH ROW EXECUTE FUNCTION require_live_owned_ora_asset_reference('asset_id', 'deleted_at')
     `);
     await client.query(`
-      DROP TRIGGER IF EXISTS ora_asset_reference_guard_brand_kits
-        ON brand_kits;
       CREATE TRIGGER ora_asset_reference_guard_brand_kits
         BEFORE INSERT OR UPDATE OF user_id, logo_asset_id
         ON brand_kits
@@ -86,7 +90,8 @@ async function migrateOraAssetReferenceGuards() {
     `);
     const readiness = await client.query<{ ready: boolean }>(`
       SELECT (
-        (SELECT COUNT(*) = 2
+        to_regprocedure('public.require_live_owned_ora_asset_reference()') IS NOT NULL
+        AND (SELECT COUNT(*) = 2
            AND bool_and(NOT trigger_row.tgisinternal)
            AND bool_and(trigger_row.tgenabled = ANY(ARRAY['O', 'A']::"char"[]))
            AND bool_and(trigger_row.tgtype = 23)
@@ -106,6 +111,35 @@ async function migrateOraAssetReferenceGuards() {
           JOIN pg_catalog.pg_trigger trigger_row ON trigger_row.tgrelid = relation.oid
          WHERE namespace.nspname = 'public'
            AND trigger_row.tgname = expected.trigger_name)
+        AND (SELECT NOT procedure_row.prosecdef
+               FROM pg_catalog.pg_proc procedure_row
+              WHERE procedure_row.oid=
+                to_regprocedure('public.require_live_owned_ora_asset_reference()'))
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_live_owned_ora_asset_reference()')
+              )), '[[:space:]]+', ' ', 'g'
+            ) LIKE '%candidate_ora_asset_id := nullif(row_json ->> tg_argv[0],%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_live_owned_ora_asset_reference()')
+              )), '[[:space:]]+', ' ', 'g'
+            ) LIKE '%from public.ora_assets ora%ora.id = candidate_ora_asset_id%ora.user_id = row_json ->> ''user_id''%ora.deleted_at is null%for share%'
+        AND regexp_replace(
+              lower(pg_get_functiondef(
+                to_regprocedure('public.require_live_owned_ora_asset_reference()')
+              )), '[[:space:]]+', ' ', 'g'
+            ) LIKE '%ora_asset_reference_unavailable%errcode = ''55000''%'
+        AND EXISTS (
+          SELECT 1
+            FROM unnest(COALESCE(
+              (SELECT proconfig FROM pg_catalog.pg_proc
+                WHERE oid=to_regprocedure('public.require_live_owned_ora_asset_reference()')),
+              ARRAY[]::text[]
+            )) setting
+           WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
+                 'search_path=pg_catalog,public'
+        )
         AND NOT EXISTS (
           SELECT 1
             FROM public.ora_file_contexts context_row
