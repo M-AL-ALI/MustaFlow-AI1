@@ -9,7 +9,8 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src/",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:database": "node -e \"if (!process.env.NABUFLOW_VITEST_DATABASE_URL) { console.error('NABUFLOW_VITEST_DATABASE_URL is required and must identify a disposable loopback database.'); process.exit(64); }\" && vitest run --config vitest.config.ts --no-file-parallelism"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1057.0",

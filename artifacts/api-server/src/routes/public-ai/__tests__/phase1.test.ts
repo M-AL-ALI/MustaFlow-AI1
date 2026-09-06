@@ -669,16 +669,16 @@ describe("Ora memory-save candidate detection", () => {
     expect(detectMemorySaveCandidate("keep a note that my budget is $5k")?.confidence).toBe("high");
   });
 
-  it("detects preference statements as low confidence", async () => {
+  it("detects plainly stated first-person preferences as high confidence", async () => {
     const { detectMemorySaveCandidate } = await import("../../../lib/public-ai/orchestrator");
     const c = detectMemorySaveCandidate("I prefer dark mode everywhere");
     expect(c).not.toBeNull();
-    expect(c?.confidence).toBe("low");
+    expect(c?.confidence).toBe("high");
   });
 
-  it("marks implicit 'my X is' facts as low confidence", async () => {
+  it("marks plainly stated 'my X is' facts as high confidence", async () => {
     const { detectMemorySaveCandidate } = await import("../../../lib/public-ai/orchestrator");
-    expect(detectMemorySaveCandidate("my timezone is PST")?.confidence).toBe("low");
+    expect(detectMemorySaveCandidate("my timezone is PST")?.confidence).toBe("high");
   });
 
   it("returns null for ordinary messages", async () => {

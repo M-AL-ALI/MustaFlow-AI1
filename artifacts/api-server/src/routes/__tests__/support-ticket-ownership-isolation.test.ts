@@ -99,6 +99,7 @@ async function escalateAs(app: express.Express, userId: string, body: Record<str
 }
 
 beforeAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   const workspaceA = await createOwnedWorkspace({
     ownerUserId: USER_A,
     name: "Owner A workspace",
@@ -124,141 +125,154 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   await db.delete(supportTicketsTable).where(inArray(supportTicketsTable.userId, ALL_USERS));
   await db.delete(projectsTable).where(inArray(projectsTable.ownerId, ALL_USERS));
   await db.delete(workspacesTable).where(inArray(workspacesTable.id, workspaceIds));
 });
 
-describe("Support tickets are scoped to their owner", () => {
-  it("each user only sees their own tickets when listed by userId", async () => {
-    const app = await buildApp();
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "Support tickets are scoped to their owner",
+  () => {
+    it("each user only sees their own tickets when listed by userId", async () => {
+      const app = await buildApp();
 
-    const resA = await escalateAs(app, USER_A, { subject: "A only ticket" });
-    expect(resA.status).toBe(201);
-    const resB = await escalateAs(app, USER_B, { subject: "B only ticket" });
-    expect(resB.status).toBe(201);
+      const resA = await escalateAs(app, USER_A, { subject: "A only ticket" });
+      expect(resA.status).toBe(201);
+      const resB = await escalateAs(app, USER_B, { subject: "B only ticket" });
+      expect(resB.status).toBe(201);
 
-    // Sanity: both tickets really exist in the table.
-    const both = await db
-      .select({ id: supportTicketsTable.id, userId: supportTicketsTable.userId })
-      .from(supportTicketsTable)
-      .where(inArray(supportTicketsTable.userId, ALL_USERS));
-    expect(both).toHaveLength(2);
+      // Sanity: both tickets really exist in the table.
+      const both = await db
+        .select({ id: supportTicketsTable.id, userId: supportTicketsTable.userId })
+        .from(supportTicketsTable)
+        .where(inArray(supportTicketsTable.userId, ALL_USERS));
+      expect(both).toHaveLength(2);
 
-    // The ownership-scoped read (the contract any ticket list/read path MUST
-    // use) returns only the owner's ticket.
-    const aTickets = await db
-      .select({ id: supportTicketsTable.id, userId: supportTicketsTable.userId })
-      .from(supportTicketsTable)
-      .where(eq(supportTicketsTable.userId, USER_A));
-    expect(aTickets).toHaveLength(1);
-    expect(aTickets.every((t) => t.userId === USER_A)).toBe(true);
-    expect(aTickets.map((t) => t.id)).toContain(resA.body.ticketId);
-    expect(aTickets.map((t) => t.id)).not.toContain(resB.body.ticketId);
+      // The ownership-scoped read (the contract any ticket list/read path MUST
+      // use) returns only the owner's ticket.
+      const aTickets = await db
+        .select({ id: supportTicketsTable.id, userId: supportTicketsTable.userId })
+        .from(supportTicketsTable)
+        .where(eq(supportTicketsTable.userId, USER_A));
+      expect(aTickets).toHaveLength(1);
+      expect(aTickets.every((t) => t.userId === USER_A)).toBe(true);
+      expect(aTickets.map((t) => t.id)).toContain(resA.body.ticketId);
+      expect(aTickets.map((t) => t.id)).not.toContain(resB.body.ticketId);
 
-    const bTickets = await db
-      .select({ id: supportTicketsTable.id, userId: supportTicketsTable.userId })
-      .from(supportTicketsTable)
-      .where(eq(supportTicketsTable.userId, USER_B));
-    expect(bTickets).toHaveLength(1);
-    expect(bTickets.every((t) => t.userId === USER_B)).toBe(true);
-    expect(bTickets.map((t) => t.id)).toContain(resB.body.ticketId);
-    expect(bTickets.map((t) => t.id)).not.toContain(resA.body.ticketId);
-  });
-
-  it("stamps the ticket userId from the authenticated session, not the request body", async () => {
-    const app = await buildApp();
-
-    // Act as A but try to forge ownership by passing USER_B in the body.
-    const res = await escalateAs(app, USER_A, {
-      subject: "Forged owner attempt",
-      userId: USER_B,
-      ownerId: USER_B,
+      const bTickets = await db
+        .select({ id: supportTicketsTable.id, userId: supportTicketsTable.userId })
+        .from(supportTicketsTable)
+        .where(eq(supportTicketsTable.userId, USER_B));
+      expect(bTickets).toHaveLength(1);
+      expect(bTickets.every((t) => t.userId === USER_B)).toBe(true);
+      expect(bTickets.map((t) => t.id)).toContain(resB.body.ticketId);
+      expect(bTickets.map((t) => t.id)).not.toContain(resA.body.ticketId);
     });
-    expect(res.status).toBe(201);
 
-    const [row] = await db
-      .select({ userId: supportTicketsTable.userId })
-      .from(supportTicketsTable)
-      .where(eq(supportTicketsTable.id, res.body.ticketId));
-    expect(row?.userId).toBe(USER_A);
-  });
-});
+    it("stamps the ticket userId from the authenticated session, not the request body", async () => {
+      const app = await buildApp();
 
-describe("Internal staff notes are never exposed to the requester", () => {
-  it("excludes internalNote transcript entries from GET /help/support/tickets/:id", async () => {
-    const app = await buildApp();
+      // Act as A but try to forge ownership by passing USER_B in the body.
+      const res = await escalateAs(app, USER_A, {
+        subject: "Forged owner attempt",
+        userId: USER_B,
+        ownerId: USER_B,
+      });
+      expect(res.status).toBe(201);
 
-    // Create a ticket for USER_A with a customer-visible transcript message.
-    const res = await escalateAs(app, USER_A, {
-      subject: "Ticket with internal note",
-      transcript: [{ role: "user", content: "Customer visible message" }],
+      const [row] = await db
+        .select({ userId: supportTicketsTable.userId })
+        .from(supportTicketsTable)
+        .where(eq(supportTicketsTable.id, res.body.ticketId));
+      expect(row?.userId).toBe(USER_A);
     });
-    expect(res.status).toBe(201);
-    const ticketId = res.body.ticketId as number;
+  },
+);
 
-    // Simulate an admin adding an internal staff-only note straight into the
-    // transcript (mirrors POST /admin/support-tickets/:id/note).
-    await db
-      .update(supportTicketsTable)
-      .set({
-        transcript: [
-          { role: "user", content: "Customer visible message" },
-          {
-            role: "assistant",
-            content: "SECRET internal note — duplicate of #42",
-            internalNote: true,
-            authorId: "admin-user",
-            at: new Date().toISOString(),
-          },
-        ],
-      })
-      .where(eq(supportTicketsTable.id, ticketId));
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "Internal staff notes are never exposed to the requester",
+  () => {
+    it("excludes internalNote transcript entries from GET /help/support/tickets/:id", async () => {
+      const app = await buildApp();
 
-    // The requester reads their own ticket — the internal note must not appear.
-    actAs(USER_A);
-    const detail = await request(app).get(`/help/support/tickets/${ticketId}`);
-    expect(detail.status).toBe(200);
-    const transcript = detail.body.transcript as { role: string; content: string }[];
-    expect(transcript).toHaveLength(1);
-    expect(transcript[0]?.content).toBe("Customer visible message");
-    expect(JSON.stringify(detail.body)).not.toContain("SECRET internal note");
-  });
-});
+      // Create a ticket for USER_A with a customer-visible transcript message.
+      const res = await escalateAs(app, USER_A, {
+        subject: "Ticket with internal note",
+        transcript: [{ role: "user", content: "Customer visible message" }],
+      });
+      expect(res.status).toBe(201);
+      const ticketId = res.body.ticketId as number;
 
-describe("Escalation drops a cross-user projectId", () => {
-  it("drops a projectId the requesting user does not own", async () => {
-    const app = await buildApp();
+      // Simulate an admin adding an internal staff-only note straight into the
+      // transcript (mirrors POST /admin/support-tickets/:id/note).
+      await db
+        .update(supportTicketsTable)
+        .set({
+          transcript: [
+            { role: "user", content: "Customer visible message" },
+            {
+              role: "assistant",
+              content: "SECRET internal note — duplicate of #42",
+              internalNote: true,
+              authorId: "admin-user",
+              at: new Date().toISOString(),
+            },
+          ],
+        })
+        .where(eq(supportTicketsTable.id, ticketId));
 
-    // USER_A escalates referencing USER_B's project — it must be dropped.
-    const res = await escalateAs(app, USER_A, {
-      subject: "Reference foreign project",
-      projectId: projectB,
+      // The requester reads their own ticket — the internal note must not appear.
+      actAs(USER_A);
+      const detail = await request(app).get(`/help/support/tickets/${ticketId}`);
+      expect(detail.status).toBe(200);
+      const transcript = detail.body.transcript as { role: string; content: string }[];
+      expect(transcript).toHaveLength(1);
+      expect(transcript[0]?.content).toBe("Customer visible message");
+      expect(JSON.stringify(detail.body)).not.toContain("SECRET internal note");
     });
-    expect(res.status).toBe(201);
+  },
+);
 
-    const [row] = await db
-      .select({ projectId: supportTicketsTable.projectId })
-      .from(supportTicketsTable)
-      .where(eq(supportTicketsTable.id, res.body.ticketId));
-    expect(row?.projectId).toBeNull();
-  });
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "Escalation drops a cross-user projectId",
+  () => {
+    it("drops a projectId the requesting user does not own", async () => {
+      const app = await buildApp();
 
-  it("keeps a projectId the requesting user owns", async () => {
-    const app = await buildApp();
+      // USER_A escalates referencing USER_B's project — it must be dropped.
+      const res = await escalateAs(app, USER_A, {
+        subject: "Reference foreign project",
+        projectId: projectB,
+      });
+      expect(res.status).toBe(201);
 
-    const res = await escalateAs(app, USER_A, {
-      subject: "Reference own project",
-      projectId: projectA,
+      const [row] = await db
+        .select({ projectId: supportTicketsTable.projectId })
+        .from(supportTicketsTable)
+        .where(eq(supportTicketsTable.id, res.body.ticketId));
+      expect(row?.projectId).toBeNull();
     });
-    expect(res.status).toBe(201);
 
-    const [row] = await db
-      .select({ projectId: supportTicketsTable.projectId })
-      .from(supportTicketsTable)
-      .where(
-        and(eq(supportTicketsTable.id, res.body.ticketId), eq(supportTicketsTable.userId, USER_A)),
-      );
-    expect(row?.projectId).toBe(projectA);
-  });
-});
+    it("keeps a projectId the requesting user owns", async () => {
+      const app = await buildApp();
+
+      const res = await escalateAs(app, USER_A, {
+        subject: "Reference own project",
+        projectId: projectA,
+      });
+      expect(res.status).toBe(201);
+
+      const [row] = await db
+        .select({ projectId: supportTicketsTable.projectId })
+        .from(supportTicketsTable)
+        .where(
+          and(
+            eq(supportTicketsTable.id, res.body.ticketId),
+            eq(supportTicketsTable.userId, USER_A),
+          ),
+        );
+      expect(row?.projectId).toBe(projectA);
+    });
+  },
+);

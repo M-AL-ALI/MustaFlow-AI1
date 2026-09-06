@@ -52,6 +52,7 @@ function buildAppAs(userId: string | null) {
 }
 
 beforeAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   await db.insert(userRolesTable).values({
     userId: ADMIN_USER,
     role: "support",
@@ -69,6 +70,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   await db.delete(supportTicketsTable).where(inArray(supportTicketsTable.userId, [TICKET_OWNER]));
   await db
     .delete(adminAccessReceiptsTable)
@@ -78,64 +80,67 @@ afterAll(async () => {
   await db.delete(userRolesTable).where(eq(userRolesTable.userId, ADMIN_USER));
 });
 
-describe("POST /api/admin/support-tickets/:id/note", () => {
-  it("makes the console indistinguishable from an unknown route to an unauthenticated caller", async () => {
-    const app = await buildAppAs(null);
-    const res = await request(app)
-      .post(`/api/admin/support-tickets/${ticketId}/note`)
-      .send({ note: "secret" });
-    expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "Not found" });
-  });
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "POST /api/admin/support-tickets/:id/note",
+  () => {
+    it("makes the console indistinguishable from an unknown route to an unauthenticated caller", async () => {
+      const app = await buildAppAs(null);
+      const res = await request(app)
+        .post(`/api/admin/support-tickets/${ticketId}/note`)
+        .send({ note: "secret" });
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Not found" });
+    });
 
-  it("makes the console indistinguishable from an unknown route to nonstaff", async () => {
-    const app = await buildAppAs(NON_ADMIN_USER);
-    const res = await request(app)
-      .post(`/api/admin/support-tickets/${ticketId}/note`)
-      .send({ note: "secret" });
-    expect(res.status).toBe(404);
-    expect(res.body).toEqual({ error: "Not found" });
-  });
+    it("makes the console indistinguishable from an unknown route to nonstaff", async () => {
+      const app = await buildAppAs(NON_ADMIN_USER);
+      const res = await request(app)
+        .post(`/api/admin/support-tickets/${ticketId}/note`)
+        .send({ note: "secret" });
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ error: "Not found" });
+    });
 
-  it("rejects an empty note with 400", async () => {
-    const app = await buildAppAs(ADMIN_USER);
-    const res = await request(app)
-      .post(`/api/admin/support-tickets/${ticketId}/note`)
-      .send({ note: "   " });
-    expect(res.status).toBe(400);
-  });
+    it("rejects an empty note with 400", async () => {
+      const app = await buildAppAs(ADMIN_USER);
+      const res = await request(app)
+        .post(`/api/admin/support-tickets/${ticketId}/note`)
+        .send({ note: "   " });
+      expect(res.status).toBe(400);
+    });
 
-  it("returns 404 for a missing ticket", async () => {
-    const app = await buildAppAs(ADMIN_USER);
-    const res = await request(app)
-      .post(`/api/admin/support-tickets/99999999/note`)
-      .send({ note: "hello" });
-    expect(res.status).toBe(404);
-  });
+    it("returns 404 for a missing ticket", async () => {
+      const app = await buildAppAs(ADMIN_USER);
+      const res = await request(app)
+        .post(`/api/admin/support-tickets/99999999/note`)
+        .send({ note: "hello" });
+      expect(res.status).toBe(404);
+    });
 
-  it("persists an internal note and never sends an email", async () => {
-    sendEmailSpy.mockClear();
-    const app = await buildAppAs(ADMIN_USER);
-    const res = await request(app)
-      .post(`/api/admin/support-tickets/${ticketId}/note`)
-      .send({ note: "waiting on engineering" });
+    it("persists an internal note and never sends an email", async () => {
+      sendEmailSpy.mockClear();
+      const app = await buildAppAs(ADMIN_USER);
+      const res = await request(app)
+        .post(`/api/admin/support-tickets/${ticketId}/note`)
+        .send({ note: "waiting on engineering" });
 
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
-    expect(res.body.message.internalNote).toBe(true);
-    expect(res.body.message.authorId).toBe(ADMIN_USER);
-    expect(res.body.message.content).toBe("waiting on engineering");
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.message.internalNote).toBe(true);
+      expect(res.body.message.authorId).toBe(ADMIN_USER);
+      expect(res.body.message.content).toBe("waiting on engineering");
 
-    // Adding a note must NOT email the requester.
-    expect(sendEmailSpy).not.toHaveBeenCalled();
+      // Adding a note must NOT email the requester.
+      expect(sendEmailSpy).not.toHaveBeenCalled();
 
-    // Persisted in the transcript with the internalNote flag.
-    const [row] = await db
-      .select({ transcript: supportTicketsTable.transcript })
-      .from(supportTicketsTable)
-      .where(eq(supportTicketsTable.id, ticketId));
-    const transcript = row!.transcript as { content: string; internalNote?: boolean }[];
-    const note = transcript.find((m) => m.internalNote === true);
-    expect(note?.content).toBe("waiting on engineering");
-  });
-});
+      // Persisted in the transcript with the internalNote flag.
+      const [row] = await db
+        .select({ transcript: supportTicketsTable.transcript })
+        .from(supportTicketsTable)
+        .where(eq(supportTicketsTable.id, ticketId));
+      const transcript = row!.transcript as { content: string; internalNote?: boolean }[];
+      const note = transcript.find((m) => m.internalNote === true);
+      expect(note?.content).toBe("waiting on engineering");
+    });
+  },
+);

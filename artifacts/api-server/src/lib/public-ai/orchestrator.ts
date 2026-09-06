@@ -1094,8 +1094,8 @@ const MEMORY_SAVE_EXPLICIT_PATTERNS: RegExp[] = [
   /\bfor\s+future\s+reference\b/i,
 ];
 
-// Implicit durable facts the user stated in passing. Worth offering to save,
-// but only as a LOW-confidence suggestion — never auto-saved.
+// Implicit durable facts the user stated in passing. Reliably first-person,
+// plainly stated facts may be high-confidence; weaker matches remain low.
 const MEMORY_SAVE_IMPLICIT_PATTERNS: RegExp[] = [
   /\bmy\s+(?:name|company|business|product|preference|budget|timezone|time\s+zone|stack|role|job|title)\s+is\b/i,
   /\bi\s+(?:prefer|always|usually)\b/i,
@@ -1171,10 +1171,9 @@ export interface MemorySaveCandidate {
   /** A short, declarative fact extracted from the user's message. */
   fact: string;
   /**
-   * "high" when the user used explicit imperative phrasing ("remember that…",
-   * "don't forget…"), making this eligible for opt-in auto-save. "low" for
-   * facts merely stated in passing — surfaced as a suggestion only. A fact
-   * flagged `sensitive` is always forced to "low" so it is never auto-saved.
+   * "high" when the user explicitly requests a save or states a durable,
+   * first-person fact plainly enough to avoid inference. "low" is used for
+   * weaker matches and every fact flagged `sensitive`, preventing auto-save.
    */
   confidence: "high" | "low";
   /**

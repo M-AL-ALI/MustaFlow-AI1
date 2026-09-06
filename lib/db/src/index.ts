@@ -4,7 +4,17 @@ import * as schema from "./schema";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
+// Unit tests import schema-bearing modules even when no database is available.
+// Give Vitest a non-routable pool target without populating DATABASE_URL, so
+// database integration suites can still use its absence as their skip signal.
+// Production remains fail-closed because VITEST is set only by the test runner.
+const databaseUrl =
+  process.env.DATABASE_URL ??
+  (process.env.VITEST === "true"
+    ? "postgresql://vitest:vitest@127.0.0.1:1/nabuflow_vitest"
+    : undefined);
+
+if (!databaseUrl) {
   throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
 }
 
@@ -17,7 +27,7 @@ function resolvePoolMax(): number {
 }
 
 export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: databaseUrl,
   // Explicit pool ceiling (matches pg's default of 10) so behavior is predictable.
   max: resolvePoolMax(),
   // Keep idle clients around a little longer than pg's 10s default; combined with

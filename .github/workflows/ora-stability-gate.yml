@@ -28,7 +28,7 @@ jobs:
         # columns need the vector extension.
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_DB: mustaflow_gate
+          POSTGRES_DB: ora_gate_disposable_0123456789abcdef
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         options: >-
@@ -40,7 +40,8 @@ jobs:
           - 5432:5432
 
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mustaflow_gate
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ora_gate_disposable_0123456789abcdef
+      ORA_STABILITY_GATE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/ora_gate_disposable_0123456789abcdef
 
     steps:
       - name: Checkout
@@ -64,7 +65,7 @@ jobs:
 
       - name: Enable pgvector extension
         run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d mustaflow_gate \
+          PGPASSWORD=postgres psql -h localhost -U postgres -d ora_gate_disposable_0123456789abcdef \
             -c 'CREATE EXTENSION IF NOT EXISTS vector;'
 
       # Fresh-DB bootstrap ordering: the first push creates all tables but

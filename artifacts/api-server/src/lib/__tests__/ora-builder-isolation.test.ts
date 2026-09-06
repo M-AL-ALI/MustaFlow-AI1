@@ -103,225 +103,230 @@ async function seedKnowledgeRow(values: Partial<typeof knowledgeEntriesTable.$in
   return row!.id;
 }
 
-beforeAll(async () => {
-  const workspace = await createOwnedWorkspace({
-    ownerUserId: TEST_USER,
-    name: `Isolation workspace ${TEST_USER}`,
-    type: "personal",
-  });
-  workspaceId = workspace.id;
-  // A project owned by the test user — loadKnowledgeContext pulls the owner's
-  // user-scope entries via the project's ownerId.
-  const [project] = await db
-    .insert(projectsTable)
-    .values({ name: `iso-test-${TEST_USER}`, ownerId: TEST_USER, workspaceId })
-    .returning({ id: projectsTable.id });
-  projectId = project!.id;
-});
-
-afterAll(async () => {
-  // Clean up everything this suite created.
-  await db.delete(knowledgeEntriesTable).where(eq(knowledgeEntriesTable.userId, TEST_USER));
-  await db.delete(projectsTable).where(eq(projectsTable.ownerId, TEST_USER));
-  await db.delete(workspacesTable).where(eq(workspacesTable.id, workspaceId));
-});
-
-describe("Ora ↔ Builder memory isolation", () => {
-  it("loadKnowledgeContext never includes the Ora row but does include the Builder row", async () => {
-    await seedKnowledgeRow({
-      title: "Ora memory",
-      content: ORA_MARKER,
-      origin: "ora",
-    });
-    const builderId = await seedKnowledgeRow({
-      title: "Builder lesson",
-      content: BUILDER_MARKER,
-      origin: "builder",
-    });
-
-    // No userPrompt → skips the embedding/TF-IDF ranking, exercises the plain
-    // eligibility query + reverse-leak guard directly.
-    const { context, applied } = await loadKnowledgeContext(projectId);
-
-    expect(context).toContain(BUILDER_MARKER);
-    expect(context).not.toContain(ORA_MARKER);
-    expect(applied.some((a) => a.title === "Builder lesson")).toBe(true);
-    expect(applied.some((a) => a.title === "Ora memory")).toBe(false);
-
-    await loadKnowledgeContext(projectId);
-    const [builderAfterRepeatedReads] = await db
-      .select({ usageCount: knowledgeEntriesTable.usageCount })
-      .from(knowledgeEntriesTable)
-      .where(eq(knowledgeEntriesTable.id, builderId));
-    expect(builderAfterRepeatedReads!.usageCount).toBe(0);
-  });
-
-  it("GET /api/knowledge never returns the Ora row", async () => {
-    const res = await request(knowledgeApp).get("/api/knowledge").query({ scope: "user" });
-    expect(res.status).toBe(200);
-    const rows = res.body as Array<{ content: string }>;
-    expect(rows.some((r) => r.content.includes(BUILDER_MARKER))).toBe(true);
-    expect(rows.some((r) => r.content.includes(ORA_MARKER))).toBe(false);
-  });
-
-  it("classifies a user-created project memory and never exposes the actor identity", async () => {
-    const created = await request(knowledgeApp)
-      .post("/api/knowledge")
-      .send({
-        projectId,
-        title: "Provenance statement",
-        content: `The user explicitly chose ${TEST_USER}`,
-        type: "provenance-test",
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "Ora ↔ Builder memory isolation database integration",
+  () => {
+    beforeAll(async () => {
+      const workspace = await createOwnedWorkspace({
+        ownerUserId: TEST_USER,
+        name: `Isolation workspace ${TEST_USER}`,
+        type: "personal",
       });
-    expect(created.status).toBe(201);
-    expect(created.body.provenance).toMatchObject({
-      semantics: "zero-memory-provenance-v1",
-      status: "verified",
-      claimKind: "stated",
-      label: "You said",
-    });
-    expect(JSON.stringify(created.body.provenance)).not.toContain(TEST_USER);
-
-    const entryId = created.body.id as number;
-    const [receipt] = await db
-      .select({
-        claimKind: knowledgeProvenanceEventsTable.claimKind,
-        actorUserId: knowledgeProvenanceEventsTable.actorUserId,
-      })
-      .from(knowledgeProvenanceEventsTable)
-      .where(eq(knowledgeProvenanceEventsTable.knowledgeEntryId, entryId));
-    expect(receipt).toEqual({ claimKind: "stated", actorUserId: TEST_USER });
-  });
-
-  it("rolls project memory back with the app version and keeps the abandoned branch visible as history", async () => {
-    const [versionOne] = await db
-      .insert(projectVersionsTable)
-      .values({ projectId, label: "Memory baseline", filesSnapshot: [] })
-      .returning({ id: projectVersionsTable.id });
-    expect(versionOne?.id).toBeTypeOf("number");
-
-    const activeMarker = `ACTIVE_VERSION_MEMORY_${TEST_USER}`;
-    const abandonedMarker = `ABANDONED_VERSION_MEMORY_${TEST_USER}`;
-    const baselineMemory = await writeKnowledge({
-      projectId,
-      userId: TEST_USER,
-      title: "Baseline version memory",
-      content: activeMarker,
-      type: "z-k-version-memory",
-      claimKind: "stated",
-    });
-    const [versionTwo] = await db
-      .insert(projectVersionsTable)
-      .values({
-        projectId,
-        parentVersionId: versionOne!.id,
-        label: "Abandoned branch",
-        filesSnapshot: [],
-      })
-      .returning({ id: projectVersionsTable.id });
-    const abandonedMemory = await writeKnowledge({
-      projectId,
-      userId: TEST_USER,
-      title: "Abandoned branch memory",
-      content: abandonedMarker,
-      type: "z-k-version-memory",
-      claimKind: "stated",
-    });
-    const [rollbackVersion] = await db
-      .insert(projectVersionsTable)
-      .values({
-        projectId,
-        parentVersionId: versionOne!.id,
-        label: "Restored baseline",
-        filesSnapshot: [],
-      })
-      .returning({ id: projectVersionsTable.id });
-    expect(versionTwo?.id).toBeTypeOf("number");
-    expect(rollbackVersion?.id).toBeTypeOf("number");
-
-    const { context } = await loadKnowledgeContext(projectId);
-    expect(context).toContain(activeMarker);
-    expect(context).not.toContain(abandonedMarker);
-
-    const rows = await request(knowledgeApp).get("/api/knowledge").query({ projectId, limit: 200 });
-    expect(rows.status).toBe(200);
-    const baselineRow = rows.body.find(
-      (entry: { id: number }) => entry.id === baselineMemory?.entryId,
-    );
-    const abandonedRow = rows.body.find(
-      (entry: { id: number }) => entry.id === abandonedMemory?.entryId,
-    );
-    expect(baselineRow?.versionState).toMatchObject({
-      state: "active",
-      currentVersionId: rollbackVersion!.id,
-    });
-    expect(abandonedRow?.versionState).toMatchObject({
-      state: "historical",
-      currentVersionId: rollbackVersion!.id,
-    });
-  });
-
-  it("writeKnowledge dedup never merges a Builder write into the Ora row", async () => {
-    // Seed an Ora row that carries an embedding and content near-identical to
-    // the upcoming Builder write. With cosineSimilarity mocked to 0.99 this row
-    // WOULD be a merge target if the isolation guard were removed.
-    const oraId = await seedKnowledgeRow({
-      title: "Ora memory to protect",
-      content: ORA_MARKER,
-      origin: "ora",
-      embedding: FIXED_VECTOR,
+      workspaceId = workspace.id;
+      // A project owned by the test user — loadKnowledgeContext pulls the owner's
+      // user-scope entries via the project's ownerId.
+      const [project] = await db
+        .insert(projectsTable)
+        .values({ name: `iso-test-${TEST_USER}`, ownerId: TEST_USER, workspaceId })
+        .returning({ id: projectsTable.id });
+      projectId = project!.id;
     });
 
-    // Builder write via the user-scope (projectId-less) dedup branch.
-    await writeKnowledge({
-      title: "Ora memory to protect",
-      content: ORA_MARKER,
-      type: "note",
-      userId: TEST_USER,
+    afterAll(async () => {
+      // Clean up everything this suite created.
+      await db.delete(knowledgeEntriesTable).where(eq(knowledgeEntriesTable.userId, TEST_USER));
+      await db.delete(projectsTable).where(eq(projectsTable.ownerId, TEST_USER));
+      await db.delete(workspacesTable).where(eq(workspacesTable.id, workspaceId));
     });
 
-    // The Ora row must be untouched: content unchanged, never reinforced.
-    const [oraAfter] = await db
-      .select({
-        content: knowledgeEntriesTable.content,
-        reinforcedCount: knowledgeEntriesTable.reinforcedCount,
-      })
-      .from(knowledgeEntriesTable)
-      .where(eq(knowledgeEntriesTable.id, oraId));
-    expect(oraAfter!.content).toBe(ORA_MARKER);
-    expect(oraAfter!.reinforcedCount).toBe(0);
+    describe("runtime read/write isolation", () => {
+      it("loadKnowledgeContext never includes the Ora row but does include the Builder row", async () => {
+        await seedKnowledgeRow({
+          title: "Ora memory",
+          content: ORA_MARKER,
+          origin: "ora",
+        });
+        const builderId = await seedKnowledgeRow({
+          title: "Builder lesson",
+          content: BUILDER_MARKER,
+          origin: "builder",
+        });
 
-    // The Builder write must have landed as its own origin="builder" row.
-    const builderRows = await db
-      .select({ id: knowledgeEntriesTable.id })
-      .from(knowledgeEntriesTable)
-      .where(
-        and(
-          eq(knowledgeEntriesTable.userId, TEST_USER),
-          eq(knowledgeEntriesTable.origin, "builder"),
-          eq(knowledgeEntriesTable.content, ORA_MARKER),
-        ),
-      );
-    expect(builderRows.length).toBe(1);
-  });
+        // No userPrompt → skips the embedding/TF-IDF ranking, exercises the plain
+        // eligibility query + reverse-leak guard directly.
+        const { context, applied } = await loadKnowledgeContext(projectId);
 
-  it("GET /api/ora/memories returns only the Ora row", async () => {
-    const res = await request(oraApp).get("/api/ora/memories");
-    expect(res.status).toBe(200);
-    const memories = (res.body as { memories: Array<{ content: string }> }).memories;
-    // Every returned row is an Ora memory…
-    expect(memories.length).toBeGreaterThan(0);
-    expect(memories.every((m) => m.content.includes(ORA_MARKER))).toBe(true);
-    // …and the Builder lesson is never present.
-    expect(memories.some((m) => m.content.includes(BUILDER_MARKER))).toBe(false);
-  });
-});
+        expect(context).toContain(BUILDER_MARKER);
+        expect(context).not.toContain(ORA_MARKER);
+        expect(applied.some((a) => a.title === "Builder lesson")).toBe(true);
+        expect(applied.some((a) => a.title === "Ora memory")).toBe(false);
 
-describe("recover-ora-memories migration", () => {
-  // Mirrors scripts/src/migrate-recover-ora-memories.ts exactly. Keep in sync
-  // with that script — both re-tag misfiled Ora saves and must leave legitimate
-  // Builder user-scope data (style_memory) untouched.
-  const RECOVERY_SQL = `UPDATE knowledge_entries
+        await loadKnowledgeContext(projectId);
+        const [builderAfterRepeatedReads] = await db
+          .select({ usageCount: knowledgeEntriesTable.usageCount })
+          .from(knowledgeEntriesTable)
+          .where(eq(knowledgeEntriesTable.id, builderId));
+        expect(builderAfterRepeatedReads!.usageCount).toBe(0);
+      });
+
+      it("GET /api/knowledge never returns the Ora row", async () => {
+        const res = await request(knowledgeApp).get("/api/knowledge").query({ scope: "user" });
+        expect(res.status).toBe(200);
+        const rows = res.body as Array<{ content: string }>;
+        expect(rows.some((r) => r.content.includes(BUILDER_MARKER))).toBe(true);
+        expect(rows.some((r) => r.content.includes(ORA_MARKER))).toBe(false);
+      });
+
+      it("classifies a user-created project memory and never exposes the actor identity", async () => {
+        const created = await request(knowledgeApp)
+          .post("/api/knowledge")
+          .send({
+            projectId,
+            title: "Provenance statement",
+            content: `The user explicitly chose ${TEST_USER}`,
+            type: "provenance-test",
+          });
+        expect(created.status).toBe(201);
+        expect(created.body.provenance).toMatchObject({
+          semantics: "zero-memory-provenance-v1",
+          status: "verified",
+          claimKind: "stated",
+          label: "You said",
+        });
+        expect(JSON.stringify(created.body.provenance)).not.toContain(TEST_USER);
+
+        const entryId = created.body.id as number;
+        const [receipt] = await db
+          .select({
+            claimKind: knowledgeProvenanceEventsTable.claimKind,
+            actorUserId: knowledgeProvenanceEventsTable.actorUserId,
+          })
+          .from(knowledgeProvenanceEventsTable)
+          .where(eq(knowledgeProvenanceEventsTable.knowledgeEntryId, entryId));
+        expect(receipt).toEqual({ claimKind: "stated", actorUserId: TEST_USER });
+      });
+
+      it("rolls project memory back with the app version and keeps the abandoned branch visible as history", async () => {
+        const [versionOne] = await db
+          .insert(projectVersionsTable)
+          .values({ projectId, label: "Memory baseline", filesSnapshot: [] })
+          .returning({ id: projectVersionsTable.id });
+        expect(versionOne?.id).toBeTypeOf("number");
+
+        const activeMarker = `ACTIVE_VERSION_MEMORY_${TEST_USER}`;
+        const abandonedMarker = `ABANDONED_VERSION_MEMORY_${TEST_USER}`;
+        const baselineMemory = await writeKnowledge({
+          projectId,
+          userId: TEST_USER,
+          title: "Baseline version memory",
+          content: activeMarker,
+          type: "z-k-version-memory",
+          claimKind: "stated",
+        });
+        const [versionTwo] = await db
+          .insert(projectVersionsTable)
+          .values({
+            projectId,
+            parentVersionId: versionOne!.id,
+            label: "Abandoned branch",
+            filesSnapshot: [],
+          })
+          .returning({ id: projectVersionsTable.id });
+        const abandonedMemory = await writeKnowledge({
+          projectId,
+          userId: TEST_USER,
+          title: "Abandoned branch memory",
+          content: abandonedMarker,
+          type: "z-k-version-memory",
+          claimKind: "stated",
+        });
+        const [rollbackVersion] = await db
+          .insert(projectVersionsTable)
+          .values({
+            projectId,
+            parentVersionId: versionOne!.id,
+            label: "Restored baseline",
+            filesSnapshot: [],
+          })
+          .returning({ id: projectVersionsTable.id });
+        expect(versionTwo?.id).toBeTypeOf("number");
+        expect(rollbackVersion?.id).toBeTypeOf("number");
+
+        const { context } = await loadKnowledgeContext(projectId);
+        expect(context).toContain(activeMarker);
+        expect(context).not.toContain(abandonedMarker);
+
+        const rows = await request(knowledgeApp)
+          .get("/api/knowledge")
+          .query({ projectId, limit: 200 });
+        expect(rows.status).toBe(200);
+        const baselineRow = rows.body.find(
+          (entry: { id: number }) => entry.id === baselineMemory?.entryId,
+        );
+        const abandonedRow = rows.body.find(
+          (entry: { id: number }) => entry.id === abandonedMemory?.entryId,
+        );
+        expect(baselineRow?.versionState).toMatchObject({
+          state: "active",
+          currentVersionId: rollbackVersion!.id,
+        });
+        expect(abandonedRow?.versionState).toMatchObject({
+          state: "historical",
+          currentVersionId: rollbackVersion!.id,
+        });
+      });
+
+      it("writeKnowledge dedup never merges a Builder write into the Ora row", async () => {
+        // Seed an Ora row that carries an embedding and content near-identical to
+        // the upcoming Builder write. With cosineSimilarity mocked to 0.99 this row
+        // WOULD be a merge target if the isolation guard were removed.
+        const oraId = await seedKnowledgeRow({
+          title: "Ora memory to protect",
+          content: ORA_MARKER,
+          origin: "ora",
+          embedding: FIXED_VECTOR,
+        });
+
+        // Builder write via the user-scope (projectId-less) dedup branch.
+        await writeKnowledge({
+          title: "Ora memory to protect",
+          content: ORA_MARKER,
+          type: "note",
+          userId: TEST_USER,
+        });
+
+        // The Ora row must be untouched: content unchanged, never reinforced.
+        const [oraAfter] = await db
+          .select({
+            content: knowledgeEntriesTable.content,
+            reinforcedCount: knowledgeEntriesTable.reinforcedCount,
+          })
+          .from(knowledgeEntriesTable)
+          .where(eq(knowledgeEntriesTable.id, oraId));
+        expect(oraAfter!.content).toBe(ORA_MARKER);
+        expect(oraAfter!.reinforcedCount).toBe(0);
+
+        // The Builder write must have landed as its own origin="builder" row.
+        const builderRows = await db
+          .select({ id: knowledgeEntriesTable.id })
+          .from(knowledgeEntriesTable)
+          .where(
+            and(
+              eq(knowledgeEntriesTable.userId, TEST_USER),
+              eq(knowledgeEntriesTable.origin, "builder"),
+              eq(knowledgeEntriesTable.content, ORA_MARKER),
+            ),
+          );
+        expect(builderRows.length).toBe(1);
+      });
+
+      it("GET /api/ora/memories returns only the Ora row", async () => {
+        const res = await request(oraApp).get("/api/ora/memories");
+        expect(res.status).toBe(200);
+        const memories = (res.body as { memories: Array<{ content: string }> }).memories;
+        // Every returned row is an Ora memory…
+        expect(memories.length).toBeGreaterThan(0);
+        expect(memories.every((m) => m.content.includes(ORA_MARKER))).toBe(true);
+        // …and the Builder lesson is never present.
+        expect(memories.some((m) => m.content.includes(BUILDER_MARKER))).toBe(false);
+      });
+    });
+
+    describe("recover-ora-memories migration", () => {
+      // Mirrors scripts/src/migrate-recover-ora-memories.ts exactly. Keep in sync
+      // with that script — both re-tag misfiled Ora saves and must leave legitimate
+      // Builder user-scope data (style_memory) untouched.
+      const RECOVERY_SQL = `UPDATE knowledge_entries
           SET origin = 'ora'
         WHERE scope = 'user'
           AND origin = 'builder'
@@ -330,32 +335,34 @@ describe("recover-ora-memories migration", () => {
           AND project_id IS NULL
           AND user_id = $1`;
 
-  it("re-tags a misfiled (scope=user, origin=builder, type=note, project_id NULL) row to ora and leaves style_memory untouched", async () => {
-    const misfiledId = await seedKnowledgeRow({
-      title: "Misfiled Ora save",
-      content: `MISFILED_${TEST_USER}`,
-      type: "note",
-      origin: "builder",
+      it("re-tags a misfiled (scope=user, origin=builder, type=note, project_id NULL) row to ora and leaves style_memory untouched", async () => {
+        const misfiledId = await seedKnowledgeRow({
+          title: "Misfiled Ora save",
+          content: `MISFILED_${TEST_USER}`,
+          type: "note",
+          origin: "builder",
+        });
+        const styleId = await seedKnowledgeRow({
+          title: "Inferred style",
+          content: `STYLE_${TEST_USER}`,
+          type: "style_memory",
+          origin: "builder",
+        });
+
+        await pool.query(RECOVERY_SQL, [TEST_USER]);
+
+        const [misfiledAfter] = await db
+          .select({ origin: knowledgeEntriesTable.origin })
+          .from(knowledgeEntriesTable)
+          .where(eq(knowledgeEntriesTable.id, misfiledId));
+        expect(misfiledAfter!.origin).toBe("ora");
+
+        const [styleAfter] = await db
+          .select({ origin: knowledgeEntriesTable.origin })
+          .from(knowledgeEntriesTable)
+          .where(eq(knowledgeEntriesTable.id, styleId));
+        expect(styleAfter!.origin).toBe("builder");
+      });
     });
-    const styleId = await seedKnowledgeRow({
-      title: "Inferred style",
-      content: `STYLE_${TEST_USER}`,
-      type: "style_memory",
-      origin: "builder",
-    });
-
-    await pool.query(RECOVERY_SQL, [TEST_USER]);
-
-    const [misfiledAfter] = await db
-      .select({ origin: knowledgeEntriesTable.origin })
-      .from(knowledgeEntriesTable)
-      .where(eq(knowledgeEntriesTable.id, misfiledId));
-    expect(misfiledAfter!.origin).toBe("ora");
-
-    const [styleAfter] = await db
-      .select({ origin: knowledgeEntriesTable.origin })
-      .from(knowledgeEntriesTable)
-      .where(eq(knowledgeEntriesTable.id, styleId));
-    expect(styleAfter!.origin).toBe("builder");
-  });
-});
+  },
+);

@@ -89,6 +89,7 @@ async function cleanup() {
 }
 
 beforeAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   await cleanup();
 
   // ── USER_A: a precise, known set of rows (the counts under test) ──────────
@@ -176,6 +177,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   await cleanup();
 });
 
@@ -183,109 +185,127 @@ beforeEach(() => {
   vi.mocked(isBillingPrivileged).mockResolvedValue(false);
 });
 
-describe("auth wall", () => {
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")("auth wall", () => {
   it("returns 401 when no user is resolved (real attachUser)", async () => {
     const res = await request(appUnauthenticated()).get("/ora/account-consistency");
     expect(res.status).toBe(401);
   });
 });
 
-describe("identity is privacy-safe", () => {
-  it("exposes a stable sha256 fingerprint and never the raw user id", async () => {
-    const res = await request(appAs(USER_A)).get("/ora/account-consistency");
-    expect(res.status).toBe(200);
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "identity is privacy-safe",
+  () => {
+    it("exposes a stable sha256 fingerprint and never the raw user id", async () => {
+      const res = await request(appAs(USER_A)).get("/ora/account-consistency");
+      expect(res.status).toBe(200);
 
-    const expectedHash = createHash("sha256").update(USER_A).digest("hex").slice(0, 12);
-    expect(res.body.identity.userIdHash).toBe(expectedHash);
-    expect(res.body.identity.userIdHash).toHaveLength(12);
-    expect(res.body.identity.clerkUserIdLast4).toBe(USER_A.slice(-4));
-    expect(res.body.identity.email).toBe("user@example.com");
+      const expectedHash = createHash("sha256").update(USER_A).digest("hex").slice(0, 12);
+      expect(res.body.identity.userIdHash).toBe(expectedHash);
+      expect(res.body.identity.userIdHash).toHaveLength(12);
+      expect(res.body.identity.clerkUserIdLast4).toBe(USER_A.slice(-4));
+      expect(res.body.identity.email).toBe("user@example.com");
 
-    // The raw user id must appear NOWHERE in the serialized response.
-    expect(JSON.stringify(res.body)).not.toContain(USER_A);
-  });
-
-  it("produces a different fingerprint for a different user", async () => {
-    const a = await request(appAs(USER_A)).get("/ora/account-consistency");
-    const b = await request(appAs(USER_B)).get("/ora/account-consistency");
-    expect(a.body.identity.userIdHash).not.toBe(b.body.identity.userIdHash);
-  });
-});
-
-describe("counts are owner-scoped and exclude soft-deleted / wrong-surface rows", () => {
-  it("counts only USER_A's own active rows", async () => {
-    const res = await request(appAs(USER_A)).get("/ora/account-consistency");
-    expect(res.status).toBe(200);
-    expect(res.body.counts).toEqual({
-      conversations: 2,
-      projects: 1,
-      userLevelMemories: 2,
-      projectMemories: 1,
-      assets: 1,
-      supportTickets: 1,
+      // The raw user id must appear NOWHERE in the serialized response.
+      expect(JSON.stringify(res.body)).not.toContain(USER_A);
     });
-  });
 
-  it("does not leak USER_B's rows into USER_A's snapshot", async () => {
-    const res = await request(appAs(USER_A)).get("/ora/account-consistency");
-    // USER_B has 5 conversations; USER_A must still report exactly 2.
-    expect(res.body.counts.conversations).toBe(2);
-    expect(res.body.latest.conversation?.label).not.toContain("B chat");
-  });
-});
+    it("produces a different fingerprint for a different user", async () => {
+      const a = await request(appAs(USER_A)).get("/ora/account-consistency");
+      const b = await request(appAs(USER_B)).get("/ora/account-consistency");
+      expect(a.body.identity.userIdHash).not.toBe(b.body.identity.userIdHash);
+    });
+  },
+);
 
-describe("latest rows carry labels + timestamps only (no content)", () => {
-  it("returns the caller's own most-recent conversation/project/memory summaries", async () => {
-    const res = await request(appAs(USER_A)).get("/ora/account-consistency");
-    expect(res.body.latest.conversation).toMatchObject({ label: expect.any(String) });
-    expect(typeof res.body.latest.conversation.id).toBe("number");
-    expect(res.body.latest.project?.label).toBe("A project");
-    expect(res.body.latest.memory).not.toBeNull();
-    // Latest rows expose id/label/at only — never a "content" field.
-    expect(res.body.latest.conversation).not.toHaveProperty("content");
-    expect(res.body.latest.memory).not.toHaveProperty("content");
-  });
-});
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "counts are owner-scoped and exclude soft-deleted / wrong-surface rows",
+  () => {
+    it("counts only USER_A's own active rows", async () => {
+      const res = await request(appAs(USER_A)).get("/ora/account-consistency");
+      expect(res.status).toBe(200);
+      expect(res.body.counts).toEqual({
+        conversations: 2,
+        projects: 1,
+        userLevelMemories: 2,
+        projectMemories: 1,
+        assets: 1,
+        supportTickets: 1,
+      });
+    });
 
-describe("billing tier and chat tier always agree", () => {
-  it("free user: billingTier == chatSession.tier == 'free'", async () => {
-    const res = await request(appAs(USER_A)).get("/ora/account-consistency");
-    expect(res.body.billing.billingTier).toBe("free");
-    expect(res.body.billing.sourceTier).toBe("free");
-    expect(res.body.chatSession.tier).toBe("free");
-    expect(res.body.chatSession.isPaid).toBe(false);
-    expect(res.body.billing.billingTier).toBe(res.body.chatSession.tier);
-  });
+    it("does not leak USER_B's rows into USER_A's snapshot", async () => {
+      const res = await request(appAs(USER_A)).get("/ora/account-consistency");
+      // USER_B has 5 conversations; USER_A must still report exactly 2.
+      expect(res.body.counts.conversations).toBe(2);
+      expect(res.body.latest.conversation?.label).not.toContain("B chat");
+    });
+  },
+);
 
-  it("paid user: reflects the active subscription on both tiers", async () => {
-    const res = await request(appAs(USER_PAID)).get("/ora/account-consistency");
-    expect(res.body.billing.sourceTier).toBe("wave");
-    expect(res.body.billing.billingTier).toBe("wave");
-    expect(res.body.billing.status).toBe("active");
-    expect(res.body.chatSession.tier).toBe("wave");
-    expect(res.body.chatSession.isPaid).toBe(true);
-    expect(typeof res.body.billing.currentPeriodEnd).toBe("string");
-    expect(res.body.billing.billingTier).toBe(res.body.chatSession.tier);
-  });
-});
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "latest rows carry labels + timestamps only (no content)",
+  () => {
+    it("returns the caller's own most-recent conversation/project/memory summaries", async () => {
+      const res = await request(appAs(USER_A)).get("/ora/account-consistency");
+      expect(res.body.latest.conversation).toMatchObject({ label: expect.any(String) });
+      expect(typeof res.body.latest.conversation.id).toBe("number");
+      expect(res.body.latest.project?.label).toBe("A project");
+      expect(res.body.latest.memory).not.toBeNull();
+      // Latest rows expose id/label/at only — never a "content" field.
+      expect(res.body.latest.conversation).not.toHaveProperty("content");
+      expect(res.body.latest.memory).not.toHaveProperty("content");
+    });
+  },
+);
 
-describe("superuser fallback raises the effective tier", () => {
-  it("a superuser with no paid subscription resolves to the superuser tier", async () => {
-    vi.mocked(isBillingPrivileged).mockResolvedValue(true);
-    const res = await request(appAs(USER_SUPER)).get("/ora/account-consistency");
-    expect(res.body.billing.isBillingPrivileged).toBe(true);
-    expect(res.body.billing.sourceTier).toBe("free");
-    expect(res.body.billing.billingTier).toBe("core");
-    expect(res.body.chatSession.tier).toBe("core");
-    expect(res.body.billing.billingTier).toBe(res.body.chatSession.tier);
-  });
-});
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "billing tier and chat tier always agree",
+  () => {
+    it("free user: billingTier == chatSession.tier == 'free'", async () => {
+      const res = await request(appAs(USER_A)).get("/ora/account-consistency");
+      expect(res.body.billing.billingTier).toBe("free");
+      expect(res.body.billing.sourceTier).toBe("free");
+      expect(res.body.chatSession.tier).toBe("free");
+      expect(res.body.chatSession.isPaid).toBe(false);
+      expect(res.body.billing.billingTier).toBe(res.body.chatSession.tier);
+    });
 
-describe("api block echoes environment + host without a fetch surface", () => {
-  it("reports the request host and node environment", async () => {
-    const res = await request(appAs(USER_A)).get("/ora/account-consistency");
-    expect(typeof res.body.api.environment).toBe("string");
-    expect(res.body.api).toHaveProperty("host");
-    expect(typeof res.body.checkedAt).toBe("string");
-  });
-});
+    it("paid user: reflects the active subscription on both tiers", async () => {
+      const res = await request(appAs(USER_PAID)).get("/ora/account-consistency");
+      expect(res.body.billing.sourceTier).toBe("wave");
+      expect(res.body.billing.billingTier).toBe("wave");
+      expect(res.body.billing.status).toBe("active");
+      expect(res.body.chatSession.tier).toBe("wave");
+      expect(res.body.chatSession.isPaid).toBe(true);
+      expect(typeof res.body.billing.currentPeriodEnd).toBe("string");
+      expect(res.body.billing.billingTier).toBe(res.body.chatSession.tier);
+    });
+  },
+);
+
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "superuser fallback raises the effective tier",
+  () => {
+    it("a superuser with no paid subscription resolves to the superuser tier", async () => {
+      vi.mocked(isBillingPrivileged).mockResolvedValue(true);
+      const res = await request(appAs(USER_SUPER)).get("/ora/account-consistency");
+      expect(res.body.billing.isBillingPrivileged).toBe(true);
+      expect(res.body.billing.sourceTier).toBe("free");
+      expect(res.body.billing.billingTier).toBe("core");
+      expect(res.body.chatSession.tier).toBe("core");
+      expect(res.body.billing.billingTier).toBe(res.body.chatSession.tier);
+    });
+  },
+);
+
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "api block echoes environment + host without a fetch surface",
+  () => {
+    it("reports the request host and node environment", async () => {
+      const res = await request(appAs(USER_A)).get("/ora/account-consistency");
+      expect(typeof res.body.api.environment).toBe("string");
+      expect(res.body.api).toHaveProperty("host");
+      expect(typeof res.body.checkedAt).toBe("string");
+    });
+  },
+);

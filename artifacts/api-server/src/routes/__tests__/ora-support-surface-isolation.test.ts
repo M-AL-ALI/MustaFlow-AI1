@@ -64,6 +64,7 @@ function appAs(userId: string) {
 }
 
 beforeAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   // A normal Ora conversation (default surface).
   const [normal] = await db
     .insert(oraConversationsTable)
@@ -85,100 +86,107 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true") return;
   await db.delete(oraConversationsTable).where(eq(oraConversationsTable.userId, USER));
 });
 
-describe("Support conversations are invisible to the normal /ora/conversations single-row endpoints", () => {
-  it("GET /ora/conversations/:id returns 404 for a support-surface conversation", async () => {
-    const app = appAs(USER);
-    const res = await request(app).get(`/ora/conversations/${supportId}`);
-    expect(res.status).toBe(404);
-    expect(res.body.conversation).toBeUndefined();
-  });
-
-  it("GET /ora/conversations/:id still returns the user's own normal conversation", async () => {
-    const app = appAs(USER);
-    const res = await request(app).get(`/ora/conversations/${normalId}`);
-    expect(res.status).toBe(200);
-    expect(res.body.conversation.id).toBe(normalId);
-  });
-
-  it("PATCH /ora/conversations/:id returns 404 for a support-surface conversation", async () => {
-    const app = appAs(USER);
-    const res = await request(app)
-      .patch(`/ora/conversations/${supportId}`)
-      .send({ title: "hijacked" });
-    expect(res.status).toBe(404);
-
-    // The support row must remain untouched in the DB.
-    const [row] = await db
-      .select({ title: oraConversationsTable.title })
-      .from(oraConversationsTable)
-      .where(eq(oraConversationsTable.id, supportId));
-    expect(row?.title).toBe("Support chat");
-  });
-
-  it("PUT /ora/conversations/:id/messages returns 404 for a support-surface conversation", async () => {
-    const app = appAs(USER);
-    const res = await request(app)
-      .put(`/ora/conversations/${supportId}/messages`)
-      .send({
-        conversationId: supportId,
-        messages: [{ role: "user", content: "leaked" }],
-      });
-    expect(res.status).toBe(404);
-
-    // The support transcript must remain untouched.
-    const [row] = await db
-      .select({ messages: oraConversationsTable.messages })
-      .from(oraConversationsTable)
-      .where(eq(oraConversationsTable.id, supportId));
-    const messages = row?.messages as Array<{ content: string }>;
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.content).toBe("I was charged twice");
-  });
-
-  it("DELETE /ora/conversations/:id returns 404 and does not archive a support-surface conversation", async () => {
-    const app = appAs(USER);
-    const res = await request(app).delete(`/ora/conversations/${supportId}`);
-    // The surface filter means no support row matched, so the endpoint 404s
-    // instead of silently reporting success.
-    expect(res.status).toBe(404);
-
-    // Secondary guard: the support row must remain un-archived.
-    const [row] = await db
-      .select({ archivedAt: oraConversationsTable.archivedAt })
-      .from(oraConversationsTable)
-      .where(eq(oraConversationsTable.id, supportId));
-    expect(row?.archivedAt).toBeNull();
-  });
-});
-
-describe("List endpoints stay partitioned by surface", () => {
-  it("GET /ora/conversations (normal list) excludes support rows", async () => {
-    const app = appAs(USER);
-    const res = await request(app).get("/ora/conversations");
-    expect(res.status).toBe(200);
-    const ids = (res.body.conversations as Array<{ id: number }>).map((c) => c.id);
-    expect(ids).toContain(normalId);
-    expect(ids).not.toContain(supportId);
-  });
-
-  it("GET /help/support/conversations (support list) excludes normal rows", async () => {
-    vi.mocked(resolveAuthedOraUser).mockResolvedValue({
-      userId: USER,
-      tier: "free",
-      isPaid: false,
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "Support conversations are invisible to the normal /ora/conversations single-row endpoints",
+  () => {
+    it("GET /ora/conversations/:id returns 404 for a support-surface conversation", async () => {
+      const app = appAs(USER);
+      const res = await request(app).get(`/ora/conversations/${supportId}`);
+      expect(res.status).toBe(404);
+      expect(res.body.conversation).toBeUndefined();
     });
-    const helpRouter = (await import("../help")).default;
-    const app = express();
-    app.use(express.json());
-    app.use(helpRouter);
 
-    const res = await request(app).get("/help/support/conversations");
-    expect(res.status).toBe(200);
-    const ids = (res.body.conversations as Array<{ id: number }>).map((c) => c.id);
-    expect(ids).toContain(supportId);
-    expect(ids).not.toContain(normalId);
-  });
-});
+    it("GET /ora/conversations/:id still returns the user's own normal conversation", async () => {
+      const app = appAs(USER);
+      const res = await request(app).get(`/ora/conversations/${normalId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.conversation.id).toBe(normalId);
+    });
+
+    it("PATCH /ora/conversations/:id returns 404 for a support-surface conversation", async () => {
+      const app = appAs(USER);
+      const res = await request(app)
+        .patch(`/ora/conversations/${supportId}`)
+        .send({ title: "hijacked" });
+      expect(res.status).toBe(404);
+
+      // The support row must remain untouched in the DB.
+      const [row] = await db
+        .select({ title: oraConversationsTable.title })
+        .from(oraConversationsTable)
+        .where(eq(oraConversationsTable.id, supportId));
+      expect(row?.title).toBe("Support chat");
+    });
+
+    it("PUT /ora/conversations/:id/messages returns 404 for a support-surface conversation", async () => {
+      const app = appAs(USER);
+      const res = await request(app)
+        .put(`/ora/conversations/${supportId}/messages`)
+        .send({
+          conversationId: supportId,
+          messages: [{ role: "user", content: "leaked" }],
+        });
+      expect(res.status).toBe(404);
+
+      // The support transcript must remain untouched.
+      const [row] = await db
+        .select({ messages: oraConversationsTable.messages })
+        .from(oraConversationsTable)
+        .where(eq(oraConversationsTable.id, supportId));
+      const messages = row?.messages as Array<{ content: string }>;
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.content).toBe("I was charged twice");
+    });
+
+    it("DELETE /ora/conversations/:id returns 404 and does not archive a support-surface conversation", async () => {
+      const app = appAs(USER);
+      const res = await request(app).delete(`/ora/conversations/${supportId}`);
+      // The surface filter means no support row matched, so the endpoint 404s
+      // instead of silently reporting success.
+      expect(res.status).toBe(404);
+
+      // Secondary guard: the support row must remain un-archived.
+      const [row] = await db
+        .select({ archivedAt: oraConversationsTable.archivedAt })
+        .from(oraConversationsTable)
+        .where(eq(oraConversationsTable.id, supportId));
+      expect(row?.archivedAt).toBeNull();
+    });
+  },
+);
+
+describe.skipIf(process.env.NABUFLOW_VITEST_DATABASE_ENABLED !== "true")(
+  "List endpoints stay partitioned by surface",
+  () => {
+    it("GET /ora/conversations (normal list) excludes support rows", async () => {
+      const app = appAs(USER);
+      const res = await request(app).get("/ora/conversations");
+      expect(res.status).toBe(200);
+      const ids = (res.body.conversations as Array<{ id: number }>).map((c) => c.id);
+      expect(ids).toContain(normalId);
+      expect(ids).not.toContain(supportId);
+    });
+
+    it("GET /help/support/conversations (support list) excludes normal rows", async () => {
+      vi.mocked(resolveAuthedOraUser).mockResolvedValue({
+        userId: USER,
+        tier: "free",
+        isPaid: false,
+      });
+      const helpRouter = (await import("../help")).default;
+      const app = express();
+      app.use(express.json());
+      app.use(helpRouter);
+
+      const res = await request(app).get("/help/support/conversations");
+      expect(res.status).toBe(200);
+      const ids = (res.body.conversations as Array<{ id: number }>).map((c) => c.id);
+      expect(ids).toContain(supportId);
+      expect(ids).not.toContain(normalId);
+    });
+  },
+);

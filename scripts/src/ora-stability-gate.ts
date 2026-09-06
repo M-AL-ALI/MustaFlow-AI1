@@ -655,6 +655,9 @@ const API_ACCOUNT_BILLING_HISTORY = [
 ].join(" ");
 
 const API_RELEASE_DATABASE = [
+  "src/lib/__tests__/ora-assets-r2.test.ts",
+  "src/lib/__tests__/ora-builder-isolation.test.ts",
+  "src/routes/__tests__/admin-support-note.test.ts",
   "src/routes/__tests__/ora-image-edit.test.ts",
   "src/routes/__tests__/ora-assets.test.ts",
   "src/routes/__tests__/ora-conversation-persistence.test.ts",
@@ -665,6 +668,7 @@ const API_RELEASE_DATABASE = [
   "src/routes/__tests__/ora-memory-upgrades.test.ts",
   "src/lib/public-ai/__tests__/ora-realtime-usage.test.ts",
   "src/routes/__tests__/ora-memory-consolidation.test.ts",
+  "src/routes/__tests__/support-ticket-ownership-isolation.test.ts",
 ].join(" ");
 
 const WEB_REALTIME = [
@@ -1100,7 +1104,7 @@ function resolveGateDatabaseUrl(): string | undefined {
 function runShell(
   command: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  options: { databaseUrl?: string } = {},
+  options: { databaseUrl?: string; enableDatabaseIntegration?: boolean } = {},
 ): {
   exitCode: number | null;
   output: string;
@@ -1109,6 +1113,9 @@ function runShell(
   const start = Date.now();
   const {
     DATABASE_URL: _ambientDatabaseUrl,
+    NABUFLOW_VITEST_DATABASE_URL: _ambientVitestDatabaseUrl,
+    NABUFLOW_VITEST_DATABASE_ENABLED: _ambientVitestDatabaseEnabled,
+    NABUFLOW_VITEST_DATABASE_URL_BASELINE: _ambientVitestDatabaseBaseline,
     ORA_STABILITY_GATE_DATABASE_URL: _gateDatabaseUrl,
     ...inheritedEnvironment
   } = process.env;
@@ -1123,7 +1130,12 @@ function runShell(
       NODE_OPTIONS: process.env.NODE_OPTIONS ?? DEFAULT_NODE_OPTIONS,
       CI: process.env.CI ?? "1",
       ...(options.databaseUrl
-        ? { DATABASE_URL: options.databaseUrl }
+        ? {
+            DATABASE_URL: options.databaseUrl,
+            ...(options.enableDatabaseIntegration
+              ? { NABUFLOW_VITEST_DATABASE_URL: options.databaseUrl }
+              : {}),
+          }
         : { SKIP_DYNAMIC_PRERENDER: process.env.SKIP_DYNAMIC_PRERENDER ?? "1" }),
       ORA_SESSION_SECRET:
         process.env.ORA_SESSION_SECRET ?? "ora-stability-gate-local-test-session-secret",
@@ -1233,13 +1245,13 @@ function commandResult(check: GateCheck): CheckResult {
     check.databaseMode === "required" ? resolveGateDatabaseUrl() : undefined;
   if (check.databaseMode === "required" && !configuredDatabaseUrl) {
     const output =
-      "Skipped: ORA_STABILITY_GATE_DATABASE_URL was not supplied. The gate never forwards ambient DATABASE_URL into mutating tests.";
-    console.log(`[ora-gate] WARN ${check.id} (explicit disposable database unavailable)`);
+      "Failed: ORA_STABILITY_GATE_DATABASE_URL was not supplied. Release database coverage is mandatory. The gate never forwards ambient DATABASE_URL into mutating tests.";
+    console.log(`[ora-gate] FAIL ${check.id} (explicit disposable database unavailable)`);
     return {
       id: check.id,
       title: check.title,
       area: check.area,
-      status: "warn",
+      status: "fail",
       durationMs: 0,
       command: check.command,
       exitCode: null,
@@ -1254,6 +1266,7 @@ function commandResult(check: GateCheck): CheckResult {
         : check.databaseMode === "import-only"
           ? IMPORT_ONLY_DATABASE_URL
           : undefined,
+    enableDatabaseIntegration: check.databaseMode === "required",
   });
   const status: GateStatus = exitCode === 0 ? "pass" : "fail";
   console.log(`[ora-gate] ${status.toUpperCase()} ${check.id} (${Math.round(durationMs / 1000)}s)`);
@@ -1593,9 +1606,12 @@ async function main() {
 
   const remainingCount = checks.length - completedCheckIds.length;
   if (remainingCount > 0) {
+    const incompleteExitCode = results.some((result) => result.status === "fail") ? 1 : 75;
     console.log(
       `[ora-gate] CHECKPOINTED: completed=${completedCheckIds.length} remaining=${remainingCount}; rerun the same command to continue`,
     );
+    console.log(`[ora-gate] INCOMPLETE: exit=${incompleteExitCode}; release not approved`);
+    process.exitCode = incompleteExitCode;
     return;
   }
 
