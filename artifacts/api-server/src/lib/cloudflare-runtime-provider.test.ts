@@ -10,7 +10,10 @@ import { CloudflareRuntimeProvider } from "./cloudflare-runtime-provider";
 import { RuntimeProviderUnavailableError } from "./tenant-runtime-provider";
 import { sealRuntimeArtifact } from "./runtime-artifact";
 import { sealLayeredRuntimeArtifact, sealRuntimeArtifactLayer } from "./runtime-artifact-layers";
-import type { ProductionDatabaseAdmissionService } from "./production-database-admission";
+import {
+  ProductionDatabaseAdmissionError,
+  type ProductionDatabaseAdmissionService,
+} from "./production-database-admission";
 
 const token = "control-token-with-at-least-thirty-two-characters";
 const config = {
@@ -2319,6 +2322,64 @@ describe("CloudflareRuntimeProvider", () => {
         verifiedGone: true,
       });
     });
+    await expect(
+      provider.releaseProductionDatabaseCapability({ projectId: 42 }),
+    ).resolves.toMatchObject({ verifiedGone: true });
+  });
+
+  it("dispatches legacy release without calling admission when the worker predates admission", async () => {
+    const admission = databaseAdmissionFixture();
+    const seal = vi.spyOn(admission, "seal");
+    const provider = new CloudflareRuntimeProvider(config, {
+      productionDatabaseAdmission: admission,
+    });
+    const state = provider as unknown as {
+      deploymentVersion: string | null;
+      controlFeatures: Set<string>;
+    };
+    state.deploymentVersion = "legacy-production-v1";
+    state.controlFeatures.add("production-database-v1");
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body).not.toHaveProperty("admission");
+      return json({
+        ok: true,
+        projectId: 42,
+        allocationIdentity: body.allocationIdentity,
+        state: "released",
+        providerProjectId: "owned-provider-42",
+        verifiedGone: true,
+      });
+    });
+
+    await expect(
+      provider.releaseProductionDatabaseCapability({ projectId: 42 }),
+    ).resolves.toMatchObject({ verifiedGone: true });
+    expect(seal).not.toHaveBeenCalled();
+  });
+
+  it("uses the ownership-only release path while a configured epoch is still draining", async () => {
+    const admission = databaseAdmissionFixture();
+    vi.spyOn(admission, "seal").mockRejectedValue(
+      new ProductionDatabaseAdmissionError("production_database_admission_epoch_inactive"),
+    );
+    const provider = new CloudflareRuntimeProvider(config, {
+      productionDatabaseAdmission: admission,
+    });
+    markDatabaseAdmissionReady(provider);
+    vi.mocked(fetch).mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body).not.toHaveProperty("admission");
+      return json({
+        ok: true,
+        projectId: 42,
+        allocationIdentity: body.allocationIdentity,
+        state: "released",
+        providerProjectId: "owned-provider-42",
+        verifiedGone: true,
+      });
+    });
+
     await expect(
       provider.releaseProductionDatabaseCapability({ projectId: 42 }),
     ).resolves.toMatchObject({ verifiedGone: true });

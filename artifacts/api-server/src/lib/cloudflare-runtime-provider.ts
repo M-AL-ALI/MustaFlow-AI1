@@ -53,7 +53,10 @@ import {
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { sealRuntimeArtifact } from "./runtime-artifact";
 import { logger } from "./logger";
-import type { ProductionDatabaseAdmissionService } from "./production-database-admission";
+import {
+  ProductionDatabaseAdmissionError,
+  type ProductionDatabaseAdmissionService,
+} from "./production-database-admission";
 import {
   RuntimeProviderUnavailableError,
   type ArtifactDeployingTenantRuntimeProvider,
@@ -1754,7 +1757,6 @@ export class CloudflareRuntimeProvider
   > {
     input.signal?.throwIfAborted();
     await this.requireControlFeature("production-database-v1");
-    await this.requireControlFeature(PRODUCTION_DATABASE_ADMISSION_FEATURE);
     const expectedDeploymentVersion = this.deploymentVersion ?? (await this.refreshVersion());
     const allocationIdentity = await productionDatabaseAllocationIdentity({
       format: "nabuflow.production-database-allocation/v1",
@@ -1762,11 +1764,26 @@ export class CloudflareRuntimeProvider
       projectId: input.projectId,
     });
     input.signal?.throwIfAborted();
-    const sealed = await this.productionDatabaseAdmission.seal({
-      projectId: input.projectId,
-      allocationIdentity,
-      signal: input.signal,
-    });
+    const sealed = this.controlFeatures.has(PRODUCTION_DATABASE_ADMISSION_FEATURE)
+      ? await this.productionDatabaseAdmission
+          .seal({
+            projectId: input.projectId,
+            allocationIdentity,
+            signal: input.signal,
+          })
+          .catch((error: unknown) => {
+            // During the governed six-minute epoch cutover, release remains
+            // available only through the worker's positive-owned-resource
+            // legacy proof. Allocation stays strictly admission-gated.
+            if (
+              error instanceof ProductionDatabaseAdmissionError &&
+              error.code === "production_database_admission_epoch_inactive"
+            ) {
+              return null;
+            }
+            throw error;
+          })
+      : null;
     const admission =
       sealed === null ? undefined : productionDatabaseSealedAdmissionSchema.parse(sealed);
     if (
@@ -1782,16 +1799,20 @@ export class CloudflareRuntimeProvider
       );
     }
     input.signal?.throwIfAborted();
+    const path = `${CONTROL_API_PREFIX}/capabilities/${input.projectId}/neon-postgres/database/production-allocation`;
+    const body = {
+      action: "release" as const,
+      projectId: input.projectId,
+      expectedDeploymentVersion,
+      allocationIdentity,
+      ...(admission ? { admission } : {}),
+    };
     const response = await this.request({
       method: "DELETE",
-      path: `${CONTROL_API_PREFIX}/capabilities/${input.projectId}/neon-postgres/database/production-allocation`,
-      body: {
-        action: "release",
-        projectId: input.projectId,
-        expectedDeploymentVersion,
-        allocationIdentity,
-        ...(admission ? { admission } : {}),
-      },
+      path,
+      body,
+      // request() binds this stable semantic key to the exact method, path,
+      // deployment version, and optional admission body before dispatch.
       idempotencyKey: `production-database:${allocationIdentity}:release:admission-v1`,
       operation: this.operationOptions(
         "production-database.release",

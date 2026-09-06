@@ -59,6 +59,22 @@ const productionReleaseCliSource = readFileSync(
   new URL("./verify-production-release.ts", import.meta.url),
   "utf8",
 );
+const cloudflareRuntimeReleaseVerifierSource = readFileSync(
+  new URL("./cloudflare-runtime-release-verifier.ts", import.meta.url),
+  "utf8",
+);
+const runtimeProductionConfigSource = readFileSync(
+  new URL(
+    "../../artifacts/nabuflow-runtime-worker/wrangler.runtime.production.jsonc",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const replitSource = readFileSync(new URL("../../.replit", import.meta.url), "utf8");
+const projectRoutesSource = readFileSync(
+  new URL("../../artifacts/api-server/src/routes/projects.ts", import.meta.url),
+  "utf8",
+);
 
 assert.equal(
   rootPackage.scripts["test:api:serial"],
@@ -112,6 +128,43 @@ for (const runtimeReleaseGuard of [
   assert.ok(
     productionReleaseCliSource.includes(runtimeReleaseGuard),
     `missing Cloudflare runtime release guard: ${runtimeReleaseGuard}`,
+  );
+}
+const epochBinding = "NABUFLOW_PRODUCTION_DATABASE_ADMISSION_EPOCH";
+const runtimeEpoch = new RegExp(`"${epochBinding}"\\s*:\\s*"([^"]+)"`, "u").exec(
+  runtimeProductionConfigSource,
+)?.[1];
+const replitProduction = replitSource.slice(replitSource.indexOf("[userenv.production]"));
+const replitEpoch = new RegExp(`^${epochBinding}\\s*=\\s*"([^"]+)"`, "mu").exec(
+  replitProduction,
+)?.[1];
+assert.match(runtimeEpoch ?? "", /^[0-9a-f-]{36}$/u);
+assert.equal(
+  replitEpoch,
+  runtimeEpoch,
+  "Replit and Cloudflare must share the exact admission epoch",
+);
+for (const databaseBinding of [
+  epochBinding,
+  "NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID",
+  "NABUFLOW_PRODUCTION_NEON_REGION_ID",
+  "NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS",
+  "NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS",
+]) {
+  assert.ok(
+    cloudflareRuntimeReleaseVerifierSource.includes(databaseBinding),
+    `release verification must require ${databaseBinding}`,
+  );
+}
+for (const ownerOnlyAdmissionRoute of [
+  '"/admin/production-database-admission"',
+  "`/admin/production-database-admission/${action}`",
+  "requireAdmin",
+  "requireOwner",
+]) {
+  assert.ok(
+    projectRoutesSource.includes(ownerOnlyAdmissionRoute),
+    `missing owner-only admission route guard: ${ownerOnlyAdmissionRoute}`,
   );
 }
 assert.equal(gateSource.includes("--minWorkers"), false);

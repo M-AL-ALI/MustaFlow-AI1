@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +28,20 @@ const REQUIRED_BINDINGS = [
   ["CLOUDFLARE_RUNTIME_CONTROL_TOKEN", "secret_text"],
   ["NABUFLOW_PRODUCTION_NEON_MANAGEMENT_KEY", "secret_text"],
   ["NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED", "plain_text"],
+  ["NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID", "plain_text"],
+  ["NABUFLOW_PRODUCTION_NEON_REGION_ID", "plain_text"],
+  ["NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS", "plain_text"],
+  ["NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS", "plain_text"],
+  ["NABUFLOW_PRODUCTION_DATABASE_ADMISSION_EPOCH", "plain_text"],
+] as const;
+
+const REQUIRED_DATABASE_PLAIN_TEXT_BINDINGS = [
+  "NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED",
+  "NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID",
+  "NABUFLOW_PRODUCTION_NEON_REGION_ID",
+  "NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS",
+  "NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS",
+  "NABUFLOW_PRODUCTION_DATABASE_ADMISSION_EPOCH",
 ] as const;
 
 type CommandName = "deployments-status" | "versions-view";
@@ -83,6 +98,51 @@ type VerificationOptions = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function configuredDatabaseBindings(configPath: string): ReadonlyMap<string, string> {
+  let source: string;
+  try {
+    source = readFileSync(configPath, "utf8");
+  } catch {
+    throw new CloudflareRuntimeReleaseVerificationError(
+      "cloudflare_runtime_release_bindings_unready",
+      "versions-view",
+    );
+  }
+  const values = new Map<string, string>();
+  for (const name of REQUIRED_DATABASE_PLAIN_TEXT_BINDINGS) {
+    const match = new RegExp(`"${name}"\\s*:\\s*"([^"]+)"`, "u").exec(source);
+    if (!match?.[1]) {
+      throw new CloudflareRuntimeReleaseVerificationError(
+        "cloudflare_runtime_release_bindings_unready",
+        "versions-view",
+      );
+    }
+    values.set(name, match[1]);
+  }
+  const epoch = values.get("NABUFLOW_PRODUCTION_DATABASE_ADMISSION_EPOCH");
+  const organization = values.get("NABUFLOW_PRODUCTION_NEON_ORGANIZATION_ID");
+  const region = values.get("NABUFLOW_PRODUCTION_NEON_REGION_ID");
+  const retention = Number(values.get("NABUFLOW_PRODUCTION_NEON_HISTORY_RETENTION_SECONDS"));
+  const maximum = Number(values.get("NABUFLOW_PRODUCTION_DATABASE_MAX_PROJECTS"));
+  if (
+    values.get("NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED") !== "enabled" ||
+    !epoch ||
+    !UUID.test(epoch) ||
+    !organization?.startsWith("org-") ||
+    !region ||
+    !Number.isSafeInteger(retention) ||
+    retention <= 0 ||
+    !Number.isSafeInteger(maximum) ||
+    maximum <= 0
+  ) {
+    throw new CloudflareRuntimeReleaseVerificationError(
+      "cloudflare_runtime_release_bindings_unready",
+      "versions-view",
+    );
+  }
+  return values;
 }
 
 function commandRunner(timeoutMs: number): CloudflareRuntimeCommandRunner {
@@ -246,17 +306,15 @@ export async function verifyCloudflareRuntimeRelease(
   const missingBindings = REQUIRED_BINDINGS.filter(
     ([name, type]) => !hasBinding(resources.bindings as readonly unknown[], name, type),
   );
-  const allocationSwitch = (resources.bindings as readonly unknown[]).find(
-    (binding) =>
-      isRecord(binding) &&
-      binding.name === "NABUFLOW_PRODUCTION_DATABASE_ALLOCATION_ENABLED" &&
-      binding.type === "plain_text",
-  );
-  if (
-    missingBindings.length > 0 ||
-    !isRecord(allocationSwitch) ||
-    allocationSwitch.text !== "enabled"
-  ) {
+  const expectedDatabaseBindings = configuredDatabaseBindings(configPath);
+  const mismatchedDatabaseBindings = REQUIRED_DATABASE_PLAIN_TEXT_BINDINGS.filter((name) => {
+    const binding = (resources.bindings as readonly unknown[]).find(
+      (candidate) =>
+        isRecord(candidate) && candidate.name === name && candidate.type === "plain_text",
+    );
+    return !isRecord(binding) || binding.text !== expectedDatabaseBindings.get(name);
+  });
+  if (missingBindings.length > 0 || mismatchedDatabaseBindings.length > 0) {
     throw new CloudflareRuntimeReleaseVerificationError(
       "cloudflare_runtime_release_bindings_unready",
       "versions-view",

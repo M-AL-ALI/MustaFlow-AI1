@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, getTableColumns, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import {
   db,
+  pool,
   projectsTable,
   projectFilesTable,
   chatMessagesTable,
@@ -81,6 +82,10 @@ import {
   canOwnerReadmitProjectPurge,
   cancelScheduledProjectPurgeForRestore,
 } from "../lib/project-purge";
+import {
+  createProductionDatabaseAdmissionEpochCoordinator,
+  ProductionDatabaseAdmissionEpochError,
+} from "../lib/production-database-admission-epoch";
 
 // ── Health score — content-based analysis ─────────────────────────────────────
 // Computes a 0–100 score by inspecting the actual generated HTML files for a
@@ -1865,6 +1870,74 @@ router.post("/projects/:id/retirement/retry", async (req, res): Promise<void> =>
 });
 
 const MAX_ADMIN_RETIREMENT_BATCH = 100;
+
+const productionDatabaseAdmissionEpoch = createProductionDatabaseAdmissionEpochCoordinator(pool);
+
+function presentProductionDatabaseAdmissionEpochError(error: unknown): {
+  status: number;
+  body: { code: string; error: string; retryable: boolean };
+} {
+  if (!(error instanceof ProductionDatabaseAdmissionEpochError)) {
+    return {
+      status: 503,
+      body: {
+        code: "production_database_admission_epoch_unavailable",
+        error: "The production database admission boundary could not be verified safely.",
+        retryable: true,
+      },
+    };
+  }
+  const conflict = new Set([
+    "production_database_admission_epoch_closed",
+    "production_database_admission_epoch_not_prepared",
+    "production_database_admission_epoch_drain_incomplete",
+    "production_database_admission_worker_changed",
+    "production_database_admission_epoch_transition_conflict",
+  ]).has(error.code);
+  return {
+    status: conflict ? 409 : 503,
+    body: {
+      code: error.code,
+      error:
+        error.code === "production_database_admission_epoch_drain_incomplete"
+          ? "The mandatory six-minute safety drain is still running. Refresh before activation."
+          : error.code === "production_database_admission_worker_changed"
+            ? "The Cloudflare runtime changed after preparation. Prepare the boundary again."
+            : "The production database admission boundary is not ready for this action.",
+      retryable: error.retryable || conflict,
+    },
+  };
+}
+
+router.get(
+  "/admin/production-database-admission",
+  requireAdmin,
+  requireOwner,
+  async (_req, res): Promise<void> => {
+    try {
+      res.json(await productionDatabaseAdmissionEpoch.status());
+    } catch (error) {
+      const response = presentProductionDatabaseAdmissionEpochError(error);
+      res.status(response.status).json(response.body);
+    }
+  },
+);
+
+for (const action of ["prepare", "activate"] as const) {
+  router.post(
+    `/admin/production-database-admission/${action}`,
+    requireAdmin,
+    requireOwner,
+    async (_req, res): Promise<void> => {
+      try {
+        res.json(await productionDatabaseAdmissionEpoch[action]());
+      } catch (error) {
+        const response = presentProductionDatabaseAdmissionEpochError(error);
+        res.status(response.status).json(response.body);
+      }
+    },
+  );
+}
 
 router.post(
   "/admin/projects/retirement/batch",

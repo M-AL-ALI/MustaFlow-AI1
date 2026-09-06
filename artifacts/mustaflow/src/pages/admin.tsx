@@ -63,6 +63,7 @@ import { OraRoutingDiagnosticsPanel } from "@/components/admin/ora-routing-diagn
 import { AdminBreadcrumbs } from "@/components/admin/admin-breadcrumbs";
 import { AdminAccountAccessPanel } from "@/components/admin/account-access-panel";
 import { ProjectRetirementPanel } from "@/components/admin/project-retirement-panel";
+import { ProductionDatabaseAdmissionPanel } from "@/components/admin/production-database-admission-panel";
 import { authFetch } from "@/lib/api-fetch";
 
 function isHttpError(err: unknown): err is { status: number; data: unknown; message: string } {
@@ -457,6 +458,8 @@ export default function AdminPage() {
           </>
         )}
       </div>
+
+      {isOwner && <ProductionDatabaseAdmissionPanel />}
 
       {isOwner && <ProjectRetirementPanel />}
 
