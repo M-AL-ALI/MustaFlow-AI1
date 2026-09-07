@@ -78,6 +78,19 @@ const claim = {
 afterEach(() => vi.useRealTimers());
 
 describe("artifact commit coordinator leases", () => {
+  it("uses invocation-owned runtime guards without persisting orphan lock rows", async () => {
+    const storage = new MemoryDurableStorage();
+    const durable = coordinator(storage);
+    const lease = await durable.acquireRuntimeExecution("runtime-a", "start", false);
+    expect(lease).not.toBeNull();
+    expect(await durable.acquireRuntimeExecution("runtime-a", "destroy", true)).toBeNull();
+    expect((await storage.list({ prefix: "runtime-executions:" })).size).toBe(0);
+    await lease!.run(async () => ({ status: 200, body: { ok: true } }));
+    await lease!.close();
+    const destroy = await durable.acquireRuntimeExecution("runtime-a", "destroy", true);
+    expect(destroy).not.toBeNull();
+    await destroy!.close();
+  });
   it("makes one coordinator-owned successor for a replayed legacy deployment deferral", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);

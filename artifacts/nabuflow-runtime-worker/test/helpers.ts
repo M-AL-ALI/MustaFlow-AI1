@@ -231,7 +231,22 @@ export async function mutationAndDrain(input: {
   );
 }
 
+import {
+  RuntimeExecutionRegistry,
+  type RuntimeExecutionLease,
+} from "../src/runtime-execution-guard";
+
 export class MemoryCoordinator implements ControlCoordinator {
+  readonly runtimeExecutions = new RuntimeExecutionRegistry();
+
+  async acquireRuntimeExecution(
+    identity: string,
+    token: string,
+    exclusive: boolean,
+  ): Promise<RuntimeExecutionLease | null> {
+    return this.runtimeExecutions.acquire(identity, token, exclusive);
+  }
+
   readonly nonces = new Map<string, number>();
   readonly idempotency = new Map<
     string,

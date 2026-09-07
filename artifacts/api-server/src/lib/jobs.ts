@@ -163,6 +163,7 @@ import {
   registerProjectWorkController,
   withActiveProjectLifecycle,
 } from "./project-lifecycle";
+import { sealedRuntimeProvisioningState } from "./sealed-runtime-provisioning-state";
 
 const readProjectJobAdmission = readProjectLifecycleAdmission;
 
@@ -8093,9 +8094,8 @@ async function syncAgenticPreviewRuntime(opts: {
           containerId: runtimeId,
           containerUrl: created.endpoint,
           containerStatus: created.status,
-          provisioningStatus: created.endpoint ? "ready" : "provisioning",
+          ...sealedRuntimeProvisioningState(created.status),
           provisioningError: null,
-          provisioningStep: created.endpoint ? null : "runtime-start",
         })
         .where(eq(projectsTable.id, opts.projectId));
     }

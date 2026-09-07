@@ -518,6 +518,16 @@ export async function provisionPreviewDb(projectId: number): Promise<void> {
  * the re-run and the project will land in `ready` without user action.
  */
 export async function resumeStuckProvisioningOnBoot(): Promise<void> {
+  // Recover only the old private-preview marker, not unfinished database work.
+  // This runs independently so an unavailable provider cannot suppress the
+  // existing agentic/database recovery below.
+  try {
+    const { recoverStaleSealedPreviewProvisioning } =
+      await import("./sealed-runtime-provisioning-state");
+    await recoverStaleSealedPreviewProvisioning();
+  } catch (err) {
+    logger.warn({ err }, "Failed sealed-preview setup recovery deferred (non-fatal)");
+  }
   try {
     const stuck = await db
       .select({ id: projectsTable.id })

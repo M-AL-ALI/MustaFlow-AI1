@@ -347,6 +347,11 @@ export interface ControlAuditRecord {
 }
 
 export interface ControlCoordinator {
+  acquireRuntimeExecution(
+    identity: string,
+    token: string,
+    exclusive: boolean,
+  ): Promise<import("./runtime-execution-guard").RuntimeExecutionHandle | null>;
   consumeOnce(nonce: string, expiresAtMs: number): Promise<boolean>;
   isConsumedOnce(nonce: string, nowMs: number): Promise<boolean>;
   beginIdempotency(key: string, fingerprint: string, nowMs: number): Promise<IdempotencyLookup>;

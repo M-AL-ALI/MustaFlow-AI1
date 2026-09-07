@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { RuntimeExecutionRegistry, type RuntimeExecutionLease } from "./runtime-execution-guard";
 import {
   ARTIFACT_COMMIT_EVENT_LIMIT,
   DURABLE_OPERATION_LEASE_MS,
@@ -549,6 +550,7 @@ export class ControlDurableObject
   implements ControlCoordinator
 {
   private readonly routeCache = new Map<string, RouteRecord | null>();
+  private readonly runtimeExecutions = new RuntimeExecutionRegistry();
   private readonly routePolicyBackend: Pick<RuntimeBackend, "setKeepAlive">;
   private readonly currentTimeMs: () => number;
   private readonly afterRoutePolicyProviderWrite?: (writeCount: number) => Promise<void>;
@@ -646,6 +648,16 @@ export class ControlDurableObject
         await transaction.delete(storageKey);
       }
     });
+  }
+
+  async acquireRuntimeExecution(
+    identity: string,
+    token: string,
+    exclusive: boolean,
+  ): Promise<RuntimeExecutionLease | null> {
+    // Admission is synchronous in this incarnation. Native RPC owns cancellation
+    // and disposal of the returned handle; no orphan row or blind TTL is needed.
+    return this.runtimeExecutions.acquire(identity, token, exclusive);
   }
 
   async registerDurableOperation(

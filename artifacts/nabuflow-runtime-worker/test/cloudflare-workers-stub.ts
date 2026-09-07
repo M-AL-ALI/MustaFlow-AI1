@@ -1,3 +1,5 @@
+export class RpcTarget {}
+
 export class DurableObject<Env = unknown> {
   protected readonly ctx: DurableObjectState;
   protected readonly env: Env;

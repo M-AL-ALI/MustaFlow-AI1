@@ -32,6 +32,78 @@ import {
   signedRequest,
 } from "./helpers";
 
+it("waits for an already-started runtime before reporting destructive cleanup complete", async () => {
+  const coordinator = new MemoryCoordinator();
+  const backend = new MockBackend();
+  const env = fakeEnv();
+  const identity = await deriveRuntimeIdentity({
+    namespace: "staging",
+    projectId: 42,
+    role: "preview",
+    slot: "primary",
+  });
+  const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+  await coordinator.putRuntime(identity, runtimeFor(identity));
+  const artifact = await makeArtifact({ identity, manifestRevision: "manifest-1" });
+  await deliverArtifact({ coordinator, backend, env, artifact, base });
+  let enterStart!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enterStart = resolve;
+  });
+  let releaseStart!: () => void;
+  const released = new Promise<void>((resolve) => {
+    releaseStart = resolve;
+  });
+  const originalStart = backend.start.bind(backend);
+  backend.start = async (runtime) => {
+    enterStart();
+    await released;
+    return originalStart(runtime);
+  };
+  const starting = mutationAndDrain({
+    path: `${base}/start`,
+    nonce: "guard-overlap-start-0001",
+    idempotencyKey: "guard-overlap-start",
+    body: {
+      locator: ensureBody().locator,
+      expectedDeploymentVersion: "worker-version-test-1",
+      artifactRevision: artifact.envelope.artifactRevision,
+      artifactSha256: artifact.envelope.sealedArtifactSha256,
+    },
+    env,
+    coordinator,
+    backend,
+    nowMs: TEST_NOW_MS,
+  });
+  await entered;
+  const destroy = (nonce: string, key: string) =>
+    signedRequest({
+      path: base,
+      method: "DELETE",
+      nonce,
+      idempotencyKey: key,
+      body: { locator: ensureBody().locator },
+    }).then((request) =>
+      handleControlRequest(request, env, { coordinator, backend, nowMs: TEST_NOW_MS }),
+    );
+  try {
+    const busy = await destroy("guard-overlap-destroy-0001", "guard-overlap-destroy");
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toMatchObject({
+      code: "runtime_execution_in_progress",
+      retryable: true,
+    });
+    expect(await coordinator.getRuntime(identity)).not.toBeNull();
+  } finally {
+    releaseStart();
+  }
+  expect((await starting).status).toBe(200);
+  const destroyed = await destroy("guard-overlap-destroy-0002", "guard-overlap-destroy");
+  expect(destroyed.status).toBe(200);
+  expect(await coordinator.getRuntime(identity)).toBeNull();
+  expect(coordinator.runtimeExecutions.size).toBe(0);
+}, 15000);
+
 async function makeArtifact(input: {
   identity: string;
   manifestRevision: string;

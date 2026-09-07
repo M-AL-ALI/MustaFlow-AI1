@@ -756,13 +756,18 @@ export async function handleControlRequest(
         // after the Worker accepted the mutation. Preserve every typed terminal
         // response so the same idempotency key can observe it without executing
         // the mutation twice. A deliberate new operation uses a new key.
-        const body = errorBody(controlError, requestId);
-        await coordinator.completeIdempotency(
-          idempotencyStorageKey,
-          idempotencyFingerprint,
-          { status: controlError.status, body },
-          nowMs,
-        );
+        if (controlError.code === "runtime_execution_in_progress") {
+          // Admission failed before any side effect: this same key can retry safely.
+          await coordinator.abandonIdempotency(idempotencyStorageKey, idempotencyFingerprint);
+        } else {
+          const body = errorBody(controlError, requestId);
+          await coordinator.completeIdempotency(
+            idempotencyStorageKey,
+            idempotencyFingerprint,
+            { status: controlError.status, body },
+            nowMs,
+          );
+        }
       } catch (finalizationError) {
         logControlErrorFinalizationFailure(
           requestId,
@@ -973,6 +978,11 @@ export async function handleDurableOperationQueue(
           throw error;
         }
         const controlError = toControlError(error);
+        if (controlError.code === "runtime_execution_in_progress") {
+          // Preserve the job/checkpoint. The lease watchdog also owns redelivery.
+          message.retry({ delaySeconds: 1 });
+          continue;
+        }
         try {
           await coordinator.failDurableOperation(
             job.jobKey,
@@ -2962,6 +2972,51 @@ function parseMutationInput(
 }
 
 async function executeEndpoint(
+  ...args: Parameters<typeof executeEndpointWithoutRuntimeGuard>
+): Promise<StoredHttpResponse> {
+  const [endpoint, , env, coordinator, , , matchedRoute] = args;
+  const locator = matchedRoute?.locator;
+  if (locator === null || locator === undefined) {
+    return executeEndpointWithoutRuntimeGuard(...args);
+  }
+  const identity = await deriveRuntimeIdentity({
+    namespace: env.CLOUDFLARE_RUNTIME_DEPLOYMENT_NAMESPACE,
+    ...locator,
+  });
+  const token = crypto.randomUUID();
+  const exclusive = endpoint === "stop" || endpoint === "destroy";
+  const lease = await coordinator.acquireRuntimeExecution(identity, token, exclusive);
+  if (lease === null) {
+    throw new ControlHttpError(
+      409,
+      "runtime_execution_in_progress",
+      "Runtime cleanup is waiting for an in-flight operation to finish",
+      true,
+    );
+  }
+  let endpointError: unknown;
+  try {
+    const result = await lease.run(async () => {
+      try {
+        return await executeEndpointWithoutRuntimeGuard(...args);
+      } catch (error) {
+        // Preserve local typed errors and staging owner-loss identity across RPC.
+        endpointError = error;
+        return null;
+      }
+    });
+    if (result === null) throw endpointError ?? new Error("Runtime execution did not complete");
+    return result;
+  } finally {
+    try {
+      await lease.close();
+    } finally {
+      lease[Symbol.dispose]();
+    }
+  }
+}
+
+async function executeEndpointWithoutRuntimeGuard(
   endpoint: Endpoint,
   input: ControlInput,
   env: WorkerBindings,

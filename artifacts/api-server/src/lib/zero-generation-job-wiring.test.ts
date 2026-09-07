@@ -67,7 +67,13 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).not.toContain('created === null || "error" in created || !created.endpoint');
     expect(jobs).not.toContain("if (!runtimeId || !opts.containerUrl)");
     expect(jobs).not.toContain("zero-task-${taskId}-node-v1");
-    expect(jobs).toContain('provisioningStatus: created.endpoint ? "ready" : "provisioning"');
+    // Endpoint-less private runtimes are provisioned when their descriptor is
+    // settled. Do not pin the old condition that stranded failed builds.
+    expect(jobs.includes("...sealedRuntimeProvisioningState(created.status)")).toBe(true);
+    expect(jobs.includes('provisioningStatus: created.endpoint ? "ready" : "provisioning"')).toBe(
+      false,
+    );
+    expect(provisioning.includes("await recoverStaleSealedPreviewProvisioning()")).toBe(true);
     expect(jobs).toContain("healthPath: opts.zeroSealedGeneration.manifest.healthPath");
     expect(jobs).toContain("runtimeId = created.runtimeId");
     expect(jobs).toContain("tenantRuntimeProvider.zeroGenerationRuntimeDescriptor(");
