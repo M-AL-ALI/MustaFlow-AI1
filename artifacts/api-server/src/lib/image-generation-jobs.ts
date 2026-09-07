@@ -190,7 +190,7 @@ async function resolveImageTier(userId: string): Promise<SubscriptionTier> {
 }
 
 /**
- * Enforce the per-tier monthly image-generation cap (calendar month).
+ * Enforce the NabuFlow per-tier image-generation cap (calendar month).
  * Throws a MONTHLY_CAP_REACHED error when generating `jobCount` more images
  * would exceed the user's tier allowance.
  */
@@ -203,6 +203,7 @@ export async function enforceMonthlyImageCap(userId: string, jobCount: number): 
     .where(
       and(
         eq(generatedImagesTable.userId, userId),
+        eq(generatedImagesTable.productScope, "nabuflow"),
         gte(generatedImagesTable.createdAt, sql`date_trunc('month', now())`),
         isNull(generatedImagesTable.deletedAt),
       ),
@@ -218,6 +219,7 @@ export async function enforceMonthlyImageCap(userId: string, jobCount: number): 
   }
 }
 
+/** NabuFlow batch preflight; Ora uses its separate usage reservation. */
 export async function preflightImageJobs(
   userId: string,
   jobCount: number,
@@ -236,6 +238,7 @@ export async function preflightImageJobs(
     .where(
       and(
         eq(generatedImagesTable.userId, userId),
+        eq(generatedImagesTable.productScope, "nabuflow"),
         gte(generatedImagesTable.createdAt, sql`now() - interval '1 hour'`),
         isNull(generatedImagesTable.deletedAt),
       ),
@@ -256,6 +259,7 @@ export async function preflightImageJobs(
     .where(
       and(
         eq(generatedImagesTable.userId, userId),
+        eq(generatedImagesTable.productScope, "nabuflow"),
         gte(generatedImagesTable.createdAt, sql`now() - interval '24 hours'`),
         isNull(generatedImagesTable.deletedAt),
       ),
@@ -313,7 +317,10 @@ export async function enqueueImageJob(
   }
 
   // Step 2: Monthly per-tier cap + rate-limit check — zero cost
-  await enforceMonthlyImageCap(userId, 1);
+  // Ora's allowance must never depend on a NabuFlow subscription or usage.
+  if (productScope === "nabuflow") {
+    await enforceMonthlyImageCap(userId, 1);
+  }
 
   const [hourlyResult] = await db
     .select({ c: count() })
@@ -321,6 +328,7 @@ export async function enqueueImageJob(
     .where(
       and(
         eq(generatedImagesTable.userId, userId),
+        eq(generatedImagesTable.productScope, productScope),
         gte(generatedImagesTable.createdAt, sql`now() - interval '1 hour'`),
         isNull(generatedImagesTable.deletedAt),
       ),
@@ -339,6 +347,7 @@ export async function enqueueImageJob(
     .where(
       and(
         eq(generatedImagesTable.userId, userId),
+        eq(generatedImagesTable.productScope, productScope),
         gte(generatedImagesTable.createdAt, sql`now() - interval '24 hours'`),
         isNull(generatedImagesTable.deletedAt),
       ),

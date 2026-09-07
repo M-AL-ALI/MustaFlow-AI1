@@ -1,4 +1,7 @@
 import { readFileSync } from "node:fs";
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { generatedImagesTable, userCreditsTable, userSubscriptionsTable } from "@workspace/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -96,9 +99,11 @@ vi.mock("./project-lifecycle", () => ({
 vi.mock("./ora-assets", () => ({ persistOraAsset: mocks.persistOra }));
 
 import {
+  enforceMonthlyImageCap,
   enqueueImageEditJob,
   enqueueImageJob,
   getJob,
+  preflightImageJobs,
   type EnqueueImageEditJobOpts,
   type EnqueueImageJobOpts,
 } from "./image-generation-jobs";
@@ -226,6 +231,122 @@ describe("server-assigned image product scope", () => {
     await expect(enqueueImageJob({ ...base, productScope: "nabuflow" })).rejects.toThrow(
       "reservation failed",
     );
+    expect(mocks.deduct).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+});
+
+type ImageUsage = { monthly: number; hourly: number; daily: number };
+
+function mockProductImageUsage(nabuflow: ImageUsage, ora: ImageUsage, creditBalance = 100) {
+  const dialect = new PgDialect();
+  const imageScopes: Array<"nabuflow" | "ora" | null> = [];
+  const subscriptionReads: unknown[] = [];
+  mocks.select.mockImplementation(() => ({
+    from: (table: unknown) => ({
+      where: async (condition: SQL) => {
+        if (table === userSubscriptionsTable) {
+          subscriptionReads.push(condition);
+          return [{ tier: "free", status: "active" }];
+        }
+        if (table === userCreditsTable) return [{ balance: creditBalance }];
+        if (table !== generatedImagesTable) throw new Error("Unexpected quota query");
+        const query = dialect.sqlToQuery(condition);
+        const scope = query.params.includes("product_scope")
+          ? query.params.includes("nabuflow")
+            ? "nabuflow"
+            : query.params.includes("ora")
+              ? "ora"
+              : null
+          : null;
+        imageScopes.push(scope);
+        const window = query.sql.includes("interval '1 hour'")
+          ? "hourly"
+          : query.sql.includes("interval '24 hours'")
+            ? "daily"
+            : "monthly";
+        const used =
+          scope === "nabuflow"
+            ? nabuflow[window]
+            : scope === "ora"
+              ? ora[window]
+              : nabuflow[window] + ora[window];
+        return [{ c: used }];
+      },
+    }),
+  }));
+  return { imageScopes, subscriptionReads };
+}
+
+describe("product-isolated image allowances", () => {
+  const small = { monthly: 3, hourly: 1, daily: 1 };
+  const exhausted = { monthly: 99, hourly: 99, daily: 99 };
+  const empty = { monthly: 0, hourly: 0, daily: 0 };
+
+  it("excludes Ora images from the NabuFlow monthly allowance", async () => {
+    const queries = mockProductImageUsage(small, exhausted);
+    await expect(enforceMonthlyImageCap(base.userId, 1)).resolves.toBeUndefined();
+    expect(queries.imageScopes).toEqual(["nabuflow"]);
+  });
+
+  it("isolates all three NabuFlow batch preflight windows", async () => {
+    const queries = mockProductImageUsage(small, exhausted);
+    await expect(preflightImageJobs(base.userId, 2, "standard")).resolves.toBeUndefined();
+    expect(queries.imageScopes).toEqual(["nabuflow", "nabuflow", "nabuflow"]);
+  });
+
+  it.each([
+    { scope: "monthly", usage: { monthly: 20, hourly: 0, daily: 0 }, code: "MONTHLY_CAP_REACHED" },
+    { scope: "hourly", usage: { monthly: 10, hourly: 10, daily: 10 }, code: "RATE_LIMITED" },
+    { scope: "daily", usage: { monthly: 19, hourly: 0, daily: 20 }, code: "RATE_LIMITED" },
+  ])("still enforces the product's own $scope limit", async ({ scope, usage, code }) => {
+    mockProductImageUsage(usage, empty);
+    await expect(preflightImageJobs(base.userId, 1, "standard")).rejects.toMatchObject({
+      code,
+      scope,
+    });
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.deduct).not.toHaveBeenCalled();
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+
+  it("preserves credit preflight after excluding another product's usage", async () => {
+    mockProductImageUsage(small, exhausted, 0);
+    await expect(preflightImageJobs(base.userId, 2, "standard")).rejects.toMatchObject({
+      code: "INSUFFICIENT_CREDITS",
+      balance: 0,
+      required: 6,
+    });
+  });
+
+  it("admits NabuFlow generation despite exhausted Ora usage", async () => {
+    const queries = mockProductImageUsage(small, exhausted);
+    const { jobId } = await enqueueImageJob({ ...base, productScope: "nabuflow" });
+    await vi.waitFor(() => expect(getJob(jobId)?.status).toBe("completed"));
+    expect(queries.imageScopes).toEqual(["nabuflow", "nabuflow", "nabuflow"]);
+    expect(mocks.persistOra).not.toHaveBeenCalled();
+  });
+
+  it("never applies NabuFlow subscription limits to Ora generation", async () => {
+    const queries = mockProductImageUsage(exhausted, small);
+    const { jobId } = await enqueueImageJob({ ...base, productScope: "ora" });
+    await vi.waitFor(() => expect(getJob(jobId)?.status).toBe("completed"));
+    expect(queries.subscriptionReads).toEqual([]);
+    expect(queries.imageScopes).toEqual(["ora", "ora"]);
+  });
+
+  it.each([
+    { scope: "hourly", usage: { monthly: 10, hourly: 10, daily: 10 } },
+    { scope: "daily", usage: { monthly: 20, hourly: 0, daily: 20 } },
+  ])("still enforces Ora's own $scope rate limit", async ({ scope, usage }) => {
+    const queries = mockProductImageUsage(exhausted, usage);
+    await expect(enqueueImageJob({ ...base, productScope: "ora" })).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      scope,
+    });
+    expect(queries.subscriptionReads).toEqual([]);
+    expect(queries.imageScopes.every((value) => value === "ora")).toBe(true);
+    expect(mocks.insert).not.toHaveBeenCalled();
     expect(mocks.deduct).not.toHaveBeenCalled();
     expect(mocks.generate).not.toHaveBeenCalled();
   });
