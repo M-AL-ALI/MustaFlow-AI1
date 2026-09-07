@@ -1,9 +1,10 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@workspace/api-client-react", () => ({
   getAuthToken: vi.fn(async () => "test-token"),
 }));
 
+import { getAuthToken } from "@workspace/api-client-react";
 import { authFetch } from "./api-fetch";
 
 function lastInit(): RequestInit {
@@ -17,10 +18,16 @@ function authHeader(): string | null {
 
 describe("authFetch bearer-token attachment (same-origin guard)", () => {
   beforeEach(() => {
+    vi.useRealTimers();
+    vi.mocked(getAuthToken).mockReset().mockResolvedValue("test-token");
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ ok: true }) as Response),
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("attaches the bearer token for a relative /api path", async () => {
@@ -58,5 +65,28 @@ describe("authFetch bearer-token attachment (same-origin guard)", () => {
       headers: { Authorization: "Bearer caller-supplied" },
     });
     expect(authHeader()).toBe("Bearer caller-supplied");
+  });
+
+  it("falls back to the same-origin cookie when token retrieval stalls", async () => {
+    vi.useFakeTimers();
+    vi.mocked(getAuthToken).mockReturnValueOnce(new Promise(() => undefined));
+
+    const request = authFetch("/api/credits");
+    await vi.advanceTimersByTimeAsync(3_000);
+    await request;
+
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(authHeader()).toBeNull();
+    expect(lastInit().credentials).toBe("include");
+  });
+
+  it("falls back to the same-origin cookie when token retrieval rejects", async () => {
+    vi.mocked(getAuthToken).mockRejectedValueOnce(new Error("token refresh failed"));
+
+    await authFetch("/api/credits");
+
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(authHeader()).toBeNull();
+    expect(lastInit().credentials).toBe("include");
   });
 });

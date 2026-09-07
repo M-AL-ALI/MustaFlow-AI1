@@ -1,5 +1,23 @@
 import { getAuthToken } from "@workspace/api-client-react";
 
+const AUTH_TOKEN_WAIT_MS = 3_000;
+
+async function getAuthTokenWithinBudget(): Promise<string | null> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve()
+        .then(() => getAuthToken())
+        .catch(() => null),
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), AUTH_TOKEN_WAIT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
 /**
  * authFetch — drop-in wrapper around the native `fetch` for same-origin `/api`
  * calls that bypass the generated Orval hooks (e.g. file downloads, streaming,
@@ -22,7 +40,10 @@ export async function authFetch(input: string, init: RequestInit = {}): Promise<
   // Only attach the bearer token to same-origin requests. This prevents an
   // accidental absolute third-party URL from ever leaking the session token.
   if (isSameOrigin(input) && !headers.has("authorization")) {
-    const token = await getAuthToken();
+    // Clerk can occasionally leave getToken() pending while its client session
+    // refreshes. Bound that optional bearer path so the same-origin cookie can
+    // still authenticate the request instead of leaving the UI pending forever.
+    const token = await getAuthTokenWithinBudget();
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
 
