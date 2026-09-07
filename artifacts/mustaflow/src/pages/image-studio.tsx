@@ -156,6 +156,7 @@ function ImageCard({
   onUseClick: (image: GeneratedImage) => void;
 }) {
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
 
   const handleDownload = () => {
@@ -168,10 +169,16 @@ function ImageCard({
 
   const handleDelete = async () => {
     setDeleting(true);
+    setDeleteError(null);
     try {
-      await authFetch(`/api/images/${image.id}`, { method: "DELETE" });
+      const response = await authFetch(`/api/images/${image.id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Image deletion was not confirmed");
       onDelete(image.id);
     } catch {
+      setDeleteError(
+        "This image could not be deleted. It remains in your library. Please try again.",
+      );
+    } finally {
       setDeleting(false);
     }
   };
@@ -200,8 +207,14 @@ function ImageCard({
               {image.errorMessage}
             </span>
           )}
+          {deleteError && (
+            <p role="alert" className="text-xs text-destructive">
+              {deleteError}
+            </p>
+          )}
           <button
             onClick={() => void handleDelete()}
+            disabled={deleting}
             className="mt-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors"
           >
             Dismiss
@@ -221,6 +234,11 @@ function ImageCard({
         className="w-full aspect-square object-cover"
         loading="lazy"
       />
+      {deleteError && (
+        <p role="alert" className="relative z-10 bg-card p-3 text-xs text-destructive">
+          {deleteError}
+        </p>
+      )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex flex-col justify-end p-3 gap-2">
         <button onClick={() => setShowPrompt((v) => !v)} className="text-left">
           <p className="text-white text-[11px] line-clamp-2 leading-snug">
@@ -645,6 +663,7 @@ export default function ImageStudioPage() {
           if (job.status === "completed" || job.status === "failed") {
             pendingJobsRef.current.delete(jobId);
             void fetchImages();
+            void fetchAssets();
           } else {
             setImages((prev) =>
               prev.map((img) => (img.id === job.imageId ? { ...img, status: job.status } : img)),
@@ -660,7 +679,7 @@ export default function ImageStudioPage() {
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
-  }, [fetchImages]);
+  }, [fetchAssets, fetchImages]);
 
   const handleGenerate = async () => {
     if (!prompt.trim() || generating) return;
@@ -722,6 +741,7 @@ export default function ImageStudioPage() {
 
   const handleDelete = (id: number) => {
     setImages((prev) => prev.filter((img) => img.id !== id));
+    void fetchAssets();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -748,14 +768,20 @@ export default function ImageStudioPage() {
 
   const handleAssetDelete = async (asset: UnifiedAsset) => {
     setUploadError(null);
-    const response = await authFetch(`/api/assets/${asset.id}`, { method: "DELETE" });
-    const body = (await response.json().catch(() => ({}))) as { error?: string };
-    if (!response.ok) {
-      setUploadError(body.error ?? "This asset could not be deleted.");
-      return;
+    try {
+      const response = await authFetch(`/api/assets/${asset.id}`, { method: "DELETE" });
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setUploadError(body.error ?? "This asset could not be deleted.");
+        return;
+      }
+      setAssets((current) => current.filter((entry) => entry.id !== asset.id));
+      await fetchAssets();
+    } catch {
+      setUploadError(
+        "This asset could not be deleted. It remains in your library. Please try again.",
+      );
     }
-    setAssets((current) => current.filter((entry) => entry.id !== asset.id));
-    await fetchAssets();
   };
 
   const startStorageCheckout = async (sku: string) => {

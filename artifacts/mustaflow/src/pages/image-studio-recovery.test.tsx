@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const authFetch = vi.hoisted(() => vi.fn());
@@ -30,7 +30,10 @@ beforeEach(() => {
   authFetch.mockImplementation(async (url: string) => reply(bodies[url]));
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const loadCases = [
   {
@@ -150,4 +153,121 @@ it("shows the known retryable storage-admission message without creating a pendi
   expect(screen.queryByText("Image generation failed")).not.toBeInTheDocument();
   expect(screen.getByText("No images yet")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled());
+});
+
+const generatedAsset = {
+  id: 901,
+  kind: "image",
+  source: "image-generation",
+  filename: "generated-901.webp",
+  mimeType: "image/webp",
+  sizeBytes: 12,
+  scanState: "decoded",
+  contentUrl: "/api/assets/901/content",
+  createdAt: "2026-09-07T00:00:00.000Z",
+};
+const generatedImage = {
+  id: 901,
+  assetId: 901,
+  prompt: "Private blue sailboat",
+  quality: "draft",
+  aspectRatio: "1:1",
+  status: "completed",
+  fileUrl: "/api/assets/901/content",
+  creditCost: 1,
+  createdAt: "2026-09-07T00:00:00.000Z",
+};
+
+it.each(["completed", "failed"])(
+  "refreshes the asset library and storage after a generation becomes %s",
+  async (status) => {
+    vi.useFakeTimers();
+    let settled = false;
+    authFetch.mockImplementation(async (url: string) => {
+      if (url === "/api/images/generate")
+        return reply({ jobId: "job-901", imageId: 901, creditCost: 1, status: "pending" });
+      if (url === "/api/images/status/job-901") {
+        settled = true;
+        return reply({ jobId: "job-901", imageId: 901, status });
+      }
+      if (url === "/api/images?limit=40")
+        return reply({ images: settled ? [{ ...generatedImage, status }] : [] });
+      if (url === "/api/assets?limit=100")
+        return reply({ assets: settled && status === "completed" ? [generatedAsset] : [] });
+      return reply(bodies[url]);
+    });
+    await act(async () => {
+      render(<ImageStudioPage />);
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Describe the image you want to generate/), {
+      target: { value: generatedImage.prompt },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(authFetch.mock.calls.filter(([url]) => url === "/api/assets?limit=100")).toHaveLength(2);
+    expect(
+      authFetch.mock.calls.filter(([url]) => url === "/api/assets/storage-plans"),
+    ).toHaveLength(2);
+    if (status === "completed")
+      expect(screen.getByText(generatedAsset.filename)).toBeInTheDocument();
+    else expect(screen.getByText("Generation failed")).toBeInTheDocument();
+  },
+);
+
+it.each([403, 409, 503, "network"])(
+  "keeps a generated image after deletion fails with %s and refreshes assets only on success",
+  async (failure) => {
+    let rejectDeletion = true;
+    let deleted = false;
+    authFetch.mockImplementation(async (url: string) => {
+      if (url === "/api/images?limit=40") return reply({ images: [generatedImage] });
+      if (url === "/api/assets?limit=100")
+        return reply({ assets: deleted ? [] : [generatedAsset] });
+      if (url === "/api/images/901") {
+        if (rejectDeletion) {
+          if (failure === "network") throw new Error("Network unavailable");
+          return reply({ error: "Deletion denied" }, Number(failure));
+        }
+        deleted = true;
+        return reply({}, 204);
+      }
+      return reply(bodies[url]);
+    });
+    render(<ImageStudioPage />);
+    await screen.findByText(generatedAsset.filename);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("It remains in your library");
+    expect(screen.getByAltText(generatedImage.prompt)).toBeInTheDocument();
+    expect(authFetch.mock.calls.filter(([url]) => url === "/api/assets?limit=100")).toHaveLength(1);
+    rejectDeletion = false;
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(screen.queryByText(generatedAsset.filename)).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByAltText(generatedImage.prompt)).not.toBeInTheDocument();
+    expect(
+      authFetch.mock.calls.filter(([url]) => url === "/api/assets/storage-plans"),
+    ).toHaveLength(2);
+  },
+);
+
+it("keeps an asset and shows a retryable message when its delete request rejects", async () => {
+  authFetch.mockImplementation(async (url: string) => {
+    if (url === "/api/assets?limit=100") return reply({ assets: [generatedAsset] });
+    if (url === "/api/assets/901") throw new Error("Network unavailable");
+    return reply(bodies[url]);
+  });
+  render(<ImageStudioPage />);
+  await screen.findByText(generatedAsset.filename);
+  fireEvent.click(screen.getByRole("button", { name: `Delete ${generatedAsset.filename}` }));
+  expect(
+    await screen.findByText(
+      "This asset could not be deleted. It remains in your library. Please try again.",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByText(generatedAsset.filename)).toBeInTheDocument();
 });
