@@ -14,7 +14,9 @@ describe("project delete wiring", () => {
 
     expect(src).toContain("useDeleteProject");
     expect(src).toContain("Move project to Trash");
-    expect(src).toContain("restore it from Trash for 30 days");
+    expect(src).toContain("<ProjectTrashDialog");
+    expect(src).toContain("setTrashProject(project)");
+    expect(src).not.toContain("window.confirm(");
     expect(src).toContain("getGetProjectsSummaryQueryKey");
     expect(src).toContain("getGetRecentActivityQueryKey");
     expect(src).toContain("getListTrashedProjectsQueryKey");
@@ -29,7 +31,9 @@ describe("project delete wiring", () => {
 
     expect(src).toContain("useDeleteProject");
     expect(src).toContain("Move project to Trash");
-    expect(src).toContain("restore it from Trash for 30 days");
+    expect(src).toContain("<ProjectTrashDialog");
+    expect(src).toContain("onDelete={setTrashProject}");
+    expect(src).not.toContain("window.confirm(");
     expect(src).toContain("getListTrashedProjectsQueryKey");
     expect(src).toContain("Trash2");
     expect(src).toContain("bg-background/80");

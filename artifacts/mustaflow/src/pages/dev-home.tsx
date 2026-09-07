@@ -22,6 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { SlideOutNav } from "@/components/layout/slide-out-nav";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
+import { ProjectTrashDialog, type TrashProject } from "@/components/project-trash-dialog";
 import {
   Rocket,
   MessageSquare,
@@ -561,6 +562,7 @@ export default function DevHomePage() {
   const [modalStack, setModalStack] = useState("react-vite");
   const [modalKind, setModalKind] = useState("web");
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
+  const [trashProject, setTrashProject] = useState<TrashProject | null>(null);
 
   function _openModalWithPrompt(prompt: string) {
     setModalPrompt(prompt);
@@ -603,11 +605,6 @@ export default function DevHomePage() {
   }
 
   async function handleDeleteProject(project: { id: number; name: string }) {
-    const confirmed = window.confirm(
-      `Move "${project.name}" to Trash? You can restore it from Trash for 30 days.`,
-    );
-    if (!confirmed) return;
-
     setDeletingProjectId(project.id);
     try {
       await deleteProject.mutateAsync({ id: project.id });
@@ -622,6 +619,7 @@ export default function DevHomePage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not delete project.";
       toast({ title: "Delete failed", description: message, variant: "destructive" });
+      throw err;
     } finally {
       setDeletingProjectId(null);
     }
@@ -681,7 +679,7 @@ export default function DevHomePage() {
                     key={project.id}
                     project={project}
                     deleting={deletingProjectId === project.id}
-                    onDelete={handleDeleteProject}
+                    onDelete={setTrashProject}
                   />
                 ))}
               </div>
@@ -713,6 +711,13 @@ export default function DevHomePage() {
         initialStack={modalStack}
         initialKind={modalKind}
       />
+      {trashProject && (
+        <ProjectTrashDialog
+          project={trashProject}
+          onConfirm={handleDeleteProject}
+          onClose={() => setTrashProject(null)}
+        />
+      )}
     </div>
   );
 }

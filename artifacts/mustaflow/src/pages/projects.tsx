@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Link, useLocation } from "wouter";
 import { BrainstormPanel } from "@/components/brainstorm-panel";
+import { ProjectTrashDialog, type TrashProject } from "@/components/project-trash-dialog";
 import {
   getGetProjectsSummaryQueryKey,
   getGetRecentActivityQueryKey,
@@ -349,15 +350,11 @@ export default function ProjectsPage() {
   });
   const deleteProject = useDeleteProject();
   const [deletingProjectId, setDeletingProjectId] = useState<number | null>(null);
+  const [trashProject, setTrashProject] = useState<TrashProject | null>(null);
 
   const hasProjects = (summary?.recent?.length ?? 0) > 0;
 
   async function handleDeleteProject(project: { id: number; name: string }) {
-    const confirmed = window.confirm(
-      `Move "${project.name}" to Trash? You can restore it from Trash for 30 days.`,
-    );
-    if (!confirmed) return;
-
     setDeletingProjectId(project.id);
     try {
       await deleteProject.mutateAsync({ id: project.id });
@@ -374,6 +371,7 @@ export default function ProjectsPage() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not delete project.";
       toast({ title: "Delete failed", description: message, variant: "destructive" });
+      throw err;
     } finally {
       setDeletingProjectId(null);
     }
@@ -383,6 +381,13 @@ export default function ProjectsPage() {
     <div className="w-full min-h-full">
       {/* Hero / prompt section */}
       <HomeHero />
+      {trashProject && (
+        <ProjectTrashDialog
+          project={trashProject}
+          onConfirm={handleDeleteProject}
+          onClose={() => setTrashProject(null)}
+        />
+      )}
 
       {/* Divider */}
       {(hasProjects || summaryError) && (
@@ -462,7 +467,7 @@ export default function ProjectsPage() {
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              void handleDeleteProject(project);
+                              setTrashProject(project);
                             }}
                           >
                             {deletingProjectId === project.id ? (
