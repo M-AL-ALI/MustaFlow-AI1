@@ -114,7 +114,14 @@ function requiredConfiguration(env: WorkerBindings): {
       "pre_dispatch",
     );
   }
-  const managementKey = env[PRODUCTION_DATABASE_NEON_MANAGEMENT_KEY_BINDING];
+  const configuredManagementKey = env[PRODUCTION_DATABASE_NEON_MANAGEMENT_KEY_BINDING];
+  // Provider keys are commonly copied from a console or password manager. Normalize only
+  // surrounding whitespace so an accidental trailing newline cannot make the Authorization
+  // header fail before the request reaches Neon.
+  const managementKey =
+    typeof configuredManagementKey === "string"
+      ? configuredManagementKey.trim()
+      : configuredManagementKey;
   const organizationId = env[PRODUCTION_DATABASE_NEON_ORGANIZATION_ID_BINDING];
   const regionId = env[PRODUCTION_DATABASE_NEON_REGION_ID_BINDING];
   const historyRetentionSeconds = Number(

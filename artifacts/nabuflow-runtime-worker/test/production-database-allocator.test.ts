@@ -585,6 +585,26 @@ describe("production database allocator", () => {
     expect(calls).toBe(0);
   });
 
+  it("normalizes surrounding whitespace in the Neon management key before dispatch", async () => {
+    const env = productionEnv();
+    env.NABUFLOW_PRODUCTION_NEON_MANAGEMENT_KEY =
+      " \r\ntest-management-material-with-sufficient-length\t ";
+    let authorization: string | null = null;
+    const allocator = new ProductionDatabaseAllocator(env, {
+      async fetch(request) {
+        authorization = request.headers.get("authorization");
+        return json({ projects: [], pagination: {} });
+      },
+    });
+
+    await expect(allocator.healthCheck()).resolves.toMatchObject({
+      provider: "neon-postgres",
+      organizationId: "org-production",
+      operation: "list-projects",
+    });
+    expect(authorization).toBe("Bearer test-management-material-with-sufficient-length");
+  });
+
   it("creates a region-pinned project, verifies retention, and returns the credential only in memory", async () => {
     const calls: Array<{ method: string; path: string; body: unknown }> = [];
     const adapter: ProductionDatabaseProviderFetch = {
