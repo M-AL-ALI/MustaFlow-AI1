@@ -429,6 +429,18 @@ export class ProductionDatabaseAllocator {
         return { projects: owned, catalogProjectCount, catalogPageCount: page + 1 };
       }
       const pagination = objectRecord(body.pagination);
+      // Neon can retain its last cursor (or return an empty pagination object)
+      // on an empty terminal page. Its SDK also terminates on an empty page.
+      // Partial-result checks above must run before accepting catalog absence.
+      if (body.projects.length === 0) {
+        if (
+          Object.keys(pagination).some((key) => key !== "cursor") ||
+          ("cursor" in pagination && typeof pagination.cursor !== "string")
+        ) {
+          throw incomplete();
+        }
+        return { projects: owned, catalogProjectCount, catalogPageCount: page + 1 };
+      }
       const next = requiredString(pagination.cursor);
       if (cursors.has(next)) throw incomplete();
       cursors.add(next);

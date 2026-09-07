@@ -27,6 +27,100 @@ const json = (body: unknown, status = 200) =>
   });
 
 describe("production database allocator", () => {
+  it.each([{}, { cursor: "" }, { cursor: "next" }])(
+    "accepts a complete empty terminal catalog page with pagination %j",
+    async (pagination) => {
+      const requests: Array<{ method: string; cursor: string | null }> = [];
+      const allocator = new ProductionDatabaseAllocator(productionEnv(), {
+        async fetch(request) {
+          const url = new URL(request.url);
+          requests.push({ method: request.method, cursor: url.searchParams.get("cursor") });
+          return requests.length === 1
+            ? json({
+                projects: [{ id: "customer-project", name: "customer-project" }],
+                pagination: { cursor: "next" },
+              })
+            : json({ projects: [], pagination, unavailable: [], unavailable_project_ids: [] });
+        },
+      });
+      await expect(
+        allocator.resolveLegacyForRelease({
+          projectId: 42,
+          allocationIdentity: identity,
+          assertAuthority: async () => undefined,
+        }),
+      ).resolves.toMatchObject({
+        state: "absent",
+        proof: {
+          catalogProjectCount: 1,
+          catalogOwnedProjectCount: 0,
+          catalogPageCount: 2,
+        },
+      });
+      expect(requests).toEqual([
+        { method: "GET", cursor: null },
+        { method: "GET", cursor: "next" },
+      ]);
+    },
+  );
+
+  it.each(["unavailable", "unavailable_project_ids"])(
+    "rejects an empty terminal page that reports partial results through %s",
+    async (partialField) => {
+      let calls = 0;
+      const allocator = new ProductionDatabaseAllocator(productionEnv(), {
+        async fetch(request) {
+          expect(request.method).toBe("GET");
+          calls += 1;
+          return calls === 1
+            ? json({
+                projects: [{ id: "customer-project", name: "customer-project" }],
+                pagination: { cursor: "next" },
+              })
+            : json({ projects: [], pagination: { cursor: "next" }, [partialField]: ["missing"] });
+        },
+      });
+      await expect(
+        allocator.resolveLegacyForRelease({
+          projectId: 42,
+          allocationIdentity: identity,
+          assertAuthority: async () => undefined,
+        }),
+      ).rejects.toMatchObject({ code: "production_database_integrity_failure", retryable: false });
+      expect(calls).toBe(2);
+    },
+  );
+
+  it("can create a new allocation from an empty catalog with empty pagination", async () => {
+    const requests: string[] = [];
+    const allocator = new ProductionDatabaseAllocator(productionEnv(), {
+      async fetch(request) {
+        const url = new URL(request.url);
+        requests.push(request.method + " " + url.pathname);
+        if (url.pathname === "/api/v2/projects") {
+          return request.method === "POST"
+            ? json({ project: { id: providerProjectId } }, 201)
+            : json({ projects: [], pagination: {} });
+        }
+        if (url.pathname.endsWith("/connection_uri")) {
+          return json({
+            uri: "postgresql://runtime:transient@ep-test.us-east-2.aws.neon.tech/neondb",
+          });
+        }
+        return json({ project: { history_retention_seconds: 604800 } });
+      },
+    });
+    await expect(
+      allocator.ensure({ projectId: 42, allocationIdentity: identity }),
+    ).resolves.toMatchObject({ reused: false, allocation: { providerProjectId } });
+    expect(requests).toEqual([
+      "GET /api/v2/projects",
+      "POST /api/v2/projects",
+      `GET /api/v2/projects/${providerProjectId}`,
+      `GET /api/v2/projects/${providerProjectId}/connection_uri`,
+    ]);
+  });
+
   it("does not repair retention after authority expires during the retention GET", async () => {
     let authorityLost = false;
     let releaseRead!: () => void;
@@ -498,8 +592,11 @@ describe("production database allocator", () => {
     { projects: [], unavailable: null },
     { projects: [], unavailable_project_ids: "missing" },
     { projects: [], pagination: null },
-    { projects: [], pagination: {} },
-    { projects: [], pagination: { cursor: "" } },
+    { projects: [], pagination: { cursor: null } },
+    { projects: [], pagination: { cursor: 42 } },
+    { projects: [], pagination: { next: "unrecognized-pagination" } },
+    { projects: [{ id: "missing-cursor", name: "unrelated" }], pagination: {} },
+    { projects: [{ id: "empty-cursor", name: "unrelated" }], pagination: { cursor: "" } },
     { projects: [{ id: "missing-name" }] },
   ])("never creates from malformed or partial inventory %#", async (body) => {
     const methods: string[] = [];
@@ -527,7 +624,12 @@ describe("production database allocator", () => {
           expect(request.method).toBe("GET");
           calls += 1;
           return json({
-            projects: failure === "duplicate-id" ? [{ id: "duplicate", name: "unrelated" }] : [],
+            projects: [
+              {
+                id: failure === "duplicate-id" ? "duplicate" : `project-${calls}`,
+                name: "unrelated",
+              },
+            ],
             pagination: { cursor: failure === "cursor-loop" ? "same" : `page-${calls}` },
           });
         },
