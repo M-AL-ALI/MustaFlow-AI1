@@ -102,13 +102,18 @@ export async function lookupNeonProjectsByStableName(
         const projectIds = [...new Set(exactIds)].sort();
         return projectIds.length > 0 ? { kind: "found", projectIds } : { kind: "absent" };
       }
-      if (
-        typeof nextCursor !== "string" ||
-        nextCursor.length > 512 ||
-        seenCursors.has(nextCursor)
-      ) {
+      if (typeof nextCursor !== "string" || nextCursor.length > 512) {
         return { kind: "unavailable" };
       }
+      // Neon echoes the requested cursor on the empty terminal page. This is
+      // completion, not a pagination loop. Only accept the current cursor after
+      // validating the response and its unavailable list; nonempty repeats and
+      // jumps back to an earlier cursor must still fail closed.
+      if (body.projects.length === 0 && nextCursor === cursor) {
+        const projectIds = [...new Set(exactIds)].sort();
+        return projectIds.length > 0 ? { kind: "found", projectIds } : { kind: "absent" };
+      }
+      if (seenCursors.has(nextCursor)) return { kind: "unavailable" };
       seenCursors.add(nextCursor);
       cursor = nextCursor;
     }

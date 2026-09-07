@@ -234,6 +234,116 @@ describe("strict Neon project lifecycle", () => {
     });
   });
 
+  it.each([false, true])(
+    "accepts an empty terminal page echoing its requested cursor (exact match: %s)",
+    async (hasExactMatch) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          response(200, {
+            projects: [
+              { id: "near-80", name: "mf-project-80" },
+              ...(hasExactMatch ? [{ id: "exact-8", name: "mf-project-8" }] : []),
+            ],
+            pagination: { cursor: "last-project" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          response(200, { projects: [], pagination: { cursor: "last-project" } }),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(lookupNeonProjectsByStableName("mf-project-8")).resolves.toEqual(
+        hasExactMatch ? { kind: "found", projectIds: ["exact-8"] } : { kind: "absent" },
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1]?.[0]).toContain("cursor=last-project");
+    },
+  );
+
+  it("does not mistake a timed-out empty terminal page for absence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          response(200, {
+            projects: [{ id: "near-80", name: "mf-project-80" }],
+            pagination: { cursor: "last-project" },
+          }),
+        )
+        .mockResolvedValueOnce(
+          response(200, {
+            projects: [],
+            pagination: { cursor: "last-project" },
+            unavailable: ["unresolved-project"],
+          }),
+        ),
+    );
+
+    await expect(lookupNeonProjectsByStableName("mf-project-8")).resolves.toEqual({
+      kind: "unavailable",
+    });
+  });
+
+  it("rejects an empty page that loops back to an older cursor", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response(200, {
+          projects: [{ id: "near-80", name: "mf-project-80" }],
+          pagination: { cursor: "page-2" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, {
+          projects: [{ id: "near-81", name: "mf-project-81" }],
+          pagination: { cursor: "page-3" },
+        }),
+      )
+      .mockResolvedValueOnce(response(200, { projects: [], pagination: { cursor: "page-2" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(lookupNeonProjectsByStableName("mf-project-8")).resolves.toEqual({
+      kind: "unavailable",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("finishes orphan checks without deleting partial-name matches", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response(200, {
+          projects: [{ id: "near-80", name: "mf-project-80" }],
+          pagination: { cursor: "last-production" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, { projects: [], pagination: { cursor: "last-production" } }),
+      )
+      .mockResolvedValueOnce(
+        response(200, {
+          projects: [{ id: "near-preview-80", name: "mf-preview-80" }],
+          pagination: { cursor: "last-preview" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response(200, { projects: [], pagination: { cursor: "last-preview" } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      releaseNeonProjectsForHardDelete({
+        projectIds: [],
+        productionProjectName: "mf-project-8",
+        previewProjectName: "mf-preview-8",
+      }),
+    ).resolves.toEqual({ removed: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.every((call) => !(call[1] as RequestInit).method)).toBe(true);
+  });
+
   it("refuses unsafe identifiers, missing config, and provider uncertainty", async () => {
     await expect(
       releaseNeonProjectsForHardDelete({
