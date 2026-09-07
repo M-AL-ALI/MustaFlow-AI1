@@ -246,7 +246,9 @@ async function providerFetch(
     if (url.origin !== NEON_ORIGIN) throw new Error("provider origin changed");
     request = new Request(url, {
       ...init,
-      redirect: "error",
+      // Workerd rejects redirect: "error" during Request construction. Manual mode
+      // prevents credentials from following redirects; reject all 3xx responses below.
+      redirect: "manual",
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     });
   } catch {
@@ -258,8 +260,21 @@ async function providerFetch(
     );
   }
   try {
-    return await adapter.fetch(request);
+    const response = await adapter.fetch(request);
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new ProductionDatabaseProviderError(
+        502,
+        "production_database_provider_rejected",
+        false,
+        "provider_rejected",
+        null,
+        response.status,
+      );
+    }
+    return response;
   } catch (error) {
+    if (error instanceof ProductionDatabaseProviderError) throw error;
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new ProductionDatabaseProviderError(
         504,

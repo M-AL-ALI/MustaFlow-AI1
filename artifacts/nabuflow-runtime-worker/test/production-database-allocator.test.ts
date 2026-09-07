@@ -448,7 +448,7 @@ describe("production database allocator", () => {
     const adapter: ProductionDatabaseProviderFetch = {
       async fetch(request) {
         const url = new URL(request.url);
-        expect(request.redirect).toBe("error");
+        expect(request.redirect).toBe("manual");
         if (request.method === "POST") {
           creates += 1;
           throw new Error("must reuse, not create");
