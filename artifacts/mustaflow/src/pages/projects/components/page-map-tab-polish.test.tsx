@@ -27,22 +27,36 @@ vi.mock("@workspace/api-client-react", () => ({
 }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => mocks.queryClient }));
 vi.mock("html2canvas", () => ({ default: mocks.exportCanvas }));
-vi.mock("./page-detail-panel", () => ({
-  PageDetailPanel: ({
-    node,
-    isOrphan,
-    isDeadEnd,
-  }: {
-    node: { label: string } | null;
-    isOrphan: boolean;
-    isDeadEnd: boolean;
-  }) =>
-    node ? (
-      <div data-testid="page-details" data-runtime-failure={isOrphan || isDeadEnd}>
-        {node.label}
-      </div>
-    ) : null,
-}));
+vi.mock("./page-detail-panel", async () => {
+  const { PageMapPreviewAction } = await import("./page-map-preview-action");
+  return {
+    PageDetailPanel: ({
+      node,
+      isOrphan,
+      isDeadEnd,
+      projectId,
+      onOpenPreview,
+    }: {
+      node: {
+        id: string;
+        label: string;
+        filePath: string;
+        notes: string;
+        planned?: boolean;
+      } | null;
+      isOrphan: boolean;
+      isDeadEnd: boolean;
+      projectId: number;
+      onOpenPreview: (route: string) => void;
+    }) =>
+      node ? (
+        <div data-testid="page-details" data-runtime-failure={isOrphan || isDeadEnd}>
+          {node.label}
+          <PageMapPreviewAction projectId={projectId} node={node} onOpenPreview={onOpenPreview} />
+        </div>
+      ) : null,
+  };
+});
 vi.mock("./edge-detail-panel", () => ({ EdgeDetailPanel: () => null }));
 vi.mock("./blocks-panel", () => ({ BlocksPanel: () => null }));
 vi.mock("@xyflow/react", async () => {
@@ -132,6 +146,28 @@ afterEach(() => {
 });
 
 describe("Page Map truthful states and toolbar", () => {
+  it("opens a dynamic gallery page through details using an explicit example without a map write", () => {
+    mocks.query.data = {
+      revision: "a".repeat(64),
+      pageMapData: {
+        ios: { nodes: [], edges: [] },
+        android: { nodes: [], edges: [] },
+        web: { nodes: [{ ...page(), notes: "Route: /notes/:id" }], edges: [] },
+      },
+    };
+    const callbacks = renderMap();
+    fireEvent.click(screen.getByRole("button", { name: "View details for Account" }));
+    expect(screen.getByRole("button", { name: "Open in Preview" })).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Example id" }), {
+      target: { value: "42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open in Preview" }));
+    expect(callbacks.onSwitchToPreview).toHaveBeenCalledExactlyOnceWith("/notes/42");
+    expect(callbacks.onSwitchToChat).not.toHaveBeenCalled();
+    expect(mocks.save.mutate).not.toHaveBeenCalled();
+    expect(mocks.analyze.mutate).not.toHaveBeenCalled();
+    expect(document.querySelector("iframe")).toBeNull();
+  });
   it("renders a bounded set of opaque, lazy live frames in Contents", () => {
     mocks.query.data = {
       revision: "a".repeat(64),

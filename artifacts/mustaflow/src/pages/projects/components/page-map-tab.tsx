@@ -1977,6 +1977,8 @@ function PageMapWorkspace({
           <>
             <div className="contents">
               <PageDetailPanel
+                projectId={projectId}
+                onOpenPreview={onSwitchToPreview}
                 node={selectedEdgeId || selectedCandidateId ? null : selectedNodeState}
                 onDraftStart={() => coordinator.stageDetails()}
                 onInspectTransition={handleInspectTransition}

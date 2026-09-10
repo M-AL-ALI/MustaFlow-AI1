@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PageType } from "./page-node";
+import { PageMapPreviewAction } from "./page-map-preview-action";
 import {
   transitionEvidenceLabel,
   transitionSummary,
@@ -64,6 +65,8 @@ const WEB_PAGE_TYPES: { value: PageType; label: string }[] = [
 
 type PageDetailPanelProps = {
   node: PageMapNodeState | null;
+  projectId?: number;
+  onOpenPreview?: (route: string) => void;
   // Wiring context — computed by parent from current edges/nodes.
   incoming?: WiringEdge[];
   outgoing?: WiringEdge[];
@@ -91,6 +94,8 @@ type PageDetailPanelProps = {
 
 export function PageDetailPanel({
   node,
+  projectId,
+  onOpenPreview,
   incoming = [],
   outgoing = [],
   availableTargets = [],
@@ -188,6 +193,10 @@ export function PageDetailPanel({
                   : "This page has no outgoing links. Most pages should let users navigate forward or back."}
             </p>
           </div>
+        )}
+
+        {projectId !== undefined && onOpenPreview && (
+          <PageMapPreviewAction projectId={projectId} node={node} onOpenPreview={onOpenPreview} />
         )}
 
         {/* Name */}
