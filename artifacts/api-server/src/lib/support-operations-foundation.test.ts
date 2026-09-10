@@ -266,7 +266,10 @@ describe("consented support operations", () => {
     expect(client).toContain("setPeers([])");
     expect(client).toContain("setSelf(null)");
     expect(client).toContain("Math.min(10_000");
-    expect(client).toContain("window.setTimeout(connect, delay)");
+    expect(client).toMatch(
+      /window\.setTimeout\(\(\) => \{\s*reconnectTimer = null;\s*connect\(\);\s*\}, delay\)/,
+    );
+    expect(client).toContain("reconnectAttempt > MULTIPLAYER_MAX_RECONNECT_ATTEMPTS");
   });
 
   it("keeps a complete named grant receipt readable by the project owner", () => {

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const jobs = readFileSync(resolve(here, "jobs.ts"), "utf8");
+const loop = readFileSync(resolve(here, "agent-loop.ts"), "utf8");
 const messages = readFileSync(resolve(here, "../routes/messages.ts"), "utf8");
 const provisioning = readFileSync(resolve(here, "provisioning.ts"), "utf8");
 const projects = readFileSync(resolve(here, "../routes/projects.ts"), "utf8");
@@ -14,6 +15,47 @@ const backend = readFileSync(
 );
 
 describe("Zero sealed generation product wiring", () => {
+  it("propagates classified model failures before post-loop checks or either sealed wrapper", () => {
+    const failureThrow = loop.indexOf("throw modelRequestFailure;");
+    const postLoopChecks = loop.indexOf("// \u2500\u2500 Post-loop: run required checks");
+    expect(failureThrow).toBeGreaterThan(-1);
+    expect(postLoopChecks).toBeGreaterThan(failureThrow);
+    expect(loop).toContain("runAgentModelRequest({");
+    expect(loop).toContain("recovery: modelRequestRecovery");
+    expect(loop).toContain("deadlineAt: startedAt + wallClockMs");
+    expect(loop).toContain('safeEvent(input.onEvent, "model:request", JSON.stringify(diagnostic))');
+    const buildStart = jobs.indexOf("const USE_AGENT_LOOP_BUILD");
+    const buildLoop = jobs.indexOf("const loopRes = await runAgentLoop({", buildStart);
+    const buildSeal = jobs.indexOf(
+      "zeroSealedGeneration = prepareZeroSealedNodeSource({",
+      buildLoop,
+    );
+    expect(buildStart).toBeGreaterThan(-1);
+    expect(buildLoop).toBeGreaterThan(buildStart);
+    expect(buildSeal).toBeGreaterThan(buildLoop);
+    const refineStart = jobs.indexOf("const USE_AGENT_LOOP_REFINE");
+    const refineLoop = jobs.indexOf("const loopRes = await runAgentLoop({", refineStart);
+    const refineSeal = jobs.indexOf(
+      "const preparedRefinement = prepareZeroSealedNodeRefinement({",
+      refineLoop,
+    );
+    expect(refineStart).toBeGreaterThan(-1);
+    expect(refineLoop).toBeGreaterThan(refineStart);
+    expect(refineSeal).toBeGreaterThan(refineLoop);
+  });
+
+  it("persists the loop report with the terminal and retains it in the later report update", () => {
+    expect(jobs).toContain("err instanceof AgentModelRequestError");
+    expect(jobs).toContain("modelRequestFailure.failureEvidence");
+    expect(jobs).toContain("report: modelFailureReport");
+    expect(jobs).toContain("completionKind: modelRequestFailure.completionKind");
+    expect(jobs).toContain("...(modelFailureReport ?? {})");
+    expect(jobs).toContain("warnings: modelFailureReport?.warnings ?? []");
+    expect(jobs).toMatch(
+      /modelFailureReport\?\.suggestions\s*\?\?\s*sealedProjectRecovery\?\.suggestions\s*\?\?\s*generateFixSuggestions/,
+    );
+  });
+
   it("selects the target from deployment state and never from the public route", () => {
     expect(jobs).toContain("resolveZeroGenerationTarget(process.env)");
     expect(jobs).toContain("isZeroSealedGenerationTarget(zeroGenerationTarget)");

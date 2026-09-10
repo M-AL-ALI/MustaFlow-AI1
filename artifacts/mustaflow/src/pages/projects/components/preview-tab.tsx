@@ -2981,7 +2981,6 @@ export function PreviewTab({
         <div className="w-px h-4 bg-border shrink-0" />
 
         <PreviewStatusSummary
-          projectStatus={project.status}
           hasRuntime={Boolean(project.containerId)}
           runtimeStatus={containerStatus}
           hasFiles={hasFiles}

@@ -78,17 +78,24 @@ export function ProjectPresence({ projectId, location, canRevokeSupport }: Proje
   );
   const staffPresent = others.some((peer) => peer.kind === "staff");
 
-  if (presence.message && others.length === 0) {
-    return (
-      <span className="hidden max-w-56 truncate text-[10px] text-amber-500 lg:inline" role="status">
-        {presence.message}
-      </span>
-    );
-  }
+  const collaborationMessage = presence.message ? (
+    <span
+      role="status"
+      aria-label="Collaboration status"
+      className="max-w-56 break-words text-[10px] leading-tight text-amber-600 dark:text-amber-400"
+    >
+      Collaboration: {presence.message}
+    </span>
+  ) : null;
+  if (collaborationMessage && others.length === 0) return collaborationMessage;
   if (presence.status !== "open" && others.length === 0) return null;
 
   return (
-    <div className="relative shrink-0" data-testid="project-presence">
+    <div
+      className="relative flex min-w-0 flex-wrap items-center gap-2"
+      data-testid="project-presence"
+    >
+      {collaborationMessage}
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

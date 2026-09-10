@@ -47,6 +47,7 @@ import {
   type E2eScenario,
 } from "./checks/e2e-runner";
 import { logger } from "./logger";
+import { AgentModelRequestError, runAgentModelRequest } from "./agent-model-request";
 import {
   CHECK_PROFILES,
   checkProfileForServicePort,
@@ -2223,6 +2224,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       : STEP_CAP;
   let lastError = "";
   let consecutiveErrors = 0;
+  const modelRequestRecovery = { used: false };
+  let modelRequestFailure: AgentModelRequestError | undefined;
   // Per-path consecutive check-failure counts. Tracks how many consecutive
   // turns ended with checks still failing after writing/patching the same path.
   // Used for strategy-change steering when the agent is stuck on a single file.
@@ -2548,30 +2551,56 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           effectiveModel = VISION_MODEL.openai as string;
         }
       }
-      // Combine the wall-clock abort signal with a per-call timeout so a hung
-      // AI response never blocks the loop for more than 3 minutes, regardless
-      // of how much wall-clock budget remains.
-      const perCallSignal = AbortSignal.any([input.signal, AbortSignal.timeout(3 * 60_000)]);
       await emitZeroRunLoopPhase(input.onEvent, "createChatCompletion");
-      response = await createChatCompletion({
-        provider: effectiveProvider,
-        model: effectiveModel,
-        messages,
-        tools: toolsForLoop,
-        tool_choice: "required",
-        signal: perCallSignal,
-        // NabuFlow R2 Phase D: accumulate token telemetry keyed by task id so
-        // flushBuildTokenTelemetry() can upsert one row at build completion.
-        taskId: input.taskId ?? undefined,
-        taskMode: input.agentMode,
-        zeroCall: {
-          tier: input.agentMode,
+      response = await runAgentModelRequest({
+        signal: input.signal,
+        startedAt,
+        deadlineAt: startedAt + wallClockMs,
+        context: {
+          taskId: input.taskId ?? undefined,
+          projectId: input.projectId,
           stage: input.mode === "refine" ? "refine" : "build",
+          step,
         },
+        recovery: modelRequestRecovery,
+        onRecovery: (hint) => {
+          messages.push({ role: "system", content: hint });
+          void safeEvent(
+            input.onEvent,
+            "narration",
+            "The model request timed out. Trying one smaller response within this run's remaining time; your requirements are unchanged.",
+          );
+        },
+        onDiagnostic: (diagnostic) => {
+          logger.warn(diagnostic, "agent-loop: model request did not finish");
+          void safeEvent(input.onEvent, "model:request", JSON.stringify(diagnostic));
+        },
+        // Keep the same routed provider/model, tools, conversation, and token telemetry.
+        request: (requestSignal) =>
+          createChatCompletion({
+            provider: effectiveProvider,
+            model: effectiveModel,
+            messages,
+            tools: toolsForLoop,
+            tool_choice: "required",
+            signal: requestSignal,
+            taskId: input.taskId ?? undefined,
+            taskMode: input.agentMode,
+            zeroCall: {
+              tier: input.agentMode,
+              stage: input.mode === "refine" ? "refine" : "build",
+            },
+          }),
       });
     } catch (err) {
       if (input.signal.aborted) {
         terminationReason = "aborted";
+        break;
+      }
+      if (err instanceof AgentModelRequestError) {
+        modelRequestFailure = err;
+        terminationReason =
+          err.code === "agent_model_run_budget_exhausted" ? "wall-clock" : "model-stopped";
         break;
       }
       // Circuit breaker open — AI provider is temporarily degraded.
@@ -3448,6 +3477,38 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       // Reset turn-level path accumulator for the next turn.
       mutatedPathsThisTurn = [];
     }
+  }
+
+  // Preserve the primary request failure before checks or sealed preparation can mask it.
+  // This is a failed run, not an exemption from any validation or persistence gate.
+  if (modelRequestFailure && !input.signal.aborted) {
+    modelRequestFailure.attachLoopReport({
+      stack,
+      steps: Math.min(toolCalls.length, stepCap),
+      stepCap,
+      wallClockElapsedMs: Date.now() - startedAt,
+      wallClockBudgetMs: wallClockMs,
+      totalToolCalls: toolCalls.length,
+      totalTokens,
+      terminationReason,
+      completionKind: completionKindForTerminationReason(terminationReason),
+      toolCalls,
+      commandsRun,
+      checkResults,
+      skillsLoaded: Array.from(loadedSkills.keys()),
+      senseCalls: { ...senseCounts },
+      creativeCalls: { ...creativeCounts },
+    });
+    await safeEvent(input.onEvent, "narration", modelRequestFailure.message);
+    try {
+      await sandboxShell.dispose();
+    } catch {
+      logger.warn(
+        { taskId: input.taskId, projectId: input.projectId },
+        "agent-loop: cleanup failed; preserving model request failure",
+      );
+    }
+    throw modelRequestFailure;
   }
 
   // If the loop exited via the for-condition without break, it's a step-cap exhaustion.

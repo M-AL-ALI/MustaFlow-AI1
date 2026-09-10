@@ -171,13 +171,17 @@ import { loadBuilderDeepReasoning, saveBuilderDeepReasoning } from "@/lib/builde
 import {
   calmPhaseForTaskEvent,
   getCalmBuilderStatus,
+  getEditorWorkStatus,
+  reconcileEditorRunReceipt,
   type CalmBuilderPhase,
+  type EditorRunReceipt,
 } from "@/lib/builder-calm-status";
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
 import { QATapeInline } from "./components/qa-tape-inline";
 import { InlineBuildResults } from "./components/inline-build-results";
 import { workspaceReadinessSubjectFromTerminal } from "@/lib/workspace-readiness";
 import { useCheckpointHistoryNavigation } from "./components/use-checkpoint-history-navigation";
+import { getEditorWorkspaceTabs } from "./components/editor-workspace-navigation";
 import {
   appendNarrationEntry,
   InlineNarrationStream,
@@ -1072,6 +1076,10 @@ export default function ProjectWorkspacePage() {
     "completed" | "failed" | "cancelled" | null
   >(null);
   const [activeTaskStreamHasReceipt, setActiveTaskStreamHasReceipt] = useState(false);
+  const [editorRunReceipt, setEditorRunReceipt] = useState<EditorRunReceipt | null>(null);
+  const editorRunScopeRef = useRef({ projectId, taskId: activeTaskId });
+  editorRunScopeRef.current = { projectId, taskId: activeTaskId };
+  const editorRequestProjectIdRef = useRef<number | null>(null);
   const seenTaskEventIdsRef = useRef<Set<number>>(new Set());
   const liveRunStepIdsRef = useRef<RunStepIdSet>(createRunStepIdSet());
   const [liveRunStepCount, setLiveRunStepCount] = useState(0);
@@ -1318,6 +1326,11 @@ export default function ProjectWorkspacePage() {
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [projectSetupSubview, setProjectSetupSubview] = useState<string>();
+  const visibleWorkspaceTabs = getEditorWorkspaceTabs({
+    activeTab,
+    subview: projectSetupSubview,
+    isPublished: project?.status === "published",
+  });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   // Optimistic local state — seeded from localStorage so there's no flicker while the API loads.
@@ -2164,7 +2177,19 @@ export default function ProjectWorkspacePage() {
     };
   } | null>(null);
 
-  const activeTaskStatus = tasksForFeed.find((task) => task.id === activeTaskId)?.status;
+  const editorActiveTask = tasksForFeed.find((task) => task.id === activeTaskId);
+  const activeTaskStatus = editorActiveTask?.status;
+  const editorWorkStatus = getEditorWorkStatus({
+    projectId,
+    projectStatus: project?.status,
+    task: editorActiveTask
+      ? { projectId, id: editorActiveTask.id, status: editorActiveTask.status }
+      : null,
+    receipt: editorRunReceipt,
+    requestPending:
+      (sendMessage.isPending && sendMessage.variables?.id === projectId) ||
+      (isStreaming && editorRequestProjectIdRef.current === projectId),
+  });
   // On refresh the originating mutation no longer exists, so the persisted task row keeps
   // the real workspace busy state until the replayed terminal event arrives.
   const hasRehydratedActiveRun =
@@ -2401,6 +2426,14 @@ export default function ProjectWorkspacePage() {
   }, [leftPanelTab, projectId]);
 
   const isMobileLayout = windowWidth < 768;
+  const navigateWorkspaceTool = useCallback(
+    (target: WorkspaceToolOpen) => {
+      setProjectSetupSubview(target.subview);
+      setActiveTab(target.tabId);
+      if (isMobileLayout) setChatDrawerOpen(false);
+    },
+    [isMobileLayout],
+  );
   const { openCheckpointHistory, completeCheckpointHistoryNavigation } =
     useCheckpointHistoryNavigation({
       activeTab,
@@ -2519,6 +2552,11 @@ export default function ProjectWorkspacePage() {
     taskEventSourceRef.current = es;
     es.onmessage = (e: MessageEvent<string>) => {
       try {
+        if (
+          editorRunScopeRef.current.projectId !== projectId ||
+          editorRunScopeRef.current.taskId !== activeTaskId
+        )
+          return;
         const receipt = parseTaskStreamReceipt(e.data, activeTaskId);
         if (!receipt) return;
         setActiveTaskStreamHasReceipt(true);
@@ -2564,6 +2602,27 @@ export default function ProjectWorkspacePage() {
           event.eventType,
           event.message,
           event.terminal,
+        );
+        setEditorRunReceipt((current) =>
+          reconcileEditorRunReceipt(
+            current,
+            {
+              projectId,
+              taskId: activeTaskId,
+              phase: calmPhaseForTaskEvent(event.eventType, event.message) ?? undefined,
+              activityLabel: activity?.label,
+              terminal: receipt.terminal
+                ? event.eventType === "completed"
+                  ? "completed"
+                  : event.eventType === "failed"
+                    ? "failed"
+                    : event.eventType === "cancelled"
+                      ? "cancelled"
+                      : "unknown"
+                : undefined,
+            },
+            editorRunScopeRef.current,
+          ),
         );
         if (activity) {
           setLiveActivityEvents((current) => appendActivityEntry(current, activity));
@@ -3006,6 +3065,7 @@ export default function ProjectWorkspacePage() {
           /* ignore */
         }
       }
+      editorRequestProjectIdRef.current = projectId;
       lastSentPromptRef.current = content;
       setPreflightBanner(null);
       setActiveTaskId(null);
@@ -3420,7 +3480,14 @@ export default function ProjectWorkspacePage() {
 
   const cancelTask = useCancelTask({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (_data, variables) => {
+        setEditorRunReceipt((current) =>
+          reconcileEditorRunReceipt(
+            current,
+            { projectId: variables.id, taskId: variables.taskId, terminal: "cancelled" },
+            editorRunScopeRef.current,
+          ),
+        );
         // Stop closes the SSE connection before the mutation returns. Mark the
         // run terminal locally so the workspace never waits on a frame it can
         // no longer receive, then reconcile both persisted surfaces.
@@ -3767,10 +3834,7 @@ export default function ProjectWorkspacePage() {
             open
             onClose={() => setCommandPaletteOpen(false)}
             isPublished={project.status === "published"}
-            onNavigate={(target: WorkspaceToolOpen) => {
-              setProjectSetupSubview(target.subview);
-              setActiveTab(target.tabId);
-            }}
+            onNavigate={navigateWorkspaceTool}
           />
         </Suspense>
       )}
@@ -3817,8 +3881,8 @@ export default function ProjectWorkspacePage() {
       )}
 
       {/* ── Top bar ── */}
-      <div className="border-b border-border bg-card shrink-0 flex items-center gap-2 px-4 h-12 z-20 relative">
-        <div className="flex items-center gap-2 shrink-0 mr-1">
+      <div className="border-b border-border bg-card shrink-0 flex flex-wrap items-center gap-2 px-4 min-h-12 py-2 md:flex-nowrap md:py-0 z-20 relative">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 mr-1">
           <div className="w-5 h-5 rounded bg-primary/20 border border-primary/30 flex items-center justify-center">
             <Globe className="h-3 w-3 text-primary" />
           </div>
@@ -3831,25 +3895,40 @@ export default function ProjectWorkspacePage() {
             </span>
           )}
           <span
+            role="status"
+            aria-label="Current work"
+            data-testid="editor-work-status"
             className={cn(
               "text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0",
-              project.status === "building"
+              editorWorkStatus.tone === "active"
                 ? "bg-primary/10 text-primary border-primary/20"
-                : project.status === "published"
+                : editorWorkStatus.tone === "success"
                   ? "bg-green-500/10 text-green-400 border-green-500/20"
-                  : project.status === "failed"
+                  : editorWorkStatus.tone === "error"
                     ? "bg-destructive/10 text-destructive border-destructive/20"
-                    : "bg-muted text-muted-foreground border-border",
+                    : editorWorkStatus.tone === "warning"
+                      ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                      : "bg-muted text-muted-foreground border-border",
             )}
           >
-            {project.status === "failed"
-              ? "Last build failed"
-              : project.status === "building"
-                ? "Building"
-                : project.status === "published"
-                  ? "Published"
-                  : project.status}
+            {editorWorkStatus.label}
           </span>
+          {editorWorkStatus.previousBuildFailed && (
+            <button
+              type="button"
+              className="text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+              title="Previous build failed. Open Project history"
+              aria-label="Previous build failed. Open Project history"
+              onClick={() => {
+                setMoreTabsExpanded(true);
+                setAdvancedDataEnabled(true);
+                switchLeftPanel("history");
+                if (isMobileLayout) setChatDrawerOpen(true);
+              }}
+            >
+              Previous build
+            </button>
+          )}
           <ProjectPresence
             projectId={projectId}
             location={workspacePresenceLocation(activeTab)}
@@ -3956,23 +4035,6 @@ export default function ProjectWorkspacePage() {
               >
                 <Map style={{ width: 11, height: 11 }} />
                 Tour
-              </button>
-              <button
-                onClick={() => setZeroPanelOpen((value) => !value)}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors",
-                  zeroPanelOpen
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-                title={zeroPanelOpen ? "Close advanced assistant" : "Open advanced assistant"}
-              >
-                <DynamicAtom
-                  size={13}
-                  animate={zeroPanelOpen || !!zeroBgTaskId}
-                  className="shrink-0"
-                />
-                Advanced
               </button>
               <button
                 onClick={() => setActiveTab("publishing")}
@@ -4114,7 +4176,7 @@ export default function ProjectWorkspacePage() {
                       : t === "files"
                         ? "Files"
                         : t === "history"
-                          ? "History"
+                          ? "Project history"
                           : "Ideas"}
                     {badge !== null && (
                       <span
@@ -4137,6 +4199,8 @@ export default function ProjectWorkspacePage() {
               })}
               {/* Advanced assistant entry in left rail */}
               <button
+                type="button"
+                aria-pressed={zeroPanelOpen}
                 onClick={() => setZeroPanelOpen((v) => !v)}
                 className={cn(
                   "flex items-center justify-center gap-1.5 py-2 px-2.5 text-[11px] font-medium transition-colors border-b-2 shrink-0",
@@ -4219,8 +4283,9 @@ export default function ProjectWorkspacePage() {
                 </span>
                 {moreTabsExpanded && (
                   <button
+                    type="button"
                     onClick={() => setShowChatHistory((value) => !value)}
-                    title={showChatHistory ? "Back to live chat" : "View chat history"}
+                    title={showChatHistory ? "Back to chat" : "View conversation history"}
                     className={cn(
                       "ml-1.5 flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors border",
                       showChatHistory
@@ -4229,7 +4294,7 @@ export default function ProjectWorkspacePage() {
                     )}
                   >
                     <History className="h-3 w-3" />
-                    {showChatHistory ? "Live" : "History"}
+                    {showChatHistory ? "Back to chat" : "Conversation history"}
                   </button>
                 )}
               </div>
@@ -5424,17 +5489,17 @@ export default function ProjectWorkspacePage() {
         <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background relative">
           <div
             data-testid="workspace-core-tabs"
-            className="hidden md:flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-3 py-2"
+            className="hidden md:flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card/40 px-3 py-2"
           >
-            {CORE_WORKSPACE_TABS.map((tab) => {
-              const Icon = tab.icon;
+            {visibleWorkspaceTabs.map((tab) => {
+              const Icon = WORKSPACE_TOOL_ICONS[tab.toolId];
               return (
                 <button
                   key={tab.value}
                   type="button"
-                  onClick={() => setActiveTab(tab.value)}
+                  onClick={() => navigateWorkspaceTool(tab.open)}
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
                     activeTab === tab.value
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -5457,35 +5522,37 @@ export default function ProjectWorkspacePage() {
           {/* Mobile bottom tab bar */}
           {isMobileLayout && (
             <div
-              className="fixed bottom-0 left-0 right-0 z-30 flex items-stretch border-t border-border bg-card/95 backdrop-blur-sm"
+              data-testid="workspace-mobile-tabs"
+              className="fixed bottom-0 left-0 right-0 z-30 flex items-stretch overflow-x-auto border-t border-border bg-card/95 backdrop-blur-sm"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >
-              {[
-                { label: "Preview", value: "preview", icon: Monitor },
-                { label: "Page map", value: "page-map", icon: Globe },
-                { label: "Plan", value: "plan", icon: ListOrdered },
-              ].map(({ label, value, icon: Icon }) => (
-                <button
-                  key={value}
-                  onClick={() => {
-                    setActiveTab(value);
-                    setChatDrawerOpen(false);
-                  }}
-                  className={cn(
-                    "flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors",
-                    activeTab === value && !chatDrawerOpen
-                      ? "text-primary"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </button>
-              ))}
+              {visibleWorkspaceTabs.map((tab) => {
+                const Icon = WORKSPACE_TOOL_ICONS[tab.toolId];
+                return (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    onClick={() => navigateWorkspaceTool(tab.open)}
+                    aria-current={activeTab === tab.value && !chatDrawerOpen ? "page" : undefined}
+                    aria-label={tab.label}
+                    className={cn(
+                      "min-w-16 flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2.5 text-[10px] font-medium transition-colors",
+                      activeTab === tab.value && !chatDrawerOpen
+                        ? "text-primary"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="max-w-full truncate">{tab.label}</span>
+                  </button>
+                );
+              })}
               <button
+                type="button"
                 onClick={() => setChatDrawerOpen((o) => !o)}
+                aria-pressed={chatDrawerOpen}
                 className={cn(
-                  "flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors",
+                  "min-w-16 flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors",
                   chatDrawerOpen ? "text-primary" : "text-muted-foreground",
                 )}
               >

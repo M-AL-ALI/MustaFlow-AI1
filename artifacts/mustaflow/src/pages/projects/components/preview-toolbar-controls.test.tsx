@@ -11,7 +11,6 @@ import {
 afterEach(cleanup);
 
 const status = {
-  projectStatus: "failed",
   hasRuntime: true,
   runtimeStatus: "running" as const,
   hasFiles: true,
@@ -21,14 +20,15 @@ const status = {
 };
 
 describe("Independent preview status", () => {
-  it("keeps a failed build visible when the runtime is running", () => {
+  it("shows runtime and source without duplicating the header build status", () => {
     render(<PreviewStatusSummary {...status} />);
-    expect(screen.getByText("Last build failed")).toBeVisible();
+    expect(screen.getByRole("status", { name: "Runtime and preview status" })).toBeVisible();
     expect(screen.getByText("Runtime running")).toBeVisible();
     expect(screen.getByText("Server preview")).toBeVisible();
+    expect(screen.queryByText(/build failed|build in progress|published/i)).toBeNull();
   });
 
-  it("keeps hibernation and build failure visible beside a browser preview", () => {
+  it("keeps hibernation distinct from a working browser preview", () => {
     render(
       <PreviewStatusSummary
         {...status}
@@ -37,18 +37,14 @@ describe("Independent preview status", () => {
         webContainerLive
       />,
     );
-    expect(screen.getByText("Last build failed")).toBeVisible();
     expect(screen.getByText("Runtime hibernated")).toBeVisible();
     expect(screen.getByText("Browser preview")).toBeVisible();
   });
 
-  it("does not claim a published snapshot from project status alone", () => {
-    render(
-      <PreviewStatusSummary {...status} projectStatus="published" serverPreviewLive={false} />,
-    );
-    expect(screen.getByText("Published")).toBeVisible();
+  it("identifies a file preview without claiming a published snapshot", () => {
+    render(<PreviewStatusSummary {...status} serverPreviewLive={false} />);
     expect(screen.getByText("File preview")).toBeVisible();
-    expect(screen.queryByText(/published version|frozen published snapshot/i)).toBeNull();
+    expect(screen.queryByText(/published|frozen snapshot/i)).toBeNull();
   });
 
   it("does not turn missing runtime metadata into a running status", () => {
@@ -63,7 +59,13 @@ describe("Independent preview status", () => {
     );
     expect(screen.getByText("Runtime running")).toBeVisible();
     expect(screen.getByText("Server preview unavailable")).toBeVisible();
-    expect(screen.getByText("Last build failed")).toBeVisible();
+    expect(screen.queryByText("Server preview")).toBeNull();
+  });
+
+  it("keeps a stopped runtime visible next to a file preview", () => {
+    render(<PreviewStatusSummary {...status} runtimeStatus="stopped" serverPreviewLive={false} />);
+    expect(screen.getByText("Runtime stopped")).toBeVisible();
+    expect(screen.getByText("File preview")).toBeVisible();
   });
 });
 

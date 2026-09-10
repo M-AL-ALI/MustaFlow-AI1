@@ -179,6 +179,7 @@ import {
   shouldAutoMergeBackgroundPlanStep,
 } from "./background-plan-step";
 import type { AgentLoopReport } from "./agent-loop";
+import { AgentModelRequestError, buildAgentModelFailureReport } from "./agent-model-request";
 import {
   isZeroSealedGenerationTarget,
   prepareZeroSealedNodeRefinement,
@@ -4549,6 +4550,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               }
             }
           } catch (err) {
+            if (err instanceof AgentModelRequestError) {
+              throw err;
+            }
             logger.warn(
               { err, taskId, projectId },
               "Empty-refine retry pass failed — using original result",
@@ -7474,20 +7478,27 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
       logger.error({ err, taskId, projectId }, "Builder job failed");
       const rawMessage = err instanceof Error ? err.message : "Unknown builder error";
+      const modelRequestFailure = err instanceof AgentModelRequestError ? err : undefined;
+      const modelFailureReport =
+        modelRequestFailure === undefined
+          ? undefined
+          : buildAgentModelFailureReport(modelRequestFailure, userPrompt);
       const failureEvidence =
-        err instanceof ZeroGenerationKitchenError
-          ? { code: err.code, message: err.message, evidence: err.evidence }
-          : err instanceof ZeroSealedSourceContractError
-            ? {
-                code: err.code,
-                message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
-                evidence: {
-                  stage: "source-contract",
-                  reasonCodes: [...err.reasons],
-                  ...(err.path === undefined ? {} : { path: err.path }),
-                },
-              }
-            : undefined;
+        modelRequestFailure !== undefined
+          ? modelRequestFailure.failureEvidence
+          : err instanceof ZeroGenerationKitchenError
+            ? { code: err.code, message: err.message, evidence: err.evidence }
+            : err instanceof ZeroSealedSourceContractError
+              ? {
+                  code: err.code,
+                  message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+                  evidence: {
+                    stage: "source-contract",
+                    reasonCodes: [...err.reasons],
+                    ...(err.path === undefined ? {} : { path: err.path }),
+                  },
+                }
+              : undefined;
       const sealedProjectRecovery =
         failureEvidence?.code === ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE
           ? {
@@ -7515,7 +7526,16 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           cause: { code: failureEvidence?.code ?? "builder_failed", stage: "mutation" },
           summary: message,
           allowedStatuses: ["building", "planning", "needs_review", "needs_fix"],
-          taskUpdate: { tokenCount: finalTokenCount },
+          taskUpdate: {
+            tokenCount: finalTokenCount,
+            ...(modelRequestFailure === undefined
+              ? {}
+              : {
+                  report: modelFailureReport,
+                  failureReason: modelRequestFailure.message,
+                  completionKind: modelRequestFailure.completionKind,
+                }),
+          },
         });
       const failurePresentation = presentZeroTerminalV1(failureTerminal);
       if (!failureCommitted) return;
@@ -7546,7 +7566,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       // Generate specific fix suggestions via AI (parallel with DB writes)
       const [suggestions] = await Promise.all([
-        sealedProjectRecovery?.suggestions ?? generateFixSuggestions(userPrompt, message),
+        modelFailureReport?.suggestions ??
+          sealedProjectRecovery?.suggestions ??
+          generateFixSuggestions(userPrompt, message),
         db
           .update(projectsTable)
           .set({ status: "failed", updatedAt: sql`now()` })
@@ -7558,13 +7580,14 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         .update(agentTasksTable)
         .set({
           report: {
+            ...(modelFailureReport ?? {}),
             terminalRef: zeroTerminalRef(failureTerminal),
             userRequest: userPrompt,
             filesCreated: [],
             filesChanged: [],
             filesRemoved: [],
             previewUpdated: false,
-            warnings: [],
+            warnings: modelFailureReport?.warnings ?? [],
             ...(failureEvidence === undefined ? {} : { failureEvidence }),
             suggestions,
             ...(sealedProjectRecovery === undefined

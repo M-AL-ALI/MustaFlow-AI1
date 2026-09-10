@@ -171,7 +171,6 @@ export function PreviewRoutesMenu(props: {
 }
 
 export function PreviewStatusSummary(props: {
-  projectStatus: string;
   hasRuntime: boolean;
   runtimeStatus?: "stopped" | "starting" | "running" | "hibernated" | "error";
   hasFiles: boolean;
@@ -179,12 +178,6 @@ export function PreviewStatusSummary(props: {
   webContainerLive: boolean;
   agenticPreviewUnavailable: boolean;
 }) {
-  const projectLabel: Record<string, string> = {
-    building: "Build in progress",
-    failed: "Last build failed",
-    published: "Published",
-    testing: "Testing in progress",
-  };
   const runtimeLabel: Record<NonNullable<typeof props.runtimeStatus>, string> = {
     stopped: "Runtime stopped",
     starting: "Runtime starting",
@@ -206,15 +199,9 @@ export function PreviewStatusSummary(props: {
   return (
     <div
       role="status"
-      aria-label="Workspace and preview status"
+      aria-label="Runtime and preview status"
       className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground"
     >
-      <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5">
-        {projectLabel[props.projectStatus] ??
-          (props.projectStatus
-            ? "Project: " + props.projectStatus.replaceAll("_", " ")
-            : "Project status unknown")}
-      </span>
       {(props.hasRuntime || props.runtimeStatus) && (
         <span
           className="rounded-full border border-border px-2 py-0.5"

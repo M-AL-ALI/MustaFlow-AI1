@@ -60,7 +60,6 @@ const SCENARIOS: Record<Scenario, ScenarioDefinition> = {
     description:
       "Illustrative published state, running runtime, and ready environment. No app was built or published by this lab.",
     preview: {
-      projectStatus: "published",
       runtimeStatus: "running",
       serverPreviewLive: true,
       webContainerLive: false,
@@ -79,7 +78,6 @@ const SCENARIOS: Record<Scenario, ScenarioDefinition> = {
     description:
       "Illustrative work in progress. Observation is disabled and setup stays pending until you choose another state.",
     preview: {
-      projectStatus: "building",
       runtimeStatus: "starting",
       serverPreviewLive: false,
       webContainerLive: false,
@@ -98,7 +96,6 @@ const SCENARIOS: Record<Scenario, ScenarioDefinition> = {
     description:
       "Illustrative build and setup failures coexist with a running runtime. Recovery callbacks keep these failure fixtures visible.",
     preview: {
-      projectStatus: "failed",
       runtimeStatus: "running",
       serverPreviewLive: true,
       webContainerLive: false,
@@ -117,7 +114,6 @@ const SCENARIOS: Record<Scenario, ScenarioDefinition> = {
     description:
       "Illustrative hibernation with a retained build failure and separate browser-preview state. No runtime or browser sandbox is started.",
     preview: {
-      projectStatus: "failed",
       runtimeStatus: "hibernated",
       serverPreviewLive: false,
       webContainerLive: true,

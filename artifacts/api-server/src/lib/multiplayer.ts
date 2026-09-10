@@ -28,7 +28,7 @@ import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 import { db, projectsTable } from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
-import { getAuth } from "@clerk/express";
+import { authenticateMultiplayerUpgrade } from "./multiplayer-upgrade-auth";
 import { logger } from "./logger";
 import { checkProjectAccess } from "./auth";
 import { getSharedAccountProfile } from "./clerk-users";
@@ -149,6 +149,7 @@ export interface MultiplayerServer {
 
 export function createMultiplayerServer(): MultiplayerServer {
   const wss = new WebSocketServer({ noServer: true });
+  const authenticatedUpgrades = new WeakMap<IncomingMessage, string>();
 
   wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
     const url = req.url ?? "";
@@ -159,19 +160,32 @@ export function createMultiplayerServer(): MultiplayerServer {
     }
     const projectId = parseInt(match[1]!, 10);
 
-    // eslint-disable-next-line no-useless-assignment
-    let userId: string | null = null;
-    try {
-      const auth = getAuth(req as unknown as Parameters<typeof getAuth>[0]);
-      userId = auth?.userId ?? null;
-    } catch {
-      userId = null;
-    }
+    const userId = authenticatedUpgrades.get(req) ?? null;
+    authenticatedUpgrades.delete(req);
     if (!userId) {
       sendJson(ws, { type: "error", message: "Unauthorized" });
       ws.close(4401, "Unauthorized");
       return;
     }
+
+    let admissionCancelled = false;
+    let releasePeer: (() => void) | undefined;
+    const cleanup = () => {
+      admissionCancelled = true;
+      releasePeer?.();
+    };
+    const admissionIsOpen = () => {
+      if (!admissionCancelled && ws.readyState === WebSocket.OPEN) return true;
+      cleanup();
+      return false;
+    };
+    // These listeners must exist before any project/access/profile lookup yields.
+    ws.on("close", cleanup);
+    ws.on("error", (err: Error) => {
+      logger.warn({ err, projectId }, "multiplayer: socket error");
+      cleanup();
+    });
+    if (!admissionIsOpen()) return;
 
     const [project] = await db
       .select({
@@ -181,6 +195,7 @@ export function createMultiplayerServer(): MultiplayerServer {
       .from(projectsTable)
       .where(and(eq(projectsTable.id, projectId), isNull(projectsTable.deletedAt)));
 
+    if (!admissionIsOpen()) return;
     if (!project) {
       sendJson(ws, { type: "error", message: "Project not found" });
       ws.close(4004, "Project not found");
@@ -191,6 +206,7 @@ export function createMultiplayerServer(): MultiplayerServer {
       findLiveSupportGrant({ projectId, staffUserId: userId }),
       getSharedAccountProfile(userId),
     ]);
+    if (!admissionIsOpen()) return;
     if (access !== "granted" && !supportGrant) {
       sendJson(ws, { type: "error", message: "Forbidden" });
       ws.close(4003, "Forbidden");
@@ -222,7 +238,37 @@ export function createMultiplayerServer(): MultiplayerServer {
       ws,
       controlledIds: new Set<number>(),
     };
+    if (!admissionIsOpen()) return;
     const room = roomFor(projectId);
+    let cleaned = false;
+    let announced = false;
+    const cleanupActions: Array<() => void> = [];
+    const retainCleanup = (action: () => void) => {
+      if (cleaned) action();
+      else cleanupActions.push(action);
+    };
+    // Teardown is ready before insertion or any send can close/error the socket.
+    releasePeer = () => {
+      if (cleaned) return;
+      cleaned = true;
+      for (const action of cleanupActions.splice(0).reverse()) action();
+      if (peer.controlledIds.size > 0) {
+        awarenessProtocol.removeAwarenessStates(
+          room.awareness,
+          Array.from(peer.controlledIds),
+          peer,
+        );
+        peer.controlledIds.clear();
+      }
+      const wasPresent = room.peers.delete(peer);
+      if (room.peers.size === 0) {
+        room.doc.destroy();
+        rooms.delete(projectId);
+      } else if (wasPresent && announced) {
+        broadcastJson(room, peer, { type: "leave", id: peer.id });
+      }
+    };
+    if (!admissionIsOpen()) return;
     room.peers.add(peer);
 
     // ── Yjs sync handshake ──────────────────────────────────────────────────
@@ -234,6 +280,7 @@ export function createMultiplayerServer(): MultiplayerServer {
       syncProtocol.writeSyncStep1(enc, room.doc);
       sendBinary(ws, encoding.toUint8Array(enc));
     }
+    if (!admissionIsOpen()) return;
     // 2) Send current awareness state of all peers to the new peer.
     {
       const states = room.awareness.getStates();
@@ -248,11 +295,16 @@ export function createMultiplayerServer(): MultiplayerServer {
       }
     }
 
+    if (!admissionIsOpen()) return;
     // Lightweight JSON greeting for non-Yjs clients (cursor-only mode).
     sendJson(ws, { type: "hello", you: publicPeer(peer) });
+    if (!admissionIsOpen()) return;
     const roster = Array.from(room.peers).map(publicPeer);
     sendJson(ws, { type: "roster", peers: roster });
+    if (!admissionIsOpen()) return;
+    announced = true;
     broadcastJson(room, peer, { type: "join", peer: publicPeer(peer) });
+    if (!admissionIsOpen()) return;
 
     // Fan-out any local Y.Doc updates to every other peer.
     const docUpdateHandler = (update: Uint8Array, origin: unknown) => {
@@ -263,6 +315,7 @@ export function createMultiplayerServer(): MultiplayerServer {
       sendBinary(ws, encoding.toUint8Array(enc));
     };
     room.doc.on("update", docUpdateHandler);
+    retainCleanup(() => room.doc.off("update", docUpdateHandler));
 
     const awarenessChangeHandler = (
       { added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
@@ -287,12 +340,14 @@ export function createMultiplayerServer(): MultiplayerServer {
       sendBinary(ws, encoding.toUint8Array(enc));
     };
     room.awareness.on("change", awarenessChangeHandler);
+    retainCleanup(() => room.awareness.off("change", awarenessChangeHandler));
 
     let lastSeenAt = Date.now();
     ws.on("pong", () => {
       lastSeenAt = Date.now();
     });
     ws.on("message", (raw: Buffer | ArrayBuffer | Buffer[], isBinary?: boolean) => {
+      if (!admissionIsOpen()) return;
       lastSeenAt = Date.now();
       // Binary frames → Yjs protocol.
       const binary = isBinary ?? (raw instanceof Buffer && raw.length > 0 && raw[0]! < 16);
@@ -390,6 +445,7 @@ export function createMultiplayerServer(): MultiplayerServer {
           }, 2_000)
         : null;
     grantWatch?.unref?.();
+    if (grantWatch) retainCleanup(() => clearInterval(grantWatch));
     const collaboratorWatch =
       peer.kind !== "staff"
         ? setInterval(() => {
@@ -407,6 +463,7 @@ export function createMultiplayerServer(): MultiplayerServer {
           }, 2_000)
         : null;
     collaboratorWatch?.unref?.();
+    if (collaboratorWatch) retainCleanup(() => clearInterval(collaboratorWatch));
     const livenessWatch = setInterval(() => {
       if (Date.now() - lastSeenAt > 12_000) {
         ws.terminate();
@@ -415,45 +472,47 @@ export function createMultiplayerServer(): MultiplayerServer {
       if (ws.readyState === WebSocket.OPEN) ws.ping();
     }, 4_000);
     livenessWatch.unref?.();
+    retainCleanup(() => clearInterval(livenessWatch));
 
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      if (grantWatch) clearInterval(grantWatch);
-      if (collaboratorWatch) clearInterval(collaboratorWatch);
-      clearInterval(livenessWatch);
-      room.doc.off("update", docUpdateHandler);
-      room.awareness.off("change", awarenessChangeHandler);
-      if (peer.controlledIds.size > 0) {
-        awarenessProtocol.removeAwarenessStates(
-          room.awareness,
-          Array.from(peer.controlledIds),
-          peer,
-        );
-        peer.controlledIds.clear();
-      }
-      room.peers.delete(peer);
-      if (room.peers.size === 0) {
-        room.doc.destroy();
-        rooms.delete(projectId);
-      } else {
-        broadcastJson(room, peer, { type: "leave", id: peer.id });
-      }
-    };
-    ws.on("close", cleanup);
-    ws.on("error", (err: Error) => {
-      logger.warn({ err, projectId }, "multiplayer: socket error");
-      cleanup();
-    });
+    if (!admissionIsOpen()) return;
   });
 
   const handleUpgrade = (req: IncomingMessage, socket: import("node:net").Socket, head: Buffer) => {
     const url = req.url ?? "";
-    if (!url.match(/\/api\/projects\/\d+\/multiplayer/)) return;
-    wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
-      wss.emit("connection", ws, req);
-    });
+    if (!/^\/api\/projects\/\d+\/multiplayer(?:\?|$)/u.test(url)) return;
+    const onPendingError = () => socket.destroy();
+    const clearPendingListeners = () => {
+      socket.removeListener("error", onPendingError);
+      socket.removeListener("close", clearPendingListeners);
+    };
+    socket.on("error", onPendingError);
+    socket.once("close", clearPendingListeners);
+    const denyUpgrade = () => {
+      if (socket.destroyed || !socket.writable) return;
+      socket.end(
+        "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+        () => socket.destroy(),
+      );
+    };
+    void authenticateMultiplayerUpgrade(req)
+      .then((userId) => {
+        if (socket.destroyed || !socket.writable) return;
+        if (!userId) {
+          denyUpgrade();
+          return;
+        }
+        authenticatedUpgrades.set(req, userId);
+        clearPendingListeners();
+        try {
+          wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+            wss.emit("connection", ws, req);
+          });
+        } catch {
+          authenticatedUpgrades.delete(req);
+          socket.destroy();
+        }
+      })
+      .catch(denyUpgrade);
   };
 
   return { wss, handleUpgrade };

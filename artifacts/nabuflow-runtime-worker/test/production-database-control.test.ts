@@ -301,34 +301,50 @@ describe("production database durable control path", () => {
       operation: "list-projects",
     });
 
+    // A correlation ID may contain any hex sequence, including a provider status.
+    // Keep that case deterministic and inspect public error fields separately.
+    const requestId = "00000401-0000-4000-8000-000000000000";
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const rejected = await handleControlRequest(
-      await signedRequest({ path, nonce: "production-database-provider-health-rejected" }),
-      env,
-      {
-        coordinator,
-        backend,
-        nowMs: TEST_NOW_MS,
-        productionDatabaseAllocator: {
-          ...baseAllocator,
-          healthCheck: async () => {
-            throw new ProductionDatabaseProviderError(
-              422,
-              "production_database_provider_rejected",
-              false,
-              "provider_rejected",
-              "list-projects",
-              401,
-            );
+    try {
+      const rejected = await handleControlRequest(
+        await signedRequest({ path, nonce: "production-database-provider-health-rejected" }),
+        env,
+        {
+          coordinator,
+          backend,
+          requestId,
+          nowMs: TEST_NOW_MS,
+          productionDatabaseAllocator: {
+            ...baseAllocator,
+            healthCheck: async () => {
+              throw new ProductionDatabaseProviderError(
+                422,
+                "production_database_provider_rejected",
+                false,
+                "provider_rejected",
+                "list-projects",
+                401,
+              );
+            },
           },
         },
-      },
-    );
-    expect(rejected.status).toBe(422);
-    const rejectedBody = await rejected.text();
-    expect(rejectedBody).toContain("production_database_provider_rejected");
-    expect(rejectedBody).not.toContain("401");
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining('"providerStatus":401'));
-    warning.mockRestore();
+      );
+      expect(rejected.status).toBe(422);
+      const rejectedBody = JSON.parse(await rejected.text());
+      expect(rejectedBody).toEqual({
+        ok: false,
+        code: "production_database_provider_rejected",
+        message: expect.any(String),
+        retryable: false,
+        requestId,
+      });
+      const { requestId: returnedRequestId, ...publicFailure } = rejectedBody;
+      expect(returnedRequestId).toBe(requestId);
+      expect(JSON.stringify(rejectedBody)).toContain("401");
+      expect(JSON.stringify(publicFailure)).not.toContain("401");
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('"providerStatus":401'));
+    } finally {
+      warning.mockRestore();
+    }
   });
 });
