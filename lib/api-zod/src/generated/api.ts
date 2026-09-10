@@ -3421,6 +3421,201 @@ export const GetPageMapParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionActionLabelMax = 240;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionControlLabelMax = 240;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionControlLocatorMax = 1024;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionDestinationValueMax = 2048;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceMax = 8;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsItemMax = 500;
+
+export const getPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsMax = 16;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemIdMax = 128;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemSourceMax = 128;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const getPageMapResponsePageMapDataWebUnresolvedTransitionsMax = 1000;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionActionLabelMax = 240;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionControlLabelMax = 240;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionControlLocatorMax = 1024;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionDestinationValueMax = 2048;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceMax = 8;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsItemMax = 500;
+
+export const getPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsMax = 16;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemIdMax = 128;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemSourceMax = 128;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const getPageMapResponsePageMapDataIosUnresolvedTransitionsMax = 1000;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionActionLabelMax = 240;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLabelMax = 240;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLocatorMax = 1024;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionDestinationValueMax = 2048;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceMax = 8;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsItemMax = 500;
+
+export const getPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsMax = 16;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemIdMax = 128;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemSourceMax = 128;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const getPageMapResponsePageMapDataAndroidUnresolvedTransitionsMax = 1000;
+
+export const getPageMapResponseRevisionRegExp = new RegExp('^[0-9a-f]{64}$');
+
+
 export const GetPageMapResponse = zod.object({
   "pageMapData": zod.object({
   "web": zod.object({
@@ -3444,8 +3639,84 @@ export const GetPageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(getPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(getPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsItemMax)).max(getPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(getPageMapResponsePageMapDataWebUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "ios": zod.object({
   "nodes": zod.array(zod.object({
@@ -3468,8 +3739,84 @@ export const GetPageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(getPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(getPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsItemMax)).max(getPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(getPageMapResponsePageMapDataIosUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "android": zod.object({
   "nodes": zod.array(zod.object({
@@ -3492,10 +3839,87 @@ export const GetPageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsItemMax)).max(getPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(getPageMapResponsePageMapDataAndroidUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 })
-})
+}),
+  "revision": zod.string().regex(getPageMapResponseRevisionRegExp).describe('Opaque lowercase SHA256 of canonical sorted JSON of the raw stored page map. Null and undefined storage values yield the same revision.')
 })
 
 
@@ -3505,6 +3929,201 @@ export const GetPageMapResponse = zod.object({
 export const PutPageMapParams = zod.object({
   "id": zod.coerce.number()
 })
+
+export const putPageMapBodyOneWebEdgesItemTransitionActionLabelMax = 240;
+
+export const putPageMapBodyOneWebEdgesItemTransitionControlLabelMax = 240;
+
+export const putPageMapBodyOneWebEdgesItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapBodyOneWebEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapBodyOneWebEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapBodyOneWebEdgesItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapBodyOneWebEdgesItemTransitionEvidenceMax = 8;
+
+export const putPageMapBodyOneWebEdgesItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapBodyOneWebEdgesItemTransitionUnknownsMax = 16;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemIdMax = 128;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemSourceMax = 128;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const putPageMapBodyOneWebUnresolvedTransitionsMax = 1000;
+
+export const putPageMapBodyOneIosEdgesItemTransitionActionLabelMax = 240;
+
+export const putPageMapBodyOneIosEdgesItemTransitionControlLabelMax = 240;
+
+export const putPageMapBodyOneIosEdgesItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapBodyOneIosEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapBodyOneIosEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapBodyOneIosEdgesItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapBodyOneIosEdgesItemTransitionEvidenceMax = 8;
+
+export const putPageMapBodyOneIosEdgesItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapBodyOneIosEdgesItemTransitionUnknownsMax = 16;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemIdMax = 128;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemSourceMax = 128;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const putPageMapBodyOneIosUnresolvedTransitionsMax = 1000;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionActionLabelMax = 240;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionControlLabelMax = 240;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionEvidenceMax = 8;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapBodyOneAndroidEdgesItemTransitionUnknownsMax = 16;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemIdMax = 128;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemSourceMax = 128;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const putPageMapBodyOneAndroidUnresolvedTransitionsMax = 1000;
+
+export const putPageMapBodyTwoExpectedRevisionRegExp = new RegExp('^[0-9a-f]{64}$');
+
 
 export const PutPageMapBody = zod.object({
   "web": zod.object({
@@ -3528,8 +4147,84 @@ export const PutPageMapBody = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapBodyOneWebEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapBodyOneWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapBodyOneWebEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapBodyOneWebEdgesItemTransitionUnknownsItemMax)).max(putPageMapBodyOneWebEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(putPageMapBodyOneWebUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(putPageMapBodyOneWebUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "ios": zod.object({
   "nodes": zod.array(zod.object({
@@ -3552,8 +4247,84 @@ export const PutPageMapBody = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapBodyOneIosEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapBodyOneIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapBodyOneIosEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapBodyOneIosEdgesItemTransitionUnknownsItemMax)).max(putPageMapBodyOneIosEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(putPageMapBodyOneIosUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(putPageMapBodyOneIosUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "android": zod.object({
   "nodes": zod.array(zod.object({
@@ -3576,10 +4347,283 @@ export const PutPageMapBody = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapBodyOneAndroidEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapBodyOneAndroidEdgesItemTransitionUnknownsItemMax)).max(putPageMapBodyOneAndroidEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(putPageMapBodyOneAndroidUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(putPageMapBodyOneAndroidUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 })
-})
+}).and(zod.object({
+  "expectedRevision": zod.string().regex(putPageMapBodyTwoExpectedRevisionRegExp).describe('Opaque lowercase SHA256 of canonical sorted JSON of the raw stored page map. Null and undefined storage values yield the same revision.')
+})).describe('Save against the revision from the last acknowledged map response. Missing expectedRevision returns 409; a nonstring or malformed value returns 400; a well-formed but stale value returns 409.')
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionActionLabelMax = 240;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionControlLabelMax = 240;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceMax = 8;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsMax = 16;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemIdMax = 128;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemSourceMax = 128;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const putPageMapResponsePageMapDataWebUnresolvedTransitionsMax = 1000;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionActionLabelMax = 240;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionControlLabelMax = 240;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceMax = 8;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsMax = 16;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemIdMax = 128;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemSourceMax = 128;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const putPageMapResponsePageMapDataIosUnresolvedTransitionsMax = 1000;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionActionLabelMax = 240;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLabelMax = 240;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceMax = 8;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsMax = 16;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemIdMax = 128;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemSourceMax = 128;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const putPageMapResponsePageMapDataAndroidUnresolvedTransitionsMax = 1000;
+
+export const putPageMapResponseRevisionRegExp = new RegExp('^[0-9a-f]{64}$');
+
 
 export const PutPageMapResponse = zod.object({
   "pageMapData": zod.object({
@@ -3604,8 +4648,84 @@ export const PutPageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapResponsePageMapDataWebEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsItemMax)).max(putPageMapResponsePageMapDataWebEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(putPageMapResponsePageMapDataWebUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "ios": zod.object({
   "nodes": zod.array(zod.object({
@@ -3628,8 +4748,84 @@ export const PutPageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapResponsePageMapDataIosEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsItemMax)).max(putPageMapResponsePageMapDataIosEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(putPageMapResponsePageMapDataIosUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "android": zod.object({
   "nodes": zod.array(zod.object({
@@ -3652,15 +4848,92 @@ export const PutPageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsItemMax)).max(putPageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(putPageMapResponsePageMapDataAndroidUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 })
-})
+}),
+  "revision": zod.string().regex(putPageMapResponseRevisionRegExp).describe('Opaque lowercase SHA256 of canonical sorted JSON of the raw stored page map. Null and undefined storage values yield the same revision.')
 })
 
 
 /**
- * @summary Re-run AI extraction on project files and update the page map
+ * @summary Refresh source-backed routes with best-effort HTML AI enrichment
  */
 export const AnalyzePageMapParams = zod.object({
   "id": zod.coerce.number()
@@ -3671,6 +4944,201 @@ export const analyzePageMapQueryPlatformDefault = `web`;
 export const AnalyzePageMapQueryParams = zod.object({
   "platform": zod.enum(['web', 'ios', 'android']).default(analyzePageMapQueryPlatformDefault)
 })
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionActionLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionControlLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionControlLocatorMax = 1024;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionDestinationValueMax = 2048;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceMax = 8;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionUnknownsItemMax = 500;
+
+export const analyzePageMapResponsePageMapDataWebEdgesItemTransitionUnknownsMax = 16;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemIdMax = 128;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemSourceMax = 128;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const analyzePageMapResponsePageMapDataWebUnresolvedTransitionsMax = 1000;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionActionLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionControlLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionControlLocatorMax = 1024;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionDestinationValueMax = 2048;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceMax = 8;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionUnknownsItemMax = 500;
+
+export const analyzePageMapResponsePageMapDataIosEdgesItemTransitionUnknownsMax = 16;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemIdMax = 128;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemSourceMax = 128;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const analyzePageMapResponsePageMapDataIosUnresolvedTransitionsMax = 1000;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionActionLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionControlLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionControlLocatorMax = 1024;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionConditionExpressionMax = 2000;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionOutcomeDetailMax = 1000;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionDestinationValueMax = 2048;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemFieldsMax = 5;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceMax = 8;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsItemMax = 500;
+
+export const analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsMax = 16;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemIdMax = 128;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemSourceMax = 128;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionActionLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLabelMax = 240;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLocatorMax = 1024;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax = 2000;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax = 1000;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionDestinationValueMax = 2048;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax = 5;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax = 1024;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp = new RegExp('^[a-f0-9]{64}$');
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin = 0;
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax = 500000;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceMax = 8;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax = 500;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsMax = 16;
+
+export const analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsMax = 1000;
+
+export const analyzePageMapResponseRevisionRegExp = new RegExp('^[0-9a-f]{64}$');
+
 
 export const AnalyzePageMapResponse = zod.object({
   "pageMapData": zod.object({
@@ -3695,8 +5163,84 @@ export const AnalyzePageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionUnknownsItemMax)).max(analyzePageMapResponsePageMapDataWebEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(analyzePageMapResponsePageMapDataWebUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "ios": zod.object({
   "nodes": zod.array(zod.object({
@@ -3719,8 +5263,84 @@ export const AnalyzePageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionUnknownsItemMax)).max(analyzePageMapResponsePageMapDataIosEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(analyzePageMapResponsePageMapDataIosUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 }),
   "android": zod.object({
   "nodes": zod.array(zod.object({
@@ -3743,10 +5363,87 @@ export const AnalyzePageMapResponse = zod.object({
   "source": zod.string(),
   "target": zod.string(),
   "connectionType": zod.enum(['nav', 'auth-gate', 'redirect', 'external']),
-  "aiGenerated": zod.boolean()
-}))
+  "aiGenerated": zod.boolean(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMin).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMin).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsItemMax)).max(analyzePageMapResponsePageMapDataAndroidEdgesItemTransitionUnknownsMax).optional()
+}).optional().describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+})),
+  "unresolvedTransitions": zod.array(zod.object({
+  "id": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemIdMax),
+  "source": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemSourceMax).optional(),
+  "transition": zod.object({
+  "version": zod.literal(1),
+  "action": zod.object({
+  "kind": zod.enum(['unknown', 'click', 'submit', 'load', 'programmatic']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionActionLabelMax).optional()
+}),
+  "control": zod.object({
+  "kind": zod.enum(['unknown', 'link', 'button', 'form', 'call', 'other']),
+  "label": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLabelMax).optional(),
+  "locator": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionControlLocatorMax).optional()
+}).describe('Descriptive metadata only. A locator is never executed as a selector.'),
+  "condition": zod.object({
+  "kind": zod.enum(['unknown', 'none', 'predicate']),
+  "expression": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionConditionExpressionMax).optional(),
+  "branch": zod.enum(['unknown', 'true', 'false'])
+}).describe('Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.'),
+  "outcome": zod.object({
+  "kind": zod.enum(['unknown', 'navigate', 'redirect', 'external', 'stay']),
+  "detail": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionOutcomeDetailMax).optional()
+}),
+  "destination": zod.object({
+  "kind": zod.enum(['unknown', 'route', 'external']),
+  "value": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionDestinationValueMax).optional()
+}).describe('Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.'),
+  "evidence": zod.array(zod.object({
+  "basis": zod.enum(['unknown', 'inferred', 'source', 'manual']),
+  "fields": zod.array(zod.enum(['action', 'control', 'condition', 'outcome', 'destination'])).min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemFieldsMax),
+  "source": zod.object({
+  "filePath": zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceFilePathMax).describe('Project-relative path; no empty, dot, parent, backslash, colon or control segments.'),
+  "contentSha256": zod.string().regex(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceContentSha256RegExp),
+  "startOffset": zod.number().min(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMin).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceStartOffsetMax),
+  "endOffset": zod.number().min(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMin).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceItemSourceEndOffsetMax)
+}).optional().describe('Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.')
+}).describe('Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.')).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionEvidenceMax),
+  "unknowns": zod.array(zod.string().min(1).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsItemMax)).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsItemTransitionUnknownsMax).optional()
+}).describe('Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.')
+}).describe('A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.')).max(analyzePageMapResponsePageMapDataAndroidUnresolvedTransitionsMax).optional().describe('Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.')
 })
-})
+}),
+  "revision": zod.string().regex(analyzePageMapResponseRevisionRegExp).describe('Opaque lowercase SHA256 of canonical sorted JSON of the raw stored page map. Null and undefined storage values yield the same revision.')
 })
 
 
@@ -5719,6 +7416,14 @@ export const GetMobileBuildLogsResponse = zod.object({
 /**
  * @summary Recent activity feed across all projects
  */
+export const getRecentActivityQueryWorkspaceIdMax = 2147483647;
+
+
+
+export const GetRecentActivityQueryParams = zod.object({
+  "workspaceId": zod.coerce.number().min(1).max(getRecentActivityQueryWorkspaceIdMax).optional().describe('Restrict activity to accessible active projects in this workspace before limiting results.')
+})
+
 export const GetRecentActivityResponseItem = zod.object({
   "id": zod.string(),
   "projectId": zod.number(),

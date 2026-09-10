@@ -32,6 +32,10 @@ import { generalLimiter } from "./lib/rateLimit";
 import { clerkSignupAdmissionLimiter } from "./lib/signup-admission";
 import { registerAssetAltTextWorker } from "./lib/asset-alt-text-analysis";
 import { runProjectRetirementOperation } from "./lib/project-retirement";
+import {
+  startAutomaticPreviewWorkerAfterMigrations,
+  stopAutomaticPreviewReconciliation,
+} from "./lib/automatic-preview-dispatch";
 import { runProjectPurgeOperation } from "./lib/project-purge";
 import {
   dispatchProjectPurgeNotificationsOnce,
@@ -83,6 +87,12 @@ export function startProjectRetirementWorkerAfterMigrations(): ReturnType<
   typeof registerRequiredWorker
 > {
   projectRetirementWorkerStartup ??= durableQueueWorkerStartup.then(async () => {
+    void startAutomaticPreviewWorkerAfterMigrations().catch(() => {
+      logger.warn(
+        { code: "automatic_preview_startup_failed" },
+        "Automatic previews remain unavailable",
+      );
+    });
     const receipt = await registerRequiredWorker(
       QUEUE_PROJECT_RETIREMENT,
       async (payload) => {
@@ -297,6 +307,7 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
 process.on("SIGTERM", () => {
   logger.info("SIGTERM received — stopping durable queue");
   stopProjectPurgeRuntime();
+  stopAutomaticPreviewReconciliation();
   void stopDurableQueue().then(() => process.exit(0));
 });
 

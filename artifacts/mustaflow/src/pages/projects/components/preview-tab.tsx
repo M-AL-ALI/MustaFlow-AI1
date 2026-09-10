@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
 import {
   Monitor,
+  Moon,
   Smartphone,
   Tablet,
   RefreshCw,
@@ -18,7 +19,6 @@ import {
   Terminal,
   X,
   Maximize2,
-  Minimize2,
   Trash2,
   Wrench,
   QrCode,
@@ -34,7 +34,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Home,
-  Camera,
   Crosshair,
   EyeOff,
   ListTree,
@@ -61,16 +60,25 @@ import {
   getPreviewAddress,
   getPreviewIframeSandbox,
   getPreviewRecoveryControl,
-  getServerPreviewBadge,
   hasServerPreviewAccess,
-  presentAgenticPreviewUnavailable,
 } from "@/lib/preview-access-ui";
+import {
+  isPreviewAuthorizationStatus,
+  presentPreviewRecovery,
+  type PreviewRecoveryError,
+} from "./preview-recovery-presentation";
 import {
   fetchWorkspaceReadinessReceipt,
   WORKSPACE_READINESS_UNBLOCK_LABELS,
   type WorkspaceReadinessReceipt,
 } from "@/lib/workspace-readiness";
 import { SharePreviewControl } from "./share-preview-control";
+import { pageRouteIsNavigable, webContainerPageUrl } from "./page-map-card-model";
+import {
+  PreviewActionsMenu,
+  PreviewRoutesMenu,
+  PreviewStatusSummary,
+} from "./preview-toolbar-controls";
 
 type Platform = "web" | "ios" | "android";
 type DeviceFrame = "desktop" | "tablet" | "mobile";
@@ -183,6 +191,12 @@ type PreviewTabProps = {
   containerUrl?: string | null;
   /** Server-derived browser preview transport. Never inferred from containerUrl. */
   previewAccess?: PreviewAccess;
+  /** Retained parent-owned failure; project refetches must not erase a rejected wake. */
+  previewRecoveryError?: PreviewRecoveryError | null;
+  /** Status-read access denial remains visible even when no preview probe can run. */
+  containerAuthorizationStatus?: 401 | 403 | null;
+  /** Owned runtime mutation remains pending independently of status polling. */
+  containerActionPending?: "start" | "stop" | null;
   /** Called when user clicks "Wake container" from the preview overlay. */
   onStartContainer?: () => void;
   /** Re-check provider truth without mutating runtime state. */
@@ -244,6 +258,9 @@ export function PreviewTab({
   containerStatus,
   containerUrl,
   previewAccess,
+  previewRecoveryError,
+  containerAuthorizationStatus,
+  containerActionPending = null,
   onStartContainer,
   onRefreshContainerStatus,
   latestReport,
@@ -288,6 +305,7 @@ export function PreviewTab({
     null,
   );
   const [testEnvironmentBusy, setTestEnvironmentBusy] = useState(false);
+  const rebuildRequired = previewRecoveryError?.kind === "rebuild-required";
   const [testEnvironmentError, setTestEnvironmentError] = useState<{
     code: string;
     message: string;
@@ -327,14 +345,14 @@ export function PreviewTab({
     return body;
   }, [project.containerId, project.id]);
   useEffect(() => {
-    if (!project.containerId || project.testingStatus === "passed") return;
+    if (!project.containerId || (project.testingStatus === "passed" && !rebuildRequired)) return;
     void refreshTestEnvironment().catch(() => {
       setTestEnvironmentError({
         code: "test_environment_status_unavailable",
         message: "The test environment status could not be read.",
       });
     });
-  }, [project.containerId, project.testingStatus, refreshTestEnvironment]);
+  }, [project.containerId, project.testingStatus, rebuildRequired, refreshTestEnvironment]);
   useEffect(() => {
     if (testEnvironmentStatus?.testingStatus !== "building") return;
     const timer = window.setInterval(() => {
@@ -1132,6 +1150,11 @@ export function PreviewTab({
   const [rollingBack, setRollingBack] = useState(false);
   type PreviewIssue = "proxy-unavailable" | "server-unreachable" | "container-error";
   const [previewIssue, setPreviewIssue] = useState<PreviewIssue | null>(null);
+  const [previewResponseAuthorizationStatus, setPreviewAuthorizationStatus] = useState<
+    401 | 403 | null
+  >(null);
+  const previewAuthorizationStatus =
+    containerAuthorizationStatus ?? previewResponseAuthorizationStatus;
 
   const { data: files, isLoading: filesLoading } = useListProjectFiles(project.id, {
     query: {
@@ -1181,7 +1204,11 @@ export function PreviewTab({
 
   const handledNavigationRequestRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!navigationRequest || handledNavigationRequestRef.current === navigationRequest.requestId) {
+    if (
+      !navigationRequest ||
+      handledNavigationRequestRef.current === navigationRequest.requestId ||
+      !pageRouteIsNavigable(navigationRequest.path)
+    ) {
       return;
     }
     handledNavigationRequestRef.current = navigationRequest.requestId;
@@ -1263,11 +1290,53 @@ export function PreviewTab({
   // to Vite HMR, while dependency/config changes trigger their precise actions.
   const isAgentic = project.builderMode === "agentic";
   const serverPreviewLive = hasServerPreviewAccess(previewAccess);
-  const agenticPreviewUnavailable = isAgentic && !serverPreviewLive;
-  const previewRecoveryControl = getPreviewRecoveryControl({
-    hasRuntime: Boolean(project.containerId),
+  const agenticPreviewUnavailable = isAgentic && (!serverPreviewLive || rebuildRequired);
+  const basePreviewRecoveryPresentation = presentPreviewRecovery({
     status: containerStatus,
+    hasRuntime: Boolean(project.containerId),
+    error: previewRecoveryError,
+    authorizationStatus: previewAuthorizationStatus,
+    testingCandidateSnapshotId: testEnvironmentStatus?.testingCandidateSnapshotId,
+    testingBusy: testEnvironmentBusy || effectiveTestingStatus === "building",
   });
+  const runtimeActionLabel =
+    containerActionPending === "start" ? "Starting runtime..." : "Stopping runtime...";
+  const previewRecoveryPresentation =
+    containerActionPending && basePreviewRecoveryPresentation.action === "wake"
+      ? { ...basePreviewRecoveryPresentation, actionLabel: runtimeActionLabel, disabled: true }
+      : basePreviewRecoveryPresentation;
+  const previewRecoveryAction =
+    previewRecoveryPresentation.action === "test"
+      ? () => void runTestEnvironmentAction(startTestingAction)
+      : previewRecoveryPresentation.action === "wake"
+        ? onStartContainer
+        : previewRecoveryPresentation.action === "retry"
+          ? () => {
+              onRefreshContainerStatus?.();
+              if (previewAuthorizationStatus !== null) setIframeKey((key) => key + 1);
+            }
+          : undefined;
+  const previewRecoveryControl =
+    previewRecoveryError || previewAuthorizationStatus !== null
+      ? previewRecoveryPresentation.actionLabel
+        ? {
+            label: previewRecoveryPresentation.actionLabel,
+            disabled: previewRecoveryPresentation.disabled,
+          }
+        : null
+      : getPreviewRecoveryControl({
+          hasRuntime: Boolean(project.containerId),
+          status: containerStatus,
+        });
+  const toolbarRecoveryAction =
+    previewRecoveryError || previewAuthorizationStatus !== null
+      ? previewRecoveryAction
+      : onStartContainer;
+  const toolbarRecoveryBusy =
+    containerActionPending !== null && toolbarRecoveryAction === onStartContainer;
+  const toolbarRecoveryLabel = toolbarRecoveryBusy
+    ? runtimeActionLabel
+    : previewRecoveryControl?.label;
   const webContainerLive =
     isReactVite && !serverPreviewLive && wc.status === "ready" && wc.previewUrl != null;
 
@@ -1277,6 +1346,7 @@ export function PreviewTab({
   useEffect(() => {
     if (!serverPreviewLive) {
       setPreviewIssue(null);
+      setPreviewAuthorizationStatus(null);
       return;
     }
     let cancelled = false;
@@ -1287,11 +1357,15 @@ export function PreviewTab({
           credentials: "include",
         });
         if (!cancelled) {
+          setPreviewAuthorizationStatus(
+            isPreviewAuthorizationStatus(res.status) ? res.status : null,
+          );
           const state = res.headers.get("X-MustaFlow-Preview-State");
           if (
-            state === "proxy-unavailable" ||
-            state === "server-unreachable" ||
-            state === "container-error"
+            !isPreviewAuthorizationStatus(res.status) &&
+            (state === "proxy-unavailable" ||
+              state === "server-unreachable" ||
+              state === "container-error")
           ) {
             setPreviewIssue(state);
           } else {
@@ -1638,9 +1712,9 @@ export function PreviewTab({
   // at the WC-provided URL (no sandbox needed — WC handles its own isolation).
   // For static-html projects, the existing DB-served preview route is used.
   const renderIframe = (extraClass?: string, extraStyle?: React.CSSProperties) => {
-    if (agenticPreviewUnavailable) {
-      const presentation = presentAgenticPreviewUnavailable(containerStatus);
-      const action = presentation.action === "wake" ? onStartContainer : onRefreshContainerStatus;
+    if (agenticPreviewUnavailable || previewAuthorizationStatus !== null) {
+      const presentation = previewRecoveryPresentation;
+      const action = previewRecoveryAction;
       return (
         <div
           className={cn(
@@ -1657,18 +1731,29 @@ export function PreviewTab({
               <p className="mt-1 text-xs text-muted-foreground">{presentation.message}</p>
             </div>
             {presentation.actionLabel && action && (
-              <Button type="button" size="sm" onClick={action}>
+              <Button type="button" size="sm" disabled={presentation.disabled} onClick={action}>
                 {presentation.actionLabel}
               </Button>
+            )}
+            {presentation.action === "test" && testEnvironmentError && (
+              <p role="alert" className="text-xs text-destructive">
+                {testEnvironmentError.message} ({testEnvironmentError.code})
+              </p>
             )}
           </div>
         </div>
       );
     }
-    const src = webContainerLive ? wc.previewUrl! : previewSrc;
+    const src = webContainerLive
+      ? (webContainerPageUrl(wc.previewUrl!, currentPath) ?? wc.previewUrl!)
+      : previewSrc;
     return (
       <iframe
-        key={webContainerLive ? `wc-${device}-${wc.previewUrl}` : `src-${device}-${iframeKey}`}
+        key={
+          webContainerLive
+            ? `wc-${device}-${src}-${navigationRequest?.requestId ?? 0}`
+            : `src-${device}-${iframeKey}`
+        }
         ref={iframeRef}
         src={src}
         title="App preview"
@@ -2470,7 +2555,11 @@ export function PreviewTab({
         </div>
       )}
       {/* Preview toolbar */}
-      <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-1.5 border-b border-border bg-card">
+      <div
+        role="region"
+        aria-label="Preview controls"
+        className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-2 px-3 py-2 border-b border-border bg-card"
+      >
         <input
           ref={referenceOverlayInputRef}
           type="file"
@@ -2492,16 +2581,23 @@ export function PreviewTab({
           }}
         />
         {/* Device size switcher */}
-        <div className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0">
+        <div
+          role="group"
+          aria-label="Preview device size"
+          className="flex items-center bg-muted border border-border rounded-lg p-0.5 gap-0.5 shrink-0"
+        >
           {(["desktop", "tablet", "mobile"] as DeviceFrame[]).map((d) => {
             const Icon = DEVICE_ICONS[d];
             return (
               <button
                 key={d}
+                type="button"
                 onClick={() => setDevice(d)}
                 title={DEVICE_LABELS[d]}
+                aria-label={`${DEVICE_LABELS[d]} preview size`}
+                aria-pressed={device === d}
                 className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-colors text-[11px] font-medium",
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md transition-colors text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                   device === d
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
@@ -2515,8 +2611,8 @@ export function PreviewTab({
         </div>
 
         {referenceOverlay ? (
-          <div className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1">
-            <span className="text-[10px] font-medium text-violet-300">Reference</span>
+          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 py-1">
+            <span className="text-[10px] font-medium text-muted-foreground">Reference</span>
             <input
               type="range"
               min={5}
@@ -2524,25 +2620,18 @@ export function PreviewTab({
               value={referenceOpacity}
               onChange={(event) => setReferenceOpacity(Number(event.target.value))}
               aria-label="Reference overlay opacity"
-              className="w-20 accent-violet-500"
+              className="w-20 accent-primary"
             />
             <button
               type="button"
               onClick={() => setReferenceOverlay(null)}
-              className="text-[10px] text-violet-200 hover:text-white"
+              aria-label="Remove reference overlay"
+              className="rounded text-[10px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               Clear
             </button>
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => referenceOverlayInputRef.current?.click()}
-            className="rounded-lg border border-border bg-muted px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
-          >
-            Add reference overlay
-          </button>
-        )}
+        ) : null}
 
         {/* iOS / Android platform toggle — mobile projects only */}
         {isMobile && (
@@ -2550,10 +2639,13 @@ export function PreviewTab({
             {(["ios", "android"] as Platform[]).map((p) => (
               <button
                 key={p}
+                type="button"
                 onClick={() => setPlatform(p)}
                 title={p === "ios" ? "iOS frame" : "Android frame"}
+                aria-label={p === "ios" ? "iOS device frame" : "Android device frame"}
+                aria-pressed={platform === p}
                 className={cn(
-                  "flex items-center gap-1 px-2 py-1 rounded-md transition-colors text-[11px] font-medium",
+                  "flex items-center gap-1 px-2 py-1 rounded-md transition-colors text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                   platform === p
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
@@ -2573,10 +2665,11 @@ export function PreviewTab({
         {hasFiles && (
           <div className="flex items-center gap-1 shrink-0">
             <button
+              type="button"
               onClick={goBack}
               disabled={!canGoBack}
               title="Back"
-              aria-label="Back"
+              aria-label="Go back in preview"
               className={cn(
                 "h-7 w-7 inline-flex items-center justify-center rounded-md transition-colors",
                 canGoBack
@@ -2587,10 +2680,11 @@ export function PreviewTab({
               <ArrowLeft className="h-3.5 w-3.5" />
             </button>
             <button
+              type="button"
               onClick={goForward}
               disabled={!canGoForward}
               title="Forward"
-              aria-label="Forward"
+              aria-label="Go forward in preview"
               className={cn(
                 "h-7 w-7 inline-flex items-center justify-center rounded-md transition-colors",
                 canGoForward
@@ -2601,17 +2695,19 @@ export function PreviewTab({
               <ArrowRight className="h-3.5 w-3.5" />
             </button>
             <button
+              type="button"
               onClick={refresh}
               title="Refresh preview"
-              aria-label="Refresh"
+              aria-label="Reload preview"
               className="h-7 w-7 inline-flex items-center justify-center rounded-md text-foreground hover:bg-muted transition-colors"
             >
               <RefreshCw className="h-3.5 w-3.5" />
             </button>
             <button
+              type="button"
               onClick={goHome}
               title="Home (/)"
-              aria-label="Home"
+              aria-label="Go to preview home"
               className="h-7 w-7 inline-flex items-center justify-center rounded-md text-foreground hover:bg-muted transition-colors"
             >
               <Home className="h-3.5 w-3.5" />
@@ -2645,68 +2741,15 @@ export function PreviewTab({
           </form>
         )}
 
-        {/* Routes dropdown */}
         {hasFiles && routes.length > 0 && (
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setRoutesOpen((o) => !o)}
-              title={`Routes (${routes.length})`}
-              className={cn(
-                "flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border transition-colors",
-                routesOpen
-                  ? "bg-primary/15 text-primary border-primary/30"
-                  : "bg-muted text-muted-foreground border-border hover:text-foreground",
-              )}
-            >
-              <ListTree className="h-3 w-3" />
-              <span className="hidden sm:inline">Routes</span>
-              <span className="text-[9px] font-bold opacity-60">{routes.length}</span>
-              <ChevronDown className="h-2.5 w-2.5 opacity-60" />
-            </button>
-            {routesOpen && (
-              <div className="absolute top-full left-0 mt-2 z-50 w-64 max-h-72 overflow-y-auto bg-popover border border-border rounded-xl shadow-2xl p-1">
-                {routes.map((r) => (
-                  <button
-                    key={`${r.kind}:${r.path}`}
-                    onClick={() => {
-                      if (r.kind === "web") {
-                        navigateTo(r.path);
-                      } else {
-                        setRoutesOpen(false);
-                        if ("fileId" in r && r.fileId && onOpenFileInEditor) {
-                          onOpenFileInEditor(r.fileId);
-                        }
-                      }
-                    }}
-                    className={cn(
-                      "w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] hover:bg-muted transition-colors",
-                      r.kind === "web" && r.path === currentPath
-                        ? "bg-primary/10 text-primary"
-                        : "text-foreground",
-                    )}
-                    title={
-                      r.kind === "web" ? `Navigate to ${r.path}` : `Open source file for ${r.path}`
-                    }
-                  >
-                    {r.kind === "web" ? (
-                      <Globe className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    ) : (
-                      <Smartphone className="h-3 w-3 shrink-0 text-muted-foreground" />
-                    )}
-                    <span className="font-mono truncate flex-1">{r.label}</span>
-                    {r.kind === "expo" && (
-                      <span className="text-[9px] px-1 rounded bg-muted text-muted-foreground shrink-0">
-                        source
-                      </span>
-                    )}
-                  </button>
-                ))}
-                <div className="px-2 py-1 mt-1 border-t border-border text-[10px] text-muted-foreground">
-                  Web routes navigate the preview. Expo routes open the source file.
-                </div>
-              </div>
-            )}
-          </div>
+          <PreviewRoutesMenu
+            routes={routes}
+            currentPath={currentPath}
+            open={routesOpen}
+            onOpenChange={setRoutesOpen}
+            onNavigate={navigateTo}
+            onOpenFile={onOpenFileInEditor}
+          />
         )}
 
         {/* ── Cluster divider ── */}
@@ -2725,6 +2768,9 @@ export function PreviewTab({
                     ? "bg-muted text-muted-foreground border-border hover:text-foreground"
                     : "bg-muted text-muted-foreground border-border hover:text-foreground",
               )}
+              type="button"
+              aria-label="Open published app QR code"
+              aria-expanded={qrOpen}
               title="Scan on phone"
             >
               <QrCode className="h-3 w-3" />
@@ -2738,7 +2784,9 @@ export function PreviewTab({
                     Test on a real device
                   </div>
                   <button
+                    type="button"
                     onClick={() => setQrOpen(false)}
+                    aria-label="Close device preview panel"
                     className="text-muted-foreground hover:text-foreground"
                   >
                     <X className="h-4 w-4" />
@@ -2805,7 +2853,7 @@ export function PreviewTab({
                       onClick={() => setQrOpen(false)}
                       className="text-[11px] text-muted-foreground hover:text-primary hover:underline"
                     >
-                      Publishing options
+                      Close
                     </button>
                   </div>
                 )}
@@ -2827,7 +2875,12 @@ export function PreviewTab({
                     ? "bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/15"
                     : "bg-muted text-muted-foreground border-border hover:text-foreground",
               )}
-              title={easBuild ? "Native Expo Go build ready" : "Scan with Expo Go (web preview)"}
+              type="button"
+              aria-label={
+                easBuild ? "Open native build QR code" : "Open mobile web preview QR code"
+              }
+              aria-expanded={qrOpen}
+              title={easBuild ? "Native build link" : "Mobile web preview link"}
             >
               <QrCode className="h-3 w-3" />
               <span className="hidden sm:inline">{easBuild ? "Expo Go" : "Expo Go"}</span>
@@ -2845,7 +2898,9 @@ export function PreviewTab({
                     {easBuild ? "Native Expo Go" : "Expo Go Preview"}
                   </div>
                   <button
+                    type="button"
                     onClick={() => setQrOpen(false)}
+                    aria-label="Close device preview panel"
                     className="text-muted-foreground hover:text-foreground"
                   >
                     <X className="h-4 w-4" />
@@ -2925,73 +2980,26 @@ export function PreviewTab({
 
         <div className="w-px h-4 bg-border shrink-0" />
 
-        {/* Status indicator */}
-        <div
-          className={cn(
-            "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium shrink-0",
-            project.status === "building"
-              ? "bg-primary/15 text-primary"
-              : project.status === "published"
-                ? "bg-green-500/15 text-green-500"
-                : project.status === "testing"
-                  ? "bg-yellow-500/15 text-yellow-500"
-                  : project.status === "failed"
-                    ? "bg-destructive/15 text-destructive"
-                    : "bg-muted text-muted-foreground",
-          )}
-        >
-          <span
-            className={cn(
-              "w-1.5 h-1.5 rounded-full shrink-0",
-              project.status === "building"
-                ? "bg-primary animate-pulse"
-                : project.status === "published"
-                  ? "bg-green-500"
-                  : project.status === "testing"
-                    ? "bg-yellow-500"
-                    : project.status === "failed"
-                      ? "bg-destructive"
-                      : "bg-muted-foreground",
-            )}
-          />
-          {project.status}
-        </div>
-
-        {/* Runtime mode badge — shows which preview engine is active */}
-        {(() => {
-          const serverBadge = getServerPreviewBadge(previewAccess);
-          let label: string;
-          let subtitle: string;
-          let badgeClass: string;
-          if (serverBadge) {
-            label = serverBadge.label;
-            subtitle = serverBadge.subtitle;
-            badgeClass = "bg-blue-500/15 text-blue-400 border-blue-500/25";
-          } else if (webContainerLive) {
-            label = "Quick Preview — WebContainer";
-            subtitle = "In-browser sandbox; some Node.js APIs unavailable";
-            badgeClass = "bg-violet-500/15 text-violet-400 border-violet-500/25";
-          } else if (project.status === "published") {
-            label = "Published Version";
-            subtitle = "Showing the frozen published snapshot";
-            badgeClass = "bg-green-500/15 text-green-400 border-green-500/25";
-          } else {
-            label = "Quick Preview — Static";
-            subtitle = "Frontend only — backend routes not available";
-            badgeClass = "bg-muted text-muted-foreground border-border";
+        <PreviewStatusSummary
+          projectStatus={project.status}
+          hasRuntime={Boolean(project.containerId)}
+          runtimeStatus={containerStatus}
+          hasFiles={hasFiles}
+          serverPreviewLive={serverPreviewLive}
+          webContainerLive={webContainerLive}
+          agenticPreviewUnavailable={
+            agenticPreviewUnavailable || previewAuthorizationStatus !== null
           }
-          return (
-            <div
-              className={cn(
-                "hidden lg:flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border shrink-0 cursor-default",
-                badgeClass,
-              )}
-              title={subtitle}
-            >
-              <span>{label}</span>
-            </div>
-          );
-        })()}
+        />
+        {previewRecoveryPresentation.statusLabel && (
+          <span
+            role="status"
+            className="text-[10px] text-amber-700 dark:text-amber-400"
+            data-testid="preview-recovery-status"
+          >
+            {previewRecoveryPresentation.statusLabel}
+          </span>
+        )}
 
         <div className="flex-1" />
 
@@ -3024,7 +3032,9 @@ export function PreviewTab({
                     Mock API
                   </div>
                   <button
+                    type="button"
                     onClick={() => setMocksOpen(false)}
+                    aria-label="Close mock API panel"
                     className="text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <X className="h-3.5 w-3.5" />
@@ -3088,18 +3098,23 @@ export function PreviewTab({
         )}
 
         {/* Explicit recovery stays reachable even when provider metadata is stale. */}
-        {previewRecoveryControl && onStartContainer && (
+        {previewRecoveryControl && toolbarRecoveryAction && (
           <button
             type="button"
-            onClick={onStartContainer}
-            disabled={previewRecoveryControl.disabled}
+            onClick={toolbarRecoveryAction}
+            disabled={previewRecoveryControl.disabled || toolbarRecoveryBusy}
+            aria-busy={toolbarRecoveryBusy}
             className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium transition-colors shrink-0 border bg-muted text-muted-foreground border-border hover:text-foreground disabled:cursor-wait disabled:opacity-60"
-            title={previewRecoveryControl.label}
+            title={toolbarRecoveryLabel}
+            aria-label={toolbarRecoveryLabel}
           >
             <RefreshCw
-              className={cn("h-3 w-3", previewRecoveryControl.disabled && "animate-spin")}
+              className={cn(
+                "h-3 w-3",
+                (previewRecoveryControl.disabled || toolbarRecoveryBusy) && "animate-spin",
+              )}
             />
-            <span className="hidden sm:inline">{previewRecoveryControl.label}</span>
+            <span className="hidden sm:inline">{toolbarRecoveryLabel}</span>
           </button>
         )}
 
@@ -3138,46 +3153,36 @@ export function PreviewTab({
         <div className="flex items-center gap-1 shrink-0">
           {hasFiles && (
             <SharePreviewControl
+              key={project.id}
               projectId={project.id}
               runtimeRunning={serverPreviewLive}
               readiness={workspaceReadiness}
             />
           )}
-          {hasFiles && onSnapshotObserve && (
-            <>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={snapshotToAi}
-                disabled={snapshotObserveState.kind === "sending"}
-                title="Ask Zero to observe this preview"
-              >
-                {snapshotObserveState.kind === "sending" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Camera className="h-3.5 w-3.5" />
-                )}
-              </Button>
-              <Button
-                variant={regionCaptureOpen ? "default" : "ghost"}
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => {
-                  setEditMode(false);
-                  setRegionCaptureOpen(true);
-                  setCaptureRegion(null);
-                  setCaptureRedactions([]);
-                  setCaptureAnnotation("");
-                }}
-                disabled={snapshotObserveState.kind === "sending"}
-                title="Point to a region for Zero"
-                aria-pressed={regionCaptureOpen}
-              >
-                <Crosshair className="h-3.5 w-3.5" />
-              </Button>
-            </>
-          )}
+          {/* Add reference overlay, observation, recovery, and focus controls share one menu. */}
+          <PreviewActionsMenu
+            referenceActive={Boolean(referenceOverlay)}
+            onAddReference={() => referenceOverlayInputRef.current?.click()}
+            onObserve={hasFiles && onSnapshotObserve ? snapshotToAi : undefined}
+            observing={snapshotObserveState.kind === "sending"}
+            onSelectRegion={
+              hasFiles && onSnapshotObserve
+                ? () => {
+                    setEditMode(false);
+                    setRegionCaptureOpen(true);
+                    setCaptureRegion(null);
+                    setCaptureRedactions([]);
+                    setCaptureAnnotation("");
+                  }
+                : undefined
+            }
+            onRefreshRuntime={onRefreshContainerStatus}
+            onRestartBrowserPreview={
+              isReactVite && wc.status === "error" ? () => void wc.restart() : undefined
+            }
+            focusMode={focusMode}
+            onToggleFocusMode={onToggleFocusMode}
+          />
           {(snapshotObserveState.kind === "success" || snapshotObserveState.kind === "error") && (
             <span
               role={snapshotObserveState.kind === "error" ? "alert" : "status"}
@@ -3193,7 +3198,8 @@ export function PreviewTab({
             <Button
               variant={editMode ? "default" : "ghost"}
               size="icon"
-              className={cn("h-7 w-7", editMode && "bg-violet-600 hover:bg-violet-500 text-white")}
+              className="h-7 w-7"
+              aria-label={editMode ? "Exit visual edit" : "Enter visual edit"}
               onClick={() => setEditMode((v) => !v)}
               title={
                 editMode
@@ -3215,25 +3221,15 @@ export function PreviewTab({
               asChild
               title="Open preview in a new browser tab"
             >
-              <a href={previewSrc} target="_blank" rel="noreferrer">
+              <a
+                href={previewSrc}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open preview in a new tab"
+              >
                 <ExternalLink className="h-3.5 w-3.5" />
                 Open
               </a>
-            </Button>
-          )}
-          {onToggleFocusMode && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              onClick={onToggleFocusMode}
-              title={focusMode ? "Exit focus mode (Esc)" : "Focus mode — expand preview"}
-            >
-              {focusMode ? (
-                <Minimize2 className="h-3.5 w-3.5" />
-              ) : (
-                <Maximize2 className="h-3.5 w-3.5" />
-              )}
             </Button>
           )}
         </div>
@@ -3241,14 +3237,12 @@ export function PreviewTab({
 
       {workspaceReadiness && (
         <div
-          className={cn(
-            "absolute left-3 right-3 top-12 z-20 rounded-md border px-3 py-2 text-xs shadow-sm",
-            workspaceReadiness.presentation.canCelebrate
-              ? "border-emerald-500/25 bg-emerald-950/90 text-emerald-100"
-              : "border-amber-500/25 bg-amber-950/90 text-amber-100",
-          )}
+          role="status"
+          aria-label="Workspace readiness"
+          className="shrink-0 border-b border-border bg-muted/40 px-3 py-2 text-xs text-foreground"
           data-testid="preview-workspace-readiness"
         >
+          <p className="mb-1 text-[10px] font-medium text-muted-foreground">Workspace readiness</p>
           <p className="font-semibold">{workspaceReadiness.presentation.title}</p>
           <p className="mt-0.5">{workspaceReadiness.presentation.message}</p>
           {workspaceReadiness.presentation.unblock && (
@@ -3261,85 +3255,108 @@ export function PreviewTab({
 
       {/* Container waking/starting banner — Phase C server-side containers */}
       {/* Task #768: testing gate nudge — shown for full-stack projects whose draft is not yet test-approved */}
-      {project.containerId && effectiveTestingStatus !== "passed" && (
+      {project.containerId && (effectiveTestingStatus !== "passed" || rebuildRequired) && (
         <div className="absolute bottom-0 left-0 right-0 z-20 flex items-center justify-between gap-2 px-3 py-2 text-xs bg-amber-500/10 border-t border-amber-500/20 text-amber-700 dark:text-amber-400">
           <div className="min-w-0 flex items-center gap-1.5">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
             <div className="min-w-0">
               <span>
-                {effectiveTestingStatus === "stale"
-                  ? "Draft changed after last test — run a new test before publishing."
-                  : effectiveTestingStatus === "ready"
-                    ? "The sealed test candidate is awaiting your review. Approve it to unlock production publishing."
-                    : effectiveTestingStatus === "building"
-                      ? "The exact sealed test candidate is being prepared."
-                      : "Start a test build to preview and approve this app before publishing."}
+                {rebuildRequired && effectiveTestingStatus === "passed"
+                  ? "Production preview needs a fresh build. Start or rebuild a test preview and review the result before publishing."
+                  : effectiveTestingStatus === "candidate-needs-attention"
+                    ? "The test candidate needs attention. Review its result before retrying or approving."
+                    : effectiveTestingStatus === "stale"
+                      ? "Draft changed after last test — run a new test before publishing."
+                      : effectiveTestingStatus === "ready"
+                        ? "The sealed test candidate is awaiting your review. Approve it to unlock production publishing."
+                        : effectiveTestingStatus === "building"
+                          ? "The exact sealed test candidate is being prepared."
+                          : "Start a test build to preview and approve this app before publishing."}
               </span>
               {testEnvironmentError && (
-                <p className="truncate text-[10px] text-destructive">
-                  {workspaceReadiness?.presentation.message ??
-                    "The test candidate needs attention. Open its details or retry it."}
+                <p role="alert" className="break-words text-[10px] text-destructive">
+                  {testEnvironmentError.message} ({testEnvironmentError.code})
                 </p>
               )}
             </div>
           </div>
-          <button
-            type="button"
-            disabled={testEnvironmentBusy || effectiveTestingStatus === "building"}
-            onClick={() =>
-              void runTestEnvironmentAction(
-                effectiveTestingStatus === "ready" ? "approve" : startTestingAction,
-              )
-            }
-            className="shrink-0 rounded-md border border-amber-500/30 bg-background/70 px-2.5 py-1 font-semibold hover:bg-background focus:outline-none disabled:cursor-wait disabled:opacity-60"
-          >
-            {testEnvironmentBusy || effectiveTestingStatus === "building"
-              ? "Testing…"
-              : effectiveTestingStatus === "ready"
-                ? "Approve test"
-                : startTestingAction === "rebuild"
-                  ? "Rebuild test"
-                  : "Start test"}
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {onNavigateToTestEnv && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={onNavigateToTestEnv}
+              >
+                Test details
+              </Button>
+            )}
+            <button
+              type="button"
+              disabled={testEnvironmentBusy || effectiveTestingStatus === "building"}
+              onClick={() =>
+                void runTestEnvironmentAction(
+                  effectiveTestingStatus === "ready" ? "approve" : startTestingAction,
+                )
+              }
+              className="shrink-0 rounded-md border border-amber-500/30 bg-background/70 px-2.5 py-1 font-semibold hover:bg-background focus:outline-none disabled:cursor-wait disabled:opacity-60"
+            >
+              {testEnvironmentBusy || effectiveTestingStatus === "building"
+                ? "Testing…"
+                : effectiveTestingStatus === "ready"
+                  ? "Approve test"
+                  : startTestingAction === "rebuild"
+                    ? "Rebuild test"
+                    : "Start test"}
+            </button>
+          </div>
         </div>
       )}
-      {!webContainerLive &&
-        containerStatus &&
-        ["starting", "hibernated"].includes(containerStatus) && (
-          <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b bg-primary/8 border-primary/15 text-primary text-xs">
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-            <span className="flex-1">
-              {containerStatus === "hibernated"
-                ? "Container hibernated — wake it to resume the live preview."
-                : "Waking up your project container… this takes 20–30 seconds."}
-            </span>
-            {containerStatus === "hibernated" && onStartContainer && (
-              <button
-                onClick={onStartContainer}
-                className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-colors"
-              >
-                Wake
-              </button>
-            )}
-            {containerStatus === "starting" && (
-              <div className="flex items-center gap-1 shrink-0">
-                {(["starting", "running"] as const).map((stage) => (
-                  <span
-                    key={stage}
-                    className={cn(
-                      "w-1.5 h-1.5 rounded-full",
-                      containerStatus === stage ? "bg-primary animate-pulse" : "bg-primary/20",
-                    )}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+      {containerStatus && ["starting", "hibernated"].includes(containerStatus) && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b bg-primary/8 border-primary/15 text-primary text-xs">
+          {containerStatus === "starting" ? (
+            <Loader2 className="h-3.5 w-3.5 shrink-0 motion-safe:animate-spin" />
+          ) : (
+            <Moon className="h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="flex-1">
+            {containerStatus === "hibernated"
+              ? "The project runtime is hibernated. Browser preview uses a separate environment."
+              : "Starting the project runtime. Preview availability is checked separately."}
+          </span>
+          {containerStatus === "hibernated" && onStartContainer && !previewRecoveryError && (
+            <button
+              type="button"
+              onClick={onStartContainer}
+              disabled={containerActionPending !== null}
+              aria-busy={containerActionPending !== null}
+              className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-primary/20 border border-primary/30 text-primary hover:bg-primary/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-wait disabled:opacity-60"
+            >
+              {containerActionPending ? runtimeActionLabel : "Wake runtime"}
+            </button>
+          )}
+          {containerStatus === "starting" && (
+            <div className="flex items-center gap-1 shrink-0">
+              {(["starting", "running"] as const).map((stage) => (
+                <span
+                  key={stage}
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    containerStatus === stage ? "bg-primary animate-pulse" : "bg-primary/20",
+                  )}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* WebContainer boot status banner — only for react-vite projects */}
       {isReactVite && wc.status !== "ready" && wc.status !== "idle" && (
         <div
+          role={wc.status === "error" ? "alert" : "status"}
+          aria-label="Browser preview status"
           className={cn(
             "shrink-0 flex items-center gap-2 px-3 py-2 border-b text-xs",
             wc.status === "error"
@@ -3356,13 +3373,14 @@ export function PreviewTab({
           ) : (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
           )}
-          <span className="flex-1">{wc.statusLabel}</span>
+          <span className="flex-1">Browser preview: {wc.statusLabel}</span>
           {wc.status === "error" && (
             <button
+              type="button"
               onClick={() => wc.restart()}
-              className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-destructive/20 border border-destructive/30 text-destructive hover:bg-destructive/30 transition-colors"
+              className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-destructive/20 border border-destructive/30 text-destructive hover:bg-destructive/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
-              Retry
+              Retry browser preview
             </button>
           )}
           {wc.status === "unsupported" && (

@@ -1,3 +1,7 @@
+import {
+  withProjectWorkspaceAdmission,
+  WorkspaceAdmissionError,
+} from "../../lib/workspace-lifecycle";
 /**
  * /api/v1/projects — stable versioned project CRUD.
  *
@@ -153,34 +157,46 @@ router.post("/projects", requirePatScope("projects:write"), async (req, res): Pr
     throw error;
   }
 
-  const [project] = await db
-    .insert(projectsTable)
-    .values({
-      ownerId: req.userId!,
-      workspaceId,
-      name: name.trim().slice(0, 120),
-      description: typeof description === "string" ? description.trim().slice(0, 500) : null,
-      kind: resolvedKind,
-      platform,
-      stack: resolvedStack,
-      projectFormat,
-      builderMode: "agentic",
-      provisioningStatus: "provisioning",
-    })
-    .returning({
-      id: projectsTable.id,
-      name: projectsTable.name,
-      description: projectsTable.description,
-      kind: projectsTable.kind,
-      platform: projectsTable.platform,
-      stack: projectsTable.stack,
-      status: projectsTable.status,
-      agentMode: projectsTable.agentMode,
-      provisioningStatus: projectsTable.provisioningStatus,
-      builderMode: projectsTable.builderMode,
-      createdAt: projectsTable.createdAt,
-      updatedAt: projectsTable.updatedAt,
-    });
+  const projectRows = await withProjectWorkspaceAdmission(
+    { workspaceId, userId: req.userId! },
+    async (tx) =>
+      tx
+        .insert(projectsTable)
+        .values({
+          ownerId: req.userId!,
+          workspaceId,
+          name: name.trim().slice(0, 120),
+          description: typeof description === "string" ? description.trim().slice(0, 500) : null,
+          kind: resolvedKind,
+          platform,
+          stack: resolvedStack,
+          projectFormat,
+          builderMode: "agentic",
+          provisioningStatus: "provisioning",
+        })
+        .returning({
+          id: projectsTable.id,
+          name: projectsTable.name,
+          description: projectsTable.description,
+          kind: projectsTable.kind,
+          platform: projectsTable.platform,
+          stack: projectsTable.stack,
+          status: projectsTable.status,
+          agentMode: projectsTable.agentMode,
+          provisioningStatus: projectsTable.provisioningStatus,
+          builderMode: projectsTable.builderMode,
+          createdAt: projectsTable.createdAt,
+          updatedAt: projectsTable.updatedAt,
+        }),
+  ).catch((error: unknown) => {
+    if (error instanceof WorkspaceAdmissionError) {
+      res.status(409).json({ error: error.code });
+      return null;
+    }
+    throw error;
+  });
+  if (!projectRows) return;
+  const [project] = projectRows;
 
   if (!project) {
     res.status(500).json({ error: "Failed to create project." });

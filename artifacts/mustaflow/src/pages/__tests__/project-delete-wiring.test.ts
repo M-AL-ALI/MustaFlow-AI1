@@ -11,18 +11,21 @@ function readPage(relPath: string): string {
 describe("project delete wiring", () => {
   it("exposes recoverable project deletion from the main projects dashboard", () => {
     const src = readPage("projects.tsx");
+    const dashboard = readPage("../components/projects/project-dashboard.tsx");
 
     expect(src).toContain("useDeleteProject");
-    expect(src).toContain("Move project to Trash");
+    expect(dashboard).toContain("Move to Trash");
     expect(src).toContain("<ProjectTrashDialog");
-    expect(src).toContain("setTrashProject(project)");
+    expect(src).toContain("onTrash={setTrashProject}");
+    expect(src).toContain("onConfirm={moveToTrash}");
+    expect(dashboard).toContain("onTrash(project)");
     expect(src).not.toContain("window.confirm(");
     expect(src).toContain("getGetProjectsSummaryQueryKey");
     expect(src).toContain("getGetRecentActivityQueryKey");
     expect(src).toContain("getListTrashedProjectsQueryKey");
-    expect(src).toContain("Trash2");
-    expect(src).toContain('href="/trash"');
-    expect(src).toContain("Open Trash");
+    expect(dashboard).toContain("Trash2");
+    expect(dashboard).toContain('href="/trash"');
+    expect(dashboard).toContain("Open Trash");
     expect(src).not.toContain('href="/projects/all"');
   });
 

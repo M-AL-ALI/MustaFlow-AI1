@@ -191,6 +191,11 @@ import {
   schedulePublishedRuntimeRecovery,
 } from "./published-data-plane";
 import { handlePreviewDataPlaneRequest } from "./preview-data-plane";
+import {
+  captureProjectPreview,
+  handlePreviewCaptureDataPlaneRequest,
+  PreviewCaptureError,
+} from "./preview-capture";
 import { CloudflareSandboxBackend, type RuntimeBackend } from "./runtime-backend";
 import { driveRoutePolicyReconciliation } from "./route-policy-reconciliation";
 import {
@@ -390,6 +395,12 @@ export async function handleWorkerRequest(
   let coordinator = dependencies.coordinator;
   try {
     coordinator ??= getCoordinator(env);
+    const captureResponse = await handlePreviewCaptureDataPlaneRequest(request, env, {
+      coordinator,
+      nowMs: dependencies.nowMs,
+      requestId,
+    });
+    if (captureResponse !== null) return captureResponse;
     const pathname = new URL(request.url).pathname;
     if (pathname === CONTROL_PREFIX || pathname.startsWith(`${CONTROL_PREFIX}/`)) {
       return await handleControlRequest(request, env, {
@@ -559,6 +570,65 @@ export async function handleControlRequest(
       false,
       requestId,
     );
+  }
+
+  // Ephemeral capture uses signed control authentication, but never response idempotency.
+  // The API's durable asset owns deduplication; only metadata reaches control audit.
+  const captureMatch = /^\/_nabuflow\/control\/v1\/projects\/([1-9][0-9]*)\/preview-capture$/u.exec(
+    url.pathname,
+  );
+  if (captureMatch !== null) {
+    const projectId = Number(captureMatch[1]);
+    context.stage = "execution";
+    try {
+      if (request.method !== "POST") {
+        throw new ControlHttpError(405, "method_not_allowed", "Control method is not allowed");
+      }
+      assertNoQuery(url);
+      if (!request.headers.get(AUTH_HEADERS.idempotencyKey)) {
+        throw new ControlHttpError(
+          400,
+          "idempotency_key_required",
+          "A capture transport idempotency key is required",
+        );
+      }
+      const result = await captureProjectPreview(request, projectId, parseJsonBody(rawBody), env, {
+        coordinator,
+        nowMs: dependencies.nowMs,
+        requestId,
+      });
+      await recordAudit(
+        coordinator,
+        requestId,
+        request.method,
+        "previewCapture",
+        null,
+        { status: 200, code: "ok" },
+        projectId,
+      );
+      return jsonResponse(200, result);
+    } catch (error) {
+      const failure =
+        error instanceof PreviewCaptureError
+          ? new ControlHttpError(error.status, error.code, error.message, error.retryable)
+          : toControlError(error);
+      await recordAudit(
+        coordinator,
+        requestId,
+        request.method,
+        "previewCapture",
+        null,
+        failure,
+        Number.isSafeInteger(projectId) ? projectId : undefined,
+      );
+      return errorResponse(
+        failure.status,
+        failure.code,
+        failure.message,
+        failure.retryable,
+        requestId,
+      );
+    }
   }
 
   let route: MatchedRoute;

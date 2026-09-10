@@ -1,3 +1,4 @@
+import { withProjectWorkspaceAdmission, WorkspaceAdmissionError } from "../lib/workspace-lifecycle";
 /**
  * Task #631 — Template Gallery routes.
  *
@@ -288,23 +289,35 @@ router.post("/gallery-templates/:slug/use", async (req, res): Promise<void> => {
 
     const workspaceId = await resolveProjectWorkspaceId({ userId });
 
-    const [newProject] = await db
-      .insert(projectsTable)
-      .values({
-        ownerId: userId,
-        workspaceId,
-        name: tpl.title,
-        description: tpl.description,
-        kind: tpl.platform === "mobile" ? "mobile-cross" : "web",
-        platform: tpl.platform === "mobile" ? "cross" : "web",
-        stack: tpl.stack as string,
-        status: "draft",
-        // Task #738 — gallery-template instances are new projects and must
-        // get their own container + Neon DB.
-        builderMode: "agentic",
-        provisioningStatus: "provisioning",
-      })
-      .returning({ id: projectsTable.id });
+    const newProjectRows = await withProjectWorkspaceAdmission(
+      { workspaceId, userId: userId },
+      async (tx) =>
+        tx
+          .insert(projectsTable)
+          .values({
+            ownerId: userId,
+            workspaceId,
+            name: tpl.title,
+            description: tpl.description,
+            kind: tpl.platform === "mobile" ? "mobile-cross" : "web",
+            platform: tpl.platform === "mobile" ? "cross" : "web",
+            stack: tpl.stack as string,
+            status: "draft",
+            // Task #738 — gallery-template instances are new projects and must
+            // get their own container + Neon DB.
+            builderMode: "agentic",
+            provisioningStatus: "provisioning",
+          })
+          .returning({ id: projectsTable.id }),
+    ).catch((error: unknown) => {
+      if (error instanceof WorkspaceAdmissionError) {
+        res.status(409).json({ error: error.code });
+        return null;
+      }
+      throw error;
+    });
+    if (!newProjectRows) return;
+    const [newProject] = newProjectRows;
 
     if (!newProject) {
       res.status(500).json({ error: "Failed to create project" });
@@ -376,22 +389,34 @@ router.post("/gallery-templates/:slug/fork", async (req, res): Promise<void> => 
 
     const workspaceId = await resolveProjectWorkspaceId({ userId });
 
-    const [newProject] = await db
-      .insert(projectsTable)
-      .values({
-        ownerId: userId,
-        workspaceId,
-        name: `${tpl.title} (fork)`,
-        description: tpl.description,
-        kind: tpl.platform === "mobile" ? "mobile-cross" : "web",
-        platform: tpl.platform === "mobile" ? "cross" : "web",
-        stack: tpl.stack as string,
-        status: "draft",
-        // Task #738 — forked templates are new infra → auto-provision.
-        builderMode: "agentic",
-        provisioningStatus: "provisioning",
-      })
-      .returning({ id: projectsTable.id });
+    const newProjectRows = await withProjectWorkspaceAdmission(
+      { workspaceId, userId: userId },
+      async (tx) =>
+        tx
+          .insert(projectsTable)
+          .values({
+            ownerId: userId,
+            workspaceId,
+            name: `${tpl.title} (fork)`,
+            description: tpl.description,
+            kind: tpl.platform === "mobile" ? "mobile-cross" : "web",
+            platform: tpl.platform === "mobile" ? "cross" : "web",
+            stack: tpl.stack as string,
+            status: "draft",
+            // Task #738 — forked templates are new infra → auto-provision.
+            builderMode: "agentic",
+            provisioningStatus: "provisioning",
+          })
+          .returning({ id: projectsTable.id }),
+    ).catch((error: unknown) => {
+      if (error instanceof WorkspaceAdmissionError) {
+        res.status(409).json({ error: error.code });
+        return null;
+      }
+      throw error;
+    });
+    if (!newProjectRows) return;
+    const [newProject] = newProjectRows;
 
     if (!newProject) {
       res.status(500).json({ error: "Failed to fork template" });

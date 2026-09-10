@@ -54,6 +54,8 @@ import { EmailSetupWizard } from "./email-setup-wizard";
 import { WebhooksPanel } from "./webhooks-panel";
 import { DomainAnalyticsCard } from "./domain-analytics-card";
 import { DomainPurchaseWidget } from "./domain-purchase-widget";
+import { ProjectDomainConnectForm } from "./project-domain-connect-form";
+import { PublishingHealthBanner } from "./publishing-health-banner";
 import { useWorkspace } from "@/contexts/workspace-context";
 import type { InlineSurfaceActivityUpdate } from "./inline-activity-stream";
 import { SupportReportLink } from "@/components/support-report-link";
@@ -65,111 +67,6 @@ import {
   WORKSPACE_READINESS_UNBLOCK_LABELS,
   type WorkspaceReadinessReceipt,
 } from "@/lib/workspace-readiness";
-
-// ─── Post-publish health banner (Task #511) ─────────────────────────────────
-function HealthCheckBanner({
-  projectId,
-  onShowProdErrors,
-}: {
-  projectId: number;
-  onShowProdErrors?: () => void;
-}) {
-  const [latest, setLatest] = useState<{
-    status: "passed" | "failed" | "partial";
-    rootStatus: number | null;
-    routesChecked: number;
-    routesFailed: number;
-    failureSummary: string | null;
-    createdAt: string;
-  } | null>(null);
-  const [running, setRunning] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const r = await authFetch(`/api/projects/${projectId}/health-checks`);
-      if (r.ok) {
-        const data = (await r.json()) as { latest: typeof latest };
-        setLatest(data.latest ?? null);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => void load(), 30_000);
-    return () => clearInterval(t);
-  }, [load]);
-
-  const runNow = useCallback(async () => {
-    setRunning(true);
-    try {
-      const r = await authFetch(`/api/projects/${projectId}/health-checks/run`, { method: "POST" });
-      if (r.ok) await load();
-    } catch {
-      /* ignore */
-    } finally {
-      setRunning(false);
-    }
-  }, [projectId, load]);
-
-  if (!latest) return null;
-
-  const tone =
-    latest.status === "passed"
-      ? "bg-green-500/5 border-green-500/30 text-green-400"
-      : latest.status === "partial"
-        ? "bg-amber-500/5 border-amber-500/30 text-amber-400"
-        : "bg-destructive/5 border-destructive/30 text-destructive";
-
-  const Icon =
-    latest.status === "passed"
-      ? CheckCircle2
-      : latest.status === "partial"
-        ? AlertTriangle
-        : XCircle;
-
-  return (
-    <div className={cn("border rounded-xl p-4 flex items-start gap-3", tone)}>
-      <Icon className="h-5 w-5 shrink-0 mt-0.5" />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold capitalize">Health check {latest.status}</span>
-          <span className="text-[11px] opacity-80">
-            · root {latest.rootStatus ?? "—"} · {latest.routesFailed}/{latest.routesChecked} routes
-            failed
-          </span>
-          <div className="ml-auto flex items-center gap-3">
-            {latest.status !== "passed" && onShowProdErrors && (
-              <button
-                type="button"
-                onClick={onShowProdErrors}
-                className="text-[11px] underline opacity-80 hover:opacity-100"
-              >
-                Show me prod errors
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => void runNow()}
-              disabled={running}
-              className="text-[11px] underline opacity-80 hover:opacity-100 disabled:opacity-50"
-            >
-              {running ? "Running…" : "Re-check"}
-            </button>
-          </div>
-        </div>
-        {latest.failureSummary && (
-          <div className="text-[12px] opacity-90 mt-1">{latest.failureSummary}</div>
-        )}
-        <div className="text-[10px] opacity-60 mt-1">
-          Last run: {new Date(latest.createdAt).toLocaleString()}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function CopyUrlButton({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
@@ -3229,6 +3126,7 @@ function BuyDomainSection({ projectId }: { projectId: number }) {
       <button
         type="button"
         onClick={() => setOpen((p) => !p)}
+        aria-expanded={open}
         className="flex items-center gap-2 text-xs text-primary hover:text-primary/80 transition-colors"
       >
         <Globe className="h-3.5 w-3.5" />
@@ -4383,7 +4281,7 @@ export function PublishingTab({
           </p>
         </div>
 
-        <HealthCheckBanner projectId={projectId} onShowProdErrors={onNavigateToLogs} />
+        <PublishingHealthBanner projectId={projectId} onShowProdErrors={onNavigateToLogs} />
 
         {/* Platform tabs — iOS/Android only visible for mobile projects */}
         <div className="flex gap-2">
@@ -5499,39 +5397,14 @@ export function PublishingTab({
                         })()}
                     </div>
 
-                    {/* Add domain input */}
-                    <div className="flex gap-2">
-                      <input
-                        value={newDomainInput}
-                        onChange={(e) => setNewDomainInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") void addDomain();
-                        }}
-                        placeholder="app.yourdomain.com or yourdomain.com"
-                        className="flex-1 bg-muted border border-border rounded-lg px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void addDomain()}
-                        disabled={addingDomain || !newDomainInput.trim()}
-                        className="shrink-0"
-                      >
-                        {addingDomain ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Link2 className="h-3.5 w-3.5" />
-                        )}
-                        <span className="ml-1.5">Add</span>
-                      </Button>
-                    </div>
-
-                    {domainAddError && (
-                      <div className="flex items-start gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                        <span>{domainAddError}</span>
-                      </div>
-                    )}
+                    <ProjectDomainConnectForm
+                      key={projectId}
+                      value={newDomainInput}
+                      onChange={setNewDomainInput}
+                      onConnect={addDomain}
+                      isSubmitting={addingDomain}
+                      error={domainAddError}
+                    />
 
                     {/* Domain rows */}
                     {domainsData && domainsData.domains.length > 0 && (

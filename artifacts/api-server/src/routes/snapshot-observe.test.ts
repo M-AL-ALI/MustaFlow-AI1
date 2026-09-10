@@ -132,6 +132,7 @@ describe("snapshot observe route", () => {
         exactCookieOrigin: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
         trustedLoopbackOrigin: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
         exactOriginCookies: [{ name: "__session", value: "session-token" }],
+        exactCookiePath: "/api/projects/51/preview/",
       }),
     );
     const captureInput = capture.mock.calls[0]?.[0];
@@ -392,6 +393,7 @@ describe("snapshot observe route", () => {
         url: expect.stringMatching(/^https:\/\/runtime\.mustaflow\.com\//u),
         exactOriginCookies: undefined,
         exactCookieOrigin: undefined,
+        exactCookiePath: undefined,
         trustedLoopbackOrigin: undefined,
       }),
     );

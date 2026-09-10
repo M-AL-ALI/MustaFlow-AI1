@@ -106,6 +106,13 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
 import {
+  isPreviewAuthorizationStatus,
+  isTerminalPreviewRecoveryError,
+  readPreviewRecoveryError,
+  reconcilePreviewRecoveryError,
+  type PreviewRecoveryError,
+} from "./components/preview-recovery-presentation";
+import {
   requestSnapshotObservation,
   type SnapshotObserveRequest,
   type SnapshotObserveResult,
@@ -238,127 +245,136 @@ import {
 } from "./components/project-image-model";
 import { useProjectImages } from "./components/use-project-images";
 import { builderLazy } from "@/lib/builder-lazy";
+import { ProjectToolsLoading } from "./components/project-tools-loading";
 
-const CommandPalette = builderLazy(() =>
-  import("./components/command-palette").then((module) => ({
-    default: module.CommandPalette,
-  })),
+const CommandPalette = builderLazy(
+  () => import("./components/command-palette"),
+  (module) => module.CommandPalette,
 );
-const KeyboardShortcuts = builderLazy(() =>
-  import("./components/keyboard-shortcuts").then((module) => ({
-    default: module.KeyboardShortcuts,
-  })),
+const KeyboardShortcuts = builderLazy(
+  () => import("./components/keyboard-shortcuts"),
+  (module) => module.KeyboardShortcuts,
 );
-const ChatHistory = builderLazy(() =>
-  import("./components/chat-history").then((module) => ({ default: module.ChatHistory })),
+const ChatHistory = builderLazy(
+  () => import("./components/chat-history"),
+  (module) => module.ChatHistory,
 );
-const CodeEditorTab = builderLazy(() =>
-  import("./components/code-editor-tab").then((module) => ({ default: module.CodeEditorTab })),
+const CodeEditorTab = builderLazy(
+  () => import("./components/code-editor-tab"),
+  (module) => module.CodeEditorTab,
 );
-const PageMapTab = builderLazy(() =>
-  import("./components/page-map-tab").then((module) => ({ default: module.PageMapTab })),
+const PageMapTab = builderLazy(
+  () => import("./components/page-map-tab"),
+  (module) => module.PageMapTab,
 );
-const SavedSuggestionsTab = builderLazy(() =>
-  import("./components/saved-suggestions-tab").then((module) => ({
-    default: module.SavedSuggestionsTab,
-  })),
+const SavedSuggestionsTab = builderLazy(
+  () => import("./components/saved-suggestions-tab"),
+  (module) => module.SavedSuggestionsTab,
 );
-const TaskQueuePanel = builderLazy(() =>
-  import("./components/task-queue-panel").then((module) => ({
-    default: module.TaskQueuePanel,
-  })),
+const TaskQueuePanel = builderLazy(
+  () => import("./components/task-queue-panel"),
+  (module) => module.TaskQueuePanel,
 );
-const BackgroundTasksDrawer = builderLazy(() =>
-  import("./components/background-tasks-drawer").then((module) => ({
-    default: module.BackgroundTasksDrawer,
-  })),
+const BackgroundTasksDrawer = builderLazy(
+  () => import("./components/background-tasks-drawer"),
+  (module) => module.BackgroundTasksDrawer,
 );
-const ZeroAgentPanel = builderLazy(() =>
-  import("./components/zero-agent-panel").then((module) => ({
-    default: module.ZeroAgentPanel,
-  })),
+const ZeroAgentPanel = builderLazy(
+  () => import("./components/zero-agent-panel"),
+  (module) => module.ZeroAgentPanel,
 );
-const CanvasTab = builderLazy(() =>
-  import("./components/canvas-tab").then((module) => ({ default: module.CanvasTab })),
+const CanvasTab = builderLazy(
+  () => import("./components/canvas-tab"),
+  (module) => module.CanvasTab,
 );
-const ArtifactTabs = builderLazy(() =>
-  import("./components/artifact-tabs").then((module) => ({ default: module.ArtifactTabs })),
+const ArtifactTabs = builderLazy(
+  () => import("./components/artifact-tabs"),
+  (module) => module.ArtifactTabs,
 );
-const ToolsTab = builderLazy(() =>
-  import("./components/tools-tab").then((module) => ({ default: module.ToolsTab })),
+const ToolsTab = builderLazy(
+  () => import("./components/tools-tab"),
+  (module) => module.ToolsTab,
 );
-const SecretsPanel = builderLazy(() =>
-  import("../dev-workspace/components/secrets-panel").then((module) => ({
-    default: module.SecretsPanel,
-  })),
+const SecretsPanel = builderLazy(
+  () => import("../dev-workspace/components/secrets-panel"),
+  (module) => module.SecretsPanel,
 );
-const PublishingTab = builderLazy(() =>
-  import("./components/publishing-tab").then((module) => ({
-    default: module.PublishingTab,
-  })),
+const PublishingTab = builderLazy(
+  () => import("./components/publishing-tab"),
+  (module) => module.PublishingTab,
 );
-const LogsTab = builderLazy(() =>
-  import("./components/logs-tab").then((module) => ({ default: module.LogsTab })),
+const LogsTab = builderLazy(
+  () => import("./components/logs-tab"),
+  (module) => module.LogsTab,
 );
-const AnalyticsTab = builderLazy(() =>
-  import("./components/analytics-tab").then((module) => ({ default: module.AnalyticsTab })),
+const AnalyticsTab = builderLazy(
+  () => import("./components/analytics-tab"),
+  (module) => module.AnalyticsTab,
 );
-const ResourcesTab = builderLazy(() =>
-  import("./components/resources-tab").then((module) => ({ default: module.ResourcesTab })),
+const ResourcesTab = builderLazy(
+  () => import("./components/resources-tab"),
+  (module) => module.ResourcesTab,
 );
 const IntegrationsTab = builderLazy(() => import("./components/integrations-tab"));
-const HealthTab = builderLazy(() =>
-  import("./components/health-tab").then((module) => ({ default: module.HealthTab })),
+const HealthTab = builderLazy(
+  () => import("./components/health-tab"),
+  (module) => module.HealthTab,
 );
-const CheckpointsTab = builderLazy(() =>
-  import("./components/checkpoints-tab").then((module) => ({
-    default: module.CheckpointsTab,
-  })),
+const CheckpointsTab = builderLazy(
+  () => import("./components/checkpoints-tab"),
+  (module) => module.CheckpointsTab,
 );
-const ManageTab = builderLazy(() =>
-  import("./components/manage-tab").then((module) => ({ default: module.ManageTab })),
+const ManageTab = builderLazy(
+  () => import("./components/manage-tab"),
+  (module) => module.ManageTab,
 );
-const KnowledgeTab = builderLazy(() =>
-  import("./components/knowledge-tab").then((module) => ({ default: module.KnowledgeTab })),
+const KnowledgeTab = builderLazy(
+  () => import("./components/knowledge-tab"),
+  (module) => module.KnowledgeTab,
 );
-const HistoryTab = builderLazy(() =>
-  import("./components/history-tab").then((module) => ({ default: module.HistoryTab })),
+const HistoryTab = builderLazy(
+  () => import("./components/history-tab"),
+  (module) => module.HistoryTab,
 );
-const TerminalTab = builderLazy(() =>
-  import("./components/terminal-tab").then((module) => ({ default: module.TerminalTab })),
+const TerminalTab = builderLazy(
+  () => import("./components/terminal-tab"),
+  (module) => module.TerminalTab,
 );
-const DatabaseTab = builderLazy(() =>
-  import("./components/database-tab").then((module) => ({ default: module.DatabaseTab })),
+const DatabaseTab = builderLazy(
+  () => import("./components/database-tab"),
+  (module) => module.DatabaseTab,
 );
-const RuntimeTab = builderLazy(() =>
-  import("./components/runtime-tab").then((module) => ({ default: module.RuntimeTab })),
+const RuntimeTab = builderLazy(
+  () => import("./components/runtime-tab"),
+  (module) => module.RuntimeTab,
 );
-const ChecksTab = builderLazy(() =>
-  import("./components/checks-tab").then((module) => ({ default: module.ChecksTab })),
+const ChecksTab = builderLazy(
+  () => import("./components/checks-tab"),
+  (module) => module.ChecksTab,
 );
-const SecurityTab = builderLazy(() =>
-  import("./components/security-tab").then((module) => ({ default: module.SecurityTab })),
+const SecurityTab = builderLazy(
+  () => import("./components/security-tab"),
+  (module) => module.SecurityTab,
 );
-const GithubTab = builderLazy(() =>
-  import("./components/github-tab").then((module) => ({ default: module.GithubTab })),
+const GithubTab = builderLazy(
+  () => import("./components/github-tab"),
+  (module) => module.GithubTab,
 );
-const RecipesTab = builderLazy(() =>
-  import("./components/recipes-tab").then((module) => ({ default: module.RecipesTab })),
+const RecipesTab = builderLazy(
+  () => import("./components/recipes-tab"),
+  (module) => module.RecipesTab,
 );
-const CommentsPanel = builderLazy(() =>
-  import("./components/comments-panel").then((module) => ({
-    default: module.CommentsPanel,
-  })),
+const CommentsPanel = builderLazy(
+  () => import("./components/comments-panel"),
+  (module) => module.CommentsPanel,
 );
-const ActivityLogTab = builderLazy(() =>
-  import("./components/activity-log-tab").then((module) => ({
-    default: module.ActivityLogTab,
-  })),
+const ActivityLogTab = builderLazy(
+  () => import("./components/activity-log-tab"),
+  (module) => module.ActivityLogTab,
 );
-const ProjectImagesTab = builderLazy(() =>
-  import("./components/project-images-tab").then((module) => ({
-    default: module.ProjectImagesTab,
-  })),
+const ProjectImagesTab = builderLazy(
+  () => import("./components/project-images-tab"),
+  (module) => module.ProjectImagesTab,
 );
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
@@ -1452,96 +1468,450 @@ export default function ProjectWorkspacePage() {
   const [previewAccess, setPreviewAccess] = useState<PreviewAccess>("unavailable");
   const [containerStarting, setContainerStarting] = useState(false);
   const containerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Reads and monitoring share a fence; mutation ownership has its own generation.
+  const containerRequestEpochRef = useRef(0);
+  const containerMutationEpochRef = useRef(0);
+  const containerLifecycleRef = useRef({ projectId, active: false, generation: 0 });
+  const containerStartupDeadlineRef = useRef<number | null>(null);
+  const containerMonitorActiveRef = useRef(false);
+  const containerStartupExpiredRef = useRef(false);
+  type ContainerAction = {
+    kind: "start" | "stop";
+    generation: number;
+    lifecycle: typeof containerLifecycleRef.current;
+    lifecycleGeneration: number;
+    deadline: number | null;
+  };
+  const containerPendingActionRef = useRef<ContainerAction | null>(null);
+  const [containerActionPending, setContainerActionPending] = useState<"start" | "stop" | null>(
+    null,
+  );
+  if (containerLifecycleRef.current.projectId !== projectId) {
+    containerLifecycleRef.current = {
+      projectId,
+      active: false,
+      generation: containerLifecycleRef.current.generation + 1,
+    };
+    containerRequestEpochRef.current += 1;
+  }
+  const containerLifecycle = containerLifecycleRef.current;
+  const containerSeededLifecycleRef = useRef<typeof containerLifecycle | null>(null);
+  const containerObservedRuntimeRef = useRef<{
+    lifecycle: typeof containerLifecycle;
+    metadata: string;
+  } | null>(null);
+  const [containerRecoveryFailure, setContainerRecoveryFailure] = useState<{
+    projectId: number;
+    error: PreviewRecoveryError;
+  } | null>(null);
+  const previewRecoveryError =
+    containerRecoveryFailure?.projectId === projectId ? containerRecoveryFailure.error : null;
+  const [containerAuthorizationFailure, setContainerAuthorizationFailure] = useState<{
+    projectId: number;
+    status: 401 | 403;
+  } | null>(null);
+  const containerAuthorizationStatus =
+    containerAuthorizationFailure?.projectId === projectId
+      ? containerAuthorizationFailure.status
+      : null;
 
-  const refreshContainerStatus = useCallback(async () => {
-    try {
-      const data = await getContainerStatus(projectId);
-      if (!data) return null;
-      const nextStatus = (data.containerStatus ?? "stopped") as ContainerStatus;
-      setContainerStatus(nextStatus);
-      setContainerUrl(data.containerUrl ?? null);
-      setPreviewAccess(data.previewAccess ?? "unavailable");
-      return nextStatus;
-    } catch {
-      setContainerStatus("error");
-      setContainerUrl(null);
-      setPreviewAccess("unavailable");
-      return null;
-    }
-  }, [projectId]);
+  const containerRenderEpoch = containerRequestEpochRef.current;
 
-  // Seed the UI from project data, then verify any claimed live state against
-  // provider truth. The stored row is not a liveness receipt.
   useEffect(() => {
-    if (!project) return;
-    const st = (project as { containerStatus?: string }).containerStatus;
-    if (st) setContainerStatus(st as ContainerStatus);
-    const url = (project as { containerUrl?: string | null }).containerUrl;
-    setContainerUrl(url ?? null);
-    setPreviewAccess((project as { previewAccess?: PreviewAccess }).previewAccess ?? "unavailable");
-    if (st === "running" || st === "starting") void refreshContainerStatus();
-  }, [project, refreshContainerStatus]);
-
-  // Poll container status when starting
-  useEffect(() => {
-    if (containerStatus === "starting" || containerStarting) {
-      if (containerPollRef.current) return;
-      containerPollRef.current = setInterval(() => {
-        refreshContainerStatus()
-          .then((newStatus) => {
-            if (!newStatus) return;
-            if (newStatus === "running") {
-              setContainerStarting(false);
-              if (containerPollRef.current) {
-                clearInterval(containerPollRef.current);
-                containerPollRef.current = null;
-              }
-            }
-          })
-          .catch(() => {});
-      }, 3000);
-    } else {
-      if (containerPollRef.current) {
-        clearInterval(containerPollRef.current);
-        containerPollRef.current = null;
-      }
-    }
+    if (containerLifecycleRef.current !== containerLifecycle) return;
+    containerLifecycle.active = true;
+    containerLifecycle.generation += 1;
+    containerRequestEpochRef.current += 1;
+    containerPendingActionRef.current = null;
+    containerSeededLifecycleRef.current = null;
+    containerStartupDeadlineRef.current = null;
+    containerMonitorActiveRef.current = false;
+    containerStartupExpiredRef.current = false;
+    setContainerActionPending(null);
+    setContainerStarting(false);
+    setContainerStatus("stopped");
+    setContainerUrl(null);
+    setPreviewAccess("unavailable");
+    setContainerRecoveryFailure(null);
+    setContainerAuthorizationFailure(null);
     return () => {
+      containerLifecycle.active = false;
+      containerLifecycle.generation += 1;
+      if (containerLifecycleRef.current !== containerLifecycle) return;
+      containerRequestEpochRef.current += 1;
+      containerPendingActionRef.current = null;
+      containerStartupDeadlineRef.current = null;
+      containerMonitorActiveRef.current = false;
+      containerStartupExpiredRef.current = false;
       if (containerPollRef.current) {
         clearInterval(containerPollRef.current);
         containerPollRef.current = null;
       }
     };
-  }, [containerStatus, containerStarting, refreshContainerStatus]);
+  }, [containerLifecycle]);
+
+  const isCurrentContainerRequest = useCallback(
+    (epoch: number) =>
+      containerLifecycle.active &&
+      containerLifecycleRef.current === containerLifecycle &&
+      containerRequestEpochRef.current === epoch,
+    [containerLifecycle],
+  );
+
+  const isCurrentContainerAction = useCallback(
+    (action: ContainerAction) =>
+      containerLifecycle.active &&
+      containerLifecycleRef.current === containerLifecycle &&
+      action.lifecycle === containerLifecycle &&
+      action.lifecycleGeneration === containerLifecycle.generation &&
+      action.generation === containerMutationEpochRef.current &&
+      containerPendingActionRef.current === action,
+    [containerLifecycle],
+  );
+
+  const closeContainerMonitor = useCallback(() => {
+    if (!containerLifecycle.active || containerLifecycleRef.current !== containerLifecycle) return;
+    containerRequestEpochRef.current += 1;
+    containerMonitorActiveRef.current = false;
+    setContainerStarting(false);
+    // Keep the original deadline and pending action; neither belongs to a status read.
+    if (containerPollRef.current) {
+      clearInterval(containerPollRef.current);
+      containerPollRef.current = null;
+    }
+  }, [containerLifecycle]);
+
+  const expireContainerMonitor = useCallback(() => {
+    if (!containerLifecycle.active || containerLifecycleRef.current !== containerLifecycle) return;
+    containerStartupExpiredRef.current = true;
+    closeContainerMonitor();
+    setContainerStatus("error");
+    setContainerUrl(null);
+    setPreviewAccess("unavailable");
+    setContainerRecoveryFailure((current) =>
+      current?.projectId === projectId && current.error.kind === "rebuild-required"
+        ? current
+        : { projectId, error: readPreviewRecoveryError({ code: "preview_start_timeout" }) },
+    );
+  }, [closeContainerMonitor, containerLifecycle, projectId]);
+
+  const readContainerStatus = useCallback(
+    async (intent: "status" | "idle-hint") => {
+      const requestEpoch = containerRequestEpochRef.current;
+      if (!isCurrentContainerRequest(requestEpoch)) return null;
+      try {
+        const data = await getContainerStatus(projectId);
+        if (!data || !isCurrentContainerRequest(requestEpoch)) return null;
+        const nextStatus = (data.containerStatus ?? "stopped") as ContainerStatus;
+        if (
+          intent === "idle-hint" &&
+          nextStatus === "starting" &&
+          containerStartupDeadlineRef.current !== null &&
+          !containerMonitorActiveRef.current
+        ) {
+          // An idle hint can reconcile a terminal receipt, but cannot reopen a
+          // completed startup window or replace its available recovery controls.
+          return null;
+        }
+        setContainerAuthorizationFailure(null);
+        if (nextStatus === "starting") {
+          if (
+            containerStartupDeadlineRef.current === null &&
+            containerPendingActionRef.current?.kind !== "stop"
+          ) {
+            containerStartupDeadlineRef.current = Date.now() + 120_000;
+          }
+          if (
+            containerStartupExpiredRef.current ||
+            (containerStartupDeadlineRef.current !== null &&
+              Date.now() >= containerStartupDeadlineRef.current)
+          ) {
+            expireContainerMonitor();
+            return null;
+          }
+          const monitoringStartup =
+            containerPendingActionRef.current?.kind !== "stop" &&
+            containerStartupDeadlineRef.current !== null;
+          containerMonitorActiveRef.current = monitoringStartup;
+          setContainerStarting(monitoringStartup);
+        } else {
+          closeContainerMonitor();
+        }
+        setContainerStatus(nextStatus);
+        setContainerUrl(data.containerUrl ?? null);
+        setPreviewAccess(data.previewAccess ?? "unavailable");
+        setContainerRecoveryFailure((current) => {
+          if (current?.projectId !== projectId) return current;
+          const error = reconcilePreviewRecoveryError(current.error, data);
+          return error ? { projectId, error } : null;
+        });
+        return nextStatus;
+      } catch (error) {
+        if (!isCurrentContainerRequest(requestEpoch)) return null;
+        const failure = readPreviewRecoveryError(error);
+        if (isPreviewAuthorizationStatus(failure.httpStatus)) {
+          setContainerAuthorizationFailure({ projectId, status: failure.httpStatus });
+        } else {
+          setContainerRecoveryFailure((current) =>
+            current?.projectId === projectId && current.error.kind === "rebuild-required"
+              ? current
+              : { projectId, error: failure },
+          );
+        }
+        const terminal = isTerminalPreviewRecoveryError(failure);
+        // A completed window keeps its deadline for fencing, not for timing out
+        // later idle reads. Only an active or still-owned startup can expire.
+        const startupExpired =
+          containerStartupExpiredRef.current ||
+          (containerStartupDeadlineRef.current !== null &&
+            (containerMonitorActiveRef.current ||
+              containerPendingActionRef.current?.kind === "start") &&
+            Date.now() >= containerStartupDeadlineRef.current);
+        if (startupExpired) containerStartupExpiredRef.current = true;
+        const monitoringStartup = !terminal && !startupExpired && containerMonitorActiveRef.current;
+        if (terminal || startupExpired) closeContainerMonitor();
+        containerMonitorActiveRef.current = monitoringStartup;
+        setContainerStarting(monitoringStartup);
+        setContainerStatus(monitoringStartup ? "starting" : "error");
+        setContainerUrl(null);
+        setPreviewAccess("unavailable");
+        return null;
+      }
+    },
+    [closeContainerMonitor, expireContainerMonitor, isCurrentContainerRequest, projectId],
+  );
+
+  const refreshContainerStatus = useCallback(
+    () => readContainerStatus("status"),
+    [readContainerStatus],
+  );
+
+  // Seed the UI from project data, then verify any claimed live state against
+  // provider truth. The stored row is not a liveness receipt.
+  useEffect(() => {
+    if (
+      !project ||
+      project.id !== projectId ||
+      !isCurrentContainerRequest(containerRequestEpochRef.current)
+    )
+      return;
+    const st = (project as { containerStatus?: string }).containerStatus;
+    const metadata = JSON.stringify([
+      st ?? null,
+      project.containerId ?? null,
+      (project as { containerUrl?: string | null }).containerUrl ?? null,
+      (project as { previewAccess?: PreviewAccess }).previewAccess ?? "unavailable",
+    ]);
+    const previousRuntime = containerObservedRuntimeRef.current;
+    containerObservedRuntimeRef.current = { lifecycle: containerLifecycle, metadata };
+    if (containerSeededLifecycleRef.current === containerLifecycle) {
+      // Changed metadata is only a hint to ask for provider truth. It cannot
+      // reseed the preview, interrupt an action, or reopen a closed startup window.
+      if (
+        previousRuntime?.lifecycle === containerLifecycle &&
+        previousRuntime.metadata !== metadata &&
+        (st === "starting" || st === "running") &&
+        containerPendingActionRef.current === null &&
+        !containerMonitorActiveRef.current &&
+        !containerStartupExpiredRef.current
+      ) {
+        void readContainerStatus("idle-hint");
+      }
+      return;
+    }
+    // Seed once. Later project rows never directly replace a runtime receipt.
+    containerSeededLifecycleRef.current = containerLifecycle;
+    if (st === "starting") {
+      containerStartupDeadlineRef.current = Date.now() + 120_000;
+      containerMonitorActiveRef.current = true;
+      setContainerStarting(true);
+    }
+    if (st) setContainerStatus(st as ContainerStatus);
+    const url = (project as { containerUrl?: string | null }).containerUrl;
+    setContainerUrl(url ?? null);
+    setPreviewAccess((project as { previewAccess?: PreviewAccess }).previewAccess ?? "unavailable");
+    if (st === "running" || st === "starting") void refreshContainerStatus();
+  }, [
+    containerLifecycle,
+    isCurrentContainerRequest,
+    project,
+    projectId,
+    readContainerStatus,
+    refreshContainerStatus,
+  ]);
+
+  // Only an active monitor polls; rendering "starting" cannot renew its deadline.
+  useEffect(() => {
+    if (!isCurrentContainerRequest(containerRenderEpoch)) return;
+    if (!containerMonitorActiveRef.current || containerStartupDeadlineRef.current === null) return;
+    if (containerPollRef.current) return;
+    const pollEpoch = containerRenderEpoch;
+    const timer = setInterval(() => {
+      if (!isCurrentContainerRequest(pollEpoch) || !containerMonitorActiveRef.current) return;
+      if (
+        containerStartupExpiredRef.current ||
+        (containerStartupDeadlineRef.current !== null &&
+          Date.now() >= containerStartupDeadlineRef.current)
+      ) {
+        expireContainerMonitor();
+        return;
+      }
+      void refreshContainerStatus().catch(() => {});
+    }, 3000);
+    containerPollRef.current = timer;
+    return () => {
+      clearInterval(timer);
+      if (containerPollRef.current === timer) containerPollRef.current = null;
+    };
+  }, [
+    containerActionPending,
+    containerRenderEpoch,
+    containerStatus,
+    containerStarting,
+    expireContainerMonitor,
+    isCurrentContainerRequest,
+    refreshContainerStatus,
+  ]);
 
   const handleStartContainer = useCallback(() => {
+    if (!isCurrentContainerRequest(containerRequestEpochRef.current)) return;
+    if (
+      containerPendingActionRef.current?.kind === "start" ||
+      (!containerPendingActionRef.current && containerStarting) ||
+      previewRecoveryError?.kind === "rebuild-required"
+    )
+      return;
+    containerSeededLifecycleRef.current = containerLifecycle;
+    const action: ContainerAction = {
+      kind: "start",
+      generation: ++containerMutationEpochRef.current,
+      lifecycle: containerLifecycle,
+      lifecycleGeneration: containerLifecycle.generation,
+      deadline: Date.now() + 120_000,
+    };
+    containerPendingActionRef.current = action;
+    setContainerActionPending("start");
+    closeContainerMonitor();
+    containerStartupDeadlineRef.current = action.deadline;
+    containerStartupExpiredRef.current = false;
+    containerMonitorActiveRef.current = true;
+    setContainerRecoveryFailure(null);
     setContainerStarting(true);
     setContainerStatus("starting");
     setPreviewAccess("unavailable");
     startContainer(projectId)
       .then((data) => {
-        if (!data) return;
-        setContainerStatus((data.containerStatus ?? "starting") as ContainerStatus);
+        if (!isCurrentContainerAction(action)) return;
+        if (!data) throw new Error("The preview start response was empty.");
+        containerPendingActionRef.current = null;
+        setContainerActionPending(null);
+        const nextStatus = (data.containerStatus ?? "starting") as ContainerStatus;
+        if (
+          nextStatus === "starting" &&
+          (containerStartupExpiredRef.current ||
+            action.deadline === null ||
+            Date.now() >= action.deadline)
+        ) {
+          expireContainerMonitor();
+          return;
+        }
+        closeContainerMonitor();
+        if (nextStatus === "starting") {
+          // An owned action may resume only what remains of its original window.
+          containerStartupDeadlineRef.current = action.deadline;
+          containerMonitorActiveRef.current = true;
+          setContainerStarting(true);
+        }
+        setContainerStatus(nextStatus);
         setContainerUrl(data.containerUrl ?? null);
         setPreviewAccess(data.previewAccess ?? "unavailable");
+        setContainerRecoveryFailure((current) => {
+          if (current?.projectId !== projectId) return current;
+          const error = reconcilePreviewRecoveryError(current.error, data);
+          return error ? { projectId, error } : null;
+        });
+        // A mutation success does not clear a later status-read access denial.
       })
-      .catch(() => {
+      .catch((error) => {
+        if (!isCurrentContainerAction(action)) return;
+        containerPendingActionRef.current = null;
+        setContainerActionPending(null);
+        closeContainerMonitor();
+        const failure = readPreviewRecoveryError(error);
+        if (isPreviewAuthorizationStatus(failure.httpStatus)) {
+          setContainerAuthorizationFailure({ projectId, status: failure.httpStatus });
+        } else {
+          setContainerRecoveryFailure((current) =>
+            current?.projectId === projectId && current.error.kind === "rebuild-required"
+              ? current
+              : { projectId, error: failure },
+          );
+        }
+        setContainerStatus(failure.kind === "rebuild-required" ? "stopped" : "error");
+        setContainerUrl(null);
+        setPreviewAccess("unavailable");
+      });
+  }, [
+    closeContainerMonitor,
+    containerLifecycle,
+    containerStarting,
+    expireContainerMonitor,
+    isCurrentContainerAction,
+    isCurrentContainerRequest,
+    previewRecoveryError,
+    projectId,
+  ]);
+
+  const handleStopContainer = useCallback(() => {
+    if (!isCurrentContainerRequest(containerRequestEpochRef.current)) return;
+    if (containerPendingActionRef.current?.kind === "stop") return;
+    containerSeededLifecycleRef.current = containerLifecycle;
+    const action: ContainerAction = {
+      kind: "stop",
+      generation: ++containerMutationEpochRef.current,
+      lifecycle: containerLifecycle,
+      lifecycleGeneration: containerLifecycle.generation,
+      deadline: null,
+    };
+    containerPendingActionRef.current = action;
+    setContainerActionPending("stop");
+    closeContainerMonitor();
+    stopContainer(projectId)
+      .then(() => {
+        if (!isCurrentContainerAction(action)) return;
+        containerPendingActionRef.current = null;
+        setContainerActionPending(null);
+        closeContainerMonitor();
+        setContainerStatus("hibernated");
+        setContainerUrl(null);
+        setPreviewAccess("unavailable");
+      })
+      .catch((error) => {
+        if (!isCurrentContainerAction(action)) return;
+        containerPendingActionRef.current = null;
+        setContainerActionPending(null);
+        closeContainerMonitor();
+        const failure = readPreviewRecoveryError(error);
+        if (isPreviewAuthorizationStatus(failure.httpStatus)) {
+          setContainerAuthorizationFailure({ projectId, status: failure.httpStatus });
+        } else {
+          setContainerRecoveryFailure((current) =>
+            current?.projectId === projectId && current.error.kind === "rebuild-required"
+              ? current
+              : { projectId, error: failure },
+          );
+        }
         setContainerStatus("error");
         setContainerUrl(null);
         setPreviewAccess("unavailable");
       });
-  }, [projectId]);
-
-  const handleStopContainer = useCallback(() => {
-    stopContainer(projectId)
-      .then(() => {
-        setContainerStatus("hibernated");
-        setContainerUrl(null);
-        setPreviewAccess("unavailable");
-        setContainerStarting(false);
-      })
-      .catch(() => {});
-  }, [projectId]);
+  }, [
+    closeContainerMonitor,
+    containerLifecycle,
+    isCurrentContainerAction,
+    isCurrentContainerRequest,
+    projectId,
+  ]);
   // ── End container state ────────────────────────────────────────────────────
 
   // ── Provisioning state (Task #738 + #988) ──────────────────────────────────
@@ -1601,7 +1971,8 @@ export default function ProjectWorkspacePage() {
             if (newStatus === "ready") {
               toast({
                 title: "Environment ready",
-                description: "Your project server and database are up. You can start building.",
+                description:
+                  "Your project environment is provisioned. Runtime and preview status are checked separately.",
               });
               setActiveTab("preview");
             }
@@ -3391,7 +3762,7 @@ export default function ProjectWorkspacePage() {
   return (
     <div className="flex flex-col h-full bg-background w-full overflow-hidden text-foreground">
       {commandPaletteOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<ProjectToolsLoading onCancel={() => setCommandPaletteOpen(false)} />}>
           <CommandPalette
             open
             onClose={() => setCommandPaletteOpen(false)}
@@ -3499,7 +3870,7 @@ export default function ProjectWorkspacePage() {
             containerHealthStatus !== "unknown" && (
               <span
                 title={
-                  isBusy && containerHealthStatus === "hibernated"
+                  containerStarting && containerHealthStatus === "hibernated"
                     ? "Waking container…"
                     : containerHealthStatus === "awake"
                       ? "Container is running"
@@ -3512,7 +3883,7 @@ export default function ProjectWorkspacePage() {
                 <span
                   className={cn(
                     "w-2 h-2 rounded-full shrink-0",
-                    isBusy && containerHealthStatus === "hibernated"
+                    containerStarting && containerHealthStatus === "hibernated"
                       ? "bg-amber-400 animate-pulse"
                       : containerHealthStatus === "awake"
                         ? "bg-green-500"
@@ -3522,12 +3893,12 @@ export default function ProjectWorkspacePage() {
                   )}
                 />
                 <span className="hidden sm:inline">
-                  {isBusy && containerHealthStatus === "hibernated"
+                  {containerStarting && containerHealthStatus === "hibernated"
                     ? "Waking\u2026"
                     : containerHealthStatus === "awake"
-                      ? "Running"
+                      ? "Runtime running"
                       : containerHealthStatus === "hibernated"
-                        ? "Hibernated"
+                        ? "Runtime hibernated"
                         : "Unreachable"}
                 </span>
               </span>
@@ -5305,6 +5676,9 @@ export default function ProjectWorkspacePage() {
                   containerStatus={containerStatus}
                   containerUrl={containerUrl}
                   previewAccess={previewAccess}
+                  previewRecoveryError={previewRecoveryError}
+                  containerAuthorizationStatus={containerAuthorizationStatus}
+                  containerActionPending={containerActionPending}
                   onStartContainer={handleStartContainer}
                   onRefreshContainerStatus={() => {
                     void refreshContainerStatus();
@@ -5323,6 +5697,7 @@ export default function ProjectWorkspacePage() {
                   onJumpToSecrets={() => setActiveTab("secrets")}
                   onTestingStatusChanged={() => {
                     void refetchProject();
+                    void refreshContainerStatus();
                   }}
                 />
               )}
@@ -5447,18 +5822,35 @@ export default function ProjectWorkspacePage() {
                     }
                     setActiveTab("preview");
                   }}
-                  onSwitchToCode={() => setActiveTab("code")}
+                  onSwitchToCode={(filePath) => {
+                    const file = files.find((candidate) => candidate.path === filePath);
+                    if (!file) return;
+                    setSelectedCodeFileId(file.id);
+                    setSelectedCodeFileLine(null);
+                    setActiveTab("code");
+                  }}
                   onSwitchToChat={(prefill) => {
                     switchLeftPanel("chat");
+                    setShowChatHistory(false);
                     if (isMobileLayout) setChatDrawerOpen(true);
                     if (prefill) {
-                      // Auto-send so the build starts immediately without the user
-                      // having to press Send, and stay on the Page Map so they can
-                      // watch "Updating map after build…" progress.
-                      send(prefill);
-                    } else {
-                      setTimeout(() => promptInputRef.current?.focus(), 50);
+                      // Prepare an editable request. Only the composer's Send action
+                      // may start generation; retain any existing unsent instructions.
+                      setPrompt((current) =>
+                        !current.trim()
+                          ? prefill
+                          : current.trimEnd().endsWith(prefill.trimEnd())
+                            ? current
+                            : `${current}\n\n${prefill}`,
+                      );
                     }
+                    requestAnimationFrame(() => {
+                      const input = document.querySelector<HTMLTextAreaElement>(
+                        '[data-tour="chat-input"] textarea',
+                      );
+                      input?.focus();
+                      input?.setSelectionRange(input.value.length, input.value.length);
+                    });
                   }}
                 />
               )}

@@ -11,6 +11,7 @@ import {
   type ZeroTerminalV1,
 } from "@workspace/ora-contracts";
 import { publishTaskEvent } from "./event-bus";
+import { notifyAutomaticPreviewForTask } from "./automatic-preview-dispatch";
 
 export type ZeroTerminalRef = {
   kind: "zero_terminal";
@@ -105,6 +106,9 @@ export async function persistZeroTerminal(input: {
     data: (event.data as Record<string, unknown> | undefined) ?? undefined,
     createdAt: event.createdAt,
   });
+  if (input.terminal.outcome === "mutation_succeeded") {
+    notifyAutomaticPreviewForTask(input.terminal.taskId);
+  }
   return true;
 }
 

@@ -6,6 +6,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
+  "browser": {
+    "binding": "BROWSER",
+  },
   "routes": [
     {
       "pattern": "runtime.apps.mustaflow.com",

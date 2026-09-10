@@ -21,6 +21,12 @@ import { promises as dns } from "node:dns";
 import { isIP } from "node:net";
 import { delimiter as pathDelimiter, join as joinPath } from "node:path";
 import { logger } from "./logger";
+import {
+  fulfillScreenshotPreview,
+  isScreenshotPreviewRequest,
+  screenshotPreviewScope,
+  SCREENSHOT_PREVIEW_TOTAL_LIMIT,
+} from "./screenshot-preview-bridge";
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MAX_FETCH_BYTES = 1_000_000; // 1MB cap on web_fetch response
@@ -294,11 +300,13 @@ export interface ScreenshotInput {
   /** Optional inline HTML to render instead of fetching the URL (static-html). */
   inlineHtml?: string;
   /**
-   * Session cookies for a first-party capture. They are installed as host-only
-   * cookies for this exact origin and stripped from every cross-origin request.
+   * Server-side credentials for the selected project's preview. Never install
+   * these cookies in Chromium or expose them to project JavaScript.
    */
   exactOriginCookies?: Array<{ name: string; value: string }>;
   exactCookieOrigin?: string;
+  /** Canonical server-selected /api/projects/:id/preview/ prefix. */
+  exactCookiePath?: string;
   /**
    * Optional server-local origin for capturing this process's own authenticated
    * preview route without a public-DNS hairpin. Only an exact
@@ -349,24 +357,6 @@ export function sanitizeCaptureConsoleError(value: string): string {
     .replace(/\s+/gu, " ")
     .trim()
     .slice(0, 240);
-}
-
-export function screenshotRequestHeaders(
-  requestUrl: string,
-  headers: Record<string, string>,
-  exactCookieOrigin?: string,
-): Record<string, string> {
-  if (!exactCookieOrigin) return headers;
-  try {
-    if (new URL(requestUrl).origin === exactCookieOrigin) return headers;
-  } catch {
-    // An invalid request URL is never eligible to receive the origin cookie.
-  }
-  const withoutCookie = { ...headers };
-  for (const name of Object.keys(withoutCookie)) {
-    if (name.toLowerCase() === "cookie") delete withoutCookie[name];
-  }
-  return withoutCookie;
 }
 
 function normalizedTrustedLoopbackOrigin(value: string | undefined): string | null {
@@ -457,88 +447,98 @@ async function availableChromiumExecutables(): Promise<string[]> {
 }
 
 export async function takeScreenshot(input: ScreenshotInput): Promise<ScreenshotResult> {
-  if (!input.inlineHtml) {
-    if (!isHttpUrl(input.url)) return { ok: false, error: "URL must be http(s)" };
-    if (!(await isAllowedScreenshotUrl(input.url, input.trustedLoopbackOrigin)))
-      return { ok: false, error: "URL points to a private/internal host" };
-  }
-  const w = Math.min(Math.max(input.width ?? 1280, 320), 1920);
-  const h = Math.min(Math.max(input.height ?? 800, 240), 1200);
-
-  let chromium: typeof import("playwright").chromium;
-  try {
-    const pw = await import("playwright");
-    chromium = pw.chromium;
-  } catch (err) {
-    return { ok: false, error: `playwright unavailable: ${String((err as Error).message ?? err)}` };
-  }
-
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), 25_000);
+  const signal = AbortSignal.any([input.signal, timeout.signal]);
+  const deadline = Date.now() + 25_000;
   let browser: import("playwright").Browser | null = null;
+  let closing: Promise<void> | undefined;
+  const closeBrowser = () => {
+    if (browser) closing ??= browser.close().catch(() => undefined);
+    return closing;
+  };
+  const abort = () => {
+    void closeBrowser();
+  };
+  signal.addEventListener("abort", abort, { once: true });
   try {
-    // Try bundled browser first; fall back to system chromium paths.
-    let launched = false;
+    signal.throwIfAborted();
+    const scope = screenshotPreviewScope(input);
+    if (!input.inlineHtml) {
+      if (!isHttpUrl(input.url)) return { ok: false, error: "URL must be http(s)" };
+      if (!(await isAllowedScreenshotUrl(input.url, input.trustedLoopbackOrigin))) {
+        return { ok: false, error: "URL points to a private/internal host" };
+      }
+    }
+    signal.throwIfAborted();
+    const w = Math.min(Math.max(input.width ?? 1280, 320), 1920);
+    const h = Math.min(Math.max(input.height ?? 800, 240), 1200);
+    const { chromium } = await import("playwright");
     for (const exePath of [undefined, ...(await availableChromiumExecutables())]) {
+      signal.throwIfAborted();
       try {
         browser = await chromium.launch({
           headless: true,
           executablePath: exePath,
+          timeout: Math.max(1, Math.min(10_000, deadline - Date.now())),
           args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
         });
-        launched = true;
+        // A launch may resolve after cancellation. Close it before using it.
+        signal.throwIfAborted();
         break;
       } catch (err) {
+        signal.throwIfAborted();
         logger.debug({ err, exePath }, "agent-senses: chromium launch attempt failed");
       }
     }
-    if (!launched || !browser) {
-      return { ok: false, error: "no chromium binary available" };
-    }
+    if (!browser) return { ok: false, error: "no chromium binary available" };
     const ctx = await browser.newContext({
       viewport: { width: w, height: h },
-      // Block JS in inline-HTML snapshots: the model controls the HTML and
-      // could otherwise issue fetch/XHR to internal IPs from within the
-      // browser process (SSRF). For external URL captures we keep JS enabled
-      // since per-request interception (below) enforces the same allow-list.
       javaScriptEnabled: !input.inlineHtml,
+      serviceWorkers: "block",
+      acceptDownloads: false,
     });
-    if (input.exactOriginCookies?.length) {
-      if (!input.exactCookieOrigin || new URL(input.url).origin !== input.exactCookieOrigin) {
-        return { ok: false, error: "exact cookie origin does not match the capture URL" };
-      }
-      await ctx.addCookies(
-        input.exactOriginCookies.map((cookie) => ({
-          name: cookie.name,
-          value: cookie.value,
-          url: input.exactCookieOrigin!,
-        })),
-      );
+    ctx.setDefaultTimeout(Math.max(1, deadline - Date.now()));
+    // Context-level routing also cages popups and frames. Never install the
+    // owner's platform cookies in this browser, including as HttpOnly cookies.
+    const budget = { remaining: SCREENSHOT_PREVIEW_TOTAL_LIMIT };
+    if (scope) {
+      await ctx.routeWebSocket("**/*", (socket) => socket.close());
     }
-    // SSRF guard: intercept every subresource/redirect the page tries to load
-    // (images, fonts, fetch, redirects, iframes, etc.) and abort any request
-    // whose resolved address is private/internal. Applies to BOTH inline HTML
-    // and URL-based captures so neither path can pivot through the browser
-    // process to a metadata/loopback target.
+    await ctx.route("**/*", async (route) => {
+      try {
+        signal.throwIfAborted();
+        const request = route.request();
+        const reqUrl = request.url();
+        if (reqUrl.startsWith("data:") || reqUrl.startsWith("about:")) {
+          await route.continue();
+          return;
+        }
+        if (!(await isAllowedScreenshotUrl(reqUrl, input.trustedLoopbackOrigin))) {
+          await route.abort("blockedbyclient");
+          return;
+        }
+        if (scope) {
+          if (!["GET", "HEAD"].includes(request.method())) {
+            await route.abort("blockedbyclient");
+            return;
+          }
+          if (new URL(reqUrl).origin === scope.origin) {
+            await fulfillScreenshotPreview(route, scope, signal, budget);
+            return;
+          }
+        }
+        await route.continue();
+      } catch {
+        await route.abort("blockedbyclient").catch(() => undefined);
+      }
+    });
     const page = await ctx.newPage();
     const consoleErrors: string[] = [];
     page.on("console", (message) => {
       if (message.type() !== "error" || consoleErrors.length >= 10) return;
       const sanitized = sanitizeCaptureConsoleError(message.text());
       if (sanitized) consoleErrors.push(sanitized);
-    });
-    await page.route("**/*", async (route) => {
-      const reqUrl = route.request().url();
-      if (reqUrl.startsWith("data:") || reqUrl.startsWith("about:")) {
-        return route.continue();
-      }
-      if (!(await isAllowedScreenshotUrl(reqUrl, input.trustedLoopbackOrigin))) {
-        return route.abort("blockedbyclient");
-      }
-      const headers = screenshotRequestHeaders(
-        reqUrl,
-        await route.request().allHeaders(),
-        input.exactCookieOrigin,
-      );
-      return route.continue({ headers });
     });
     let status = 200;
     if (input.inlineHtml) {
@@ -549,16 +549,16 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
       if (status < 200 || status >= 300) {
         return { ok: false, status, finalUrl: page.url(), error: "capture target unavailable" };
       }
-      if (input.exactCookieOrigin && new URL(page.url()).origin !== input.exactCookieOrigin) {
+      if (scope && !isScreenshotPreviewRequest(page.url(), scope)) {
         return {
           ok: false,
           status,
           finalUrl: page.url(),
-          error: "capture redirect left the approved origin",
+          error: "capture redirect left the selected project preview",
         };
       }
     }
-    // Settle a moment for CSS/fonts
+    signal.throwIfAborted();
     await page.waitForTimeout(300);
     if (input.captureOverlay) {
       await page.evaluate((overlay) => {
@@ -604,10 +604,10 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
       fullPage: input.clip ? false : !!input.fullPage,
       clip: input.clip,
     });
-    const base64 = Buffer.from(buf).toString("base64");
+    signal.throwIfAborted();
     return {
       ok: true,
-      base64,
+      base64: Buffer.from(buf).toString("base64"),
       bytes: buf.length,
       width: input.clip?.width ?? w,
       height: input.clip?.height ?? h,
@@ -616,15 +616,14 @@ export async function takeScreenshot(input: ScreenshotInput): Promise<Screenshot
       consoleErrors,
     };
   } catch (err) {
-    return { ok: false, error: String((err as Error).message ?? err) };
+    return {
+      ok: false,
+      error: signal.aborted ? "capture cancelled" : String((err as Error).message ?? err),
+    };
   } finally {
-    if (browser) {
-      try {
-        await browser.close();
-      } catch {
-        // ignore
-      }
-    }
+    clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+    await closeBrowser();
   }
 }
 

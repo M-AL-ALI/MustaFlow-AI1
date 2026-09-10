@@ -387,7 +387,7 @@ describe("non-test export reachability", () => {
   });
 
   it("marks every registered dormant export at its definition", () => {
-    expect(dormantExports).toHaveLength(25);
+    expect(dormantExports).toHaveLength(29);
     expect(
       new Set(dormantExports.map(({ path: filePath, symbol }) => `${filePath}#${symbol}`)).size,
     ).toBe(dormantExports.length);

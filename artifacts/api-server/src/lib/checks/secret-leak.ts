@@ -30,7 +30,7 @@ const SECRET_PATTERNS: Array<{
     severity: "error",
   },
   {
-    pattern: /pk[-_](live|test)[-_][A-Za-z0-9]{20,}/gi,
+    pattern: /pk[-_](?:live|test)[-_][A-Za-z0-9]{20,}/gi,
     label: "Stripe publishable key",
     severity: "error",
   },
@@ -88,15 +88,16 @@ function maskValue(value: string): string {
   return value.slice(0, 4) + "****" + value.slice(-4);
 }
 
-export function runSecretLeakCheck(files: BuilderFile[]): SecretLeakResult {
+export function runSecretLeakCheck(
+  files: ReadonlyArray<Pick<BuilderFile, "path" | "content">>,
+): SecretLeakResult {
   const findings: CheckFinding[] = [];
 
   for (const file of files) {
     const lines = file.content.split("\n");
     for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
       const line = lines[lineIdx] ?? "";
-      if (isPlaceholder(line)) continue;
-
+      // Exempt the matched value, never adjacent code or comments on its line.
       for (const { pattern, label, severity } of SECRET_PATTERNS) {
         pattern.lastIndex = 0;
         let match: RegExpExecArray | null;

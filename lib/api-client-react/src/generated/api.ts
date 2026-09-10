@@ -155,6 +155,7 @@ import type {
   GetProjectQueueBatch200,
   GetPublishReadinessParams,
   GetPurchasedDomainAuthCode200,
+  GetRecentActivityParams,
   GetSecretAuditLogParams,
   GithubCommitsResult,
   GithubConnectInput,
@@ -227,8 +228,8 @@ import type {
   PackageInstallInput,
   PackageManagerResult,
   PackageUninstallInput,
-  PageMapData,
   PageMapResponse,
+  PageMapSaveRequest,
   PatchVersionBody,
   PermanentlyDeleteProjectBody,
   Project,
@@ -7842,7 +7843,7 @@ export const getPutPageMapUrl = (id: number,) => {
  * @summary Save the page/screen flow map for a project
  */
 export const putPageMap = async (id: number,
-    pageMapData: PageMapData, options?: RequestInit): Promise<PageMapResponse> => {
+    pageMapSaveRequest: PageMapSaveRequest, options?: RequestInit): Promise<PageMapResponse> => {
 
   return customFetch<PageMapResponse>(getPutPageMapUrl(id),
   {
@@ -7850,16 +7851,16 @@ export const putPageMap = async (id: number,
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      pageMapData,)
+      pageMapSaveRequest,)
   }
 );}
 
 
 
 
-export const getPutPageMapMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapData>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapData>}, TContext> => {
+export const getPutPageMapMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapSaveRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapSaveRequest>}, TContext> => {
 
 const mutationKey = ['putPageMap'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -7871,7 +7872,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putPageMap>>, {id: number;data: BodyType<PageMapData>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putPageMap>>, {id: number;data: BodyType<PageMapSaveRequest>}> = (props) => {
           const {id,data} = props ?? {};
 
           return  putPageMap(id,data,requestOptions)
@@ -7885,18 +7886,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type PutPageMapMutationResult = NonNullable<Awaited<ReturnType<typeof putPageMap>>>
-    export type PutPageMapMutationBody = BodyType<PageMapData>
-    export type PutPageMapMutationError = ErrorType<unknown>
+    export type PutPageMapMutationBody = BodyType<PageMapSaveRequest>
+    export type PutPageMapMutationError = ErrorType<void>
 
     /**
  * @summary Save the page/screen flow map for a project
  */
-export const usePutPageMap = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapData>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const usePutPageMap = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putPageMap>>, TError,{id: number;data: BodyType<PageMapSaveRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof putPageMap>>,
         TError,
-        {id: number;data: BodyType<PageMapData>},
+        {id: number;data: BodyType<PageMapSaveRequest>},
         TContext
       > => {
       return useMutation(getPutPageMapMutationOptions(options));
@@ -7919,7 +7920,7 @@ export const getAnalyzePageMapUrl = (id: number,
 }
 
 /**
- * @summary Re-run AI extraction on project files and update the page map
+ * @summary Refresh source-backed routes with best-effort HTML AI enrichment
  */
 export const analyzePageMap = async (id: number,
     params?: AnalyzePageMapParams, options?: RequestInit): Promise<PageMapResponse> => {
@@ -7936,7 +7937,7 @@ export const analyzePageMap = async (id: number,
 
 
 
-export const getAnalyzePageMapMutationOptions = <TError = ErrorType<unknown>,
+export const getAnalyzePageMapMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzePageMap>>, TError,{id: number;params?: AnalyzePageMapParams}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof analyzePageMap>>, TError,{id: number;params?: AnalyzePageMapParams}, TContext> => {
 
@@ -7965,12 +7966,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AnalyzePageMapMutationResult = NonNullable<Awaited<ReturnType<typeof analyzePageMap>>>
 
-    export type AnalyzePageMapMutationError = ErrorType<unknown>
+    export type AnalyzePageMapMutationError = ErrorType<void>
 
     /**
- * @summary Re-run AI extraction on project files and update the page map
+ * @summary Refresh source-backed routes with best-effort HTML AI enrichment
  */
-export const useAnalyzePageMap = <TError = ErrorType<unknown>,
+export const useAnalyzePageMap = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof analyzePageMap>>, TError,{id: number;params?: AnalyzePageMapParams}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof analyzePageMap>>,
@@ -13533,20 +13534,27 @@ export function useGetMobileBuildLogs<TData = Awaited<ReturnType<typeof getMobil
 
 
 
-export const getGetRecentActivityUrl = () => {
+export const getGetRecentActivityUrl = (params?: GetRecentActivityParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/activity`
+  return stringifiedParams.length > 0 ? `/api/activity?${stringifiedParams}` : `/api/activity`
 }
 
 /**
  * @summary Recent activity feed across all projects
  */
-export const getRecentActivity = async ( options?: RequestInit): Promise<ActivityItem[]> => {
+export const getRecentActivity = async (params?: GetRecentActivityParams, options?: RequestInit): Promise<ActivityItem[]> => {
 
-  return customFetch<ActivityItem[]>(getGetRecentActivityUrl(),
+  return customFetch<ActivityItem[]>(getGetRecentActivityUrl(params),
   {
     ...options,
     method: 'GET'
@@ -13559,23 +13567,23 @@ export const getRecentActivity = async ( options?: RequestInit): Promise<Activit
 
 
 
-export const getGetRecentActivityQueryKey = () => {
+export const getGetRecentActivityQueryKey = (params?: GetRecentActivityParams,) => {
     return [
-    `/api/activity`
+    `/api/activity`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetRecentActivityQueryOptions = <TData = Awaited<ReturnType<typeof getRecentActivity>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRecentActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetRecentActivityQueryOptions = <TData = Awaited<ReturnType<typeof getRecentActivity>>, TError = ErrorType<unknown>>(params?: GetRecentActivityParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRecentActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetRecentActivityQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetRecentActivityQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRecentActivity>>> = ({ signal }) => getRecentActivity({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRecentActivity>>> = ({ signal }) => getRecentActivity(params, { signal, ...requestOptions });
 
 
 
@@ -13593,11 +13601,11 @@ export type GetRecentActivityQueryError = ErrorType<unknown>
  */
 
 export function useGetRecentActivity<TData = Awaited<ReturnType<typeof getRecentActivity>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRecentActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetRecentActivityParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRecentActivity>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetRecentActivityQueryOptions(options)
+  const queryOptions = getGetRecentActivityQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

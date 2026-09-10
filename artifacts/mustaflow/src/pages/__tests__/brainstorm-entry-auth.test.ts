@@ -12,7 +12,7 @@ describe("public brainstorm entry authentication boundary", () => {
   it("hands the signed-out prompt to the protected projects route without dispatching AI", () => {
     const handler = extractNamedFunction(homeSource, "handleBrainstorm", "tsx");
 
-    expect(handler).toContain('sessionStorage.setItem("mustaflow_brainstorm_seed"');
+    expect(handler).toContain('savePublicCreationDraft({ intent: "brainstorm"');
     expect(handler).toContain('setLocation("/projects")');
     expect(handler).not.toContain("/api/brainstorm");
     expect(appSource).toMatch(/<Route path="\/projects">\s*<Protected>\s*<BuilderGuard>/);

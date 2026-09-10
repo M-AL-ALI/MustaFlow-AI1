@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PageMapEdgeConnectionType } from './pageMapEdgeConnectionType';
+import type { PageMapTransition } from './pageMapTransition';
 
 export interface PageMapEdge {
   id: string;
@@ -13,4 +14,5 @@ export interface PageMapEdge {
   target: string;
   connectionType: PageMapEdgeConnectionType;
   aiGenerated: boolean;
+  transition?: PageMapTransition;
 }

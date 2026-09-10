@@ -1,8 +1,14 @@
-import { eq } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable } from "@workspace/db";
+import { pageMapRepository } from "./page-map-repository";
+import { parseStoredPageMap, assertPageMapPlatform } from "./page-map-validation";
+import { discoverSourcePageMap, stabilizeSourcePageMap } from "./page-map-source";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { logger } from "./logger";
 import type { BuilderFile } from "./builder";
+import {
+  reconcilePageMapPlatformUpdate,
+  type PageMapTransition,
+  type PageMapUnresolvedTransition,
+} from "./page-map-transition";
 
 export type PageType =
   | "landing"
@@ -40,11 +46,13 @@ export type PageMapEdge = {
   target: string;
   connectionType: ConnectionType;
   aiGenerated: boolean;
+  transition?: PageMapTransition;
 };
 
 export type PageMapPlatform = {
   nodes: PageMapNode[];
   edges: PageMapEdge[];
+  unresolvedTransitions?: PageMapUnresolvedTransition[];
 };
 
 export type PageMapData = {
@@ -106,8 +114,9 @@ Rules:
 //   - location.href = "..."
 //   - history.pushState(..., "...")
 //
-// Returns edges keyed to existing AI node IDs (by filePath). Same-pair edges
-// are deduped against the AI edges in the caller. The static edges are still
+// Legacy helper retained for compatibility tests. Production analysis uses
+// comment-aware source discovery below and preserves declaration identities.
+// Returns edges keyed to existing node IDs (by filePath). These edges are still
 // marked aiGenerated=true so user-drawn (manual) edges are preserved during
 // merge — the distinction matters only for user-vs-machine ownership, not
 // for which extractor produced them.
@@ -234,8 +243,8 @@ export function extractStaticEdges(files: BuilderFile[], nodes: PageMapNode[]): 
 
 function buildAutoLayout(nodes: PageMapNode[]): PageMapNode[] {
   const COLS = 3;
-  const X_STEP = 280;
-  const Y_STEP = 180;
+  const X_STEP = 340;
+  const Y_STEP = 300;
   return nodes.map((node, idx) => ({
     ...node,
     position: {
@@ -246,100 +255,160 @@ function buildAutoLayout(nodes: PageMapNode[]): PageMapNode[] {
 }
 
 function normalizeLabel(label: string): string {
-  return label.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return label
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
 }
 
-function mergeWithExisting(
+export function mergePageMapNotes(generated: string, previous?: string): string {
+  const canonical = /^Route:\s*\/[^\r\n]*/.exec(generated)?.[0];
+  if (!canonical) return previous ?? generated;
+  const description = (previous || generated).replace(/^Route:[^\r\n]*(?:\r?\n)?/m, "").trim();
+  return [canonical, description].filter(Boolean).join("\n").slice(0, 8000);
+}
+
+export function mergeWithExisting(
   aiNodes: PageMapNode[],
   aiEdges: PageMapEdge[],
   existing: PageMapPlatform,
+  sourceCandidates?: PageMapUnresolvedTransition[],
 ): PageMapPlatform {
-  const existingById = new Map(existing.nodes.map((n) => [n.id, n]));
-
-  // Build a normalized-label index of AI nodes for planned-to-built matching
-  const aiNodesByLabel = new Map(aiNodes.map((n) => [normalizeLabel(n.label), n]));
-
-  // Preserve user-customised positions and notes on AI nodes (matched by ID)
-  const mergedAiNodes = aiNodes.map((n) => {
-    const prev = existingById.get(n.id);
+  const existingById = new Map(existing.nodes.map((node) => [node.id, node]));
+  const labels = new Map<string, PageMapNode[]>();
+  for (const node of aiNodes) {
+    const label = normalizeLabel(node.label);
+    if (label) labels.set(label, [...(labels.get(label) ?? []), node]);
+  }
+  const merged = aiNodes.map((node) => {
+    const prior = existingById.get(node.id);
     return {
-      ...n,
-      position: prev?.position ?? n.position,
-      notes: prev?.notes ?? n.notes,
+      ...node,
+      position: prior?.position ?? node.position,
+      notes: mergePageMapNotes(node.notes, prior?.notes),
       aiGenerated: true,
-      planned: false, // AI confirmed the file exists — no longer planned
+      planned: false,
     };
   });
-
-  // Retain planned nodes only when no AI node matches by ID or normalized label.
-  // When a planned node's label matches an AI node, the AI node absorbs its
-  // position and notes via the ID map above (if IDs match) or it is simply
-  // retired here (if only the label matched) — the built AI node replaces it.
-  const aiNodeIds = new Set(aiNodes.map((n) => n.id));
-  const plannedNodes = existing.nodes.filter((n) => {
-    if (!n.planned) return false;
-    if (aiNodeIds.has(n.id)) return false; // matched by ID — AI node absorbs it
-    const aiMatch = aiNodesByLabel.get(normalizeLabel(n.label));
-    if (aiMatch) {
-      // Transfer position and notes to the matched AI node
-      const idx = mergedAiNodes.findIndex((m) => m.id === aiMatch.id);
-      if (idx !== -1) {
-        mergedAiNodes[idx] = {
-          ...mergedAiNodes[idx],
-          position: n.position,
-          notes: n.notes || mergedAiNodes[idx].notes,
-        };
+  const ids = new Set(merged.map((node) => node.id));
+  const remapped = new Map<string, string>();
+  const retained: PageMapNode[] = [];
+  for (const prior of existing.nodes) {
+    if (ids.has(prior.id)) continue;
+    if (prior.planned) {
+      const matches = labels.get(normalizeLabel(prior.label)) ?? [];
+      if (matches.length === 1) {
+        const target = merged.find((node) => node.id === matches[0].id)!;
+        target.position = prior.position;
+        target.notes = mergePageMapNotes(target.notes, prior.notes || undefined);
+        remapped.set(prior.id, target.id);
+        continue;
       }
-      return false; // retire the planned placeholder
+      retained.push(prior);
+    } else if (!prior.aiGenerated) {
+      // User-authored pages are not disposable merely because an AI pass omitted them.
+      retained.push(prior);
     }
-    return true; // no match — keep as planned
+  }
+  const nodes = [...merged, ...retained];
+  const liveIds = new Set(nodes.map((node) => node.id));
+  // A user transition annotation is map metadata, not disposable extractor output.
+  const annotatedIds = new Set(
+    existing.edges
+      .filter((edge) => !edge.aiGenerated && edge.transition !== undefined)
+      .map((edge) => edge.id),
+  );
+  const automaticEdges = aiEdges.filter((edge) => !annotatedIds.has(edge.id));
+  const automaticIds = new Set(automaticEdges.map((edge) => edge.id));
+  const manualEdges = existing.edges.filter(
+    (edge) => !edge.aiGenerated && !automaticIds.has(edge.id),
+  );
+  const edges = [...automaticEdges.map((edge) => ({ ...edge, aiGenerated: true })), ...manualEdges]
+    .map((edge) => ({
+      ...edge,
+      source: remapped.get(edge.source) ?? edge.source,
+      target: remapped.get(edge.target) ?? edge.target,
+    }))
+    .filter((edge) => liveIds.has(edge.source) && liveIds.has(edge.target));
+  // Extraction and PUT use the same binding checks. A stable ID is not proof
+  // that a candidate still belongs to the same file, route or planned page.
+  const { unresolvedTransitions: retainedTransitions } = reconcilePageMapPlatformUpdate(existing, {
+    nodes,
+    edges: [],
+    ...(existing.unresolvedTransitions === undefined
+      ? {}
+      : {
+          unresolvedTransitions: existing.unresolvedTransitions.map((candidate) => ({
+            ...candidate,
+            ...(candidate.source === undefined
+              ? {}
+              : { source: remapped.get(candidate.source) ?? candidate.source }),
+          })),
+        }),
   });
-
-  const nodes = [...mergedAiNodes, ...plannedNodes];
-
-  const aiEdgeIds = new Set(aiEdges.map((e) => e.id));
-  const userEdges = existing.edges.filter((e) => !e.aiGenerated && !aiEdgeIds.has(e.id));
-
-  const edges = [...aiEdges.map((e) => ({ ...e, aiGenerated: true })), ...userEdges];
-
-  return { nodes, edges };
+  // A fresh server extraction replaces old source declarations, including
+  // declarations removed from the file. Classify before reconciliation: a
+  // changed binding must not turn obsolete source output into a manual draft.
+  const replacedSourceIds = new Set(
+    sourceCandidates === undefined
+      ? []
+      : (existing.unresolvedTransitions ?? [])
+          .filter(
+            ({ transition }) =>
+              transition.evidence.some((item) => item.basis === "source") &&
+              !transition.evidence.some((item) => item.basis === "manual"),
+          )
+          .map((candidate) => candidate.id),
+  );
+  const retainedCandidates = retainedTransitions?.filter(
+    (candidate) => !replacedSourceIds.has(candidate.id),
+  );
+  const retainedIds = new Set(retainedCandidates?.map((candidate) => candidate.id));
+  // Only this internal extraction path accepts new source authority. HTTP PUT
+  // still uses reconcilePageMapPlatformUpdate and cannot mint source evidence.
+  const unresolvedTransitions =
+    sourceCandidates === undefined
+      ? retainedCandidates
+      : [
+          ...(retainedCandidates ?? []),
+          ...sourceCandidates
+            .filter((candidate) => !retainedIds.has(candidate.id))
+            .map((candidate) => ({
+              ...candidate,
+              ...(candidate.source === undefined
+                ? {}
+                : { source: remapped.get(candidate.source) ?? candidate.source }),
+            })),
+        ];
+  return assertPageMapPlatform({
+    nodes,
+    edges,
+    ...(unresolvedTransitions === undefined ? {} : { unresolvedTransitions }),
+  });
 }
 
 /**
  * DB-aware wrapper: loads current project files + existing page map from DB,
  * runs AI extraction for the "web" platform, and persists the result back.
- * Fire-and-forget safe — any errors are caught internally.
+ * The caller must handle failures; superseded analysis is discarded.
  */
 export async function extractPageMap(projectId: number): Promise<void> {
-  const [project] = await db.select().from(projectsTable).where(eq(projectsTable.id, projectId));
+  const project = await pageMapRepository.read(projectId);
   if (!project) return;
-
-  const fileRows = await db
-    .select()
-    .from(projectFilesTable)
-    .where(eq(projectFilesTable.projectId, projectId));
-
-  const files: BuilderFile[] = fileRows.map((r) => ({
-    path: r.path,
-    content: r.content,
-    mimeType: r.mimeType ?? "text/plain",
-  }));
-
-  const existingMap = (project.pageMapData as PageMapData | null) ?? EMPTY_PAGE_MAP;
-
-  const webPlatform = await extractPageMapForFiles(files, "web", existingMap.web);
-
-  const updatedMap: PageMapData = { ...existingMap, web: webPlatform };
-
-  await db
-    .update(projectsTable)
-    .set({ pageMapData: updatedMap })
-    .where(eq(projectsTable.id, projectId));
-
-  logger.info(
-    { projectId, nodeCount: webPlatform.nodes.length },
-    "Page map extracted and persisted",
+  const snapshot = await pageMapRepository.readFiles(projectId);
+  const existing = parseStoredPageMap(project.pageMapData);
+  const web = await extractPageMapForFiles(snapshot.files, "web", existing.web);
+  const persisted = await pageMapRepository.write(
+    projectId,
+    { ...existing, web },
+    project.pageMapData,
+    snapshot.revision,
   );
+  if (!persisted) {
+    logger.info({ projectId }, "Page map source or edits changed; discarded superseded analysis");
+    return;
+  }
+  logger.info({ projectId, nodeCount: web.nodes.length }, "Page map extracted and persisted");
 }
 
 /**
@@ -354,13 +423,26 @@ export async function extractPageMapForFiles(
     return existingMap ?? EMPTY_PLATFORM;
   }
 
+  const discovered = stabilizeSourcePageMap(discoverSourcePageMap(files), existingMap);
+  const fallback = () =>
+    mergeWithExisting(
+      discovered.nodes,
+      discovered.edges,
+      existingMap ?? EMPTY_PLATFORM,
+      discovered.unresolvedTransitions ?? [],
+    );
+  if (discovered.nodes.some((node) => !/\.html?$/i.test(node.filePath))) return fallback();
+
   const pageFiles = files.filter(
     (f) => f.mimeType === "text/html" || f.path.endsWith(".html") || f.path === "index.html",
   );
 
   if (pageFiles.length === 0) {
-    return existingMap ?? EMPTY_PLATFORM;
+    return discovered.nodes.length || files.length === 0
+      ? fallback()
+      : (existingMap ?? EMPTY_PLATFORM);
   }
+  if (pageFiles.length > 120) return fallback();
 
   const manifest = pageFiles
     .map(
@@ -405,65 +487,132 @@ export async function extractPageMapForFiles(
     const rawNodes = Array.isArray(parsed.nodes) ? parsed.nodes : [];
     const rawEdges = Array.isArray(parsed.edges) ? parsed.edges : [];
 
-    const aiNodes: PageMapNode[] = buildAutoLayout(
+    const pagePaths = new Set(pageFiles.map((file) => file.path));
+    const seenIds = new Set<string>();
+    const pageTypes = new Set([
+      "landing",
+      "auth",
+      "form",
+      "dashboard",
+      "modal",
+      "settings",
+      "404",
+      "tab-bar",
+      "drawer",
+      "sheet",
+      "list",
+      "detail",
+      "other",
+    ]);
+    const connectionTypes = new Set(["nav", "auth-gate", "redirect", "external"]);
+    const modelNodes: PageMapNode[] = buildAutoLayout(
       rawNodes
         .filter(
           (n) =>
+            n !== null &&
+            typeof n === "object" &&
             typeof n.id === "string" &&
+            n.id.length > 0 &&
+            n.id.length <= 128 &&
             typeof n.label === "string" &&
-            typeof n.filePath === "string",
+            typeof n.filePath === "string" &&
+            pagePaths.has(n.filePath),
         )
+        .filter((node) => {
+          if (seenIds.has(node.id)) return false;
+          seenIds.add(node.id);
+          return true;
+        })
+        .slice(0, 500)
         .map((n) => ({
           id: n.id,
           label: n.label,
-          pageType: (n.pageType as PageType) ?? "other",
+          pageType: pageTypes.has(n.pageType) ? (n.pageType as PageType) : "other",
           filePath: n.filePath,
           position: { x: 0, y: 0 },
           isNew: false,
           hasError: false,
           aiGenerated: true,
-          notes: n.notes ?? "",
+          notes: typeof n.notes === "string" ? n.notes.slice(0, 2000) : "",
         })),
     );
 
+    // AI metadata may change, but a page's durable identity belongs to its
+    // source. Otherwise enrichment can detach user edits and replace them
+    // with fresh source claims. Ambiguous model pages are not safe bindings.
+    const modelPaths = new Set(modelNodes.map((node) => node.filePath));
+    const sourceByPath = new Map(discovered.nodes.map((node) => [node.filePath, node]));
+    if (modelPaths.size !== modelNodes.length || sourceByPath.size !== discovered.nodes.length) {
+      return fallback();
+    }
+    const modelToSourceIds = new Map<string, string>();
+    const enrichedNodes = modelNodes.flatMap((node) => {
+      const source = sourceByPath.get(node.filePath);
+      if (!source) return [];
+      modelToSourceIds.set(node.id, source.id);
+      return [{ ...node, id: source.id, notes: mergePageMapNotes(source.notes, node.notes) }];
+    });
+    const aiNodes = buildAutoLayout([
+      ...enrichedNodes,
+      ...discovered.nodes.filter((node) => !modelPaths.has(node.filePath)),
+    ]);
     const nodeIds = new Set(aiNodes.map((n) => n.id));
     const aiEdges: PageMapEdge[] = rawEdges
       .filter(
         (e) =>
+          e !== null &&
+          typeof e === "object" &&
           typeof e.id === "string" &&
           typeof e.source === "string" &&
           typeof e.target === "string" &&
-          nodeIds.has(e.source) &&
-          nodeIds.has(e.target),
+          nodeIds.has(modelToSourceIds.get(e.source) ?? "") &&
+          nodeIds.has(modelToSourceIds.get(e.target) ?? ""),
       )
       .map((e) => ({
         id: e.id,
-        source: e.source,
-        target: e.target,
-        connectionType: (e.connectionType as ConnectionType) ?? "nav",
+        source: modelToSourceIds.get(e.source)!,
+        target: modelToSourceIds.get(e.target)!,
+        connectionType: connectionTypes.has(e.connectionType)
+          ? (e.connectionType as ConnectionType)
+          : "nav",
         aiGenerated: true,
       }));
 
-    // Augment AI edges with a deterministic regex scan of the full HTML
-    // contents (inline <script> blocks included). This recovers links the
-    // model missed due to its 3000-char per-file truncation. External .js
-    // files are not scanned: their navigation can't be reliably attributed
-    // to a single source page.
-    const scanFiles = files.filter((f) => f.mimeType === "text/html" || f.path.endsWith(".html"));
-    const staticEdges = extractStaticEdges(scanFiles, aiNodes);
+    // Reuse comment-aware source discovery, remapping its page identities to
+    // the enriched nodes. Do not reintroduce regex-only links from comments.
+    const discoveredPaths = new Map(discovered.nodes.map((node) => [node.id, node.filePath]));
+    const enrichedIds = new Map(aiNodes.map((node) => [node.filePath, node.id]));
+    const staticEdges: PageMapEdge[] = discovered.edges.flatMap((edge) => {
+      const source = enrichedIds.get(discoveredPaths.get(edge.source) ?? "");
+      const target = enrichedIds.get(discoveredPaths.get(edge.target) ?? "");
+      return source && target ? [{ ...edge, source, target }] : [];
+    });
 
-    // Dedupe by source+target pair; AI edges win (they carry semantic
-    // connectionType info like auth-gate/redirect that regex can't infer).
-    const aiPairs = new Set(aiEdges.map((e) => `${e.source}->${e.target}`));
+    const sourceCandidates = (discovered.unresolvedTransitions ?? []).map((candidate) => {
+      const source =
+        candidate.source === undefined
+          ? undefined
+          : enrichedIds.get(discoveredPaths.get(candidate.source) ?? "");
+      return { ...candidate, source };
+    });
+
+    // Concrete declarations take precedence over model-inferred pairs. Keep
+    // every source identity: two controls can lead to the same destination.
+    const sourcePairs = new Set(staticEdges.map((edge) => `${edge.source}->${edge.target}`));
     const mergedAiAndStatic = [
-      ...aiEdges,
-      ...staticEdges.filter((e) => !aiPairs.has(`${e.source}->${e.target}`)),
+      ...staticEdges,
+      ...aiEdges.filter((edge) => !sourcePairs.has(`${edge.source}->${edge.target}`)),
     ];
 
-    const merged = mergeWithExisting(aiNodes, mergedAiAndStatic, existingMap ?? EMPTY_PLATFORM);
+    const merged = mergeWithExisting(
+      aiNodes,
+      mergedAiAndStatic,
+      existingMap ?? EMPTY_PLATFORM,
+      sourceCandidates,
+    );
     return merged;
   } catch (err) {
-    logger.error({ err }, "extractPageMap AI call failed");
-    return existingMap ?? EMPTY_PLATFORM;
+    logger.warn({ err }, "Page map AI enrichment unavailable; using source evidence");
+    return fallback();
   }
 }

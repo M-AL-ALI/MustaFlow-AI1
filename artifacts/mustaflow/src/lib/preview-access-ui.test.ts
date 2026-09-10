@@ -3,7 +3,6 @@ import {
   getPreviewAddress,
   getPreviewIframeSandbox,
   getPreviewRecoveryControl,
-  getServerPreviewBadge,
   hasServerPreviewAccess,
   presentAgenticPreviewUnavailable,
 } from "./preview-access-ui";
@@ -29,12 +28,6 @@ describe("preview access UI", () => {
     expect(getPreviewIframeSandbox({ serverPreviewLive: false, webContainerLive: false })).toBe(
       "allow-scripts allow-forms allow-popups",
     );
-  });
-
-  it("presents the active provider transport honestly", () => {
-    expect(getServerPreviewBadge("direct")?.label).toBe("Full App Preview — Container");
-    expect(getServerPreviewBadge("gateway")?.label).toBe("Full App Preview — Gateway");
-    expect(getServerPreviewBadge("unavailable")).toBeNull();
   });
 
   it("uses a direct endpoint only for direct transport", () => {

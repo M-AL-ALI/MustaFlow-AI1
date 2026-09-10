@@ -1,5 +1,11 @@
 import { authFetch } from "@/lib/api-fetch";
-import { formatAssetBytes, uploadProjectAsset, type AssetUploadResult } from "@/lib/asset-upload";
+import {
+  createAssetUploadLifetime,
+  formatAssetBytes,
+  uploadProjectAsset,
+  type AssetUploadLifetime,
+  type AssetUploadResult,
+} from "@/lib/asset-upload";
 import {
   QUEUE_LOAD_FALLBACK_ERROR,
   QUEUE_MUTATION_FALLBACK_ERROR,
@@ -229,6 +235,15 @@ export function ZeroPromptQueueDrawer({
   const editFileInputRef = useRef<HTMLInputElement>(null);
   const previousPhaseRef = useRef<ZeroPromptQueueObservedPhase | null>(phase);
 
+  const uploadScopes = useRef(new Set<AssetUploadLifetime>());
+  useEffect(() => {
+    const activeScopes = uploadScopes.current;
+    return () => {
+      for (const scope of activeScopes) scope.dispose();
+      activeScopes.clear();
+    };
+  }, [projectId]);
+
   const loadQueue = useCallback(async () => {
     try {
       const body = await queueRequest(
@@ -306,25 +321,40 @@ export function ZeroPromptQueueDrawer({
 
   const uploadFiles = async (files: FileList | null) => {
     if (!files?.length) return;
-    setBusy(true);
-    setError(null);
+    const scope = createAssetUploadLifetime();
+    uploadScopes.current.add(scope);
     try {
+      scope.assertCurrent();
+      setBusy(true);
+      setError(null);
       const remaining = Math.max(0, 10 - newAssets.length);
       const selected = Array.from(files).slice(0, remaining);
       const uploaded: AssetUploadResult[] = [];
       for (const file of selected) {
-        uploaded.push(await uploadProjectAsset({ projectId, file, source: "picker" }));
+        scope.assertCurrent();
+        const asset = await uploadProjectAsset({
+          projectId,
+          file,
+          source: "picker",
+          signal: scope.signal,
+        });
+        scope.assertCurrent();
+        uploaded.push(asset);
       }
+      scope.assertCurrent();
       setNewAssets((current) => [...current, ...uploaded].slice(0, 10));
     } catch (uploadError) {
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "The attachment could not be uploaded.",
-      );
+      if (scope.isCurrent())
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : "The attachment could not be uploaded.",
+        );
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
       setBusy(false);
+      uploadScopes.current.delete(scope);
+      scope.dispose();
     }
   };
 
@@ -356,25 +386,40 @@ export function ZeroPromptQueueDrawer({
 
   const uploadEditFiles = async (files: FileList | null) => {
     if (!files?.length) return;
-    setBusy(true);
-    setError(null);
+    const scope = createAssetUploadLifetime();
+    uploadScopes.current.add(scope);
     try {
+      scope.assertCurrent();
+      setBusy(true);
+      setError(null);
       const remaining = Math.max(0, 10 - editAssetIds.length - editNewAssets.length);
       const selected = Array.from(files).slice(0, remaining);
       const uploaded: AssetUploadResult[] = [];
       for (const file of selected) {
-        uploaded.push(await uploadProjectAsset({ projectId, file, source: "picker" }));
+        scope.assertCurrent();
+        const asset = await uploadProjectAsset({
+          projectId,
+          file,
+          source: "picker",
+          signal: scope.signal,
+        });
+        scope.assertCurrent();
+        uploaded.push(asset);
       }
+      scope.assertCurrent();
       setEditNewAssets((current) => [...current, ...uploaded].slice(0, 10 - editAssetIds.length));
     } catch (uploadError) {
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "The attachment could not be uploaded.",
-      );
+      if (scope.isCurrent())
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : "The attachment could not be uploaded.",
+        );
     } finally {
       if (editFileInputRef.current) editFileInputRef.current.value = "";
       setBusy(false);
+      uploadScopes.current.delete(scope);
+      scope.dispose();
     }
   };
 

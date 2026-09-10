@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
   process.env.DATABASE_URL = "postgresql://test:test@127.0.0.1:1/test";
@@ -18,20 +18,30 @@ const tenancy = vi.hoisted(() => {
   };
 });
 
+const effects = vi.hoisted(() => ({
+  insert: vi.fn(() => {
+    throw new Error("insert must not occur after workspace denial");
+  }),
+  enqueue: vi.fn(),
+  containerConfigured: vi.fn(),
+}));
+
 vi.mock("@workspace/db", async (importOriginal) => {
   const original = await importOriginal<typeof import("@workspace/db")>();
   const select = vi.fn(() => ({
     from: vi.fn(() => ({ where: vi.fn(async () => []) })),
   }));
-  return { ...original, db: { ...original.db, select } };
+  return { ...original, db: { ...original.db, select, insert: effects.insert } };
 });
 vi.mock("../../lib/jobs", () => ({ resolveAgentIdentity: vi.fn(), enqueueJob: vi.fn() }));
 vi.mock("../../lib/provisioning", () => ({
-  enqueueProvisionProjectJob: vi.fn(),
+  enqueueProvisionProjectJob: effects.enqueue,
   provisionPreviewDb: vi.fn(),
   getRollingAverageMs: vi.fn(),
 }));
-vi.mock("../../lib/tenant-runtime", () => ({ isContainerLayerConfigured: vi.fn() }));
+vi.mock("../../lib/tenant-runtime", () => ({
+  isContainerLayerConfigured: effects.containerConfigured,
+}));
 vi.mock("../../lib/stack-selection", () => ({ resolveInitialStackSelection: vi.fn() }));
 vi.mock("../../lib/runtime-manifest", () => ({ resolveProjectRuntimeManifest: vi.fn() }));
 vi.mock("../../lib/zero-sealed-generation", () => ({
@@ -45,7 +55,10 @@ vi.mock("../../lib/workspace-tenancy", () => ({
 }));
 
 describe("authorization lockdown: project workspace selection", () => {
-  it("passes a caller hint to the central selector and returns its typed fail-closed outcome", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  it("passes a binding destination and denies before insertion or provisioning", async () => {
     const router = (await import("../projects")).default;
     const app = express();
     app.use(express.json());
@@ -67,5 +80,8 @@ describe("authorization lockdown: project workspace selection", () => {
     });
     expect(response.status).toBe(409);
     expect(response.body).toEqual({ error: "project_workspace_unavailable" });
+    expect(effects.insert).not.toHaveBeenCalled();
+    expect(effects.enqueue).not.toHaveBeenCalled();
+    expect(effects.containerConfigured).not.toHaveBeenCalled();
   });
 });

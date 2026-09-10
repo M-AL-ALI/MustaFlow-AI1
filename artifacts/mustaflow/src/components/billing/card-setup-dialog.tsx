@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { loadStripe, type Stripe as StripeJs } from "@stripe/stripe-js";
 import {
   AddressElement,
@@ -17,7 +17,20 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/api-fetch";
-import { createNabuflowSetupIntent, getNabuflowBillingState } from "@workspace/api-client-react";
+import {
+  getCreateNabuflowSetupIntentUrl,
+  getGetNabuflowBillingStateUrl,
+  type createNabuflowSetupIntent,
+  type getNabuflowBillingState,
+} from "@workspace/api-client-react";
+import {
+  billingAccountRequest,
+  useBillingAccount,
+  useBillingAccountLifetime,
+  type BillingAccountLifetime,
+} from "@/lib/billing-account-lifetime";
+
+export type CardSetupRequest = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 // Cache the loadStripe promise per publishable key so the Stripe.js singleton
 // isn't re-initialized across re-renders (same pattern as settings.tsx).
@@ -37,11 +50,13 @@ function isDarkMode(): boolean {
 }
 
 function SetupForm({
+  lifetime,
   onComplete,
   onCancel,
   onSubmittingChange,
   submitLabel,
 }: {
+  lifetime: BillingAccountLifetime;
   onComplete: () => void;
   onCancel: () => void;
   onSubmittingChange: (submitting: boolean) => void;
@@ -51,11 +66,21 @@ function SetupForm({
   const elements = useElements();
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const inFlightRef = useRef(false);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!stripe || !elements || submitting) return;
+      const isCurrent = () => mountedRef.current && lifetime.isCurrent();
+      if (!isCurrent() || !stripe || !elements || inFlightRef.current) return;
+      inFlightRef.current = true;
       setSubmitting(true);
       onSubmittingChange(true);
       setFormError(null);
@@ -67,6 +92,7 @@ function SetupForm({
             return_url: `${window.location.origin}/billing/payment`,
           },
         });
+        if (!isCurrent()) return;
         if (error) {
           setFormError(error.message ?? "Your card couldn't be saved. Please try again.");
           return;
@@ -77,13 +103,16 @@ function SetupForm({
         }
         setFormError("Card setup didn't finish. Please try again.");
       } catch {
-        setFormError("Something went wrong saving your card. Please try again.");
+        if (isCurrent()) setFormError("Something went wrong saving your card. Please try again.");
       } finally {
-        setSubmitting(false);
-        onSubmittingChange(false);
+        if (isCurrent()) {
+          inFlightRef.current = false;
+          setSubmitting(false);
+          onSubmittingChange(false);
+        }
       }
     },
-    [stripe, elements, submitting, onComplete, onSubmittingChange],
+    [stripe, elements, lifetime, onComplete, onSubmittingChange],
   );
 
   return (
@@ -109,7 +138,15 @@ function SetupForm({
           Card details go directly to Stripe.
         </p>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={submitting}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (mountedRef.current && lifetime.isCurrent()) onCancel();
+            }}
+            disabled={submitting}
+          >
             Cancel
           </Button>
           <Button
@@ -132,8 +169,13 @@ function SetupForm({
  * The server confirms card state via Stripe webhooks — after a successful
  * confirm we poll the billing state briefly so the UI reflects the new card.
  */
-export function CardSetupDialog({
-  open,
+export function CardSetupDialog(props: Parameters<typeof OpenCardSetupDialog>[0]) {
+  // Each open gets its own lifetime. A close/unmount cannot revive it on reopen.
+  return props.open ? <OpenCardSetupDialog {...props} /> : null;
+}
+
+function OpenCardSetupDialog({
+  open: requestedOpen,
   onClose,
   onSaved,
   title = "Add a payment method",
@@ -154,11 +196,26 @@ export function CardSetupDialog({
   /**
    * Override the SetupIntent factory — e.g. the organization/company card,
    * which lives on the company's Stripe Customer instead of the personal one.
+   * Network work must use the supplied request, bound to this open's lifetime.
    */
-  createIntent?: () => Promise<{ clientSecret: string; setupIntentId: string }>;
-  /** Custom "is the new card visible yet" check for the finishing poll. */
-  verifySaved?: () => Promise<boolean>;
+  createIntent?: (
+    request: CardSetupRequest,
+  ) => Promise<{ clientSecret: string; setupIntentId: string }>;
+  /** Custom check; use the supplied request for account-bound network work. */
+  verifySaved?: (request: CardSetupRequest) => Promise<boolean>;
 }) {
+  const account = useBillingAccount();
+  const [owner] = useState(account);
+  const lifetime = useBillingAccountLifetime(owner);
+  const request = useMemo<CardSetupRequest>(
+    () =>
+      <T,>(url: string, init?: RequestInit) =>
+        billingAccountRequest<T>(lifetime, url, init),
+    [lifetime],
+  );
+  // A still-open parent prop must not start a new setup for the arriving account.
+  const open = requestedOpen && !!owner && account?.key === owner.key;
+  const pollingRef = useRef(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [publishableKey, setPublishableKey] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -231,18 +288,27 @@ export function CardSetupDialog({
       setLoadError(null);
       return;
     }
+    if (!lifetime?.isCurrent()) return;
     let cancelled = false;
     void (async () => {
       try {
-        const intentFactory = createIntentRef.current ?? createNabuflowSetupIntent;
+        lifetime.assertCurrent();
+        const intentFactory = createIntentRef.current;
         const [intent, pkgRes] = await Promise.all([
-          intentFactory(),
-          authFetch("/api/billing/packages"),
+          intentFactory
+            ? intentFactory(request)
+            : billingAccountRequest<Awaited<ReturnType<typeof createNabuflowSetupIntent>>>(
+                lifetime,
+                getCreateNabuflowSetupIntentUrl(),
+                { method: "POST" },
+              ),
+          authFetch("/api/billing/packages", { signal: lifetime.signal }, lifetime.assertCurrent),
         ]);
+        if (cancelled || !lifetime.isCurrent()) return;
         const pkg = pkgRes.ok
           ? ((await pkgRes.json()) as { publishableKey?: string; stripeConfigured?: boolean })
           : null;
-        if (cancelled) return;
+        if (cancelled || !lifetime.isCurrent()) return;
         if (!pkg?.publishableKey) {
           setLoadError("Payments aren't configured on this platform yet. Please try again later.");
           return;
@@ -250,7 +316,7 @@ export function CardSetupDialog({
         setPublishableKey(pkg.publishableKey);
         setClientSecret(intent.clientSecret);
       } catch {
-        if (!cancelled) {
+        if (!cancelled && lifetime.isCurrent()) {
           setLoadError("Couldn't start the card setup. Please try again.");
         }
       }
@@ -258,31 +324,45 @@ export function CardSetupDialog({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, lifetime, request]);
 
-  // After Stripe confirms the SetupIntent, the card lands on the subscription
-  // row via webhook. Poll briefly so the caller sees the new card; fall
-  // through after ~15s (webhook may lag — the card is safe either way).
+  // Stripe work already submitted cannot be rolled back here. Only the current
+  // open/account lifetime may poll or complete after the webhook grace period.
   const finishAndPoll = useCallback(async () => {
+    if (!lifetime?.isCurrent() || pollingRef.current) return;
+    pollingRef.current = true;
     setPhase("finishing");
+    const verify = verifySavedRef.current;
     for (let i = 0; i < 10; i++) {
+      if (!lifetime.isCurrent()) return;
       try {
-        const verify = verifySavedRef.current;
         if (verify) {
-          if (await verify()) break;
+          const saved = await verify(request);
+          if (!lifetime.isCurrent()) return;
+          if (saved) break;
         } else {
-          const state = await getNabuflowBillingState();
+          const state = await billingAccountRequest<
+            Awaited<ReturnType<typeof getNabuflowBillingState>>
+          >(lifetime, getGetNabuflowBillingStateUrl());
+          if (!lifetime.isCurrent()) return;
           const last4 = state.card?.last4 ?? null;
           if (last4 && last4 !== (previousLast4 ?? null)) break;
           if (last4 && !previousLast4) break;
         }
       } catch {
-        // keep polling
+        if (!lifetime.isCurrent()) return;
+        // Keep the existing grace-timeout behavior for the unchanged account.
       }
-      await new Promise((r) => setTimeout(r, 1500));
+      if (!(await lifetime.wait(1500))) return;
     }
-    onSaved();
-  }, [onSaved, previousLast4]);
+    if (lifetime.isCurrent()) onSaved();
+  }, [lifetime, onSaved, previousLast4, request]);
+
+  const close = () => {
+    if (!lifetime?.isCurrent()) return;
+    lifetime.dispose();
+    onClose();
+  };
 
   const elementsOptions = useMemo(
     () =>
@@ -298,10 +378,12 @@ export function CardSetupDialog({
     [clientSecret],
   );
 
+  if (!open) return null;
+
   return (
     <Dialog
       open={open}
-      onOpenChange={(next) => !next && !submitting && phase !== "finishing" && onClose()}
+      onOpenChange={(next) => !next && !submitting && phase !== "finishing" && close()}
     >
       <DialogContent
         className="max-w-md"
@@ -318,7 +400,7 @@ export function CardSetupDialog({
         {loadError ? (
           <div className="space-y-3">
             <p className="text-sm text-destructive">{loadError}</p>
-            <Button variant="outline" size="sm" onClick={onClose}>
+            <Button variant="outline" size="sm" onClick={close}>
               Close
             </Button>
           </div>
@@ -328,12 +410,15 @@ export function CardSetupDialog({
             <p className="text-sm font-medium text-foreground">Saving your card…</p>
             <p className="text-xs text-muted-foreground">This usually takes a few seconds.</p>
           </div>
-        ) : clientSecret && publishableKey && elementsOptions ? (
+        ) : clientSecret && publishableKey && elementsOptions && lifetime ? (
           <Elements stripe={getStripePromise(publishableKey)} options={elementsOptions}>
             <SetupForm
+              lifetime={lifetime}
               onComplete={() => void finishAndPoll()}
-              onCancel={onClose}
-              onSubmittingChange={setSubmitting}
+              onCancel={close}
+              onSubmittingChange={(next) => {
+                if (lifetime.isCurrent()) setSubmitting(next);
+              }}
               submitLabel={submitLabel}
             />
           </Elements>

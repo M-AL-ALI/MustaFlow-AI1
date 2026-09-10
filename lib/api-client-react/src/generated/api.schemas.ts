@@ -3057,6 +3057,225 @@ export interface PageMapNode {
   planned?: boolean;
 }
 
+/**
+ * Server-owned historical source declaration, not execution or freshness proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file with this exact content SHA256. endOffset must exceed startOffset.
+ */
+export interface PageMapTransitionSourceReference {
+  /**
+     * Project-relative path; no empty, dot, parent, backslash, colon or control segments.
+     * @minLength 1
+     * @maxLength 1024
+     */
+  filePath: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  contentSha256: string;
+  /**
+     * @minimum 0
+     * @maximum 500000
+     */
+  startOffset: number;
+  /**
+     * @minimum 0
+     * @maximum 500000
+     */
+  endOffset: number;
+}
+
+export type PageMapTransitionEvidenceBasis = typeof PageMapTransitionEvidenceBasis[keyof typeof PageMapTransitionEvidenceBasis];
+
+
+export const PageMapTransitionEvidenceBasis = {
+  unknown: 'unknown',
+  inferred: 'inferred',
+  source: 'source',
+  manual: 'manual',
+} as const;
+
+export type PageMapTransitionEvidenceFieldsItem = typeof PageMapTransitionEvidenceFieldsItem[keyof typeof PageMapTransitionEvidenceFieldsItem];
+
+
+export const PageMapTransitionEvidenceFieldsItem = {
+  action: 'action',
+  control: 'control',
+  condition: 'condition',
+  outcome: 'outcome',
+  destination: 'destination',
+} as const;
+
+/**
+ * Authority is assigned by the server, never by PUT input. source is required exactly when basis is source. Inferred is not verified. Runtime observation is unsupported in version 1.
+ */
+export interface PageMapTransitionEvidence {
+  basis: PageMapTransitionEvidenceBasis;
+  /**
+     * @minItems 1
+     * @maxItems 5
+     */
+  fields: PageMapTransitionEvidenceFieldsItem[];
+  source?: PageMapTransitionSourceReference;
+}
+
+export type PageMapTransitionActionKind = typeof PageMapTransitionActionKind[keyof typeof PageMapTransitionActionKind];
+
+
+export const PageMapTransitionActionKind = {
+  unknown: 'unknown',
+  click: 'click',
+  submit: 'submit',
+  load: 'load',
+  programmatic: 'programmatic',
+} as const;
+
+export interface PageMapTransitionAction {
+  kind: PageMapTransitionActionKind;
+  /**
+     * @minLength 1
+     * @maxLength 240
+     */
+  label?: string;
+}
+
+export type PageMapTransitionControlKind = typeof PageMapTransitionControlKind[keyof typeof PageMapTransitionControlKind];
+
+
+export const PageMapTransitionControlKind = {
+  unknown: 'unknown',
+  link: 'link',
+  button: 'button',
+  form: 'form',
+  call: 'call',
+  other: 'other',
+} as const;
+
+/**
+ * Descriptive metadata only. A locator is never executed as a selector.
+ */
+export interface PageMapTransitionControl {
+  kind: PageMapTransitionControlKind;
+  /**
+     * @minLength 1
+     * @maxLength 240
+     */
+  label?: string;
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
+  locator?: string;
+}
+
+export type PageMapTransitionConditionKind = typeof PageMapTransitionConditionKind[keyof typeof PageMapTransitionConditionKind];
+
+
+export const PageMapTransitionConditionKind = {
+  unknown: 'unknown',
+  none: 'none',
+  predicate: 'predicate',
+} as const;
+
+export type PageMapTransitionConditionBranch = typeof PageMapTransitionConditionBranch[keyof typeof PageMapTransitionConditionBranch];
+
+
+export const PageMapTransitionConditionBranch = {
+  unknown: 'unknown',
+  true: 'true',
+  false: 'false',
+} as const;
+
+/**
+ * Unknown does not mean unconditional. Predicate requires expression; other kinds must omit expression and use branch unknown. Expressions are bounded descriptive text, never evaluated.
+ */
+export interface PageMapTransitionCondition {
+  kind: PageMapTransitionConditionKind;
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  expression?: string;
+  branch: PageMapTransitionConditionBranch;
+}
+
+export type PageMapTransitionOutcomeKind = typeof PageMapTransitionOutcomeKind[keyof typeof PageMapTransitionOutcomeKind];
+
+
+export const PageMapTransitionOutcomeKind = {
+  unknown: 'unknown',
+  navigate: 'navigate',
+  redirect: 'redirect',
+  external: 'external',
+  stay: 'stay',
+} as const;
+
+export interface PageMapTransitionOutcome {
+  kind: PageMapTransitionOutcomeKind;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  detail?: string;
+}
+
+export type PageMapTransitionDestinationKind = typeof PageMapTransitionDestinationKind[keyof typeof PageMapTransitionDestinationKind];
+
+
+export const PageMapTransitionDestinationKind = {
+  unknown: 'unknown',
+  route: 'route',
+  external: 'external',
+} as const;
+
+/**
+ * Unknown must omit value. Route requires a slash-prefixed non-network path; it may still be unresolved or parameterized. External requires credential-free HTTP(S). No backslashes, whitespace or control bytes. This metadata never grants permission to fetch or open a destination.
+ */
+export interface PageMapTransitionDestination {
+  kind: PageMapTransitionDestinationKind;
+  /**
+     * @minLength 1
+     * @maxLength 2048
+     */
+  value?: string;
+}
+
+export type PageMapTransitionVersion = typeof PageMapTransitionVersion[keyof typeof PageMapTransitionVersion];
+
+
+export const PageMapTransitionVersion = {
+  NUMBER_1: 1,
+} as const;
+
+/**
+ * Optional descriptive transition contract. Absence is legacy unknown, not a confirmed link or unconditional branch. PUT preserves evidence only from the same stored identity, binding and unchanged claims; new or changed claims become manual regardless of submitted evidence. Clear claims with an explicit all-unknown version-1 transition.
+ */
+export interface PageMapTransition {
+  version: PageMapTransitionVersion;
+  action: PageMapTransitionAction;
+  control: PageMapTransitionControl;
+  condition: PageMapTransitionCondition;
+  outcome: PageMapTransitionOutcome;
+  destination: PageMapTransitionDestination;
+  /** @maxItems 8 */
+  evidence: PageMapTransitionEvidence[];
+  /** @maxItems 16 */
+  unknowns?: string[];
+}
+
+/**
+ * A navigation candidate without a justified internal target edge. Missing source means attribution is unknown. Never invent a target node.
+ */
+export interface PageMapUnresolvedTransition {
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  id: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
+  source?: string;
+  transition: PageMapTransition;
+}
+
 export type PageMapEdgeConnectionType = typeof PageMapEdgeConnectionType[keyof typeof PageMapEdgeConnectionType];
 
 
@@ -3073,11 +3292,17 @@ export interface PageMapEdge {
   target: string;
   connectionType: PageMapEdgeConnectionType;
   aiGenerated: boolean;
+  transition?: PageMapTransition;
 }
 
 export interface PageMapPlatformData {
   nodes: PageMapNode[];
   edges: PageMapEdge[];
+  /**
+     * Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.
+     * @maxItems 1000
+     */
+  unresolvedTransitions?: PageMapUnresolvedTransition[];
 }
 
 export interface PageMapData {
@@ -3086,8 +3311,22 @@ export interface PageMapData {
   android: PageMapPlatformData;
 }
 
+/**
+ * Opaque lowercase SHA256 of canonical sorted JSON of the raw stored page map. Null and undefined storage values yield the same revision.
+ * @pattern ^[0-9a-f]{64}$
+ */
+export type PageMapRevision = string;
+
+/**
+ * Save against the revision from the last acknowledged map response. Missing expectedRevision returns 409; a nonstring or malformed value returns 400; a well-formed but stale value returns 409.
+ */
+export type PageMapSaveRequest = PageMapData & {
+  expectedRevision: PageMapRevision;
+};
+
 export interface PageMapResponse {
   pageMapData: PageMapData;
+  revision: PageMapRevision;
 }
 
 export interface FileBlock {
@@ -6305,6 +6544,15 @@ export type ListVaultEntries200 = {
 
 export type ListMobileBuilds200 = {
   builds: MobileBuildLog[];
+};
+
+export type GetRecentActivityParams = {
+/**
+ * Restrict activity to accessible active projects in this workspace before limiting results.
+ * @minimum 1
+ * @maximum 2147483647
+ */
+workspaceId?: number;
 };
 
 export type SearchProjectFilesParams = {

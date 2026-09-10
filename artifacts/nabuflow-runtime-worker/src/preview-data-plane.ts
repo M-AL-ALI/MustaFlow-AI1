@@ -31,10 +31,18 @@ const HOP_BY_HOP_HEADERS = new Set([
   "transfer-encoding",
   "upgrade",
 ]);
+const WEBSOCKET_HANDSHAKE_HEADERS = new Set([
+  "sec-websocket-key",
+  "sec-websocket-version",
+  "sec-websocket-protocol",
+  "sec-websocket-extensions",
+]);
 const PLATFORM_COOKIE_NAMES = new Set([
   "__prs",
   "__session",
   "__client_uat",
+  "__client",
+  "__refresh",
   "__cf_bm",
   "cf_clearance",
 ]);
@@ -161,18 +169,15 @@ export async function handlePreviewDataPlaneRequest(
     }
 
     const sandbox = dependencies.sandbox ?? runtimeSandbox(env, route.identity);
-    if (websocketUpgrade) {
-      // Workerd attaches upgrade state to the inbound Request. Cloning it or
-      // mutating its headers makes @cloudflare/sandbox wsConnect throw. Grant
-      // and redeemed-session authentication has completed above, so preserve
-      // the original request byte-for-byte for the upgrade. Accepted trade-off:
-      // the tenant WebSocket handshake sees the preview/platform cookies and
-      // client forwarding headers; HTTP traffic still receives full hygiene.
-      return await sandbox.wsConnect(request, claims.port);
-    }
-
     const headers = new Headers(request.headers);
-    sanitizeRequestHeaders(headers, url, cookieName);
+    sanitizeRequestHeaders(headers, url, cookieName, websocketUpgrade);
+    if (websocketUpgrade) {
+      // Authenticate with the original cookies above, then use the same header
+      // hygiene as HTTP. The raw Sandbox adapter already constructs a Request
+      // with replacement headers to add its target port; retain the inbound
+      // request URL and metadata here while removing gateway credentials.
+      return await sandbox.wsConnect(new Request(request, { headers }), claims.port);
+    }
     const upstreamUrl = new URL(`${route.appPath}${url.search}`, "https://tenant.preview.invalid");
     const body = request.method === "GET" || request.method === "HEAD" ? null : request.body;
     const upstreamRequest = new Request(upstreamUrl, {
@@ -288,15 +293,19 @@ function readCookie(cookieHeader: string | null, expectedName: string): string |
 }
 
 function isPlatformCookie(name: string, previewCookieNameValue: string): boolean {
-  const lower = name.toLowerCase();
+  // Cookie security prefixes do not make platform credentials tenant-owned.
+  // Match the runtime cookie family, including gates for other runtimes.
+  const lower = name.toLowerCase().replace(/^__(?:host|secure)-/, "");
   return (
     name === previewCookieNameValue ||
     PLATFORM_COOKIE_NAMES.has(lower) ||
     lower.startsWith("__clerk") ||
-    lower.startsWith("__host-__clerk") ||
-    lower.startsWith("__secure-__clerk") ||
+    lower.startsWith("__session_") ||
+    lower.startsWith("__client_uat_") ||
     lower.startsWith("mustaflow_") ||
-    lower.startsWith("nabuflow_")
+    lower.startsWith("nabuflow_") ||
+    lower.startsWith("b5_") ||
+    lower.startsWith("__b5_")
   );
 }
 
@@ -316,6 +325,7 @@ function sanitizeRequestHeaders(
   headers: Headers,
   requestUrl: URL,
   previewCookieNameValue: string,
+  websocketUpgrade: boolean,
 ): void {
   const connectingIp = headers.get("cf-connecting-ip");
   const connectionTokens = (headers.get("connection") ?? "")
@@ -326,8 +336,16 @@ function sanitizeRequestHeaders(
   headers.forEach((_value, name) => headerNames.push(name));
   for (const name of headerNames) {
     const lower = name.toLowerCase();
-    const isHopByHop = HOP_BY_HOP_HEADERS.has(lower) || connectionTokens.includes(lower);
+    const isHopByHop =
+      (HOP_BY_HOP_HEADERS.has(lower) || connectionTokens.includes(lower)) &&
+      !(websocketUpgrade && WEBSOCKET_HANDSHAKE_HEADERS.has(lower));
     if (
+      // HTTP explicitly supports tenant bearer auth; ordinary preview upgrades
+      // must not expose browser/platform Authorization to the tenant handshake.
+      (websocketUpgrade && lower === "authorization") ||
+      lower.startsWith("x-clerk-") ||
+      lower.startsWith("x-b5-") ||
+      lower.startsWith("x-mustaflow-") ||
       lower.startsWith("x-forwarded-") ||
       lower === "forwarded" ||
       lower.startsWith("x-nabuflow-") ||
@@ -339,6 +357,11 @@ function sanitizeRequestHeaders(
     ) {
       headers.delete(name);
     }
+  }
+  if (websocketUpgrade) {
+    // Rebuild only the required upgrade tokens, never client hop-by-hop fields.
+    headers.set("connection", "Upgrade");
+    headers.set("upgrade", "websocket");
   }
   const cookies = sanitizeCookieHeader(headers.get("cookie"), previewCookieNameValue);
   if (cookies === null) headers.delete("cookie");

@@ -1,3 +1,5 @@
+import { withProjectWorkspaceAdmission, WorkspaceAdmissionError } from "../lib/workspace-lifecycle";
+import { parseWorkspaceQueryFilter } from "../lib/workspace-query-filter";
 import { Router, type IRouter } from "express";
 import { and, desc, eq, getTableColumns, inArray, isNull, sql, type SQL } from "drizzle-orm";
 import {
@@ -186,15 +188,20 @@ router.get("/projects", async (req, res): Promise<void> => {
     return;
   }
   const userId = req.userId;
+  const filter = parseWorkspaceQueryFilter(req.query.workspaceId);
+  if (!filter.ok) {
+    res.status(400).json({ error: "Invalid workspace selection" });
+    return;
+  }
   const accessibleIds = await listAccessibleProjectIds(userId, "viewer");
   if (accessibleIds.length === 0) {
     res.json([]);
     return;
   }
-  const wsId = req.query.workspaceId ? parseInt(req.query.workspaceId as string, 10) : null;
+  const wsId = filter.workspaceId;
   const mode = req.query.mode as string | undefined;
   const conditions: SQL[] = [inArray(projectsTable.id, accessibleIds), activeProjects];
-  if (wsId && !isNaN(wsId)) conditions.push(eq(projectsTable.workspaceId, wsId));
+  if (wsId !== null) conditions.push(eq(projectsTable.workspaceId, wsId));
   if (mode === "developer" || mode === "builder") {
     conditions.push(eq(projectsTable.projectMode, mode));
   }
@@ -312,48 +319,60 @@ router.post("/projects", async (req, res): Promise<void> => {
   const sealedRuntimePort = resolveZeroProjectRuntimePort(process.env);
   const sealedDeploymentType = resolveZeroProjectDeploymentType(process.env);
 
-  const [project] = await db
-    .insert(projectsTable)
-    .values({
-      ownerId: req.userId!,
-      workspaceId,
-      name: projectInput.name,
-      description: projectInput.description ?? null,
-      kind: projectInput.kind,
-      platform,
-      projectFormat,
-      stack: resolvedStack,
-      stackLocked,
-      runtimePort: sealedRuntimePort,
-      deploymentType: sealedDeploymentType,
-      // Task #738 — agentic projects get a real Fly container + Neon Postgres.
-      // The frontend mode selector explicitly sets builderMode; default to
-      // "agentic" when not provided (preserves backwards compatibility).
-      builderMode: requestedBuilderMode ?? "agentic",
-      // Start as 'provisioning' only when both Fly + Neon tokens are present.
-      // Without them the background job degrades to 'idle' anyway, but only
-      // after an async delay — setting 'idle' here avoids the workspace banner
-      // flashing "Your project is being set up" before the job runs.
-      provisioningStatus:
-        (requestedBuilderMode ?? "agentic") === "agentic" &&
-        containerLayerOperational &&
-        (!requiresDirectDatabase || Boolean(process.env.NEON_API_KEY))
-          ? "provisioning"
-          : "idle",
-      lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
-      lastTaskSummaryProvenance: initialPrompt
-        ? projectSummaryProvenance({
-            sourceKind: "system",
-            sourceIdentity: "project-create:initial-prompt",
-            actorUserId: req.userId,
-            content: `Initial idea: ${initialPrompt.slice(0, 120)}`,
-          })
-        : null,
-      chipLabel: chipLabel ?? null,
-      projectMode: mode ?? "builder",
-      requireCommandApproval: true,
-    })
-    .returning();
+  const projectRows = await withProjectWorkspaceAdmission(
+    { workspaceId, userId: req.userId! },
+    async (tx) =>
+      tx
+        .insert(projectsTable)
+        .values({
+          ownerId: req.userId!,
+          workspaceId,
+          name: projectInput.name,
+          description: projectInput.description ?? null,
+          kind: projectInput.kind,
+          platform,
+          projectFormat,
+          stack: resolvedStack,
+          stackLocked,
+          runtimePort: sealedRuntimePort,
+          deploymentType: sealedDeploymentType,
+          // Task #738 — agentic projects get a real Fly container + Neon Postgres.
+          // The frontend mode selector explicitly sets builderMode; default to
+          // "agentic" when not provided (preserves backwards compatibility).
+          builderMode: requestedBuilderMode ?? "agentic",
+          // Start as 'provisioning' only when both Fly + Neon tokens are present.
+          // Without them the background job degrades to 'idle' anyway, but only
+          // after an async delay — setting 'idle' here avoids the workspace banner
+          // flashing "Your project is being set up" before the job runs.
+          provisioningStatus:
+            (requestedBuilderMode ?? "agentic") === "agentic" &&
+            containerLayerOperational &&
+            (!requiresDirectDatabase || Boolean(process.env.NEON_API_KEY))
+              ? "provisioning"
+              : "idle",
+          lastTaskSummary: initialPrompt ? `Initial idea: ${initialPrompt.slice(0, 120)}` : null,
+          lastTaskSummaryProvenance: initialPrompt
+            ? projectSummaryProvenance({
+                sourceKind: "system",
+                sourceIdentity: "project-create:initial-prompt",
+                actorUserId: req.userId,
+                content: `Initial idea: ${initialPrompt.slice(0, 120)}`,
+              })
+            : null,
+          chipLabel: chipLabel ?? null,
+          projectMode: mode ?? "builder",
+          requireCommandApproval: true,
+        })
+        .returning(),
+  ).catch((error: unknown) => {
+    if (error instanceof WorkspaceAdmissionError) {
+      res.status(409).json({ error: error.code });
+      return null;
+    }
+    throw error;
+  });
+  if (!projectRows) return;
+  const [project] = projectRows;
 
   if (!project) {
     res.status(500).json({ error: "Failed to create project" });

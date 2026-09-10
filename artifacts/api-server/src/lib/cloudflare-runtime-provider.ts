@@ -83,6 +83,9 @@ import {
   type ProductionArtifactPromotingTenantRuntimeProvider,
   type ProductionRouteInventoryTenantRuntimeProvider,
   type ProductionDatabaseCapabilityTenantRuntimeProvider,
+  type ProjectPreviewCaptureInput,
+  type ProjectPreviewCaptureOptions,
+  type ProjectPreviewCapturingTenantRuntimeProvider,
 } from "./tenant-runtime-provider";
 
 type CloudflareConfig = NonNullable<TenantRuntimeConfig["cloudflare"]>;
@@ -340,7 +343,8 @@ export class CloudflareRuntimeProvider
     ZeroGenerationTenantRuntimeProvider,
     ProductionArtifactPromotingTenantRuntimeProvider,
     ProductionRouteInventoryTenantRuntimeProvider,
-    ProductionDatabaseCapabilityTenantRuntimeProvider
+    ProductionDatabaseCapabilityTenantRuntimeProvider,
+    ProjectPreviewCapturingTenantRuntimeProvider
 {
   readonly providerId = "cloudflare";
   private subsystemStatus: RuntimeSubsystemStatus | null = null;
@@ -563,6 +567,8 @@ export class CloudflareRuntimeProvider
   }
 
   private async requestEncoded<T>(input: {
+    /** Only the single-attempt, fixed-route preview capability uses a 45s bound. */
+    previewCaptureTransport?: boolean;
     method: string;
     path: string;
     body: string | Uint8Array;
@@ -598,7 +604,10 @@ export class CloudflareRuntimeProvider
           idempotencyKey,
         });
         const transportTimeoutMs = positiveIntegerTimerMs(
-          Math.min(input.transportTimeoutMs ?? REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS),
+          Math.min(
+            input.transportTimeoutMs ?? REQUEST_TIMEOUT_MS,
+            input.previewCaptureTransport ? 45_000 : REQUEST_TIMEOUT_MS,
+          ),
         );
         if (
           transportTimeoutMs === null ||
@@ -1438,6 +1447,78 @@ export class CloudflareRuntimeProvider
         });
     }
     return toInfo(runtime);
+  }
+
+  async captureProjectPreview(
+    input: ProjectPreviewCaptureInput,
+    options: ProjectPreviewCaptureOptions,
+  ): Promise<unknown> {
+    if (
+      !Number.isSafeInteger(input.projectId) ||
+      input.projectId < 1 ||
+      input.projectId > 2_147_483_647 ||
+      input.route !== "/" ||
+      input.viewport?.width !== 1280 ||
+      input.viewport?.height !== 800 ||
+      typeof input.manifestRevision !== "string" ||
+      !input.manifestRevision.trim() ||
+      !/^[a-f0-9]{64}$/u.test(input.sealedArtifactSha256) ||
+      !/^[A-Za-z0-9_-]{16,128}$/u.test(options.idempotencyKey)
+    ) {
+      throw new CloudflareRuntimeControlError(
+        400,
+        "invalid_project_preview_capture",
+        false,
+        "Capture requires a project-bound witness and fixed viewport",
+      );
+    }
+    const locator = await this.locator(input.runtimeIdentity, input.projectId);
+    if (locator.role !== "preview" || locator.slot !== "primary") {
+      throw new CloudflareRuntimeControlError(
+        400,
+        "invalid_project_preview_capture",
+        false,
+        "Capture requires the project's primary preview runtime",
+      );
+    }
+    const timeoutMs = options.timeoutMs ?? 45_000;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < CLOUDFLARE_RUNTIME_MIN_TRANSPORT_DISPATCH_MS) {
+      throw new CloudflareRuntimeControlError(
+        400,
+        "invalid_project_preview_capture",
+        false,
+        "Capture timeout is invalid",
+      );
+    }
+    if (options.signal?.aborted) {
+      throw new CloudflareRuntimeControlError(
+        499,
+        "control_operation_cancelled",
+        false,
+        "Preview capture was cancelled",
+      );
+    }
+    // Unlike control mutations, screenshot bytes are deliberately not persisted
+    // in idempotency receipts. A transport retry could start another paid render.
+    // Send once; only the durable asset coordinator can authorize another attempt.
+    return this.requestEncoded({
+      method: "POST",
+      path: `${CONTROL_API_PREFIX}/projects/${input.projectId}/preview-capture`,
+      body: JSON.stringify({
+        runtimeIdentity: input.runtimeIdentity,
+        manifestRevision: input.manifestRevision,
+        sealedArtifactSha256: input.sealedArtifactSha256,
+        route: input.route,
+        viewport: { width: 1280, height: 800 },
+      }),
+      contentType: "application/json",
+      idempotencyKey: options.idempotencyKey,
+      signal: options.signal,
+      transportTimeoutMs: Math.min(timeoutMs, 45_000),
+      previewCaptureTransport: true,
+      retryDelaysMs: [],
+      parse: { parse: (value: unknown) => value },
+    });
   }
 
   async zeroGenerationControlRequest(input: {

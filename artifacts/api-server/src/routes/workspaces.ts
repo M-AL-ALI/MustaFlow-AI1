@@ -3,6 +3,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, workspacesTable } from "@workspace/db";
 import { z } from "zod";
 import { createOwnedWorkspace } from "../lib/workspace-foundation";
+import { retireEmptyWorkspace } from "../lib/workspace-lifecycle";
 
 const router: IRouter = Router();
 
@@ -138,34 +139,36 @@ router.delete("/workspaces/:id", async (req, res): Promise<void> => {
     res.status(401).json({ error: "Unauthenticated" });
     return;
   }
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
+  const rawId = req.params.id;
+  const id = Number(rawId);
+  if (
+    typeof rawId !== "string" ||
+    !/^[0-9]+$/.test(rawId) ||
+    !Number.isInteger(id) ||
+    id < 1 ||
+    id > 2147483647
+  ) {
     res.status(400).json({ error: "Invalid id" });
     return;
   }
 
   const userId = req.userId;
 
-  const existing = await db
-    .select()
-    .from(workspacesTable)
-    .where(and(eq(workspacesTable.ownerUserId, userId), activeWorkspaces));
-
-  if (existing.length <= 1) {
+  const outcome = await retireEmptyWorkspace({ workspaceId: id, userId });
+  if (outcome === "not-found") {
+    res.status(404).json({ error: "Workspace not found" });
+    return;
+  }
+  if (outcome === "only-workspace") {
     res.status(400).json({ error: "Cannot delete your only workspace" });
     return;
   }
-
-  const [workspace] = await db
-    .update(workspacesTable)
-    .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(
-      and(eq(workspacesTable.id, id), eq(workspacesTable.ownerUserId, userId), activeWorkspaces),
-    )
-    .returning();
-
-  if (!workspace) {
-    res.status(404).json({ error: "Workspace not found" });
+  if (outcome === "projects-remain") {
+    res.status(409).json({
+      error:
+        "This workspace still contains projects, including any in Trash. Resolve those projects before deleting the workspace.",
+      code: "workspace_projects_remain",
+    });
     return;
   }
   res.json({ deleted: true });

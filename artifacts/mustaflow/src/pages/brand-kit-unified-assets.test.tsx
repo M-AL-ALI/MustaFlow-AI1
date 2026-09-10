@@ -10,8 +10,10 @@ const brandPill = readFileSync(
 
 describe("brand kit unified asset UI", () => {
   it("uploads the logo through the shared account asset pipeline and marks its role", () => {
-    expect(memoryPage).toContain('import { uploadAccountAsset } from "@/lib/asset-upload"');
-    expect(memoryPage).toContain('await uploadAccountAsset({ file, source: "picker" })');
+    expect(memoryPage).toContain("createAssetUploadLifetime");
+    expect(memoryPage).toContain(
+      'await uploadAccountAsset({ file, source: "picker", signal: scope.signal })',
+    );
     expect(memoryPage).toContain('JSON.stringify({ brandRole: "logo", altText: "Brand logo" })');
   });
 

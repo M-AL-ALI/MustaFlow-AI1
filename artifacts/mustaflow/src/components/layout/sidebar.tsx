@@ -1,4 +1,4 @@
-import { authFetch } from "@/lib/api-fetch";
+import { useAdminAccess } from "@/hooks/use-admin-access";
 import { Link, useLocation } from "wouter";
 import logoUrl from "/logo.png";
 import {
@@ -90,19 +90,8 @@ function NavGroup({
 }
 
 function AdminNavItem() {
-  const [staffRole, setStaffRole] = useState<string | null>(null);
-  const { isLoaded, isSignedIn } = useClerkUser();
+  const { isAdmin, role: staffRole } = useAdminAccess();
   const [location] = useLocation();
-
-  useEffect(() => {
-    if (!isLoaded || !isSignedIn) return;
-    authFetch("/api/admin/me")
-      .then((r) => (r.ok ? (r.json() as Promise<{ isAdmin: boolean; role: string }>) : null))
-      .then((data) => {
-        if (data?.isAdmin) setStaffRole(data.role);
-      })
-      .catch(() => {});
-  }, [isLoaded, isSignedIn]);
 
   const newTicketsQuery = useListAdminSupportTickets(
     { limit: 1 },
@@ -123,7 +112,7 @@ function AdminNavItem() {
     staffRole === "owner" || staffRole === "operator" || staffRole === "support";
   useAdminTicketAlerts(canViewSupport);
 
-  if (!staffRole) return null;
+  if (!isAdmin) return null;
 
   const adminActive = location === "/admin";
   const supportActive = location === "/admin/support" || location.startsWith("/admin/support");

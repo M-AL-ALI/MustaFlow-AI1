@@ -14,6 +14,7 @@ import {
   Rocket,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useBillingAccount } from "@/lib/billing-account-lifetime";
 import { useNabuflowState } from "./shared";
 import { OverviewSection } from "./overview";
 import { PlansSection } from "./plans";
@@ -56,13 +57,13 @@ function NavLinks({
             data-testid={`billing-nav-${s.slug || "overview"}`}
             aria-current={isActive ? "page" : undefined}
             className={cn(
-              "flex items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-[13px] transition-colors no-underline",
+              "flex min-h-10 items-center gap-2.5 whitespace-nowrap rounded-xl px-3 py-2 text-[13px] transition-colors no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               isActive
                 ? "bg-primary/10 font-semibold text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
-            <Icon className="h-4 w-4 shrink-0" />
+            <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
             {s.label}
           </Link>
         );
@@ -72,6 +73,12 @@ function NavLinks({
 }
 
 export default function BillingUsagePage() {
+  const account = useBillingAccount();
+  if (!account) return <p role="status">Your account must be ready to view billing.</p>;
+  return <AccountBillingUsagePage key={account.key} />;
+}
+
+function AccountBillingUsagePage() {
   const [, params] = useRoute("/billing/:section?");
   const search = useSearch();
   const { data: state } = useNabuflowState();
@@ -106,10 +113,15 @@ export default function BillingUsagePage() {
       className="mx-auto w-full max-w-6xl px-4 pb-16 pt-4 md:px-8"
       data-testid="billing-usage-page"
     >
-      <header className="mb-5">
-        <h1 className="text-xl font-bold tracking-tight text-foreground">Billing &amp; Usage</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Your plan, build usage, payment method and spending limits — all in one place.
+      <header className="mb-6 rounded-2xl border border-border bg-gradient-to-br from-card via-card to-muted/40 px-5 py-6 md:px-7">
+        <p className="mb-2 text-xs font-medium uppercase tracking-widest text-muted-foreground">
+          Account billing
+        </p>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
+          Billing &amp; Usage
+        </h1>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Understand your credit balance, review recorded usage, and manage what you spend.
         </p>
       </header>
 
@@ -122,7 +134,7 @@ export default function BillingUsagePage() {
       {state?.exempt && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Your account is exempt from billing limits — nothing here will ever block your builds.
+          Your account is currently exempt from billing limits.
         </div>
       )}
       {showDunningBanner && (

@@ -314,6 +314,17 @@ async function admitResponseProjectLifecycleSession(
     | ActiveProjectLifecycleSession
     | undefined;
   if (existing) {
+    const existingState = (res.locals as Record<string, unknown>)[LIFECYCLE_SESSION_STATE_LOCAL] as
+      | ResponseProjectLifecycleState
+      | undefined;
+    if (
+      res.destroyed ||
+      res.writableEnded ||
+      existingState?.responseEnded ||
+      existingState?.releaseStarted
+    ) {
+      return;
+    }
     if (existing.projectId !== projectId) {
       res.status(404).json({ error: "Project not found" });
       return;
@@ -322,7 +333,26 @@ async function admitResponseProjectLifecycleSession(
     return;
   }
 
-  const session = await acquireProjectLifecycleSession(projectId);
+  // Observe disconnects before the asynchronous pool/lock acquisition starts.
+  // Registering only after acquisition misses a close and can retain the lock
+  // forever, because no future response event will mark that session ended.
+  let endedWhileAcquiring = res.destroyed || res.writableEnded;
+  const markAcquisitionEnded = (): void => {
+    endedWhileAcquiring = true;
+  };
+  res.once("finish", markAcquisitionEnded);
+  res.once("close", markAcquisitionEnded);
+  let session: ActiveProjectLifecycleSession | null;
+  try {
+    session = await acquireProjectLifecycleSession(projectId);
+  } finally {
+    res.off("finish", markAcquisitionEnded);
+    res.off("close", markAcquisitionEnded);
+  }
+  if (endedWhileAcquiring || res.destroyed || res.writableEnded) {
+    await session?.release();
+    return;
+  }
   if (!session) {
     res.status(404).json({ error: "Project not found" });
     return;

@@ -89,4 +89,33 @@ describe("authFetch bearer-token attachment (same-origin guard)", () => {
     expect(authHeader()).toBeNull();
     expect(lastInit().credentials).toBe("include");
   });
+
+  it("rechecks an operation guard after token retrieval, before dispatch", async () => {
+    let resolve!: (value: string) => void;
+    vi.mocked(getAuthToken).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    let current = true;
+    const request = authFetch("/api/credits", {}, () => {
+      if (!current) throw new DOMException("Account changed", "AbortError");
+    });
+    const result = expect(request).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.resolve();
+    current = false;
+    resolve("new-account-token");
+    await result;
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not acquire authentication or dispatch a pre-cancelled request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(authFetch("/api/credits", { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(getAuthToken).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
 });

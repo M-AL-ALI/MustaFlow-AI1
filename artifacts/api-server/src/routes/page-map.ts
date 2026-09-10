@@ -1,148 +1,131 @@
-import { Router, type IRouter } from "express";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { db, projectsTable, projectFilesTable } from "@workspace/db";
+import { Router, type IRouter, type RequestHandler } from "express";
 import { requireProjectOwnership } from "../lib/auth";
+import { extractPageMapForFiles, type PageMapData } from "../lib/page-map";
+import { pageMapRepository, type PageMapRepository } from "../lib/page-map-repository";
 import {
-  extractPageMapForFiles,
-  type PageMapData,
-  type PageMapPlatform,
-  EMPTY_PAGE_MAP,
-} from "../lib/page-map";
+  pageMapUpdateSchema,
+  parseStoredPageMap,
+  PageMapAnalysisValidationError,
+} from "../lib/page-map-validation";
+import { pageMapRevision } from "../lib/page-map-revision";
+import { reconcilePageMapPlatformUpdate } from "../lib/page-map-transition";
+import {
+  requireActiveProjectLifecycleSession,
+  holdResponseProjectLifecycleSession,
+} from "../lib/project-lifecycle";
 
-const router: IRouter = Router();
+const conflictMessage =
+  "The app or map changed during this operation. Refresh the map before trying again.";
 
-const activeProjects = isNull(projectsTable.deletedAt);
-
-function parseMapData(raw: unknown): PageMapData {
-  if (!raw || typeof raw !== "object") return EMPTY_PAGE_MAP;
-  const r = raw as Record<string, unknown>;
-  const parsePlatform = (p: unknown): PageMapPlatform => {
-    if (!p || typeof p !== "object") return { nodes: [], edges: [] };
-    const pl = p as Record<string, unknown>;
-    return {
-      nodes: Array.isArray(pl.nodes) ? (pl.nodes as PageMapPlatform["nodes"]) : [],
-      edges: Array.isArray(pl.edges) ? (pl.edges as PageMapPlatform["edges"]) : [],
-    };
-  };
-  return {
-    web: parsePlatform(r.web),
-    ios: parsePlatform(r.ios),
-    android: parsePlatform(r.android),
+function withLifecycleHold(handler: RequestHandler): RequestHandler {
+  return async (req, res, next) => {
+    const release = holdResponseProjectLifecycleSession(res);
+    try {
+      await handler(req, res, next);
+    } finally {
+      await release();
+    }
   };
 }
 
-router.get("/projects/:id/page-map", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-
-  const [project] = await db
-    .select({ pageMapData: projectsTable.pageMapData })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), activeProjects));
-
-  if (!project) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-
-  const mapData = parseMapData(project.pageMapData);
-  res.json({ pageMapData: mapData });
-});
-
-router.put("/projects/:id/page-map", requireProjectOwnership, async (req, res): Promise<void> => {
-  const projectId = Number(req.params.id);
-
-  const body = req.body as Partial<PageMapData>;
-  if (!body || typeof body !== "object") {
-    res.status(400).json({ error: "Invalid page map payload" });
-    return;
-  }
-
-  const [existing] = await db
-    .select({ pageMapData: projectsTable.pageMapData })
-    .from(projectsTable)
-    .where(and(eq(projectsTable.id, projectId), activeProjects));
-
-  if (!existing) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-
-  const current = parseMapData(existing.pageMapData);
-  const merged: PageMapData = {
-    web: body.web ?? current.web,
-    ios: body.ios ?? current.ios,
-    android: body.android ?? current.android,
-  };
-
-  await db
-    .update(projectsTable)
-    .set({ pageMapData: merged as unknown as Record<string, unknown>, updatedAt: sql`now()` })
-    .where(and(eq(projectsTable.id, projectId), activeProjects));
-
-  req.log.info({ projectId }, "Page map updated");
-  res.json({ pageMapData: merged });
-});
-
-router.post(
-  "/projects/:id/page-map/analyze",
-  requireProjectOwnership,
-  async (req, res): Promise<void> => {
-    const projectId = Number(req.params.id);
-    const platform = (req.query.platform as string) ?? "web";
-
-    if (!["web", "ios", "android"].includes(platform)) {
-      res.status(400).json({ error: "platform must be web, ios, or android" });
+export function createPageMapRouter(
+  repository: PageMapRepository = pageMapRepository,
+  ownership: RequestHandler = requireProjectOwnership,
+): IRouter {
+  const router: IRouter = Router();
+  // Express has already decoded the parameter. Reject aliases before the shared
+  // ownership middleware and every repository operation can interpret it differently.
+  router.param("id", (_req, res, next, value: string) => {
+    const id = Number(value);
+    if (!/^[0-9]+$/.test(value) || !Number.isInteger(id) || id < 1 || id > 2147483647) {
+      res.status(404).json({ error: "Project not found" });
       return;
     }
-
-    const [project] = await db
-      .select({ pageMapData: projectsTable.pageMapData })
-      .from(projectsTable)
-      .where(and(eq(projectsTable.id, projectId), activeProjects));
-
+    next();
+  });
+  router.get("/projects/:id/page-map", ownership, async (req, res): Promise<void> => {
+    const project = await repository.read(Number(req.params.id));
     if (!project) {
       res.status(404).json({ error: "Project not found" });
       return;
     }
-
-    const currentMapData = parseMapData(project.pageMapData);
-    const existingPlatform = currentMapData[platform as "web" | "ios" | "android"];
-
-    const files = await db
-      .select()
-      .from(projectFilesTable)
-      .where(eq(projectFilesTable.projectId, projectId));
-
-    const builderFiles = files.map((f) => ({
-      path: f.path,
-      content: f.content,
-      mimeType: f.mimeType,
-    }));
-
-    req.log.info({ projectId, platform, fileCount: files.length }, "Analyzing page map");
-
-    const updatedPlatform = await extractPageMapForFiles(
-      builderFiles,
-      platform as "web" | "ios" | "android",
-      existingPlatform,
-    );
-
-    const newMapData: PageMapData = {
-      ...currentMapData,
-      [platform]: updatedPlatform,
-    };
-
-    await db
-      .update(projectsTable)
-      .set({ pageMapData: newMapData as unknown as Record<string, unknown>, updatedAt: sql`now()` })
-      .where(and(eq(projectsTable.id, projectId), activeProjects));
-
-    req.log.info(
-      { projectId, platform, nodeCount: updatedPlatform.nodes.length },
-      "Page map analyzed",
-    );
-    res.json({ pageMapData: newMapData });
-  },
-);
-
-export default router;
+    res.json({
+      pageMapData: parseStoredPageMap(project.pageMapData),
+      revision: pageMapRevision(project.pageMapData),
+    });
+  });
+  router.put(
+    "/projects/:id/page-map",
+    ownership,
+    requireActiveProjectLifecycleSession,
+    withLifecycleHold(async (req, res): Promise<void> => {
+      const parsed = pageMapUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Invalid page map payload" });
+        return;
+      }
+      const projectId = Number(req.params.id);
+      const project = await repository.read(projectId);
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      if (parsed.data.expectedRevision !== pageMapRevision(project.pageMapData)) {
+        res.status(409).json({ error: conflictMessage });
+        return;
+      }
+      const current = parseStoredPageMap(project.pageMapData);
+      const merged: PageMapData = {
+        web: reconcilePageMapPlatformUpdate(current.web, parsed.data.web),
+        ios: reconcilePageMapPlatformUpdate(current.ios, parsed.data.ios),
+        android: reconcilePageMapPlatformUpdate(current.android, parsed.data.android),
+      };
+      if (!(await repository.write(projectId, merged, project.pageMapData))) {
+        res.status(409).json({ error: conflictMessage });
+        return;
+      }
+      req.log.info({ projectId }, "Page map updated");
+      res.json({ pageMapData: merged, revision: pageMapRevision(merged) });
+    }),
+  );
+  router.post(
+    "/projects/:id/page-map/analyze",
+    ownership,
+    requireActiveProjectLifecycleSession,
+    withLifecycleHold(async (req, res): Promise<void> => {
+      const projectId = Number(req.params.id);
+      const platform = req.query.platform ?? "web";
+      if (platform !== "web" && platform !== "ios" && platform !== "android") {
+        res.status(400).json({ error: "platform must be web, ios, or android" });
+        return;
+      }
+      const project = await repository.read(projectId);
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      const current = parseStoredPageMap(project.pageMapData);
+      const snapshot = await repository.readFiles(projectId);
+      let updated;
+      try {
+        updated = await extractPageMapForFiles(snapshot.files, platform, current[platform]);
+      } catch (error) {
+        if (!(error instanceof PageMapAnalysisValidationError)) throw error;
+        res.status(422).json({
+          error:
+            "This analysis exceeds the supported map limits or has conflicting page identities. Your saved map was not changed.",
+        });
+        return;
+      }
+      const next: PageMapData = { ...current, [platform]: updated };
+      if (!(await repository.write(projectId, next, project.pageMapData, snapshot.revision))) {
+        res.status(409).json({ error: conflictMessage });
+        return;
+      }
+      req.log.info({ projectId, platform, nodeCount: updated.nodes.length }, "Page map analyzed");
+      res.json({ pageMapData: next, revision: pageMapRevision(next) });
+    }),
+  );
+  return router;
+}
+export default createPageMapRouter();

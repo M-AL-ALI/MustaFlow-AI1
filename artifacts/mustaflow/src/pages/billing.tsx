@@ -35,6 +35,7 @@ import { Link, useSearch } from "wouter";
 import { BuilderCreditCostList } from "@/components/billing/builder-credit-cost-list";
 import { SupportErrorMessage } from "@/components/support-report-link";
 import { selectBillingFailureError } from "@/lib/user-visible-errors";
+import { formatBillingAmount } from "./billing-usage/presentation";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -148,6 +149,11 @@ export default function BillingPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
+  const [invoicesError, setInvoicesError] = useState(false);
+  const [usageLoading, setUsageLoading] = useState(true);
+  const [usageError, setUsageError] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [_planCheckoutLoading, _setPlanCheckoutLoading] = useState<string | null>(null);
@@ -181,42 +187,56 @@ export default function BillingPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setDataError(null);
     try {
-      const [balRes, pkgRes, txRes, subRes] = await Promise.all([
-        authFetch("/api/billing/credits"),
-        authFetch("/api/billing/packages"),
-        authFetch("/api/billing/transactions"),
-        authFetch("/api/billing/subscription"),
-      ]);
-      if (balRes.ok) setBalance((await balRes.json()) as CreditsBalance);
-      if (pkgRes.ok) setPackages((await pkgRes.json()) as PackagesResponse);
-      if (txRes.ok)
-        setTransactions(
-          ((await txRes.json()) as { transactions: CreditTransaction[] }).transactions,
-        );
-      if (subRes.ok) setSubscription((await subRes.json()) as SubscriptionResponse);
+      const [balData, pkgData, txData, subData] = await Promise.all(
+        [
+          authFetch("/api/billing/credits"),
+          authFetch("/api/billing/packages"),
+          authFetch("/api/billing/transactions"),
+          authFetch("/api/billing/subscription"),
+        ].map(async (request) => {
+          const response = await request;
+          if (!response.ok) throw new Error("Billing read failed");
+          return response.json();
+        }),
+      );
+      setBalance(balData as CreditsBalance);
+      setPackages(pkgData as PackagesResponse);
+      setTransactions((txData as { transactions: CreditTransaction[] }).transactions);
+      setSubscription(subData as SubscriptionResponse);
     } catch {
-      /* ignore */
+      setDataError("Your current balance, plans, and transactions could not be loaded.");
     } finally {
       setLoading(false);
     }
   }, []);
 
   const fetchInvoices = useCallback(async () => {
+    setInvoicesLoading(true);
+    setInvoicesError(false);
     try {
       const res = await authFetch("/api/billing/invoices");
-      if (res.ok) setInvoices(((await res.json()) as { invoices: Invoice[] }).invoices);
+      if (!res.ok) throw new Error("Invoice read failed");
+      setInvoices(((await res.json()) as { invoices: Invoice[] }).invoices);
     } catch {
-      /* ignore */
+      setInvoicesError(true);
+    } finally {
+      setInvoicesLoading(false);
     }
   }, []);
 
   const fetchUsage = useCallback(async () => {
+    setUsageLoading(true);
+    setUsageError(false);
     try {
       const res = await authFetch("/api/billing/usage");
-      if (res.ok) setUsage((await res.json()) as UsageData);
+      if (!res.ok) throw new Error("Usage read failed");
+      setUsage((await res.json()) as UsageData);
     } catch {
-      /* ignore */
+      setUsageError(true);
+    } finally {
+      setUsageLoading(false);
     }
   }, []);
 
@@ -282,8 +302,13 @@ export default function BillingPage() {
   const starterBalance = STARTER_CREDITS;
   const balanceNum = balance?.balance ?? 0;
   const lowCreditPct = starterBalance > 0 ? (balanceNum / starterBalance) * 100 : 100;
-  const showLowCreditWarning = !loading && balanceNum > 0 && lowCreditPct <= LOW_CREDIT_WARNING_PCT;
-  const showZeroWarning = !loading && balanceNum === 0;
+  const showLowCreditWarning =
+    !loading &&
+    !dataError &&
+    balance != null &&
+    balanceNum > 0 &&
+    lowCreditPct <= LOW_CREDIT_WARNING_PCT;
+  const showZeroWarning = !loading && !dataError && balance != null && balanceNum === 0;
 
   async function handleCheckout(pkg: CreditPackage) {
     if (!pkg.available) return;
@@ -438,7 +463,7 @@ export default function BillingPage() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-4xl mx-auto px-4 py-8 space-y-6 sm:px-6 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-ring [&_a]:focus-visible:outline-none [&_a]:focus-visible:ring-2 [&_a]:focus-visible:ring-ring">
         {/* Pointer to the consolidated NabuFlow builder billing section */}
         <div
           className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2"
@@ -454,7 +479,7 @@ export default function BillingPage() {
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-4 rounded-2xl border border-border bg-gradient-to-br from-card to-muted/30 p-5">
           <div className="flex items-center gap-3">
             <CreditCard className="h-6 w-6 text-primary" />
             <div>
@@ -480,7 +505,16 @@ export default function BillingPage() {
               </button>
             )}
             <button
-              onClick={() => void fetchData()}
+              onClick={() => {
+                void fetchData();
+                if (activeTab === "invoices") void fetchInvoices();
+                if (activeTab === "usage") void fetchUsage();
+              }}
+              disabled={
+                loading ||
+                (activeTab === "invoices" && invoicesLoading) ||
+                (activeTab === "usage" && usageLoading)
+              }
               className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <RefreshCw className="h-3.5 w-3.5" />
@@ -491,11 +525,13 @@ export default function BillingPage() {
 
         {/* Alerts */}
         {successParam && (
-          <div className="border border-green-500/20 bg-green-500/10 rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-green-600">
-            <CheckCircle className="h-4 w-4 shrink-0" />
-            {successParam === "subscribed" || successParam === "1"
-              ? "Payment successful! Your plan and credits have been updated."
-              : "Payment successful! Your credits have been added."}
+          <div
+            role="status"
+            className="border border-border bg-muted/40 rounded-xl px-4 py-3 flex items-center gap-2.5 text-sm text-muted-foreground"
+          >
+            <History aria-hidden="true" className="h-4 w-4 shrink-0" />
+            You returned from checkout. Payment and plan updates may still be processing. Refresh to
+            see the latest balance and subscription status.
           </div>
         )}
 
@@ -503,7 +539,7 @@ export default function BillingPage() {
           <div className="border border-destructive/30 bg-destructive/10 rounded-xl px-4 py-3 flex items-start gap-2.5 text-sm text-destructive">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
             <div>
-              <span className="font-semibold">You're out of credits.</span> Builds are paused.{" "}
+              <span className="font-semibold">Your recorded balance is zero build credits.</span>{" "}
               <button className="underline font-medium" onClick={() => setActiveTab("overview")}>
                 Top up now
               </button>{" "}
@@ -563,6 +599,8 @@ export default function BillingPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                type="button"
+                aria-pressed={activeTab === tab.id}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors",
                   activeTab === tab.id
@@ -577,7 +615,23 @@ export default function BillingPage() {
           })}
         </div>
 
-        {activeTab === "overview" && (
+        {dataError && (activeTab === "overview" || activeTab === "subscription") && (
+          <div className="rounded-xl border border-border bg-card p-5">
+            <p role="alert" className="text-sm text-muted-foreground">
+              {dataError} A zero balance or empty history cannot be confirmed.
+            </p>
+            <button
+              type="button"
+              onClick={() => void fetchData()}
+              disabled={loading}
+              className="mt-3 min-h-10 rounded-lg border border-border px-3 text-sm font-medium"
+            >
+              Retry billing
+            </button>
+          </div>
+        )}
+
+        {activeTab === "overview" && !dataError && (
           <OverviewTab
             balance={balance}
             packages={packages}
@@ -588,7 +642,7 @@ export default function BillingPage() {
           />
         )}
 
-        {activeTab === "subscription" && (
+        {activeTab === "subscription" && !dataError && (
           <SubscriptionTab
             subscription={subscription}
             loading={loading}
@@ -602,9 +656,27 @@ export default function BillingPage() {
           />
         )}
 
-        {activeTab === "usage" && <UsageTab usage={usage} />}
+        {activeTab === "usage" &&
+          (usageLoading ? (
+            <p role="status" className="py-8 text-sm text-muted-foreground">
+              Loading recorded usage...
+            </p>
+          ) : usageError || !usage ? (
+            <BillingReadError label="usage" onRetry={() => void fetchUsage()} />
+          ) : (
+            <UsageTab usage={usage} />
+          ))}
 
-        {activeTab === "invoices" && <InvoicesTab invoices={invoices} />}
+        {activeTab === "invoices" &&
+          (invoicesLoading ? (
+            <p role="status" className="py-8 text-sm text-muted-foreground">
+              Loading invoices...
+            </p>
+          ) : invoicesError ? (
+            <BillingReadError label="invoices" onRetry={() => void fetchInvoices()} />
+          ) : (
+            <InvoicesTab invoices={invoices} />
+          ))}
       </div>
     </div>
   );
@@ -721,6 +793,23 @@ function BillingPrivilegePlanSwitcher({ workspaceId }: { workspaceId?: number })
   );
 }
 
+function BillingReadError({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <p role="alert" className="text-sm text-muted-foreground">
+        Could not load {label}. Please retry to see your records.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-3 min-h-10 rounded-lg border border-border px-3 text-sm font-medium"
+      >
+        Retry {label}
+      </button>
+    </div>
+  );
+}
+
 function OverviewTab({
   balance,
   packages,
@@ -745,7 +834,7 @@ function OverviewTab({
             Current balance
           </p>
           <p className="text-4xl font-bold">
-            {loading ? "…" : (balance?.balance ?? 0).toLocaleString()}
+            {loading ? "Loading..." : balance ? balance.balance.toLocaleString() : "Unavailable"}
           </p>
           <p className="text-xs text-muted-foreground">build credits</p>
         </div>
@@ -756,10 +845,14 @@ function OverviewTab({
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         <div className="px-4 py-2.5 bg-muted/40 border-b border-border">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Credit costs per build
+            Build credit reference
           </h3>
         </div>
         <BuilderCreditCostList />
+        <p className="border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+          These reference costs do not confirm a charge. Transaction history shows recorded credit
+          debits and the balance after each entry.
+        </p>
       </div>
 
       {/* Credit packs */}
@@ -771,14 +864,23 @@ function OverviewTab({
               key={pkg.id}
               pkg={pkg}
               loading={checkoutLoading === pkg.id}
+              disabled={checkoutLoading !== null}
               stripeConfigured={packages?.stripeConfigured ?? false}
               onCheckout={() => onCheckout(pkg)}
             />
           ))}
           {loading && !packages && (
-            <div className="col-span-3 text-center text-sm text-muted-foreground py-4">
+            <div
+              role="status"
+              className="sm:col-span-3 text-center text-sm text-muted-foreground py-4"
+            >
               Loading…
             </div>
+          )}
+          {!loading && packages?.packages.length === 0 && (
+            <p className="sm:col-span-3 py-4 text-sm text-muted-foreground">
+              No credit packages are currently available.
+            </p>
           )}
         </div>
       </div>
@@ -815,7 +917,7 @@ function OverviewTab({
                     className={`font-semibold ${tx.amount > 0 ? "text-green-500" : "text-muted-foreground"}`}
                   >
                     {tx.amount > 0 ? "+" : ""}
-                    {tx.amount}
+                    {tx.amount} credits
                   </span>
                   {tx.receiptUrl && (
                     <a
@@ -1038,7 +1140,14 @@ function SubscriptionTab({
               {!isCurrent && isPaid && (
                 <button
                   onClick={() => onSubscribe(plan.id)}
-                  disabled={checkoutLoading === plan.id}
+                  disabled={
+                    checkoutLoading !== null ||
+                    cancelLoading ||
+                    portalLoading ||
+                    !plan.available ||
+                    !subscription?.stripeConfigured
+                  }
+                  aria-busy={checkoutLoading === plan.id}
                   className={cn(
                     "w-full py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors",
                     isHighlight
@@ -1047,10 +1156,16 @@ function SubscriptionTab({
                   )}
                 >
                   {checkoutLoading === plan.id ? (
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <>
+                      <RefreshCw aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> Opening
+                      checkout...
+                    </>
                   ) : (
                     <>
-                      Upgrade to {plan.name} <ArrowUpRight className="h-3 w-3" />
+                      {plan.available && subscription?.stripeConfigured
+                        ? `Review ${plan.name} in checkout`
+                        : "Checkout unavailable"}{" "}
+                      <ArrowUpRight className="h-3 w-3" />
                     </>
                   )}
                 </button>
@@ -1058,7 +1173,8 @@ function SubscriptionTab({
               {isCurrent && isPaid && !subscription?.cancelAtPeriodEnd && (
                 <button
                   onClick={onCancel}
-                  disabled={cancelLoading}
+                  disabled={cancelLoading || checkoutLoading !== null || portalLoading}
+                  aria-label={cancelLoading ? "Canceling plan" : "Cancel plan at period end"}
                   className="w-full py-2 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:bg-muted transition-colors"
                 >
                   {cancelLoading ? (
@@ -1130,7 +1246,7 @@ function UsageTab({ usage }: { usage: UsageData | null }) {
   return (
     <div className="space-y-6">
       {/* Summary stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           {
             label: "Credits spent (30d)",
@@ -1283,7 +1399,10 @@ function InvoicesTab({ invoices }: { invoices: Invoice[] }) {
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <div className="text-right">
-                <p className="font-semibold">${(inv.amountPaid / 100).toFixed(2)}</p>
+                <p className="font-semibold tabular-nums">
+                  {formatBillingAmount(inv.amountPaid, inv.currency)}
+                </p>
+                <p className="text-xs text-muted-foreground">Amount paid</p>
                 <p
                   className={cn(
                     "text-[10px] font-medium",
@@ -1300,6 +1419,7 @@ function InvoicesTab({ invoices }: { invoices: Invoice[] }) {
                     target="_blank"
                     rel="noopener noreferrer"
                     title="View invoice"
+                    aria-label={`View invoice ${inv.number ?? inv.id} (opens in a new tab)`}
                     className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
                   >
                     <ExternalLink className="h-3 w-3" />
@@ -1311,6 +1431,7 @@ function InvoicesTab({ invoices }: { invoices: Invoice[] }) {
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Download PDF"
+                    aria-label={`Download invoice ${inv.number ?? inv.id} PDF (opens in a new tab)`}
                     className="p-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
                   >
                     <Download className="h-3 w-3" />
@@ -1330,11 +1451,13 @@ function InvoicesTab({ invoices }: { invoices: Invoice[] }) {
 function PackageCard({
   pkg,
   loading,
+  disabled,
   stripeConfigured,
   onCheckout,
 }: {
   pkg: CreditPackage;
   loading: boolean;
+  disabled: boolean;
   stripeConfigured: boolean;
   onCheckout: () => void;
 }) {
@@ -1351,7 +1474,8 @@ function PackageCard({
       </div>
       <button
         onClick={onCheckout}
-        disabled={!stripeConfigured || loading}
+        disabled={!stripeConfigured || !pkg.available || disabled}
+        aria-busy={loading}
         className={cn(
           "w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors",
           !stripeConfigured
@@ -1360,12 +1484,15 @@ function PackageCard({
         )}
       >
         {loading ? (
-          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-        ) : !stripeConfigured ? (
-          "Coming soon"
+          <>
+            <RefreshCw aria-hidden="true" className="h-3.5 w-3.5 animate-spin" /> Opening
+            checkout...
+          </>
+        ) : !stripeConfigured || !pkg.available ? (
+          "Checkout unavailable"
         ) : (
           <>
-            Buy now <ExternalLink className="h-3 w-3" />
+            Review in checkout <ExternalLink className="h-3 w-3" />
           </>
         )}
       </button>

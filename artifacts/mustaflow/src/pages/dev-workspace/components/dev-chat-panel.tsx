@@ -43,7 +43,12 @@ import { useToast } from "@/hooks/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ZeroPromptQueueDrawer } from "@/pages/projects/components/zero-prompt-queue-drawer";
 import type { ZeroPromptQueueObservedPhase } from "@workspace/ora-contracts";
-import { uploadProjectAsset, type AssetUploadResult } from "@/lib/asset-upload";
+import {
+  createAssetUploadLifetime,
+  uploadProjectAsset,
+  type AssetUploadLifetime,
+  type AssetUploadResult,
+} from "@/lib/asset-upload";
 
 type AgentMode = "lite" | "eco" | "power" | "pro";
 
@@ -237,6 +242,15 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const uploadScopes = useRef(new Set<AssetUploadLifetime>());
+  useEffect(() => {
+    const activeScopes = uploadScopes.current;
+    return () => {
+      for (const scope of activeScopes) scope.dispose();
+      activeScopes.clear();
+    };
+  }, [projectId]);
+
   const sendMessage = useSendMessage();
   const rollbackVersion = useRollbackVersion();
 
@@ -386,13 +400,20 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
 
   // ── Image upload ───────────────────────────────────────────────────────────
   const uploadImage = useCallback(
-    async (file: File): Promise<AssetUploadResult | null> => {
-      if (file.size > MAX_IMAGE_BYTES) {
-        return null;
-      }
+    async (file: File, scope: AssetUploadLifetime): Promise<AssetUploadResult | null> => {
+      scope.assertCurrent();
+      if (file.size > MAX_IMAGE_BYTES) return null;
       try {
-        return await uploadProjectAsset({ projectId, file, source: "paste" });
+        const uploaded = await uploadProjectAsset({
+          projectId,
+          file,
+          source: "paste",
+          signal: scope.signal,
+        });
+        scope.assertCurrent();
+        return uploaded;
       } catch {
+        scope.assertCurrent();
         return null;
       }
     },
@@ -401,35 +422,62 @@ export function DevChatPanel({ projectId, onBuildComplete }: DevChatPanelProps) 
 
   const handleImageFiles = useCallback(
     async (files: File[]) => {
-      const imageFiles = files.filter((f) => f.type.startsWith("image/")).slice(0, 4);
-      if (imageFiles.length === 0) return;
-
-      const pendingItems: PendingImage[] = imageFiles.map((f) => ({
-        objectUrl: URL.createObjectURL(f),
-        file: f,
-        uploading: true,
-      }));
-      setImages((prev) => [...prev, ...pendingItems]);
-      setUploadingCount((n) => n + pendingItems.length);
-
-      for (let i = 0; i < imageFiles.length; i++) {
-        const file = imageFiles[i]!;
-        const objUrl = pendingItems[i]!.objectUrl;
-        const uploaded = await uploadImage(file);
-        setImages((prev) =>
-          prev.map((img) =>
-            img.objectUrl === objUrl
-              ? {
-                  ...img,
-                  uploading: false,
-                  uploadedUrl: uploaded?.contentUrl,
-                  assetId: uploaded?.assetId,
-                  error: uploaded ? undefined : "Upload failed",
-                }
-              : img,
-          ),
+      const scope = createAssetUploadLifetime();
+      uploadScopes.current.add(scope);
+      const pendingItems: PendingImage[] = [];
+      let remaining = 0;
+      let retired = false;
+      const retire = () => {
+        if (retired) return;
+        retired = true;
+        const urls = new Set(pendingItems.map((item) => item.objectUrl));
+        for (const url of urls) URL.revokeObjectURL(url);
+        setImages((current) => current.filter((item) => !urls.has(item.objectUrl)));
+        const count = remaining;
+        remaining = 0;
+        setUploadingCount((current) => Math.max(0, current - count));
+      };
+      scope.signal.addEventListener("abort", retire, { once: true });
+      try {
+        scope.assertCurrent();
+        const imageFiles = files.filter((f) => f.type.startsWith("image/")).slice(0, 4);
+        if (imageFiles.length === 0) return;
+        pendingItems.push(
+          ...imageFiles.map((file) => ({
+            objectUrl: URL.createObjectURL(file),
+            file,
+            uploading: true,
+          })),
         );
-        setUploadingCount((n) => Math.max(0, n - 1));
+        remaining = pendingItems.length;
+        setImages((current) => [...current, ...pendingItems]);
+        setUploadingCount((current) => current + pendingItems.length);
+        for (const item of pendingItems) {
+          scope.assertCurrent();
+          const uploaded = await uploadImage(item.file, scope);
+          scope.assertCurrent();
+          setImages((current) =>
+            current.map((image) =>
+              image.objectUrl === item.objectUrl
+                ? {
+                    ...image,
+                    uploading: false,
+                    uploadedUrl: uploaded?.contentUrl,
+                    assetId: uploaded?.assetId,
+                    error: uploaded ? undefined : "Upload failed",
+                  }
+                : image,
+            ),
+          );
+          remaining -= 1;
+          setUploadingCount((current) => Math.max(0, current - 1));
+        }
+      } catch {
+        retire();
+      } finally {
+        scope.signal.removeEventListener("abort", retire);
+        uploadScopes.current.delete(scope);
+        scope.dispose();
       }
     },
     [uploadImage],

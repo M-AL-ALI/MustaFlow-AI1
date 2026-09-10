@@ -1,8 +1,16 @@
-import { useState, useEffect } from "react";
-import { X, ArrowRight, Lock, CornerUpRight, ExternalLink, Trash2 } from "lucide-react";
+import { useState, useEffect, useId } from "react";
+import { X, ArrowRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ConnectionType } from "./page-edge";
+import {
+  copyPageMapTransition,
+  manualPageMapTransition,
+  transitionDraftError,
+  transitionEvidenceLabel,
+  transitionSummary,
+  type PageMapTransition,
+} from "./page-map-transition-model";
 
 export type PageMapEdgeState = {
   id: string;
@@ -10,181 +18,469 @@ export type PageMapEdgeState = {
   targetLabel: string;
   connectionType: ConnectionType;
   aiGenerated: boolean;
+  transition?: PageMapTransition;
+  unresolved?: boolean;
+  pending?: boolean;
 };
-
-const CONNECTION_TYPES: {
-  value: ConnectionType;
-  label: string;
-  description: string;
-  Icon: React.ElementType;
-  color: string;
-  border: string;
-  activeBg: string;
-}[] = [
-  {
-    value: "nav",
-    label: "Navigation",
-    description: "Standard page link or button",
-    Icon: ArrowRight,
-    color: "text-primary",
-    border: "border-primary/30",
-    activeBg: "bg-primary/10",
-  },
-  {
-    value: "auth-gate",
-    label: "Auth Gate",
-    description: "Requires login to access",
-    Icon: Lock,
-    color: "text-yellow-400",
-    border: "border-yellow-500/30",
-    activeBg: "bg-yellow-500/10",
-  },
-  {
-    value: "redirect",
-    label: "Redirect",
-    description: "Automatic redirect (e.g. after submit)",
-    Icon: CornerUpRight,
-    color: "text-foreground",
-    border: "border-border",
-    activeBg: "bg-muted",
-  },
-  {
-    value: "external",
-    label: "External Link",
-    description: "Opens outside the app",
-    Icon: ExternalLink,
-    color: "text-muted-foreground",
-    border: "border-border",
-    activeBg: "bg-muted/60",
-  },
-];
 
 type EdgeDetailPanelProps = {
   edge: PageMapEdgeState | null;
   onClose: () => void;
-  onSave: (edgeId: string, connectionType: ConnectionType) => void;
+  onSave: (edgeId: string, connectionType: ConnectionType, transition: PageMapTransition) => void;
   onDelete: (edgeId: string) => void;
+  onDraftStart?: () => void;
+  onDraftEnd?: () => void;
 };
 
-export function EdgeDetailPanel({ edge, onClose, onSave, onDelete }: EdgeDetailPanelProps) {
+const inputClass =
+  "w-full rounded-md border border-border bg-muted px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50";
+
+export function EdgeDetailPanel({
+  edge,
+  onClose,
+  onSave,
+  onDelete,
+  onDraftStart,
+  onDraftEnd,
+}: EdgeDetailPanelProps) {
+  const formId = useId();
   const [connectionType, setConnectionType] = useState<ConnectionType>("nav");
+  const [draft, setDraft] = useState<PageMapTransition>(() => copyPageMapTransition());
+  const [dirty, setDirty] = useState(false);
+  const [unknownText, setUnknownText] = useState("");
 
   useEffect(() => {
-    if (edge) {
-      setConnectionType(edge.connectionType);
-    }
+    setConnectionType(edge?.connectionType ?? "nav");
+    setDraft(copyPageMapTransition(edge?.transition));
+    setUnknownText(edge?.transition?.unknowns?.join("\n") ?? "");
+    setDirty(false);
   }, [edge]);
 
   if (!edge) return null;
-
-  const handleTypeChange = (type: ConnectionType) => {
-    setConnectionType(type);
-    onSave(edge.id, type);
+  const error = transitionDraftError(draft);
+  const displayed = dirty ? manualPageMapTransition(draft) : draft;
+  const change = (next: PageMapTransition) => {
+    onDraftStart?.();
+    setDirty(true);
+    setDraft(next);
   };
+  const discard = () => {
+    setConnectionType(edge.connectionType);
+    setDraft(copyPageMapTransition(edge.transition));
+    setUnknownText(edge.transition?.unknowns?.join("\n") ?? "");
+    setDirty(false);
+    onDraftEnd?.();
+  };
+  const close = () => {
+    onDraftEnd?.();
+    onClose();
+  };
+  const save = () => {
+    if (!dirty || error) return;
+    onSave(edge.id, connectionType, manualPageMapTransition(draft));
+    setDirty(false);
+    onDraftEnd?.();
+  };
+  const fieldId = (name: string) => formId + "-" + name;
 
   return (
-    <div
+    <aside
+      aria-label={edge.unresolved ? "Unresolved transition details" : "Transition details"}
       className={cn(
-        "absolute right-0 top-0 bottom-0 w-72 bg-card border-l border-border shadow-xl z-20",
-        "flex flex-col transition-transform duration-200",
-        edge ? "translate-x-0" : "translate-x-full",
+        "absolute right-0 top-0 bottom-0 z-20 w-80 max-w-full border-l border-border bg-card shadow-xl",
+        "flex flex-col",
       )}
     >
-      {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-border bg-card/80">
-        <div className="flex items-center gap-2 min-w-0">
-          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <span className="text-sm font-semibold text-foreground truncate">Connection</span>
-        </div>
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold">
+          {edge.unresolved ? "Unresolved transition" : "Transition"}
+        </h3>
         <button
-          onClick={onClose}
-          className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          type="button"
+          aria-label={dirty ? "Discard draft and close transition" : "Close transition details"}
+          onClick={close}
+          className="rounded p-1 text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
-
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {/* Route summary */}
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 border border-border rounded-lg px-3 py-2">
-          <span className="font-medium text-foreground truncate max-w-[90px]">
-            {edge.sourceLabel}
-          </span>
-          <ArrowRight className="h-3 w-3 shrink-0" />
-          <span className="font-medium text-foreground truncate max-w-[90px]">
-            {edge.targetLabel}
-          </span>
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-2 py-2 text-xs">
+          <span className="min-w-0 flex-1 break-words">{edge.sourceLabel}</span>
+          <ArrowRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 break-words">{edge.targetLabel}</span>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Map only. Saving these claims does not change app navigation or start generation.
+        </p>
+        <p className="break-words text-xs">{transitionSummary(displayed)}</p>
+        <p role="status" className="text-[11px] text-muted-foreground">
+          {dirty
+            ? "Manual draft; not saved"
+            : transitionEvidenceLabel(edge.transition, edge.pending)}
+        </p>
 
-        {/* Connection type */}
-        <div className="space-y-2">
-          <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-            Connection Type
-          </label>
-          <div className="space-y-1.5">
-            {CONNECTION_TYPES.map((ct) => {
-              const Icon = ct.Icon;
-              const active = connectionType === ct.value;
-              return (
-                <button
-                  key={ct.value}
-                  onClick={() => handleTypeChange(ct.value)}
-                  className={cn(
-                    "w-full flex items-start gap-3 px-3 py-2.5 rounded-lg border text-left transition-all",
-                    active
-                      ? `${ct.activeBg} ${ct.border} ring-1 ring-inset ${ct.border}`
-                      : "bg-muted/30 border-border hover:bg-muted/60",
-                  )}
-                >
-                  <div
-                    className={cn("mt-0.5 shrink-0", active ? ct.color : "text-muted-foreground")}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div
-                      className={cn("text-xs font-semibold", active ? ct.color : "text-foreground")}
-                    >
-                      {ct.label}
-                    </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5">{ct.description}</div>
-                  </div>
-                  {active && (
-                    <div
-                      className={cn(
-                        "ml-auto mt-0.5 w-1.5 h-1.5 rounded-full shrink-0",
-                        ct.color.replace("text-", "bg-"),
-                      )}
-                    />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Metadata badge */}
-        {edge.aiGenerated && (
-          <div className="flex flex-wrap gap-1.5">
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-semibold">
-              AI-generated
-            </span>
+        {!edge.unresolved && (
+          <div className="space-y-1">
+            <label htmlFor={fieldId("type")} className="text-xs font-medium">
+              Mapped connection type
+            </label>
+            <select
+              id={fieldId("type")}
+              className={inputClass}
+              value={connectionType}
+              onChange={(event) => {
+                onDraftStart?.();
+                setDirty(true);
+                setConnectionType(event.target.value as ConnectionType);
+              }}
+            >
+              <option value="nav">Navigation</option>
+              <option value="auth-gate">Access gate (mapped claim)</option>
+              <option value="redirect">Redirect</option>
+              <option value="external">External link</option>
+            </select>
           </div>
         )}
-      </div>
 
-      {/* Footer */}
-      <div className="shrink-0 border-t border-border px-4 py-3">
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-xs font-semibold">Action and control</legend>
+          <label className="block text-xs" htmlFor={fieldId("action")}>
+            Action
+          </label>
+          <select
+            id={fieldId("action")}
+            className={inputClass}
+            value={draft.action.kind}
+            onChange={(event) =>
+              change({
+                ...draft,
+                action: {
+                  ...draft.action,
+                  kind: event.target.value as PageMapTransition["action"]["kind"],
+                },
+              })
+            }
+          >
+            {["unknown", "click", "submit", "load", "programmatic"].map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
+          </select>
+          <label className="block text-xs" htmlFor={fieldId("action-label")}>
+            Action label
+          </label>
+          <input
+            id={fieldId("action-label")}
+            className={inputClass}
+            value={draft.action.label ?? ""}
+            maxLength={240}
+            onChange={(event) =>
+              change({
+                ...draft,
+                action: { ...draft.action, label: event.target.value || undefined },
+              })
+            }
+          />
+          <label className="block text-xs" htmlFor={fieldId("control")}>
+            Control kind
+          </label>
+          <select
+            id={fieldId("control")}
+            className={inputClass}
+            value={draft.control.kind}
+            onChange={(event) =>
+              change({
+                ...draft,
+                control: {
+                  ...draft.control,
+                  kind: event.target.value as PageMapTransition["control"]["kind"],
+                },
+              })
+            }
+          >
+            {["unknown", "link", "button", "form", "call", "other"].map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
+          </select>
+          <label className="block text-xs" htmlFor={fieldId("control-label")}>
+            Control label
+          </label>
+          <input
+            id={fieldId("control-label")}
+            className={inputClass}
+            value={draft.control.label ?? ""}
+            maxLength={240}
+            onChange={(event) =>
+              change({
+                ...draft,
+                control: { ...draft.control, label: event.target.value || undefined },
+              })
+            }
+          />
+          <label className="block text-xs" htmlFor={fieldId("locator")}>
+            Control locator (description only)
+          </label>
+          <input
+            id={fieldId("locator")}
+            className={inputClass}
+            value={draft.control.locator ?? ""}
+            maxLength={1024}
+            onChange={(event) =>
+              change({
+                ...draft,
+                control: { ...draft.control, locator: event.target.value || undefined },
+              })
+            }
+          />
+        </fieldset>
+
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-xs font-semibold">Condition</legend>
+          <label className="block text-xs" htmlFor={fieldId("condition")}>
+            Condition kind
+          </label>
+          <select
+            id={fieldId("condition")}
+            className={inputClass}
+            value={draft.condition.kind}
+            onChange={(event) => {
+              const kind = event.target.value as PageMapTransition["condition"]["kind"];
+              change({
+                ...draft,
+                condition:
+                  kind === "predicate"
+                    ? {
+                        kind,
+                        expression: draft.condition.expression ?? "",
+                        branch: draft.condition.branch,
+                      }
+                    : { kind, branch: "unknown" },
+              });
+            }}
+          >
+            <option value="unknown">Unknown</option>
+            <option value="none">No condition mapped</option>
+            <option value="predicate">Predicate (descriptive)</option>
+          </select>
+          {draft.condition.kind === "predicate" && (
+            <>
+              <label className="block text-xs" htmlFor={fieldId("predicate")}>
+                Predicate description
+              </label>
+              <textarea
+                id={fieldId("predicate")}
+                className={inputClass}
+                rows={2}
+                maxLength={2000}
+                value={draft.condition.expression ?? ""}
+                onChange={(event) =>
+                  change({
+                    ...draft,
+                    condition: { ...draft.condition, expression: event.target.value },
+                  })
+                }
+              />
+              <label className="block text-xs" htmlFor={fieldId("branch")}>
+                Branch
+              </label>
+              <select
+                id={fieldId("branch")}
+                className={inputClass}
+                value={draft.condition.branch}
+                onChange={(event) =>
+                  change({
+                    ...draft,
+                    condition: {
+                      ...draft.condition,
+                      branch: event.target.value as PageMapTransition["condition"]["branch"],
+                    },
+                  })
+                }
+              >
+                <option value="unknown">Unknown</option>
+                <option value="true">True</option>
+                <option value="false">False</option>
+              </select>
+            </>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            Unknown is not unconditional. Predicates are not evaluated.
+          </p>
+        </fieldset>
+
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-xs font-semibold">Outcome and destination</legend>
+          <label className="block text-xs" htmlFor={fieldId("outcome")}>
+            Outcome
+          </label>
+          <select
+            id={fieldId("outcome")}
+            className={inputClass}
+            value={draft.outcome.kind}
+            onChange={(event) =>
+              change({
+                ...draft,
+                outcome: {
+                  ...draft.outcome,
+                  kind: event.target.value as PageMapTransition["outcome"]["kind"],
+                },
+              })
+            }
+          >
+            {["unknown", "navigate", "redirect", "external", "stay"].map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
+          </select>
+          <label className="block text-xs" htmlFor={fieldId("outcome-detail")}>
+            Outcome detail
+          </label>
+          <textarea
+            id={fieldId("outcome-detail")}
+            className={inputClass}
+            rows={2}
+            value={draft.outcome.detail ?? ""}
+            maxLength={1000}
+            onChange={(event) =>
+              change({
+                ...draft,
+                outcome: { ...draft.outcome, detail: event.target.value || undefined },
+              })
+            }
+          />
+          <label className="block text-xs" htmlFor={fieldId("destination")}>
+            Destination kind
+          </label>
+          <select
+            id={fieldId("destination")}
+            className={inputClass}
+            value={draft.destination.kind}
+            onChange={(event) => {
+              const kind = event.target.value as PageMapTransition["destination"]["kind"];
+              change({
+                ...draft,
+                destination:
+                  kind === "unknown" ? { kind } : { kind, value: draft.destination.value ?? "" },
+              });
+            }}
+          >
+            <option value="unknown">Unknown</option>
+            <option value="route">App route (descriptive)</option>
+            <option value="external">External HTTP(S)</option>
+          </select>
+          {draft.destination.kind !== "unknown" && (
+            <>
+              <label className="block text-xs" htmlFor={fieldId("destination-value")}>
+                Destination value
+              </label>
+              <input
+                id={fieldId("destination-value")}
+                className={inputClass}
+                value={draft.destination.value ?? ""}
+                maxLength={2048}
+                onChange={(event) =>
+                  change({
+                    ...draft,
+                    destination: { ...draft.destination, value: event.target.value },
+                  })
+                }
+              />
+            </>
+          )}
+          <p className="text-[11px] text-muted-foreground">
+            Editing a destination does not retarget an arrow, open a URL, or create a page.
+          </p>
+        </fieldset>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium" htmlFor={fieldId("unknowns")}>
+            Unresolved questions (one per line)
+          </label>
+          <textarea
+            id={fieldId("unknowns")}
+            className={inputClass}
+            rows={3}
+            value={unknownText}
+            onChange={(event) => {
+              setUnknownText(event.target.value);
+              const unknowns = event.target.value
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean);
+              change({ ...draft, unknowns: unknowns.length ? unknowns : undefined });
+            }}
+          />
+        </div>
+
+        <section aria-label="Transition evidence" className="space-y-2 border-t border-border pt-3">
+          <h4 className="text-xs font-semibold">Evidence (read-only)</h4>
+          <p className="text-[11px] text-muted-foreground">
+            Historical source is a declaration at a recorded file hash, not current-source freshness
+            or runtime observation. No runtime behavior has been verified here.
+          </p>
+          {displayed.evidence.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Evidence unknown for all fields.</p>
+          ) : (
+            displayed.evidence.map((item, index) => (
+              <div
+                key={index}
+                className="space-y-1 rounded border border-border bg-muted/30 p-2 text-[11px]"
+              >
+                <p>
+                  {item.basis === "source" ? "Historical source" : item.basis}:{" "}
+                  {item.fields.join(", ")}
+                </p>
+                {item.source && (
+                  <p className="break-all font-mono">
+                    {item.source.filePath}
+                    <br />
+                    SHA256 {item.source.contentSha256}
+                    <br />
+                    UTF-16 span [{item.source.startOffset}, {item.source.endOffset})
+                  </p>
+                )}
+              </div>
+            ))
+          )}
+        </section>
+        {error && (
+          <p role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        )}
+      </div>
+      <div className="shrink-0 space-y-2 border-t border-border px-4 py-3">
         <Button
-          variant="outline"
-          onClick={() => onDelete(edge.id)}
-          className="w-full h-8 text-xs gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10 hover:border-destructive/50"
+          type="button"
+          className="h-8 w-full text-xs"
+          disabled={!dirty || !!error}
+          onClick={save}
         >
-          <Trash2 className="h-3 w-3" />
-          Remove connection
+          Save mapped transition
+        </Button>
+        {dirty && (
+          <Button type="button" variant="ghost" className="h-8 w-full text-xs" onClick={discard}>
+            Discard transition draft
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          className="h-8 w-full gap-1 text-xs text-destructive"
+          onClick={() => {
+            onDraftEnd?.();
+            onDelete(edge.id);
+          }}
+        >
+          <Trash2 className="h-3 w-3" aria-hidden="true" />
+          Remove {edge.unresolved ? "candidate" : "transition"} from map
         </Button>
       </div>
-    </div>
+    </aside>
   );
 }

@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PageMapData } from './pageMapData';
+import type { PageMapRevision } from './pageMapRevision';
 
 export interface PageMapResponse {
   pageMapData: PageMapData;
+  revision: PageMapRevision;
 }

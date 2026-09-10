@@ -1,750 +1,839 @@
-import { useState, useEffect } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useCreateProject,
   getListProjectsQueryKey,
   getGetProjectQueryKey,
-  ProjectInputStack,
+  getGetProjectsSummaryQueryKey,
+  getGetRecentActivityQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useWorkspace } from "@/contexts/workspace-context";
-import {
-  Monitor,
-  LayoutDashboard,
-  Zap,
-  Database,
-  Globe,
-  LayoutTemplate,
-  PencilLine,
-  ChevronLeft,
-  ChevronDown,
-  Smartphone,
-  ShoppingCart,
-  MessageSquare,
-  CreditCard,
-  Layers,
-  Server,
-  Code2,
-  CheckCircle2,
-  Clock,
-  Rocket,
-  KeyRound,
-  Cpu,
-  ArrowLeft,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ArrowLeft, ArrowRight, LayoutTemplate, Monitor, Smartphone } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { TemplatePicker } from "@/components/template-picker";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { useClerkUser } from "@/lib/clerk-safe";
 import {
-  type TemplateDefinition,
-  TEMPLATES,
-  STARTER_PACKS,
-  SLIDES_TEMPLATES,
-  ANIMATION_TEMPLATES,
-  AUTOMATION_TEMPLATES,
-} from "@/lib/templates";
-import { useToast } from "@/hooks/use-toast";
+  createProjectReviewAccountFence,
+  type ProjectReviewAccountFence,
+} from "@/lib/project-review-account-fence";
+import {
+  claimCreationDraft,
+  readCreationDraft,
+  clearCreationDraft,
+  type CreationDraft,
+} from "@/lib/creation-draft";
+import { TEMPLATES, STARTER_PACKS, type TemplateDefinition } from "@/lib/templates";
+import { cn } from "@/lib/utils";
+import {
+  BRIEF_LIMIT,
+  CREATION_STACKS,
+  clearProjectReviewDraft,
+  isCreationKind,
+  projectCreationInput,
+  readProjectReviewDraft,
+  saveProjectReviewDraft,
+  suggestProjectName,
+  type CreationValues,
+} from "@/components/projects/project-creation-state";
 
-type Stack = "react-vite" | "nextjs" | "node-api" | "python-flask" | "python-fastapi" | "go-gin";
+// Persist the destination alongside review values. The shared draft serializer keeps
+// these values intact, while projectCreationInput sends only its explicit fields.
+type WorkspaceReviewValues = CreationValues & {
+  workspaceId?: number | null;
+  handoffWorkspaceId?: number | null;
+};
 
-const STACK_OPTIONS: Array<{
-  value: Stack;
-  label: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string }>;
-  badge?: string;
-}> = [
-  {
-    value: "react-vite",
-    label: "React + Vite",
-    description: "Static web app",
-    icon: Layers,
-    badge: "default",
-  },
-  {
-    value: "nextjs",
-    label: "Next.js 14",
-    description: "App Router",
-    icon: Globe,
-  },
-  {
-    value: "node-api",
-    label: "Node.js API",
-    description: "Express + TypeScript",
-    icon: Server,
-  },
-  {
-    value: "python-flask",
-    label: "Python Flask",
-    description: "REST API / web",
-    icon: Code2,
-  },
-  {
-    value: "python-fastapi",
-    label: "FastAPI",
-    description: "Async Python API",
-    icon: Zap,
-  },
-  {
-    value: "go-gin",
-    label: "Go + Gin",
-    description: "Go REST API",
-    icon: Server,
-  },
-];
-
-const WEB_PROJECT_TYPES = [
-  { label: "Website", kind: "web", icon: Monitor },
-  { label: "Web App", kind: "fullstack", icon: Globe },
-  { label: "Dashboard", kind: "dashboard", icon: LayoutDashboard },
-  { label: "Automation", kind: "automation", icon: Zap },
-  { label: "API", kind: "api", icon: Database },
-  { label: "Mobile", kind: "mobile", icon: Smartphone },
-] as const;
-
-const MOBILE_PROJECT_TYPES = [
-  { label: "Cross-platform", kind: "mobile-cross", icon: Smartphone },
-  { label: "Store", kind: "mobile-cross", icon: ShoppingCart, preset: "mobile-ecommerce" },
-  { label: "Chat", kind: "mobile-cross", icon: MessageSquare, preset: "mobile-chat" },
-  { label: "SaaS", kind: "mobile-cross", icon: CreditCard, preset: "mobile-subscription-saas" },
-] as const;
-
-const FULLSTACK_CHECKLIST = [
-  {
-    icon: Server,
-    label: "Private server",
-    detail: "Your own isolated runtime — no shared hosting",
-  },
-  {
-    icon: Database,
-    label: "Postgres database",
-    detail: "A dedicated Neon Postgres project, auto-provisioned",
-  },
-  {
-    icon: KeyRound,
-    label: "Secret management",
-    detail: "DATABASE_URL and custom secrets, encrypted at rest",
-  },
-  {
-    icon: Rocket,
-    label: "Production pipeline",
-    detail: "Staging review + one-click promote to production",
-  },
-];
-
-type PlatformTab = "web" | "mobile";
-type AppMode = "simple" | "fullstack";
-
-type WebProjectKind = (typeof WEB_PROJECT_TYPES)[number]["kind"];
-type MobileProjectKind = "mobile-cross";
-type ProjectKind = WebProjectKind | MobileProjectKind;
-
-type View = "form" | "templates";
-
-function nameFromPrompt(prompt: string): string {
-  const words = prompt.trim().split(/\s+/).slice(0, 5).join(" ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
+function retainedWorkspaceId(values: CreationValues): number | null | undefined {
+  const id: unknown = (values as WorkspaceReviewValues).workspaceId;
+  if (id === undefined) return undefined; // Legacy drafts bind on first ready selection.
+  return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-function isMobileKind(k: string): boolean {
-  return k === "mobile-cross" || k === "mobile-ios" || k === "mobile-android";
-}
+const ALL_TEMPLATES = [...TEMPLATES, ...STARTER_PACKS];
+const ENTRY_PARAMS = ["draft", "draftId", "workspaceId", "prompt", "platform", "template"];
+const WEB_TYPES = [
+  ["web", "Website"],
+  ["fullstack", "Web app"],
+  ["dashboard", "Dashboard"],
+  ["automation", "Automation"],
+  ["api", "API"],
+] as const;
+const STACK_LABELS: Record<CreationValues["stack"], string> = {
+  "react-vite": "React + Vite",
+  nextjs: "Next.js",
+  "node-api": "Node.js API",
+  "python-flask": "Python Flask",
+  "python-fastapi": "FastAPI",
+  "go-gin": "Go + Gin",
+};
+const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
+const unsupportedTemplate =
+  "This template's project type is not supported by project creation yet. Your brief is unchanged; choose another template.";
 
-function findTemplateById(id: string): TemplateDefinition | undefined {
-  return [
-    ...TEMPLATES,
-    ...STARTER_PACKS,
-    ...SLIDES_TEMPLATES,
-    ...ANIMATION_TEMPLATES,
-    ...AUTOMATION_TEMPLATES,
-  ].find((t) => t.id === id);
+function initialReview(ownerId: string, arrival: CreationDraft | null, params: URLSearchParams) {
+  const buildDraft =
+    arrival?.intent === "build" &&
+    arrival.accountId === ownerId &&
+    typeof arrival.workspaceId === "number" &&
+    Number.isSafeInteger(arrival.workspaceId) &&
+    arrival.workspaceId > 0
+      ? arrival
+      : null;
+  const saved = readProjectReviewDraft(ownerId);
+  const hasEntry = ENTRY_PARAMS.some((key) => params.has(key));
+  if (
+    saved &&
+    (!hasEntry ||
+      (buildDraft && saved.sourceDraftId === buildDraft.id) ||
+      (!buildDraft &&
+        params.get("draft") === "1" &&
+        !params.has("prompt") &&
+        !params.has("template")))
+  ) {
+    const sourceId = (saved.values as WorkspaceReviewValues).handoffWorkspaceId;
+    return {
+      values: saved.values,
+      sourceDraftId: saved.sourceDraftId,
+      sourceWorkspaceId:
+        typeof sourceId === "number" && Number.isSafeInteger(sourceId) && sourceId > 0
+          ? sourceId
+          : null,
+      notice:
+        !buildDraft && params.get("draft") === "1"
+          ? "Your saved idea is unavailable for this account and workspace. Your existing review is unchanged."
+          : "",
+    };
+  }
+  const candidate = ALL_TEMPLATES.find((template) => template.id === params.get("template"));
+  const template = candidate && isCreationKind(candidate.projectKind) ? candidate : undefined;
+  const platform = template
+    ? template.projectKind === "mobile-cross"
+      ? "mobile"
+      : "web"
+    : (buildDraft?.platform ?? params.get("platform")) === "mobile"
+      ? "mobile"
+      : "web";
+  const prompt = buildDraft?.prompt ?? params.get("prompt") ?? template?.seedPrompt ?? "";
+  const values: WorkspaceReviewValues = {
+    workspaceId: buildDraft?.workspaceId ?? undefined,
+    handoffWorkspaceId: buildDraft?.workspaceId ?? undefined,
+    prompt,
+    name: template && prompt === template.seedPrompt ? template.title : suggestProjectName(prompt),
+    nameEdited: false,
+    platform,
+    kind:
+      template && isCreationKind(template.projectKind)
+        ? template.projectKind
+        : platform === "mobile"
+          ? "mobile-cross"
+          : "web",
+    stack: "react-vite",
+    appMode: "simple",
+    templateId: template?.id ?? null,
+  };
+  const notice =
+    candidate && !template
+      ? unsupportedTemplate
+      : params.has("template") && !candidate
+        ? "This template is unavailable. You can describe your project below."
+        : params.get("draft") === "1" && !buildDraft
+          ? "Your saved idea is unavailable or has expired. Add a brief or project name to begin."
+          : "";
+  return {
+    values,
+    sourceDraftId: buildDraft?.id ?? null,
+    sourceWorkspaceId: buildDraft?.workspaceId ?? null,
+    notice,
+  };
 }
 
 export default function NewProjectPage() {
+  const { user, isLoaded, isSignedIn } = useClerkUser();
+  if (!isLoaded) {
+    return (
+      <p role="status" className="px-4 py-8 text-sm text-muted-foreground">
+        Loading your account...
+      </p>
+    );
+  }
+  if (!isSignedIn || !user?.id) {
+    return (
+      <p role="status" className="px-4 py-8 text-sm text-muted-foreground">
+        Sign in to review your project.
+      </p>
+    );
+  }
+  return <AccountProjectReview key={user.id} ownerId={user.id} />;
+}
+
+function AccountProjectReview({ ownerId }: { ownerId: string }) {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const createProject = useCreateProject();
-  const { currentWorkspace } = useWorkspace();
-  const { toast } = useToast();
-
-  // Read pre-fill hints from the URL (?prompt=…&platform=web|mobile&template=<id>)
-  // so the dashboard hero, landing page templates, and other entry points can
-  // hand off a typed idea or a chosen template.
-  const initialParams = new URLSearchParams(
-    typeof window !== "undefined" ? window.location.search : "",
+  const createProject = useCreateProject({ mutation: { retry: false } });
+  const { currentWorkspace, workspaces, hasChosenWorkspace, isLoading, isError, retryWorkspaces } =
+    useWorkspace();
+  const ownedWorkspaces = useMemo(
+    () =>
+      workspaces.filter((workspace) => workspace.ownerUserId === ownerId && !workspace.deletedAt),
+    [workspaces, ownerId],
   );
-  const initialPrompt = initialParams.get("prompt") ?? "";
-  const initialPlatform: PlatformTab =
-    initialParams.get("platform") === "mobile" ? "mobile" : "web";
-  const initialTemplateId = initialParams.get("template");
-  const initialTemplate = initialTemplateId ? findTemplateById(initialTemplateId) : undefined;
-  const initialKind: ProjectKind = initialTemplate
-    ? (initialTemplate.projectKind as ProjectKind)
-    : initialPlatform === "mobile"
-      ? "mobile-cross"
-      : "web";
-  const initialPlatformTab: PlatformTab = initialTemplate
-    ? isMobileKind(initialTemplate.projectKind)
-      ? "mobile"
-      : "web"
-    : initialPlatform;
-
-  const [view, setView] = useState<View>("form");
-  const [platformTab, setPlatformTab] = useState<PlatformTab>(initialPlatformTab);
-  const [stack, setStack] = useState<Stack>("react-vite");
-  const [name, setName] = useState(initialTemplate?.title ?? "");
-  const [nameDirty, setNameDirty] = useState(false);
-  const [kind, setKind] = useState<ProjectKind>(initialKind);
-  const [prompt, setPrompt] = useState(initialTemplate?.seedPrompt ?? initialPrompt);
-  const [appMode, setAppMode] = useState<AppMode>("simple");
-  const [checklistOpen, setChecklistOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<TemplateDefinition | undefined>(
-    initialTemplate,
+  const selectedWorkspace = ownedWorkspaces.find(
+    (workspace) => workspace.id === currentWorkspace?.id,
   );
+  const selectableWorkspaceId =
+    hasChosenWorkspace && !isLoading && !isError ? selectedWorkspace?.id : undefined;
+  const [entryParams] = useState(
+    () => new URLSearchParams(typeof window === "undefined" ? "" : window.location.search),
+  );
+  const [initial, setInitial] = useState(() => initialReview(ownerId, null, entryParams));
+  const [arrivalPending, setArrivalPending] = useState(entryParams.get("draft") === "1");
+  const [values, setValues] = useState<WorkspaceReviewValues>(() => {
+    const retainedId = retainedWorkspaceId(initial.values);
+    return {
+      ...initial.values,
+      workspaceId: retainedId === undefined ? selectableWorkspaceId : retainedId,
+    };
+  });
+  const draftWorkspace = ownedWorkspaces.find((workspace) => workspace.id === values.workspaceId);
+  const [notice, setNotice] = useState(initial.notice);
+  const [view, setView] = useState<"form" | "templates">("form");
+  const [saved, setSaved] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [principalReady, setPrincipalReady] = useState(false);
+  const [submittedWorkspace, setSubmittedWorkspace] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [created, setCreated] = useState<{ id: number; name: string } | null>(null);
+  const submitting = useRef(false);
+  const mounted = useRef(false);
+  const activeSubmission = useRef<object | null>(null);
+  const accountFence = useRef<ProjectReviewAccountFence | null>(null);
+  const savedReviewId = useRef<string | null>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+  const selectedTemplate = ALL_TEMPLATES.find((template) => template.id === values.templateId);
 
-  // Strip the query params from the URL once consumed so a refresh starts clean.
+  function hasCurrentAccount() {
+    return mounted.current && accountFence.current?.isCurrent() === true;
+  }
+
+  useLayoutEffect(() => {
+    mounted.current = true;
+    const fence = createProjectReviewAccountFence(ownerId, () => {
+      activeSubmission.current = null;
+      if (mounted.current) setPrincipalReady(false);
+    });
+    accountFence.current = fence;
+    setPrincipalReady(fence.isCurrent());
+    return () => {
+      mounted.current = false;
+      activeSubmission.current = null;
+      accountFence.current = null;
+      fence.dispose();
+    };
+  }, [ownerId]);
+
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.location.search) {
-      window.history.replaceState({}, "", window.location.pathname);
+    if (!arrivalPending || !hasCurrentAccount()) return;
+    const expectedId = entryParams.get("draftId");
+    const finish = (arrival: CreationDraft | null) => {
+      const accepted =
+        arrival && (expectedId === null || expectedId === arrival.id) ? arrival : null;
+      const restored = initialReview(ownerId, accepted, entryParams);
+      const retainedId = retainedWorkspaceId(restored.values);
+      setInitial(restored);
+      setValues({
+        ...restored.values,
+        workspaceId: retainedId === undefined ? selectableWorkspaceId : retainedId,
+      });
+      setNotice(restored.notice);
+      setArrivalPending(false);
+      // Preserve the durable destination even if saving the editable review fails.
+      if (accepted?.workspaceId != null && typeof window !== "undefined") {
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set("workspaceId", String(accepted.workspaceId));
+          url.searchParams.set("draftId", accepted.id);
+          window.history.replaceState(
+            window.history.state,
+            "",
+            url.pathname + url.search + url.hash,
+          );
+        } catch {
+          /* The bound receipt remains available in scoped tab storage. */
+        }
+      }
+    };
+    if (entryParams.has("workspaceId")) {
+      if (isLoading || isError) return;
+      const rawId = entryParams.get("workspaceId")!;
+      const id = /^[1-9]\d*$/.test(rawId) ? Number(rawId) : NaN;
+      if (!Number.isSafeInteger(id) || !ownedWorkspaces.some((workspace) => workspace.id === id)) {
+        finish(null);
+        return;
+      }
+      finish(readCreationDraft({ accountId: ownerId, workspaceId: id }));
+      return;
     }
-  }, []);
+    const unassigned = claimCreationDraft(
+      { accountId: ownerId, workspaceId: null },
+      expectedId ?? undefined,
+    );
+    if (!unassigned) {
+      finish(null);
+      return;
+    }
+    if (selectableWorkspaceId === undefined) return;
+    finish(
+      claimCreationDraft(
+        { accountId: ownerId, workspaceId: selectableWorkspaceId },
+        expectedId ?? undefined,
+      ),
+    );
+  }, [
+    arrivalPending,
+    ownedWorkspaces,
+    ownerId,
+    entryParams,
+    selectableWorkspaceId,
+    isLoading,
+    isError,
+    principalReady,
+  ]);
+
+  useEffect(() => {
+    if (!hasCurrentAccount() || submitting.current || selectableWorkspaceId === undefined) return;
+    setValues((previous) =>
+      previous.workspaceId === undefined
+        ? { ...previous, workspaceId: selectableWorkspaceId }
+        : previous,
+    );
+  }, [selectableWorkspaceId, ownerId]);
+
+  useEffect(() => {
+    if (
+      !mounted.current ||
+      !accountFence.current?.isCurrent() ||
+      submitting.current ||
+      arrivalPending
+    )
+      return;
+    const draft = saveProjectReviewDraft(ownerId, values, initial.sourceDraftId);
+    savedReviewId.current = draft?.id ?? null;
+    setSaved(Boolean(draft));
+    // Remove only consumed hints, and only after their editable replacement is saved.
+    if (draft && typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      ENTRY_PARAMS.forEach((key) => url.searchParams.delete(key));
+      if (url.href !== window.location.href) {
+        window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+      }
+    }
+  }, [values, initial.sourceDraftId, ownerId, arrivalPending]);
+
+  function changePrompt(prompt: string) {
+    setValues((previous) => ({
+      ...previous,
+      prompt,
+      name: previous.nameEdited ? previous.name : suggestProjectName(prompt),
+    }));
+  }
+
+  function changePlatform(platform: CreationValues["platform"]) {
+    if (platform === values.platform) return;
+    setValues((previous) => ({
+      ...previous,
+      platform,
+      kind: platform === "mobile" ? "mobile-cross" : "web",
+      templateId: null,
+    }));
+  }
 
   function applyTemplate(template: TemplateDefinition) {
-    setSelectedTemplate(template);
-    setPrompt(template.seedPrompt);
-    if (!nameDirty || !name.trim()) {
-      setName(template.title);
-      setNameDirty(false);
+    const kind = template.projectKind;
+    if (!isCreationKind(kind)) {
+      setNotice(unsupportedTemplate);
+      setView("form");
+      return;
     }
-    const templateKind = template.projectKind as ProjectKind;
-    setKind(templateKind);
-    setPlatformTab(isMobileKind(templateKind) ? "mobile" : "web");
-    setStack("react-vite");
+    setValues((previous) => {
+      const useSeed = !previous.prompt.trim() || previous.prompt === selectedTemplate?.seedPrompt;
+      return {
+        ...previous,
+        prompt: useSeed ? template.seedPrompt : previous.prompt,
+        name: previous.nameEdited
+          ? previous.name
+          : useSeed
+            ? template.title
+            : suggestProjectName(previous.prompt),
+        templateId: template.id,
+        kind,
+        platform: kind === "mobile-cross" ? "mobile" : "web",
+        stack: "react-vite",
+      };
+    });
+    setNotice("");
     setView("form");
   }
 
-  function clearTemplate() {
-    setSelectedTemplate(undefined);
-    setPrompt("");
-    if (platformTab === "mobile") {
-      setKind("mobile-cross");
-    } else {
-      setKind("web");
+  function openWorkspace(id: number) {
+    if (!hasCurrentAccount()) return;
+    try {
+      setLocation("/projects/" + id, { replace: true });
+    } catch {
+      if (!hasCurrentAccount()) return;
+      if (mounted.current) setError("Your project was created. Use Open workspace to continue.");
     }
   }
 
-  function handlePlatformTabChange(tab: PlatformTab) {
-    setPlatformTab(tab);
-    setSelectedTemplate(undefined);
-    if (tab === "mobile") {
-      setKind("mobile-cross");
-    } else {
-      setKind("web");
-      setStack("react-vite");
-    }
+  function recoverCurrent(message: string) {
+    if (!hasCurrentAccount()) return;
+    activeSubmission.current = null;
+    submitting.current = false;
+    setPending(false);
+    setSubmittedWorkspace(null);
+    setError(message);
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const resolvedName = name.trim() || (prompt.trim() ? nameFromPrompt(prompt) : "New Project");
-    const builderMode = appMode === "fullstack" ? "agentic" : "static-legacy";
-
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!hasCurrentAccount()) return;
+    if (submitting.current || createProject.isPending || created) return;
+    if (arrivalPending || isLoading || isError || !draftWorkspace) {
+      setError("Choose an available workspace for this draft before creating the project.");
+      return;
+    }
+    if (!values.name.trim()) {
+      setError("Give your project a name before creating it.");
+      nameInput.current?.focus();
+      return;
+    }
+    if (values.prompt.length > BRIEF_LIMIT) {
+      setError("Keep your brief within 20,000 characters before creating the project.");
+      return;
+    }
+    submitting.current = true;
+    setPending(true);
+    setSubmittedWorkspace(draftWorkspace.name);
+    setError("");
+    const reviewId = savedReviewId.current;
+    const submittedOwnerId = ownerId;
+    const sourceDraftId = initial.sourceDraftId;
+    const sourceWorkspaceId = initial.sourceWorkspaceId;
+    const submission = {};
+    activeSubmission.current = submission;
+    const isCurrentSubmission = () =>
+      hasCurrentAccount() && activeSubmission.current === submission;
+    const recover = (message: string) => {
+      if (isCurrentSubmission()) recoverCurrent(message);
+    };
     createProject.mutate(
-      {
-        data: {
-          name: resolvedName,
-          description: prompt.trim() || undefined,
-          workspaceId: currentWorkspace?.id,
-          kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
-          stack: platformTab === "web" ? (stack as ProjectInputStack) : undefined,
-          initialPrompt: prompt.trim() || undefined,
-          builderMode,
-        },
-      },
+      { data: projectCreationInput(values, draftWorkspace.id) },
       {
         onSuccess: (project) => {
-          queryClient.setQueryData(getGetProjectQueryKey(project.id), project);
-          void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-          setLocation(`/projects/${project.id}`);
+          if (!isCurrentSubmission()) return;
+          if (!project || !Number.isSafeInteger(project.id) || project.id <= 0) {
+            recover(
+              "The server response did not confirm a project. Check your projects before trying again.",
+            );
+            return;
+          }
+          setCreated({ id: project.id, name: project.name });
+          if (reviewId) clearProjectReviewDraft(submittedOwnerId, reviewId);
+          if (sourceDraftId && sourceWorkspaceId !== null) {
+            clearCreationDraft(sourceDraftId, {
+              accountId: submittedOwnerId,
+              workspaceId: sourceWorkspaceId,
+            });
+          }
+          // Cache refresh failures must never turn a confirmed creation into a retry.
+          try {
+            queryClient.setQueryData(getGetProjectQueryKey(project.id), project);
+            for (const queryKey of [
+              getListProjectsQueryKey(),
+              getGetProjectsSummaryQueryKey(),
+              getGetRecentActivityQueryKey(),
+            ]) {
+              if (!isCurrentSubmission()) return;
+              void queryClient.invalidateQueries({ queryKey }).catch(() => undefined);
+            }
+          } catch {
+            // The workspace can fetch the confirmed project independently.
+          }
+          if (isCurrentSubmission()) openWorkspace(project.id);
         },
-        onError: (err: unknown) => {
-          const message =
-            err instanceof Error && err.message
-              ? err.message
-              : "Could not create your project. Please try again.";
-          toast({
-            title: "Couldn't create project",
-            description: message,
-            variant: "destructive",
-          });
-        },
+        onError: (cause: unknown) =>
+          recover(
+            cause instanceof Error && cause.message
+              ? cause.message
+              : "Could not create your project. Please try again.",
+          ),
       },
     );
   }
 
-  const templateCount = platformTab === "mobile" ? "6 mobile templates" : "16 templates";
+  if (created) {
+    return (
+      <div className="nabuflow-shell mx-auto w-full max-w-2xl px-4 py-10">
+        <p role="status" className="mb-2 text-sm text-muted-foreground">
+          Project created
+        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">{created.name}</h1>
+        <p className="my-4 text-sm text-muted-foreground">
+          Your project is ready to open. Follow build progress and continue editing in its
+          workspace.
+        </p>
+        {error && (
+          <p role="alert" className="mb-4 text-sm">
+            {error}
+          </p>
+        )}
+        <Button onClick={() => openWorkspace(created.id)} className="gap-2">
+          Open workspace <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </div>
+    );
+  }
 
   if (view === "templates") {
     return (
-      <div className="mx-auto w-full max-w-4xl px-4 py-8">
-        <button
-          type="button"
-          onClick={() => setView("form")}
-          className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Back to project details
+      <div className="nabuflow-shell mx-auto w-full max-w-4xl px-4 py-8">
+        <button type="button" onClick={() => setView("form")} className="nf-quiet-link mb-6">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to project details
         </button>
-        <h1 className="mb-1 text-2xl font-bold tracking-tight">Choose a template</h1>
+        <h1 className="mb-2 text-2xl font-semibold tracking-tight">Choose a starting point</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          Pick a recommended starting point, or start from scratch.
+          Templates fill an empty brief. Your own wording and custom project name stay in place.
         </p>
         <TemplatePicker
           selectedId={selectedTemplate?.id}
           onSelect={applyTemplate}
           onStartFromScratch={() => {
-            clearTemplate();
+            setValues((previous) => ({ ...previous, templateId: null }));
             setView("form");
           }}
-          filterPlatform={platformTab}
+          filterPlatform={values.platform}
         />
       </div>
     );
   }
 
+  const busy = pending || createProject.isPending;
+  const workspaceReady =
+    principalReady && !arrivalPending && !isLoading && !isError && Boolean(draftWorkspace);
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-8">
-      {/* Page header */}
+    <div className="nabuflow-shell mx-auto w-full max-w-2xl px-4 py-8 text-foreground">
       <button
         type="button"
+        disabled={busy}
         onClick={() => setLocation("/projects")}
-        className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="nf-quiet-link mb-6"
       >
-        <ArrowLeft className="h-4 w-4" />
-        Back to projects
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to projects
       </button>
-
       <div className="mb-7">
-        <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Create a new project</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Give your project a name and choose what you&apos;re building. You can refine everything
-          later in the workspace.
+        <p className="nf-eyebrow">NabuFlow / New project</p>
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
+          Make your idea a project
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Review your brief, give it a name, and choose where it will run.
         </p>
       </div>
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-        {/* Project name — the primary field, up top */}
-        <div className="space-y-1.5">
-          <Label htmlFor="np-name">Project name</Label>
-          <Input
-            id="np-name"
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              setNameDirty(true);
-            }}
-            placeholder={
-              selectedTemplate
-                ? selectedTemplate.title
-                : prompt.trim()
-                  ? nameFromPrompt(prompt)
-                  : platformTab === "mobile"
-                    ? "My mobile app"
-                    : stack === "python-flask" || stack === "python-fastapi"
-                      ? "My Python API"
-                      : stack === "node-api"
-                        ? "My Node.js API"
-                        : stack === "go-gin"
-                          ? "My Go API"
-                          : "My web app"
-            }
-            autoFocus
-          />
-          <p className="text-xs text-muted-foreground">
-            Leave blank to auto-generate from your prompt.
-          </p>
-        </div>
-
-        {/* ── App mode selector — web only ── */}
-        {platformTab === "web" && (
-          <div className="space-y-2">
-            <Label>What do you want to build?</Label>
-            <div className="grid grid-cols-2 gap-3">
-              {/* Simple app */}
-              <button
-                type="button"
-                onClick={() => setAppMode("simple")}
-                className={cn(
-                  "flex flex-col gap-2 rounded-xl border p-3.5 text-left transition-all",
-                  appMode === "simple"
-                    ? "border-primary bg-primary/8 ring-1 ring-primary/20"
-                    : "border-border bg-card hover:bg-muted hover:border-border/80",
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
-                      appMode === "simple" ? "bg-primary/15" : "bg-muted",
-                    )}
-                  >
-                    <Zap
-                      className={cn(
-                        "h-4 w-4",
-                        appMode === "simple" ? "text-primary" : "text-muted-foreground",
-                      )}
-                    />
-                  </div>
-                  <span
-                    className={cn(
-                      "text-sm font-semibold",
-                      appMode === "simple" ? "text-primary" : "text-foreground",
-                    )}
-                  >
-                    Simple app
-                  </span>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-snug">
-                  Static site or client-only app. Ready instantly — no server setup.
-                </p>
-                <div className="flex items-center gap-1 text-[10px] text-muted-foreground/70">
-                  <Clock className="h-3 w-3 shrink-0" />
-                  Builds in seconds
-                </div>
-              </button>
-
-              {/* Full-stack app */}
-              <button
-                type="button"
-                onClick={() => setAppMode("fullstack")}
-                className={cn(
-                  "flex flex-col gap-2 rounded-xl border p-3.5 text-left transition-all",
-                  appMode === "fullstack"
-                    ? "border-primary bg-primary/8 ring-1 ring-primary/20"
-                    : "border-border bg-card hover:bg-muted hover:border-border/80",
-                )}
-              >
-                <div className="flex items-center gap-2">
-                  <div
-                    className={cn(
-                      "flex h-8 w-8 items-center justify-center rounded-lg shrink-0",
-                      appMode === "fullstack" ? "bg-primary/15" : "bg-muted",
-                    )}
-                  >
-                    <Cpu
-                      className={cn(
-                        "h-4 w-4",
-                        appMode === "fullstack" ? "text-primary" : "text-muted-foreground",
-                      )}
-                    />
-                  </div>
-                  <span
-                    className={cn(
-                      "text-sm font-semibold",
-                      appMode === "fullstack" ? "text-primary" : "text-foreground",
-                    )}
-                  >
-                    Full-stack app
-                  </span>
-                </div>
-                <p className="text-[11px] text-muted-foreground leading-snug">
-                  Real server + Postgres database. Ideal for APIs, auth, and data-driven apps.
-                </p>
-                <div className="flex items-center gap-1 text-[10px] text-muted-foreground/70">
-                  <Clock className="h-3 w-3 shrink-0" />
-                  ~1 min setup
-                </div>
-              </button>
-            </div>
-
-            {/* Full-stack checklist */}
-            {appMode === "fullstack" && (
-              <div className="rounded-xl border border-primary/20 bg-primary/5 overflow-hidden">
+      {notice && (
+        <p role="status" className="mb-5 rounded-lg border border-border p-3 text-sm">
+          {notice}
+        </p>
+      )}
+      {!principalReady && (
+        <p role="status" className="mb-4 text-sm text-muted-foreground">
+          Your account changed or is unavailable. Wait for the page to update, or reload it.
+        </p>
+      )}
+      <form onSubmit={handleSubmit} aria-label="Create project" aria-busy={busy}>
+        <div className="min-w-0 space-y-6">
+          <div className="rounded-lg border border-border px-3 py-2 text-sm">
+            {busy && submittedWorkspace ? (
+              <p>Creating in {submittedWorkspace}</p>
+            ) : isLoading ? (
+              <p role="status">Loading workspaces...</p>
+            ) : isError ? (
+              <div role="alert" className="flex flex-wrap items-center justify-between gap-2">
+                <p>Workspaces could not be loaded. Your brief is still here.</p>
                 <button
                   type="button"
-                  onClick={() => setChecklistOpen((v) => !v)}
-                  className="w-full flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm font-medium text-primary hover:bg-primary/8 transition-colors"
+                  className="nf-quiet-link"
+                  disabled={busy || !principalReady}
+                  onClick={() => {
+                    if (!hasCurrentAccount() || busy) return;
+                    void Promise.resolve(retryWorkspaces()).catch(() => undefined);
+                  }}
                 >
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 shrink-0" />
-                    What gets set up automatically
-                  </div>
-                  <ChevronDown
-                    className={cn(
-                      "h-4 w-4 shrink-0 transition-transform duration-200",
-                      checklistOpen && "rotate-180",
-                    )}
-                  />
+                  Retry workspaces
                 </button>
-                {checklistOpen && (
-                  <div className="px-3.5 pb-3.5 pt-1 space-y-2.5 border-t border-primary/10">
-                    {FULLSTACK_CHECKLIST.map(({ icon: Icon, label, detail }) => (
-                      <div key={label} className="flex items-start gap-2.5">
-                        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 shrink-0 mt-0.5">
-                          <Icon className="h-3.5 w-3.5 text-primary" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-[12px] font-semibold text-foreground">{label}</div>
-                          <div className="text-[11px] text-muted-foreground leading-snug">
-                            {detail}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+              </div>
+            ) : arrivalPending ? (
+              <p role="status">
+                Choose a workspace from the sidebar to assign this saved idea. Your idea stays
+                private to this account.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {draftWorkspace ? (
+                  <p>
+                    Workspace: <span className="font-medium">{draftWorkspace.name}</span>
+                  </p>
+                ) : (
+                  <p role="status">
+                    {values.workspaceId === undefined
+                      ? "Choose or create a workspace using the workspace switcher to continue."
+                      : "This draft's workspace is unavailable. Choose another workspace explicitly; your brief is unchanged."}
+                  </p>
+                )}
+                {selectedWorkspace && selectedWorkspace.id !== values.workspaceId && (
+                  <div className="space-y-2">
+                    <p className="text-muted-foreground">
+                      Changing the sidebar workspace does not move this draft.
+                    </p>
+                    <button
+                      type="button"
+                      className="nf-quiet-link"
+                      disabled={busy || !principalReady}
+                      onClick={() => {
+                        if (!hasCurrentAccount() || submitting.current || createProject.isPending)
+                          return;
+                        setValues((previous) => ({
+                          ...previous,
+                          workspaceId: selectedWorkspace.id,
+                        }));
+                        setError("");
+                      }}
+                    >
+                      Use {selectedWorkspace.name} for this draft
+                    </button>
                   </div>
                 )}
               </div>
             )}
           </div>
-        )}
-
-        {/* Platform tab selector */}
-        <div className="flex items-center bg-muted border border-border rounded-lg p-1 gap-1">
-          <button
-            type="button"
-            onClick={() => handlePlatformTabChange("web")}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-              platformTab === "web"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+          <fieldset
+            disabled={busy || !principalReady || arrivalPending}
+            className="min-w-0 space-y-6"
           >
-            <Monitor className="h-4 w-4" />
-            Web
-          </button>
-          <button
-            type="button"
-            onClick={() => handlePlatformTabChange("mobile")}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors",
-              platformTab === "mobile"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Smartphone className="h-4 w-4" />
-            Mobile
-          </button>
-        </div>
-
-        {/* Stack selector — web only */}
-        {platformTab === "web" && (
-          <div className="space-y-1.5">
-            <Label>Stack</Label>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-              {STACK_OPTIONS.map((opt) => {
-                const Icon = opt.icon;
-                const isSelected = stack === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setStack(opt.value)}
-                    className={cn(
-                      "flex flex-col items-center gap-1 rounded-xl border px-1.5 py-2.5 text-[10px] font-medium transition-colors text-center",
-                      isSelected
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="leading-tight">{opt.label}</span>
-                    <span
+            <div className="space-y-2">
+              <Label htmlFor="np-prompt">Project brief</Label>
+              <Textarea
+                id="np-prompt"
+                value={values.prompt}
+                onChange={(event) => changePrompt(event.target.value)}
+                placeholder="A booking app for my studio, with appointments and reminders."
+                rows={5}
+                dir="auto"
+                maxLength={BRIEF_LIMIT}
+                aria-describedby="np-brief-help"
+                className="resize-y"
+              />
+              <p id="np-brief-help" className="text-xs text-muted-foreground">
+                A brief starts the first build. You can also create a named project and add a brief
+                in its workspace.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="np-name">Project name</Label>
+              <Input
+                id="np-name"
+                ref={nameInput}
+                value={values.name}
+                onChange={(event) =>
+                  setValues((previous) => ({
+                    ...previous,
+                    name: event.target.value,
+                    nameEdited: true,
+                  }))
+                }
+                placeholder="Choose a project name"
+                dir="auto"
+                aria-describedby="np-name-help"
+              />
+              <p id="np-name-help" className="text-xs text-muted-foreground">
+                This is the name you will see in your projects and workspace. Edit the suggestion
+                freely.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Build for</Label>
+              <div
+                role="group"
+                aria-label="App platform"
+                className="flex gap-2 rounded-lg border border-border bg-muted p-1"
+              >
+                {(["web", "mobile"] as const).map((platform) => {
+                  const Icon = platform === "web" ? Monitor : Smartphone;
+                  return (
+                    <button
+                      key={platform}
+                      type="button"
+                      aria-pressed={values.platform === platform}
+                      onClick={() => changePlatform(platform)}
                       className={cn(
-                        "text-[9px] font-normal leading-tight",
-                        isSelected ? "text-primary/70" : "text-muted-foreground/60",
+                        "flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm",
+                        values.platform === platform
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground",
                       )}
                     >
-                      {opt.description}
-                    </span>
-                  </button>
-                );
-              })}
+                      <Icon className="h-4 w-4" aria-hidden="true" />{" "}
+                      {platform === "web" ? "Web" : "Mobile"}
+                    </button>
+                  );
+                })}
+              </div>
+              {values.platform === "mobile" && (
+                <p className="text-xs text-muted-foreground">
+                  Mobile targets iOS and Android using Expo / React Native. Device previews depend
+                  on the workspace runtime.
+                </p>
+              )}
             </div>
-          </div>
-        )}
-
-        {/* Mobile info banner */}
-        {platformTab === "mobile" && (
-          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-green-500/10 border border-green-500/20 text-xs text-green-400">
-            <Smartphone className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-medium">Expo / React Native</span>
-              {" — "}
-              Generates iOS + Android source code with a web preview. Scan the QR code with Expo Go
-              to run on your device.
-            </div>
-          </div>
-        )}
-
-        {/* Recommended choices — template selector strip */}
-        <div
-          className={cn(
-            "rounded-xl border p-3 transition-colors",
-            selectedTemplate ? "border-primary/50 bg-primary/5" : "border-border bg-muted/40",
-          )}
-        >
-          {selectedTemplate ? (
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <LayoutTemplate className="h-4 w-4 text-primary shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-primary truncate">
-                    {selectedTemplate.title}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    Template applied — you can edit the prompt below
-                  </p>
+            <details className="rounded-xl border border-border">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+                Starting point and advanced options
+              </summary>
+              <div className="space-y-5 border-t border-border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-sm">
+                    {selectedTemplate?.title ?? "Start with your own brief"}
+                  </span>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setView("templates")}
+                      className="nf-quiet-link"
+                    >
+                      <LayoutTemplate className="h-4 w-4" aria-hidden="true" />{" "}
+                      {selectedTemplate ? "Change template" : "Browse templates"}
+                    </button>
+                    {selectedTemplate && (
+                      <button
+                        type="button"
+                        className="nf-quiet-link"
+                        onClick={() => setValues((previous) => ({ ...previous, templateId: null }))}
+                      >
+                        Remove template
+                      </button>
+                    )}
+                  </div>
                 </div>
+                {values.platform === "web" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="np-mode">Build setup</Label>
+                      <select
+                        id="np-mode"
+                        className={selectClass}
+                        value={values.appMode}
+                        onChange={(event) =>
+                          setValues((previous) => ({
+                            ...previous,
+                            appMode: event.target.value === "fullstack" ? "fullstack" : "simple",
+                          }))
+                        }
+                      >
+                        <option value="simple">Simple app</option>
+                        <option value="fullstack">Full-stack app</option>
+                      </select>
+                      <p className="text-xs text-muted-foreground">
+                        {values.appMode === "fullstack"
+                          ? "Requests server and database setup where available. Track setup status in the workspace."
+                          : "Static site or client-side app without automatic server provisioning."}
+                      </p>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="np-stack">Stack</Label>
+                        <select
+                          id="np-stack"
+                          className={selectClass}
+                          value={values.stack}
+                          onChange={(event) => {
+                            const stack = CREATION_STACKS.find(
+                              (value) => value === event.target.value,
+                            );
+                            if (stack) setValues((previous) => ({ ...previous, stack }));
+                          }}
+                        >
+                          {CREATION_STACKS.map((stack) => (
+                            <option key={stack} value={stack}>
+                              {STACK_LABELS[stack]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="np-kind">Project type</Label>
+                        <select
+                          id="np-kind"
+                          className={selectClass}
+                          value={values.kind}
+                          onChange={(event) => {
+                            const kind = WEB_TYPES.find(
+                              ([value]) => value === event.target.value,
+                            )?.[0];
+                            if (kind)
+                              setValues((previous) => ({ ...previous, kind, templateId: null }));
+                          }}
+                        >
+                          {WEB_TYPES.map(([kind, label]) => (
+                            <option key={kind} value={kind}>
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  onClick={() => setView("templates")}
-                >
-                  <LayoutTemplate className="h-3 w-3" />
-                  Change
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs text-muted-foreground hover:text-foreground gap-1"
-                  onClick={clearTemplate}
-                >
-                  <PencilLine className="h-3 w-3" />
-                  Clear
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="flex items-center gap-2 w-full text-sm text-muted-foreground hover:text-foreground transition-colors group"
-              onClick={() => setView("templates")}
-            >
-              <LayoutTemplate className="h-4 w-4 group-hover:text-primary transition-colors" />
-              <span>Start from a template</span>
-              <span className="ml-auto text-xs text-muted-foreground/60 group-hover:text-muted-foreground">
-                {templateCount} available
-              </span>
-            </button>
-          )}
-        </div>
-
-        {/* Project type — web only; mobile is always mobile-cross */}
-        {platformTab === "web" && (
-          <div className="space-y-1.5">
-            <Label>Project type</Label>
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-              {WEB_PROJECT_TYPES.map(({ label, kind: k, icon: Icon }) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => setKind(k)}
-                  className={cn(
-                    "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-[11px] font-medium transition-colors",
-                    kind === k
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Mobile type picker */}
-        {platformTab === "mobile" && (
-          <div className="space-y-1.5">
-            <Label>App type</Label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {MOBILE_PROJECT_TYPES.map(({ label, icon: Icon }, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setKind("mobile-cross")}
-                  className={cn(
-                    "flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-[11px] font-medium transition-colors",
-                    kind === "mobile-cross" && i === 0
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              All mobile projects target iOS and Android via Expo.
+            </details>
+            <p role="status" className="text-xs text-muted-foreground">
+              {saved
+                ? "Draft kept in this tab for 30 minutes after your last edit."
+                : "Your edits are only on this page. Tab storage is unavailable; keep this page open until creation finishes."}
             </p>
-          </div>
-        )}
-
-        {/* First prompt */}
-        <div className="space-y-1.5">
-          <Label htmlFor="np-prompt">
-            {selectedTemplate ? "Prompt (from template — edit freely)" : "First prompt (optional)"}
-          </Label>
-          <Textarea
-            id="np-prompt"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={
-              platformTab === "mobile"
-                ? "Describe your mobile app — e.g. A fitness tracker with workout logging, progress charts, and a home screen dashboard."
-                : appMode === "fullstack"
-                  ? "Describe your full-stack app — e.g. A task manager with user accounts, a REST API, and a Postgres database for storing tasks."
-                  : stack === "python-flask" || stack === "python-fastapi"
-                    ? "Describe your Python API — e.g. A REST API for a task management system with user authentication and CRUD endpoints."
-                    : stack === "node-api"
-                      ? "Describe your Node.js API — e.g. An Express REST API for a recipe book with search, categories, and user bookmarks."
-                      : stack === "go-gin"
-                        ? "Describe your Go API — e.g. A REST API for a URL shortener with Gin, in-memory store, and JSON responses."
-                        : "Describe what you want to build — e.g. A landing page for a local towing company with a hero section, services, and contact form."
-            }
-            rows={selectedTemplate ? 5 : 4}
-            className="resize-none"
-          />
-          <p className="text-xs text-muted-foreground">
-            {selectedTemplate
-              ? "This seed prompt is pre-filled from the template. You can refine it before building."
-              : appMode === "fullstack"
-                ? "The AI will plan, build, and test your app. A server and database are provisioned automatically."
-                : "If provided, the AI builder will start building immediately after you create the project."}
-          </p>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center justify-end gap-2 border-t border-border pt-5">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setLocation("/projects")}
-            disabled={createProject.isPending}
-          >
-            Cancel
-          </Button>
-          <Button type="submit" disabled={createProject.isPending} className="gap-2">
-            <Rocket className="h-4 w-4" />
-            {createProject.isPending
-              ? "Starting…"
-              : appMode === "fullstack"
-                ? "Start full-stack project"
-                : "Start project"}
-          </Button>
+            {error && (
+              <div
+                role="alert"
+                className="space-y-2 rounded-lg border border-destructive/40 p-3 text-sm"
+              >
+                <p>{error}</p>
+                <p className="text-muted-foreground">
+                  Your details are still here. If the request was interrupted, check your projects
+                  before retrying.
+                </p>
+              </div>
+            )}
+            <div className="flex flex-col gap-4 border-t border-border pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                After creation, your project workspace opens with its build progress and editing
+                tools.
+              </p>
+              <Button
+                type="submit"
+                disabled={
+                  busy ||
+                  !workspaceReady ||
+                  !values.name.trim() ||
+                  values.prompt.length > BRIEF_LIMIT
+                }
+                className="shrink-0 gap-2"
+              >
+                {busy ? "Creating project..." : "Create project"}{" "}
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </fieldset>
         </div>
       </form>
     </div>

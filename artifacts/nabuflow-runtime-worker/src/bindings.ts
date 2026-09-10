@@ -10,6 +10,8 @@ export interface WorkerVersionMetadataBinding {
 }
 
 export interface WorkerBindings {
+  /** Optional stateless Browser Run capture capability; absence fails closed. */
+  BROWSER?: Pick<BrowserRun, "quickAction">;
   NABUFLOW_RUNTIME_ARTIFACTS: R2Bucket;
   DURABLE_OPERATION_QUEUE?: Queue<DurableOperationQueueMessage>;
   /** @deprecated Test-only compatibility alias; production uses DURABLE_OPERATION_QUEUE. */

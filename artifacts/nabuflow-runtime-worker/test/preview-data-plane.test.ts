@@ -447,7 +447,7 @@ describe("authenticated preview data plane", () => {
     expect(response?.headers.get("set-cookie")).toBeNull();
   });
 
-  it("authenticates then round-trips an echo through wsConnect with the untouched Request", async () => {
+  it("authenticates then round-trips an echo through wsConnect with sanitized headers", async () => {
     const token = await grant();
     const redeemed = await redeem(token);
     const request = new Request(`${origin}${PREVIEW_DATA_PREFIX}/${identity}/socket`, {
@@ -467,7 +467,10 @@ describe("authenticated preview data plane", () => {
     });
     expect(response?.headers.get("x-test-websocket")).toBe("connected");
     await expect(response?.text()).resolves.toBe("echo:nabuflow-websocket-test");
-    expect(sandbox.wsRequests[0]).toBe(request);
+    expect(sandbox.wsRequests[0]).not.toBe(request);
+    expect(sandbox.wsRequests[0]?.headers.get("cookie")).toBeNull();
+    expect(sandbox.wsRequests[0]?.headers.get("authorization")).toBeNull();
+    expect(sandbox.wsRequests[0]?.headers.get("x-forwarded-for")).toBeNull();
     expect(request.headers.get("cookie")).toContain("__session=platform-secret");
     expect(request.headers.get("authorization")).toBe("Bearer websocket-app-token");
     expect(request.headers.get("x-forwarded-for")).toBe("attacker.invalid");

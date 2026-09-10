@@ -1,3 +1,4 @@
+import { withProjectWorkspaceAdmission } from "./lib/workspace-lifecycle";
 /**
  * Part 1 verification script — creates a fresh node-api agentic project
  * under the real user's Clerk account and runs the initial build.
@@ -40,22 +41,26 @@ async function main() {
   // ── Step 1: Create project ──────────────────────────────────────────────
   console.log("Step 1: Creating project…");
   const workspaceId = await resolveProjectWorkspaceId({ userId: REAL_USER_ID });
-  const [project] = await db
-    .insert(projectsTable)
-    .values({
-      name: PROJECT_NAME,
-      ownerId: REAL_USER_ID,
-      workspaceId,
-      kind: "web",
-      stack: "node-api",
-      builderMode: "agentic",
-      projectMode: "builder",
-      provisioningStatus: "provisioning",
-      status: "draft",
-      agentMode: "power",
-      defaultAgent: "main",
-    })
-    .returning();
+  const [project] = await withProjectWorkspaceAdmission(
+    { workspaceId, userId: REAL_USER_ID },
+    async (tx) =>
+      tx
+        .insert(projectsTable)
+        .values({
+          name: PROJECT_NAME,
+          ownerId: REAL_USER_ID,
+          workspaceId,
+          kind: "web",
+          stack: "node-api",
+          builderMode: "agentic",
+          projectMode: "builder",
+          provisioningStatus: "provisioning",
+          status: "draft",
+          agentMode: "power",
+          defaultAgent: "main",
+        })
+        .returning(),
+  );
 
   console.log(`  Created project id=${project.id} name="${project.name}"`);
   console.log(`  owner_id=${project.ownerId}`);

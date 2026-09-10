@@ -234,8 +234,8 @@ describe("Preview Architecture Fix regression coverage", () => {
       "const serverPreviewLive = isAgentic && hasServerPreviewAccess(previewAccess)",
     );
     expect(previewTabSource).not.toContain("Boolean(containerUrl)");
-    expect(previewTabSource).toContain(
-      "const src = webContainerLive ? wc.previewUrl! : previewSrc",
+    expect(previewTabSource).toMatch(
+      /const src\s*=\s*webContainerLive\s*\?\s*\(?\s*webContainerPageUrl\(\s*wc\.previewUrl!\s*,\s*currentPath\s*,?\s*\)\s*\?\?\s*wc\.previewUrl!\s*\)?\s*:\s*previewSrc/u,
     );
   });
 
@@ -259,9 +259,11 @@ describe("Preview Architecture Fix regression coverage", () => {
     expect(projectPageSource).toContain(
       'if (st === "running" || st === "starting") void refreshContainerStatus()',
     );
-    const fallback = previewTabSource.indexOf("if (agenticPreviewUnavailable)");
-    const iframe = previewTabSource.indexOf("<iframe", fallback);
+    const fallback = previewTabSource.search(
+      /if\s*\(\s*agenticPreviewUnavailable\s*\|\|\s*previewAuthorizationStatus\s*!==\s*null\s*\)/u,
+    );
     expect(fallback).toBeGreaterThan(-1);
+    const iframe = previewTabSource.indexOf("<iframe", fallback);
     expect(iframe).toBeGreaterThan(fallback);
     expect(previewTabSource).toContain('data-testid="agentic-preview-unavailable"');
   });

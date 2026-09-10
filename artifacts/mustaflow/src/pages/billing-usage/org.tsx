@@ -45,8 +45,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
-  createNabuflowOrgSetupIntent,
-  getNabuflowOrg,
+  getCreateNabuflowOrgSetupIntentUrl,
+  getGetNabuflowOrgUrl,
+  getRegisterNabuflowOrgUrl,
+  type createNabuflowOrgSetupIntent,
+  type getNabuflowOrg,
+  type registerNabuflowOrg,
   getGetNabuflowBillingStateQueryKey,
   getGetNabuflowOrgPricingQueryKey,
   getGetNabuflowOrgQueryKey,
@@ -66,7 +70,12 @@ import {
 } from "@workspace/api-client-react";
 import { formatResetDate, formatUsdCents } from "@/lib/nabuflow-billing";
 import { CardSetupDialog } from "@/components/billing/card-setup-dialog";
-import { MeterBar, SectionCard, useNabuflowState } from "./shared";
+import { MeterBar, SectionCard, billingStateQueryKey, useNabuflowState } from "./shared";
+import {
+  billingAccountRequest,
+  useBillingAccount,
+  useBillingAccountLifetime,
+} from "@/lib/billing-account-lifetime";
 
 function apiErrorMessage(err: unknown): string {
   const data = (err as { data?: { error?: unknown } } | null)?.data;
@@ -99,18 +108,45 @@ const EMPTY_FORM = {
 };
 
 export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return open ? <OpenOrgSetupDialog onClose={onClose} /> : null;
+}
+
+function OpenOrgSetupDialog({ onClose }: { onClose: () => void }) {
+  const account = useBillingAccount();
+  const [owner] = useState(account);
+  const lifetime = useBillingAccountLifetime(owner);
+  const open = !!owner && account?.key === owner.key;
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
-  const register = useRegisterNabuflowOrg();
+  const register = useRegisterNabuflowOrg({
+    request: { signal: lifetime?.signal },
+    mutation: {
+      mutationFn: ({ data }) =>
+        billingAccountRequest<Awaited<ReturnType<typeof registerNabuflowOrg>>>(
+          lifetime,
+          getRegisterNabuflowOrgUrl(),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          },
+        ),
+    },
+  });
 
-  useEffect(() => {
-    if (!open) setForm({ ...EMPTY_FORM });
-  }, [open]);
+  const close = () => {
+    if (!lifetime?.isCurrent()) return;
+    lifetime.dispose();
+    onClose();
+  };
 
-  const set = (key: keyof typeof EMPTY_FORM) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, [key]: e.target.value }));
+  const set = (key: keyof typeof EMPTY_FORM) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!lifetime?.isCurrent()) return;
+    const value = e.target.value;
+    setForm((f) => ({ ...f, [key]: value }));
+  };
 
   const requiredOk =
     form.companyName.trim().length >= 2 &&
@@ -121,6 +157,7 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
     form.country.trim().length === 2;
 
   const submit = () => {
+    if (!lifetime?.isCurrent() || !requiredOk || register.isPending) return;
     const payload: RegisterNabuflowOrgBody = {
       companyName: form.companyName.trim(),
       billingContactEmail: form.billingContactEmail.trim(),
@@ -140,22 +177,31 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
       { data: payload },
       {
         onSuccess: () => {
+          if (!lifetime.isCurrent()) return;
           toast({
             title: "Organization created",
             description:
               "Your company is set up — fund the credit pool and add seats to start building.",
           });
-          void queryClient.invalidateQueries({ queryKey: getGetNabuflowBillingStateQueryKey() });
+          if (!lifetime.isCurrent()) return;
+          void queryClient.invalidateQueries({
+            queryKey: billingStateQueryKey(owner?.userId ?? null),
+          });
+          if (!lifetime.isCurrent()) return;
           void queryClient.invalidateQueries({ queryKey: getGetNabuflowOrgQueryKey() });
-          onClose();
+          if (!lifetime.isCurrent()) return;
+          // Navigate while the operation is current; closing disposes its lifetime.
           navigate("/billing/org");
+          close();
         },
-        onError: (err) =>
+        onError: (err) => {
+          if (!lifetime.isCurrent()) return;
           toast({
             title: "Couldn't set up the organization",
             description: apiErrorMessage(err),
             variant: "destructive",
-          }),
+          });
+        },
       },
     );
   };
@@ -183,8 +229,10 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
     </div>
   );
 
+  if (!open) return null;
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !next && !register.isPending && onClose()}>
+    <Dialog open={open} onOpenChange={(next) => !next && !register.isPending && close()}>
       <DialogContent
         className="max-h-[85vh] max-w-lg overflow-y-auto"
         data-testid="org-setup-dialog"
@@ -246,13 +294,13 @@ export function OrgSetupDialog({ open, onClose }: { open: boolean; onClose: () =
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={register.isPending}>
+          <Button variant="ghost" size="sm" onClick={close} disabled={register.isPending}>
             Cancel
           </Button>
           <Button
             size="sm"
             onClick={submit}
-            disabled={!requiredOk || register.isPending}
+            disabled={!lifetime || !requiredOk || register.isPending}
             data-testid="org-register-submit"
           >
             {register.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
@@ -1135,9 +1183,15 @@ export function OrgSection() {
         description="This card belongs to the organization and pays for bulk credit purchases."
         submitLabel="Save company card"
         previousLast4={prevLast4}
-        createIntent={() => createNabuflowOrgSetupIntent()}
-        verifySaved={async () => {
-          const fresh = await getNabuflowOrg();
+        createIntent={(request) =>
+          request<Awaited<ReturnType<typeof createNabuflowOrgSetupIntent>>>(
+            getCreateNabuflowOrgSetupIntentUrl(),
+            { method: "POST" },
+          )
+        }
+        verifySaved={async (request) => {
+          const fresh =
+            await request<Awaited<ReturnType<typeof getNabuflowOrg>>>(getGetNabuflowOrgUrl());
           const l4 = fresh.card?.last4 ?? null;
           return !!l4 && l4 !== prevLast4;
         }}

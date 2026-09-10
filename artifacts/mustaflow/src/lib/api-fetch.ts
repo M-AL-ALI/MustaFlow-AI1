@@ -2,7 +2,7 @@ import { getAuthToken } from "@workspace/api-client-react";
 
 const AUTH_TOKEN_WAIT_MS = 3_000;
 
-async function getAuthTokenWithinBudget(): Promise<string | null> {
+export async function getAuthTokenWithinBudget(): Promise<string | null> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -34,7 +34,13 @@ async function getAuthTokenWithinBudget(): Promise<string | null> {
  *
  * Use this instead of calling `fetch("/api/...")` directly.
  */
-export async function authFetch(input: string, init: RequestInit = {}): Promise<Response> {
+export async function authFetch(
+  input: string,
+  init: RequestInit = {},
+  beforeRequest?: () => void,
+): Promise<Response> {
+  init.signal?.throwIfAborted();
+  beforeRequest?.();
   const headers = new Headers(init.headers ?? {});
 
   // Only attach the bearer token to same-origin requests. This prevents an
@@ -47,6 +53,9 @@ export async function authFetch(input: string, init: RequestInit = {}): Promise<
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
 
+  // Account-scoped operations must recheck after the asynchronous token wait.
+  init.signal?.throwIfAborted();
+  beforeRequest?.();
   return fetch(input, {
     ...init,
     // After the spread so callers can never accidentally drop the cookie path.

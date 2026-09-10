@@ -40,3 +40,28 @@ describe("Command Center", () => {
     expect(screen.getByText("Analytics")).toBeInTheDocument();
   });
 });
+
+describe("Command Center search aliases", () => {
+  it.each([
+    ["shell", "Terminal", "terminal"],
+    ["logs", "Console output", "logs"],
+    ["runtime", "Server", "runtime"],
+    ["image studio", "Images", "images"],
+  ])("opens %s using its existing destination", async (query, label, tabId) => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    render(<CommandPalette open onClose={onClose} onNavigate={onNavigate} isPublished={false} />);
+    await user.type(screen.getByLabelText("Search project tools"), query);
+    await user.click(screen.getByText(label));
+    expect(onNavigate).toHaveBeenCalledWith({ kind: "workspace-tab", tabId });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it("does not surface Analytics through search before publishing", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette open onClose={vi.fn()} onNavigate={vi.fn()} isPublished={false} />);
+    await user.type(screen.getByLabelText("Search project tools"), "analytics");
+    expect(screen.queryByText("Analytics")).not.toBeInTheDocument();
+    expect(screen.getByText(/No matching tools/)).toBeInTheDocument();
+  });
+});

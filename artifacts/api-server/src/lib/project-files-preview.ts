@@ -6,6 +6,7 @@ import { isBinaryMime } from "./binary-mime";
 import { resolveProjectFileBytes } from "./project-file-asset-reference";
 import { injectBridge, MOCK_FLAG_SCRIPT } from "./consoleBridge";
 import { VISUAL_EDIT_SCRIPT } from "./visualEditScript";
+import { protectPreviewDocument } from "./preview-document-policy";
 
 const STATIC_PREVIEW_BANNER = `<style id="mustaflow-static-preview-style">
 #mustaflow-static-preview{position:fixed;z-index:2147483647;left:50%;bottom:12px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;max-width:calc(100vw - 24px);padding:7px 10px 7px 12px;border:1px solid rgba(148,163,184,.35);border-radius:8px;background:rgba(15,23,42,.92);box-shadow:0 8px 24px rgba(15,23,42,.24);color:#e2e8f0;font:12px/1.35 system-ui,-apple-system,sans-serif;backdrop-filter:blur(8px)}
@@ -38,6 +39,9 @@ export async function serveProjectFilesPreview(
     previewState?: string;
   },
 ): Promise<void> {
+  // Editor/API documents require an opaque origin. Do not change the origin of
+  // a public app served on its own hostname through the non-editor fallback.
+  if (options.visualEditEnabled) protectPreviewDocument(res);
   const [row] = await db
     .select()
     .from(projectFilesTable)

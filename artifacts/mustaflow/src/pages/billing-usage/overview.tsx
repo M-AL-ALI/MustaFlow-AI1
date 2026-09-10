@@ -38,14 +38,28 @@ import {
 } from "./shared";
 
 export function OverviewSection() {
-  const { data: state, isLoading, isError, refetch, blockedReason } = useNabuflowState();
+  const {
+    data: state,
+    isLoading,
+    isError,
+    isFetching,
+    refetch,
+    blockedReason,
+  } = useNabuflowState();
   const { data: plansData } = useListNabuflowPlans();
-  const { data: notifData } = useListNabuflowBillingNotifications();
+  const {
+    data: notifData,
+    isLoading: notificationsLoading,
+    isError: notificationsError,
+    isFetching: notificationsFetching,
+    refetch: refetchNotifications,
+  } = useListNabuflowBillingNotifications();
   const { user } = useClerkUser();
 
   if (isLoading) {
     return (
-      <div className="space-y-4" data-testid="overview-loading">
+      <div className="space-y-4" data-testid="overview-loading" role="status" aria-busy="true">
+        <span className="sr-only">Loading billing overview</span>
         <Skeleton className="h-32 w-full rounded-xl" />
         <div className="grid gap-4 md:grid-cols-2">
           <Skeleton className="h-40 rounded-xl" />
@@ -57,10 +71,16 @@ export function OverviewSection() {
   if (isError || !state) {
     return (
       <SectionCard title="Couldn't load billing">
-        <p className="text-sm text-muted-foreground">
-          Something went wrong loading your billing state.
+        <p role="alert" className="text-sm text-muted-foreground">
+          Your current plan and balance are unavailable. Retry to load the latest billing details.
         </p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => void refetch()}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          disabled={isFetching}
+          onClick={() => void refetch()}
+        >
           <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Try again
         </Button>
       </SectionCard>
@@ -128,7 +148,9 @@ export function OverviewSection() {
             <div className="flex h-full flex-col justify-between gap-4">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-lg font-bold text-foreground">{plan.name}</h2>
+                  <h2 className="text-xl font-semibold tracking-tight text-foreground">
+                    {plan.name}
+                  </h2>
                   <SubscriptionStatusBadge
                     status={sub?.status}
                     cancelAtPeriodEnd={sub?.cancelAtPeriodEnd}
@@ -140,9 +162,8 @@ export function OverviewSection() {
                 </p>
                 {sub?.currentCycleEnd && (
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {sub.cancelAtPeriodEnd ? "Full access continues until" : "Cycle renews on"}{" "}
+                    {sub.cancelAtPeriodEnd ? "Scheduled to end on" : "Current cycle ends on"}{" "}
                     {formatResetDate(sub.currentCycleEnd)}
-                    {sub.cancelAtPeriodEnd ? "; there is no partial-cycle refund" : ""}
                   </p>
                 )}
               </div>
@@ -214,10 +235,16 @@ export function OverviewSection() {
 
       {plan && cycle && (
         <div className="grid gap-4 md:grid-cols-2">
-          <SectionCard title="Credits this cycle" testId="overview-credits">
-            <p className="mb-3 text-2xl font-bold tabular-nums text-foreground">
+          <SectionCard
+            title="Included credit balance"
+            description="Remaining included credits reported for your current cycle."
+            testId="overview-credits"
+          >
+            <p className="mb-4 text-3xl font-semibold tracking-tight tabular-nums text-foreground">
               {cycle.remainingIncludedCredits.toLocaleString()}
-              <span className="ml-1.5 text-xs font-normal text-muted-foreground">credits left</span>
+              <span className="ml-1.5 text-sm font-normal text-muted-foreground">
+                credits remaining
+              </span>
             </p>
             <MeterBar
               label="Included credits used"
@@ -239,7 +266,7 @@ export function OverviewSection() {
           </SectionCard>
 
           <SectionCard
-            title="Spend vs cap"
+            title="Recorded overage"
             testId="overview-spend"
             action={
               <Link
@@ -253,19 +280,23 @@ export function OverviewSection() {
             <p className="mb-3 text-2xl font-bold tabular-nums text-foreground">
               {formatUsdCents(cycle.overageUsdCents)}
               <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                overage so far
+                this cycle (USD)
               </span>
             </p>
-            <MeterBar
-              label="Pay-as-you-go spend"
-              used={cycle.overageUsdCents}
-              total={cap?.usdCents ?? 0}
-              formatValue={(u, t) => `${formatUsdCents(u)} of ${formatUsdCents(t)} cap`}
-              sublabel={resetDate ? `Cap resets on ${resetDate}` : null}
-            />
+            {cap ? (
+              <MeterBar
+                label="Pay-as-you-go spending limit"
+                used={cycle.overageUsdCents}
+                total={cap.usdCents}
+                formatValue={(u, t) => `${formatUsdCents(u)} of ${formatUsdCents(t)} cap`}
+                sublabel={resetDate ? `Cap resets on ${resetDate}` : null}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">Spending limit unavailable.</p>
+            )}
             <p className="mt-2 text-[11px] text-muted-foreground">
-              When included credits run out, builds continue at your plan&apos;s overage rate until
-              this spending limit is reached.
+              Recorded usage charges are separate from your subscription price. This amount is not a
+              payment receipt; invoices show billed amounts and payment status.
             </p>
           </SectionCard>
         </div>
@@ -336,7 +367,7 @@ export function OverviewSection() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <SectionCard title="Quick actions">
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             <Button asChild variant="outline" size="sm" className="justify-start">
               <Link href="/billing/usage">
                 <BarChart3 className="mr-1.5 h-3.5 w-3.5" /> Usage &amp; charts
@@ -356,7 +387,25 @@ export function OverviewSection() {
         </SectionCard>
 
         <SectionCard title="Recent billing activity" testId="overview-notifications">
-          {notifications.length === 0 ? (
+          {notificationsLoading ? (
+            <p role="status" className="text-xs text-muted-foreground">
+              Loading billing activity...
+            </p>
+          ) : notificationsError ? (
+            <div className="space-y-3">
+              <p role="alert" className="text-xs text-muted-foreground">
+                Billing activity could not be loaded.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={notificationsFetching}
+                onClick={() => void refetchNotifications()}
+              >
+                Retry activity
+              </Button>
+            </div>
+          ) : notifications.length === 0 ? (
             <p className="text-xs text-muted-foreground">No billing alerts yet.</p>
           ) : (
             <ul className="space-y-2">

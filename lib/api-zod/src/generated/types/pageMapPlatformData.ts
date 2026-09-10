@@ -7,8 +7,14 @@
  */
 import type { PageMapEdge } from './pageMapEdge';
 import type { PageMapNode } from './pageMapNode';
+import type { PageMapUnresolvedTransition } from './pageMapUnresolvedTransition';
 
 export interface PageMapPlatformData {
   nodes: PageMapNode[];
   edges: PageMapEdge[];
+  /**
+     * Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.
+     * @maxItems 1000
+     */
+  unresolvedTransitions?: PageMapUnresolvedTransition[];
 }

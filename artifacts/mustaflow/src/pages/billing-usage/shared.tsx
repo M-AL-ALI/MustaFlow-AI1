@@ -4,9 +4,17 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
   getGetNabuflowBillingStateQueryKey,
+  getGetNabuflowBillingStateUrl,
+  type getNabuflowBillingState,
   useGetNabuflowBillingState,
 } from "@workspace/api-client-react";
 import { extractNabuflowGate } from "@/lib/nabuflow-billing";
+import { billingMeterPercent } from "./presentation";
+import {
+  billingAccountRequest,
+  createBillingAccountLifetime,
+  useBillingAccount,
+} from "@/lib/billing-account-lifetime";
 
 export function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(() => {
@@ -22,18 +30,37 @@ export function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-/** Single shared read model — react-query dedupes across all sub-pages. */
+export function billingStateQueryKey(accountId: string | null) {
+  return [...getGetNabuflowBillingStateQueryKey(), "account", accountId];
+}
+
+/** Shared within an account; a late response cannot populate another account's read model. */
 export function useNabuflowState() {
+  const account = useBillingAccount();
   const query = useGetNabuflowBillingState({
     query: {
-      queryKey: getGetNabuflowBillingStateQueryKey(),
+      queryKey: billingStateQueryKey(account?.userId ?? null),
+      enabled: !!account,
+      placeholderData: () => undefined,
+      queryFn: async ({ signal }) => {
+        const lifetime = createBillingAccountLifetime(account, signal);
+        try {
+          return await billingAccountRequest<Awaited<ReturnType<typeof getNabuflowBillingState>>>(
+            lifetime,
+            getGetNabuflowBillingStateUrl(),
+          );
+        } finally {
+          lifetime.dispose();
+        }
+      },
       staleTime: 15_000,
       refetchInterval: 60_000,
       refetchOnWindowFocus: true,
     },
   });
-  const blockedReason = query.data ? extractNabuflowGate(query.data.blockedReason) : null;
-  return { ...query, blockedReason };
+  const data = account && !query.isPlaceholderData ? query.data : undefined;
+  const blockedReason = data ? extractNabuflowGate(data.blockedReason) : null;
+  return { ...query, data, blockedReason };
 }
 
 export function SectionCard({
@@ -53,15 +80,15 @@ export function SectionCard({
 }) {
   return (
     <div
-      className={cn("rounded-xl border border-border bg-card p-4 md:p-5", className)}
+      className={cn("rounded-2xl border border-border bg-card p-5 md:p-6", className)}
       data-testid={testId}
     >
       {(title || action) && (
-        <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             {title && <h2 className="text-sm font-semibold text-foreground">{title}</h2>}
             {description && (
-              <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{description}</p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{description}</p>
             )}
           </div>
           {action && <div className="shrink-0">{action}</div>}
@@ -88,17 +115,16 @@ export function MeterBar({
   formatValue?: (used: number, total: number) => string;
   testId?: string;
 }) {
-  const pct = total > 0 ? Math.min((used / total) * 100, 100) : 0;
+  const pct = billingMeterPercent(used, total);
+  const valueText = formatValue
+    ? formatValue(used, total)
+    : `${used.toLocaleString()} of ${total.toLocaleString()}`;
   const tone = pct >= 100 ? "bg-destructive" : pct >= 80 ? "bg-amber-500" : "bg-primary";
   return (
     <div data-testid={testId}>
-      <div className="flex items-baseline justify-between gap-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-xs font-medium text-foreground">{label}</p>
-        <p className="text-xs tabular-nums text-muted-foreground">
-          {formatValue
-            ? formatValue(used, total)
-            : `${used.toLocaleString()} of ${total.toLocaleString()}`}
-        </p>
+        <p className="text-xs tabular-nums text-muted-foreground">{valueText}</p>
       </div>
       <div
         className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted"
@@ -107,6 +133,7 @@ export function MeterBar({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-label={label}
+        aria-valuetext={valueText}
       >
         <div
           className={cn(
@@ -116,7 +143,7 @@ export function MeterBar({
           style={{ width: `${pct}%` }}
         />
       </div>
-      {sublabel && <p className="mt-1 text-[10px] text-muted-foreground">{sublabel}</p>}
+      {sublabel && <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{sublabel}</p>}
     </div>
   );
 }

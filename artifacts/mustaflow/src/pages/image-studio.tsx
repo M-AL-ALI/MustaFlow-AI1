@@ -1,6 +1,7 @@
 import { authFetch } from "@/lib/api-fetch";
+import { presentImageFailure } from "@/lib/image-failure-presentation";
 import { formatAssetBytes, uploadAccountAsset } from "@/lib/asset-upload";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import {
   ImagePlus,
   Loader2,
@@ -20,6 +21,11 @@ import {
   HardDrive,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  ImageStudioCollections,
+  type ImageStudioCollectionContext,
+} from "@/components/image-studio/image-studio-collections";
+import { AssetReuseDialog } from "@/components/image-studio/asset-reuse-dialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -132,11 +138,25 @@ const VARIATION_OPTIONS = [
 
 const POLL_INTERVAL_MS = 2000;
 
+// Every async operation captures one mounted lifetime. A new controller on
+// effect setup also keeps obsolete responses fenced during StrictMode replay.
+function useImageStudioRequestSignal() {
+  const controllerRef = useRef<AbortController | null>(null);
+
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    return () => controller.abort();
+  }, []);
+
+  return useCallback(() => controllerRef.current?.signal, []);
+}
+
 // ── Label pill ────────────────────────────────────────────────────────────────
 
 function LabelPill({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-[9px] text-white/60 bg-white/10 px-1.5 py-0.5 rounded leading-none">
+    <span className="text-[11px] text-muted-foreground bg-muted px-2 py-1 rounded leading-none">
       {children}
     </span>
   );
@@ -158,6 +178,8 @@ function ImageCard({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showPrompt, setShowPrompt] = useState(false);
+  const [previewUnavailable, setPreviewUnavailable] = useState(false);
+  const captureRequestSignal = useImageStudioRequestSignal();
 
   const handleDownload = () => {
     if (!image.fileUrl) return;
@@ -168,18 +190,22 @@ function ImageCard({
   };
 
   const handleDelete = async () => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setDeleting(true);
     setDeleteError(null);
     try {
-      const response = await authFetch(`/api/images/${image.id}`, { method: "DELETE" });
+      const response = await authFetch(`/api/images/${image.id}`, { method: "DELETE", signal });
+      if (signal.aborted) return;
       if (!response.ok) throw new Error("Image deletion was not confirmed");
       onDelete(image.id);
     } catch {
+      if (signal.aborted) return;
       setDeleteError(
         "This image could not be deleted. It remains in your library. Please try again.",
       );
     } finally {
-      setDeleting(false);
+      if (!signal.aborted) setDeleting(false);
     }
   };
 
@@ -202,11 +228,10 @@ function ImageCard({
         <div className="flex flex-col items-center gap-2 text-center">
           <AlertCircle className="h-5 w-5 text-destructive/70" />
           <span className="text-[11px] text-destructive/80">Generation failed</span>
-          {image.errorMessage && (
-            <span className="text-[10px] text-muted-foreground line-clamp-2">
-              {image.errorMessage}
-            </span>
-          )}
+          <span className="text-xs leading-relaxed text-muted-foreground">
+            {presentImageFailure(image.errorMessage)}
+          </span>
+          <span className="text-[11px] text-muted-foreground">Image #{image.id}</span>
           {deleteError && (
             <p role="alert" className="text-xs text-destructive">
               {deleteError}
@@ -224,24 +249,41 @@ function ImageCard({
     );
   }
 
-  if (!image.fileUrl) return null;
+  if (!image.fileUrl) {
+    return (
+      <article className="rounded-xl border border-border bg-card p-4">
+        <p className="text-sm font-medium">Preview unavailable</p>
+        <p className="mt-2 text-xs text-muted-foreground">{image.prompt}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          This record has no image file available yet.
+        </p>
+      </article>
+    );
+  }
 
   return (
     <div className="group rounded-xl border border-border bg-card overflow-hidden relative">
-      <img
-        src={image.thumbnailUrl ?? image.fileUrl}
-        alt={image.prompt}
-        className="w-full aspect-square object-cover"
-        loading="lazy"
-      />
+      {previewUnavailable ? (
+        <div className="flex aspect-square items-center justify-center bg-muted/40 p-4 text-sm text-muted-foreground">
+          Preview could not be loaded
+        </div>
+      ) : (
+        <img
+          src={image.thumbnailUrl ?? image.fileUrl}
+          alt={image.prompt}
+          className="w-full aspect-square object-cover"
+          loading="lazy"
+          onError={() => setPreviewUnavailable(true)}
+        />
+      )}
       {deleteError && (
         <p role="alert" className="relative z-10 bg-card p-3 text-xs text-destructive">
           {deleteError}
         </p>
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex flex-col justify-end p-3 gap-2">
+      <div className="relative flex flex-col gap-3 border-t border-border p-3">
         <button onClick={() => setShowPrompt((v) => !v)} className="text-left">
-          <p className="text-white text-[11px] line-clamp-2 leading-snug">
+          <p className="text-foreground text-xs line-clamp-2 leading-relaxed">
             {showPrompt ? (image.revisedPrompt ?? image.prompt) : image.prompt}
           </p>
         </button>
@@ -259,7 +301,7 @@ function ImageCard({
           <div className="flex-1" />
           <button
             onClick={handleDownload}
-            className="p-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
+            className="p-2 rounded-lg bg-muted text-foreground hover:bg-muted/70 transition-colors"
             title="Download"
           >
             <Download className="h-3.5 w-3.5" />
@@ -267,7 +309,7 @@ function ImageCard({
           <button
             onClick={() => void handleDelete()}
             disabled={deleting}
-            className="p-1.5 rounded-lg bg-white/10 text-white hover:bg-destructive/60 transition-colors disabled:opacity-50"
+            className="p-2 rounded-lg bg-muted text-foreground hover:text-destructive transition-colors disabled:opacity-50"
             title="Delete"
           >
             {deleting ? (
@@ -278,7 +320,7 @@ function ImageCard({
           </button>
           <button
             onClick={() => onEditClick(image)}
-            className="p-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors"
+            className="p-2 rounded-lg bg-muted text-foreground hover:bg-muted/70 transition-colors"
             title="Edit with AI"
           >
             <Pencil className="h-3.5 w-3.5" />
@@ -287,9 +329,10 @@ function ImageCard({
             onClick={() => onUseClick(image)}
             disabled={!image.assetId}
             title={image.assetId ? "Use in Project" : "This image is still being prepared"}
-            className="p-1.5 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors disabled:text-white/40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 p-2 rounded-lg bg-muted text-foreground hover:bg-muted/70 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Image className="h-3.5 w-3.5" />
+            <span className="text-[11px]">Use in project</span>
           </button>
         </div>
       </div>
@@ -300,6 +343,20 @@ function ImageCard({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ImageStudioPage() {
+  return (
+    <ImageStudioCollections>
+      {(context) => <AccountImageStudioPage {...context} />}
+    </ImageStudioCollections>
+  );
+}
+
+function AccountImageStudioPage({
+  projects,
+  projectsLoading,
+  projectsError,
+  retryProjects,
+}: ImageStudioCollectionContext) {
+  const captureRequestSignal = useImageStudioRequestSignal();
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [showNegativePrompt, setShowNegativePrompt] = useState(false);
@@ -318,7 +375,6 @@ export default function ImageStudioPage() {
   const [assets, setAssets] = useState<UnifiedAsset[]>([]);
   const [loadingAssets, setLoadingAssets] = useState(true);
   const [assetsLoadError, setAssetsLoadError] = useState<string | null>(null);
-  const [projects, setProjects] = useState<Array<{ id: number; name: string }>>([]);
   const [usingAsset, setUsingAsset] = useState<{ assetId: number; label: string } | null>(null);
   const [useProjectId, setUseProjectId] = useState<number | null>(null);
   const [useBusy, setUseBusy] = useState(false);
@@ -366,28 +422,35 @@ export default function ImageStudioPage() {
   const totalCost = selectedQuality.cost * variationCount;
 
   const fetchImages = useCallback(async () => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setLoadingImages(true);
     setImagesLoadError(null);
     try {
-      const res = await authFetch("/api/images?limit=40");
+      const res = await authFetch("/api/images?limit=40", { signal });
       if (!res.ok) throw new Error("Image library request failed");
       const data = (await res.json()) as { images: GeneratedImage[] };
+      if (signal.aborted) return;
       if (!Array.isArray(data.images)) throw new Error("Image library response unavailable");
       setImages(data.images);
     } catch {
+      if (signal.aborted) return;
       setImagesLoadError("Generated images could not be loaded. Please try again.");
     } finally {
-      setLoadingImages(false);
+      if (!signal.aborted) setLoadingImages(false);
     }
-  }, []);
+  }, [captureRequestSignal]);
 
   const fetchAssetLibrary = useCallback(async () => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setLoadingAssets(true);
     setAssetsLoadError(null);
     try {
-      const response = await authFetch("/api/assets?limit=100");
+      const response = await authFetch("/api/assets?limit=100", { signal });
       if (!response.ok) throw new Error("Asset library request failed");
       const body = (await response.json()) as { assets?: UnifiedAsset[] };
+      if (signal.aborted) return;
       if (!Array.isArray(body.assets)) throw new Error("Asset library response unavailable");
       const nextAssets = body.assets;
       setAssets(nextAssets);
@@ -408,50 +471,59 @@ export default function ImageStudioPage() {
         ),
       );
     } catch {
+      if (signal.aborted) return;
       setAssetsLoadError("Your private asset library could not be loaded. Please try again.");
     } finally {
-      setLoadingAssets(false);
+      if (!signal.aborted) setLoadingAssets(false);
     }
-  }, []);
+  }, [captureRequestSignal]);
 
   const fetchStorage = useCallback(async () => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setLoadingStorage(true);
     setStorageLoadError(null);
     try {
-      const response = await authFetch("/api/assets/storage-plans");
+      const response = await authFetch("/api/assets/storage-plans", { signal });
       if (!response.ok) throw new Error("Storage allowance request failed");
       const body = (await response.json()) as {
         quota?: { usedBytes: number; reservedBytes: number; limitBytes: number };
         plans?: StoragePlan[];
       };
+      if (signal.aborted) return;
       if (!body.quota || !Array.isArray(body.plans))
         throw new Error("Storage allowance response unavailable");
       setQuota(body.quota);
       setStoragePlans(body.plans);
     } catch {
+      if (signal.aborted) return;
       setStorageLoadError("Your storage allowance could not be loaded. Please try again.");
     } finally {
-      setLoadingStorage(false);
+      if (!signal.aborted) setLoadingStorage(false);
     }
-  }, []);
+  }, [captureRequestSignal]);
 
   const fetchAnalysisUsage = useCallback(async () => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setLoadingAnalysisUsage(true);
     setAnalysisUsageLoadError(null);
     try {
-      const response = await authFetch("/api/assets/analysis-usage");
+      const response = await authFetch("/api/assets/analysis-usage", { signal });
       if (!response.ok) throw new Error("Image analysis usage request failed");
       const body = (await response.json()) as {
         total?: { count: number; estimatedProviderCostMicros: number };
       };
+      if (signal.aborted) return;
       if (!body.total) throw new Error("Image analysis usage response unavailable");
       setAnalysisUsage(body.total);
     } catch {
+      if (signal.aborted) return;
       setAnalysisUsageLoadError("Image analysis usage could not be loaded. Please try again.");
     } finally {
-      setLoadingAnalysisUsage(false);
+      if (!signal.aborted) setLoadingAnalysisUsage(false);
     }
-  }, []);
+  }, [captureRequestSignal]);
 
   const fetchAssets = useCallback(async () => {
     await Promise.all([fetchAssetLibrary(), fetchStorage(), fetchAnalysisUsage()]);
@@ -460,52 +532,49 @@ export default function ImageStudioPage() {
   useEffect(() => {
     void fetchImages();
     void fetchAssets();
-    void authFetch("/api/projects")
-      .then(async (response) => (response.ok ? ((await response.json()) as unknown) : []))
-      .then((value) => {
-        const rows = Array.isArray(value) ? value : [];
-        const available = rows
-          .filter(
-            (row): row is { id: number; name: string } =>
-              Boolean(row) &&
-              typeof row === "object" &&
-              Number.isSafeInteger((row as { id?: unknown }).id) &&
-              typeof (row as { name?: unknown }).name === "string",
-          )
-          .map((row) => ({ id: row.id, name: row.name }));
-        setProjects(available);
-        setUseProjectId((current) => current ?? available[0]?.id ?? null);
-      })
-      .catch(() => setProjects([]));
   }, [fetchAssets, fetchImages]);
 
   const addAssetToProject = async () => {
-    if (!usingAsset || useProjectId === null) return;
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
+    if (
+      !usingAsset ||
+      useBusy ||
+      projectsLoading ||
+      projectsError ||
+      useProjectId === null ||
+      !projects.some((project) => project.id === useProjectId)
+    )
+      return;
     setUseBusy(true);
     setUploadError(null);
     try {
       const response = await authFetch(
         `/api/projects/${useProjectId}/assets/${usingAsset.assetId}/materialize`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal },
       );
       const body = (await response.json().catch(() => ({}))) as {
         src?: string;
         error?: string;
       };
+      if (signal.aborted) return;
       if (!response.ok) throw new Error(body.error ?? "The asset could not be added.");
       setAssetNotice(`${usingAsset.label} is ready in the selected project at ${body.src}.`);
       setUsingAsset(null);
       await fetchAssets();
     } catch (useError) {
+      if (signal.aborted) return;
       setUploadError(
         useError instanceof Error ? useError.message : "The asset could not be added.",
       );
     } finally {
-      setUseBusy(false);
+      if (!signal.aborted) setUseBusy(false);
     }
   };
 
   const saveAssetDetails = async (assetId: number) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     const draft = assetDrafts[assetId];
     if (!draft) return;
     setAssetBusy(assetId);
@@ -513,33 +582,40 @@ export default function ImageStudioPage() {
     try {
       const response = await authFetch(`/api/assets/${assetId}`, {
         method: "PATCH",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draft),
       });
       const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (signal.aborted) return;
       if (!response.ok) throw new Error(body.error ?? "Asset details could not be saved.");
       setAssetNotice("Asset details saved for Zero and published-app accessibility checks.");
       await fetchAssets();
     } catch (detailsError) {
+      if (signal.aborted) return;
       setUploadError(
         detailsError instanceof Error ? detailsError.message : "Asset details could not be saved.",
       );
     } finally {
-      setAssetBusy(null);
+      if (!signal.aborted) setAssetBusy(null);
     }
   };
 
   const proposeAssetAltText = async (assetId: number) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setAssetBusy(assetId);
     setAssetNotice(null);
     try {
       const response = await authFetch(`/api/assets/${assetId}/alt-text-proposal`, {
         method: "POST",
+        signal,
       });
       const body = (await response.json().catch(() => null)) as {
         error?: string;
         proposedAltText?: string;
       } | null;
+      if (signal.aborted) return;
       if (!response.ok || !body?.proposedAltText) {
         throw new Error(body?.error ?? "Zero could not suggest alt text right now.");
       }
@@ -553,18 +629,22 @@ export default function ImageStudioPage() {
       setAssetNotice("Zero proposed editable alt text. Review it, then save when it is right.");
       await fetchAssets();
     } catch (error) {
+      if (signal.aborted) return;
       setAssetNotice(error instanceof Error ? error.message : "Zero could not suggest alt text.");
     } finally {
-      setAssetBusy(null);
+      if (!signal.aborted) setAssetBusy(null);
     }
   };
 
   const createAppSizes = async (assetId: number) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setAssetBusy(assetId);
     setUploadError(null);
     try {
       const response = await authFetch(`/api/assets/${assetId}/derivatives`, {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: "{}",
       });
@@ -572,21 +652,25 @@ export default function ImageStudioPage() {
         error?: string;
         derivatives?: unknown[];
       };
+      if (signal.aborted) return;
       if (!response.ok) throw new Error(body.error ?? "App-ready sizes could not be created.");
       setAssetNotice(`${body.derivatives?.length ?? 0} app-ready sizes were added to the library.`);
       await fetchAssets();
     } catch (derivativeError) {
+      if (signal.aborted) return;
       setUploadError(
         derivativeError instanceof Error
           ? derivativeError.message
           : "App-ready sizes could not be created.",
       );
     } finally {
-      setAssetBusy(null);
+      if (!signal.aborted) setAssetBusy(null);
     }
   };
 
   const openAssetUsage = async (asset: UnifiedAsset) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setUsageAsset(asset);
     setAssetUsages([]);
     setReplacementAssetId(
@@ -596,24 +680,28 @@ export default function ImageStudioPage() {
     setUsageBusy(true);
     setUploadError(null);
     try {
-      const response = await authFetch(`/api/assets/${asset.id}/usage`);
+      const response = await authFetch(`/api/assets/${asset.id}/usage`, { signal });
       const body = (await response.json().catch(() => ({}))) as {
         usages?: AssetUsage[];
         error?: string;
       };
+      if (signal.aborted) return;
       if (!response.ok) throw new Error(body.error ?? "Asset use could not be loaded.");
       setAssetUsages(body.usages ?? []);
     } catch (usageError) {
+      if (signal.aborted) return;
       setUploadError(
         usageError instanceof Error ? usageError.message : "Asset use could not be loaded.",
       );
       setUsageAsset(null);
     } finally {
-      setUsageBusy(false);
+      if (!signal.aborted) setUsageBusy(false);
     }
   };
 
   const replaceAssetInProject = async (projectId: number) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     if (!usageAsset || replacementAssetId === null) return;
     setUsageBusy(true);
     setUploadError(null);
@@ -622,6 +710,7 @@ export default function ImageStudioPage() {
         `/api/projects/${projectId}/assets/${usageAsset.id}/replace`,
         {
           method: "POST",
+          signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ replacementAssetId }),
         },
@@ -630,38 +719,48 @@ export default function ImageStudioPage() {
         replacements?: unknown[];
         error?: string;
       };
+      if (signal.aborted) return;
       if (!response.ok) throw new Error(body.error ?? "The asset could not be replaced safely.");
       setAssetNotice(
         `${body.replacements?.length ?? 0} uses were replaced together in ${projects.find((project) => project.id === projectId)?.name ?? "the project"}.`,
       );
       await openAssetUsage(usageAsset);
+      if (signal.aborted) return;
       await fetchAssets();
     } catch (replaceError) {
+      if (signal.aborted) return;
       setUploadError(
         replaceError instanceof Error
           ? replaceError.message
           : "The asset could not be replaced safely.",
       );
     } finally {
-      setUsageBusy(false);
+      if (!signal.aborted) setUsageBusy(false);
     }
   };
 
   // Polling for pending jobs
   useEffect(() => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
+
+    const pendingJobs = pendingJobsRef.current;
     const poll = async () => {
-      if (pendingJobsRef.current.size === 0) return;
-      const toCheck = Array.from(pendingJobsRef.current);
+      if (signal.aborted || pendingJobs.size === 0) return;
+      const toCheck = Array.from(pendingJobs);
       for (const jobId of toCheck) {
+        if (signal.aborted) return;
         try {
-          const res = await authFetch(`/api/images/status/${jobId}`);
+          const res = await authFetch(`/api/images/status/${jobId}`, { signal });
+          if (signal.aborted) return;
           if (!res.ok) {
-            pendingJobsRef.current.delete(jobId);
+            pendingJobs.delete(jobId);
             continue;
           }
           const job = (await res.json()) as JobStatusResponse;
+          if (signal.aborted) return;
           if (job.status === "completed" || job.status === "failed") {
-            pendingJobsRef.current.delete(jobId);
+            pendingJobs.delete(jobId);
             void fetchImages();
             void fetchAssets();
           } else {
@@ -675,13 +774,18 @@ export default function ImageStudioPage() {
       }
     };
 
-    pollingRef.current = setInterval(() => void poll(), POLL_INTERVAL_MS);
+    const interval = setInterval(() => void poll(), POLL_INTERVAL_MS);
+    pollingRef.current = interval;
     return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
+      clearInterval(interval);
+      if (pollingRef.current === interval) pollingRef.current = null;
+      pendingJobs.clear();
     };
-  }, [fetchAssets, fetchImages]);
+  }, [captureRequestSignal, fetchAssets, fetchImages]);
 
   const handleGenerate = async () => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     if (!prompt.trim() || generating) return;
     setError(null);
     setGenerating(true);
@@ -689,6 +793,7 @@ export default function ImageStudioPage() {
     try {
       const res = await authFetch("/api/images/generate", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: prompt.trim(),
@@ -704,12 +809,9 @@ export default function ImageStudioPage() {
 
       const body = (await res.json()) as GenerateResponse & { error?: string; code?: string };
 
+      if (signal.aborted) return;
       if (!res.ok) {
-        setError(
-          body.code === "asset_storage_reconciliation_required"
-            ? "Your storage total is still being verified. Please try again after storage reconciliation finishes."
-            : (body.error ?? "Generation failed"),
-        );
+        setError(presentImageFailure(body.error, { code: body.code, status: res.status }));
         return;
       }
 
@@ -733,18 +835,23 @@ export default function ImageStudioPage() {
       setImages((prev) => [...placeholders, ...prev]);
       jobIds.forEach((id) => pendingJobsRef.current.add(id));
     } catch {
+      if (signal.aborted) return;
       setError("Network error — please try again");
     } finally {
-      setGenerating(false);
+      if (!signal.aborted) setGenerating(false);
     }
   };
 
   const handleDelete = (id: number) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setImages((prev) => prev.filter((img) => img.id !== id));
     void fetchAssets();
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
@@ -752,7 +859,8 @@ export default function ImageStudioPage() {
     setAssetNotice(null);
     setUploading(true);
     try {
-      const uploaded = await uploadAccountAsset({ file, source: "picker" });
+      const uploaded = await uploadAccountAsset({ file, source: "picker", signal });
+      if (signal.aborted) return;
       setAssetNotice(
         uploaded.resized
           ? "The image was resized for a faster app while keeping full visual detail."
@@ -760,17 +868,21 @@ export default function ImageStudioPage() {
       );
       await fetchAssets();
     } catch (error) {
+      if (signal.aborted) return;
       setUploadError(error instanceof Error ? error.message : "Network error — please try again");
     } finally {
-      setUploading(false);
+      if (!signal.aborted) setUploading(false);
     }
   };
 
   const handleAssetDelete = async (asset: UnifiedAsset) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setUploadError(null);
     try {
-      const response = await authFetch(`/api/assets/${asset.id}`, { method: "DELETE" });
+      const response = await authFetch(`/api/assets/${asset.id}`, { method: "DELETE", signal });
       const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (signal.aborted) return;
       if (!response.ok) {
         setUploadError(body.error ?? "This asset could not be deleted.");
         return;
@@ -778,6 +890,7 @@ export default function ImageStudioPage() {
       setAssets((current) => current.filter((entry) => entry.id !== asset.id));
       await fetchAssets();
     } catch {
+      if (signal.aborted) return;
       setUploadError(
         "This asset could not be deleted. It remains in your library. Please try again.",
       );
@@ -785,11 +898,14 @@ export default function ImageStudioPage() {
   };
 
   const startStorageCheckout = async (sku: string) => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     setStorageBusy(sku);
     setUploadError(null);
     try {
       const response = await authFetch("/api/assets/storage-checkout", {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sku }),
       });
@@ -797,25 +913,30 @@ export default function ImageStudioPage() {
         checkoutUrl?: string;
         error?: string;
       };
+      if (signal.aborted) return;
       if (!response.ok || !body.checkoutUrl) {
         setUploadError(body.error ?? "Storage checkout is temporarily unavailable.");
         return;
       }
       window.location.assign(body.checkoutUrl);
     } catch {
+      if (signal.aborted) return;
       setUploadError("Storage checkout is temporarily unavailable.");
     } finally {
-      setStorageBusy(null);
+      if (!signal.aborted) setStorageBusy(null);
     }
   };
 
   const handleEditSubmit = async () => {
+    const signal = captureRequestSignal();
+    if (!signal || signal.aborted) return;
     if (!editingImage || !editInstruction.trim() || editSubmitting) return;
     setEditError(null);
     setEditSubmitting(true);
     try {
       const res = await authFetch(`/api/images/${editingImage.id}/edit`, {
         method: "POST",
+        signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction: editInstruction.trim(), quality: editQuality }),
       });
@@ -824,9 +945,11 @@ export default function ImageStudioPage() {
         imageId?: number;
         creditCost?: number;
         error?: string;
+        code?: string;
       };
+      if (signal.aborted) return;
       if (!res.ok) {
-        setEditError(body.error ?? "Edit failed");
+        setEditError(presentImageFailure(body.error, { code: body.code, status: res.status }));
         return;
       }
       const placeholder: GeneratedImage = {
@@ -846,9 +969,10 @@ export default function ImageStudioPage() {
       setEditInstruction("");
       setEditQuality("standard");
     } catch {
+      if (signal.aborted) return;
       setEditError("Network error — please try again");
     } finally {
-      setEditSubmitting(false);
+      if (!signal.aborted) setEditSubmitting(false);
     }
   };
 
@@ -1367,9 +1491,11 @@ export default function ImageStudioPage() {
                         </a>
                         <button
                           type="button"
-                          onClick={() =>
-                            setUsingAsset({ assetId: asset.id, label: asset.filename })
-                          }
+                          onClick={() => {
+                            setUseProjectId(null);
+                            setUploadError(null);
+                            setUsingAsset({ assetId: asset.id, label: asset.filename });
+                          }}
                           className="rounded bg-muted p-1 text-muted-foreground hover:text-foreground"
                           aria-label={`Use ${asset.filename} in a project`}
                         >
@@ -1470,10 +1596,12 @@ export default function ImageStudioPage() {
                   image={img}
                   onDelete={handleDelete}
                   onEditClick={setEditingImage}
-                  onUseClick={(image) =>
-                    image.assetId &&
-                    setUsingAsset({ assetId: image.assetId, label: `Generated image ${image.id}` })
-                  }
+                  onUseClick={(image) => {
+                    if (!image.assetId) return;
+                    setUseProjectId(null);
+                    setUploadError(null);
+                    setUsingAsset({ assetId: image.assetId, label: `Generated image ${image.id}` });
+                  }}
                 />
               ))}
             </div>
@@ -1482,45 +1610,27 @@ export default function ImageStudioPage() {
       </div>
 
       {usingAsset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm space-y-4 rounded-xl border border-border bg-background p-4 shadow-xl">
-            <div>
-              <h2 className="text-sm font-semibold">Use in a project</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                A restorable project file and a where-used receipt will be created.
-              </p>
-            </div>
-            <select
-              aria-label="Project for asset"
-              value={useProjectId ?? ""}
-              onChange={(event) => setUseProjectId(Number(event.target.value))}
-              className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs"
-            >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setUsingAsset(null)}
-                className="rounded px-3 py-2 text-xs text-muted-foreground hover:bg-muted"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void addAssetToProject()}
-                disabled={useBusy || useProjectId === null}
-                className="rounded bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50"
-              >
-                {useBusy ? "Adding…" : "Add to project"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <AssetReuseDialog
+          assetLabel={usingAsset.label}
+          projects={projects}
+          projectsLoading={projectsLoading}
+          projectsError={projectsError}
+          retryProjects={retryProjects}
+          projectId={useProjectId}
+          busy={useBusy}
+          error={uploadError}
+          onProjectChange={(projectId) => {
+            setUseProjectId(projectId);
+            setUploadError(null);
+          }}
+          onCancel={() => {
+            if (useBusy) return;
+            setUsingAsset(null);
+            setUseProjectId(null);
+            setUploadError(null);
+          }}
+          onConfirm={() => void addAssetToProject()}
+        />
       )}
 
       {usageAsset && (

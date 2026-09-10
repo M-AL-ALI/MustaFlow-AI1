@@ -427,7 +427,21 @@ describe("project lifecycle mutation fences", () => {
       snapshotObserveRoutesSource,
       'router.post("/projects/:id/observe/snapshot"',
     );
-    expect(snapshotRoute).toContain("dependencies.complete({");
+    const snapshotObservation = routeBlock(snapshotObserveRoutesSource, "const observe = async");
+    expect(snapshotObservation).toContain("await dependencies.complete({");
+    expect(snapshotRoute).toContain("const release = dependencies.holdLifecycle?.(res)");
+    expect(snapshotRoute).toContain("await observe(req, res)");
+    expect(snapshotRoute).toContain("finally {");
+    expect(snapshotRoute).toContain("await release?.()");
+    expect(snapshotRoute.indexOf("dependencies.holdLifecycle?.(res)")).toBeLessThan(
+      snapshotRoute.indexOf("await observe(req, res)"),
+    );
+    expect(snapshotRoute.indexOf("await observe(req, res)")).toBeLessThan(
+      snapshotRoute.indexOf("await release?.()"),
+    );
+    expect(snapshotObserveRoutesSource).toContain(
+      "holdLifecycle: holdResponseProjectLifecycleSession",
+    );
     expect(snapshotObserveRoutesSource).toContain("const asset = await reserveAsset({");
     expect(snapshotObserveRoutesSource).toContain("await completeAsset({");
     expect(snapshotObserveRoutesSource).not.toContain("withActiveProjectLifecycle");

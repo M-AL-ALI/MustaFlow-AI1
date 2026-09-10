@@ -186,8 +186,16 @@ export async function requireProjectOwnership(
     return;
   }
   const rawId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const projectId = parseInt(rawId ?? "", 10);
-  if (!Number.isFinite(projectId)) {
+  // Ownership and downstream handlers must interpret the same project identity.
+  // Prefix parsing accepts aliases such as 12e1 that Number-based handlers read as 120.
+  const projectId = Number(rawId);
+  if (
+    typeof rawId !== "string" ||
+    !/^[0-9]+$/.test(rawId) ||
+    !Number.isInteger(projectId) ||
+    projectId < 1 ||
+    projectId > 2147483647
+  ) {
     res.status(400).json({ error: "Invalid project id" });
     return;
   }

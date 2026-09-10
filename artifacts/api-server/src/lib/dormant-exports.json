@@ -1,5 +1,25 @@
 [
   {
+    "path": "artifacts/api-server/src/lib/automatic-preview-r2-multipart.ts",
+    "symbol": "createPreviewMultipart",
+    "reachableWhen": "AP-2 is disabled and unintegrated. Reachable only after the parent durable capture coordinator integrates opaque unassigned staging MPU creation, durably records and binds the returned key/uploadId before any image bytes, and establishes provider lifecycle cleanup for unknown empty staging MPUs after lost create responses. Requires serial recovery validation and separately approved rollout activation."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/automatic-preview-r2-multipart.ts",
+    "symbol": "uploadPreviewPart",
+    "reachableWhen": "AP-2 is disabled and unintegrated. Reachable only after durable asset-row ownership of the exact key/uploadId and current project/version/runtime admission are established before bounded part-1 upload, with cancellation, writer quiescence, and crash/restart recovery integrated and serially validated. Automatic previews remain OFF until separately approved activation."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/automatic-preview-r2-multipart.ts",
+    "symbol": "completePreviewMultipart",
+    "reachableWhen": "AP-2 is disabled and unintegrated. Reachable only after the parent coordinator durably records completing state, serializes writers for each upload, and records positive terminal completion acknowledgement. Ambiguous completion must remain blocked: abort/ListParts absence cannot prove an in-flight Complete will not materialize an object. Requires serial recovery validation and separately approved rollout activation."
+  },
+  {
+    "path": "artifacts/api-server/src/lib/automatic-preview-r2-multipart.ts",
+    "symbol": "abortPreviewMultipart",
+    "reachableWhen": "AP-2 is disabled and unintegrated. Reachable only after durable cleanup ownership, writer quiescence, and retry state are integrated. Abort/ListParts proves only upload-part absence; ambiguous completion and completed-object absence require separate reconciliation and must not be cleared by NoSuchUpload. Requires serial cleanup/recovery validation and separately approved rollout activation."
+  },
+  {
     "path": "artifacts/api-server/src/lib/zero-prompt-queue-coherence.ts",
     "symbol": "assessPromptQueueCoherence",
     "reachableWhen": "A first-party producer records structured prompt references and a product surface consumes mutation warnings."

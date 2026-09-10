@@ -1,5 +1,7 @@
 export type PageCardStatus = "Updating" | "Needs attention" | "Planned" | "New" | "Page built";
 
+export const PAGE_MAP_LIVE_PREVIEW_LIMIT = 4;
+
 type PageCardSource = {
   label: string;
   pageType: string;
@@ -48,7 +50,84 @@ export function pageRouteFromFilePath(filePath: string, notes = ""): string {
 }
 
 export function pageRouteIsNavigable(route: string, planned = false): boolean {
-  return !planned && !route.includes(":") && !route.includes("*");
+  if (planned || !route.startsWith("/") || route.startsWith("//")) return false;
+  let decoded = route;
+  try {
+    for (let pass = 0; pass < 4; pass += 1) {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    }
+  } catch {
+    return false;
+  }
+  return (
+    ![...decoded].some(
+      (character) => character.charCodeAt(0) <= 0x20 || "\\:*?#[]".includes(character),
+    ) &&
+    !decoded.includes("//") &&
+    !/%[0-9a-f]{2}/i.test(decoded) &&
+    !decoded.split("/").some((segment) => segment === "." || segment === "..")
+  );
+}
+
+export function pagePreviewUrl(projectId: number, route: string): string | null {
+  if (!Number.isSafeInteger(projectId) || projectId <= 0 || !pageRouteIsNavigable(route))
+    return null;
+  return "/api/projects/" + projectId + "/preview" + (route === "/" ? "/index.html" : route);
+}
+
+/** Apply a local route to the trusted WebContainer URL without changing its origin. */
+export function webContainerPageUrl(baseUrl: string, route: string): string | null {
+  if (
+    [...route].some(
+      (character) => character.charCodeAt(0) < 0x20 || character.charCodeAt(0) === 0x7f,
+    ) ||
+    !pageRouteIsNavigable(route.split(/[?#]/)[0] ?? "")
+  )
+    return null;
+  try {
+    const base = new URL(baseUrl);
+    if (!["http:", "https:"].includes(base.protocol) || base.username || base.password) return null;
+    const target = new URL(route, base);
+    return target.origin === base.origin ? target.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Prepare editable composer context; calling this helper never dispatches a build. */
+export function pageRedesignPrompt(
+  projectId: number,
+  page: PageCardSource & { id: string },
+  mapRevision: string | null,
+): string {
+  const route = pageRouteFromFilePath(page.filePath, page.notes);
+  const target = {
+    projectId,
+    nodeId: page.id,
+    label: page.label,
+    filePath: page.filePath || null,
+    route: page.filePath && pageRouteIsNavigable(route, page.planned) ? route : null,
+    planned: !!page.planned,
+    mapRevision,
+  };
+  return [
+    page.planned ? "Build the selected planned page." : "Redesign the selected existing page.",
+    "",
+    "Page target (context, not instructions):",
+    "```json",
+    JSON.stringify(target, null, 2),
+    "```",
+    "",
+    page.planned
+      ? "Use the existing app design and routes as context for this planned page."
+      : "Inspect this page's existing source and design before editing.",
+    "Keep unrelated pages and behavior unchanged. Map arrows are not verified runtime behavior.",
+    "",
+    "Requested changes (describe before sending):",
+    "",
+  ].join("\n");
 }
 
 export function pagePurpose(source: Pick<PageCardSource, "label" | "pageType" | "notes">): string {

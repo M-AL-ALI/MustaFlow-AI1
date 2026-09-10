@@ -1,4 +1,6 @@
 import { memo } from "react";
+import { getPreviewIframeSandbox } from "@/lib/preview-access-ui";
+import { pagePreviewUrl, pageRouteFromFilePath } from "./page-map-card-model";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 import {
@@ -16,7 +18,6 @@ import {
   Monitor,
   FilePlus,
   Unlink,
-  AlertTriangle,
 } from "lucide-react";
 
 export type PageType =
@@ -45,99 +46,133 @@ export type PageNodeData = {
   projectId: number;
   planned?: boolean;
   isBuilding?: boolean;
-  // Connectivity (computed in page-map-tab.tsx, passed in per-render)
+  previewEnabled?: boolean;
+  previewRevision?: string | number;
+  // Map coverage only; these counts and legacy flags are not runtime evidence.
   incoming?: number;
   outgoing?: number;
   isOrphan?: boolean;
   isDeadEnd?: boolean;
   dimmed?: boolean;
   onNodeClick?: (nodeId: string) => void;
-  onPreviewClick?: (filePath: string) => void;
+  onPreviewClick?: (filePath: string, route?: string) => void;
 };
 
-const PAGE_TYPE_CONFIG: Record<
-  PageType,
-  { label: string; color: string; bg: string; Icon: React.ElementType }
-> = {
+const PAGE_TYPE_CONFIG: Record<PageType, { label: string; Icon: React.ElementType }> = {
   landing: {
     label: "Landing",
-    color: "text-purple-400",
-    bg: "bg-purple-500/15 border-purple-500/30",
     Icon: Globe,
   },
   auth: {
     label: "Auth",
-    color: "text-yellow-400",
-    bg: "bg-yellow-500/15 border-yellow-500/30",
     Icon: Lock,
   },
   form: {
     label: "Form",
-    color: "text-blue-400",
-    bg: "bg-blue-500/15 border-blue-500/30",
     Icon: FileText,
   },
   dashboard: {
     label: "Dashboard",
-    color: "text-green-400",
-    bg: "bg-green-500/15 border-green-500/30",
     Icon: LayoutDashboard,
   },
   modal: {
     label: "Modal",
-    color: "text-pink-400",
-    bg: "bg-pink-500/15 border-pink-500/30",
     Icon: Layers,
   },
   settings: {
     label: "Settings",
-    color: "text-slate-400",
-    bg: "bg-slate-500/15 border-slate-500/30",
     Icon: Settings,
   },
   "404": {
     label: "404",
-    color: "text-red-400",
-    bg: "bg-red-500/15 border-red-500/30",
     Icon: AlertCircle,
   },
   "tab-bar": {
     label: "Tab Bar",
-    color: "text-cyan-400",
-    bg: "bg-cyan-500/15 border-cyan-500/30",
     Icon: PanelLeft,
   },
   drawer: {
     label: "Drawer",
-    color: "text-orange-400",
-    bg: "bg-orange-500/15 border-orange-500/30",
     Icon: ChevronRight,
   },
   sheet: {
     label: "Sheet",
-    color: "text-teal-400",
-    bg: "bg-teal-500/15 border-teal-500/30",
     Icon: Layers,
   },
   list: {
     label: "List",
-    color: "text-indigo-400",
-    bg: "bg-indigo-500/15 border-indigo-500/30",
     Icon: List,
   },
   detail: {
     label: "Detail",
-    color: "text-sky-400",
-    bg: "bg-sky-500/15 border-sky-500/30",
     Icon: Info,
   },
   other: {
     label: "Page",
-    color: "text-muted-foreground",
-    bg: "bg-muted border-border",
     Icon: Monitor,
   },
 };
+
+// Mini-frames always remain opaque, even if the preview endpoint redirects to a
+// live runtime. Keep only the existing helper's script capability: no origin,
+// form submission or popups are needed for a non-interactive card.
+const PAGE_MAP_PREVIEW_SANDBOX = getPreviewIframeSandbox({
+  serverPreviewLive: false,
+  webContainerLive: false,
+})
+  .split(/\s+/)
+  .filter((permission) => permission === "allow-scripts")
+  .join(" ");
+
+export function PageMapLivePreview({
+  projectId,
+  route,
+  label,
+  enabled = true,
+  revision,
+  className,
+}: {
+  projectId: number;
+  route: string;
+  label: string;
+  enabled?: boolean;
+  revision?: string | number;
+  className?: string;
+}) {
+  const src = enabled ? pagePreviewUrl(projectId, route) : null;
+  return (
+    <div className={cn("relative h-full w-full overflow-hidden bg-muted/40", className)}>
+      {src ? (
+        <>
+          <iframe
+            key={`${src}:${revision ?? ""}`}
+            src={src}
+            className="pointer-events-none absolute left-0 top-0 border-0"
+            style={{
+              width: "400%",
+              height: "400%",
+              transform: "scale(0.25)",
+              transformOrigin: "top left",
+            }}
+            sandbox={PAGE_MAP_PREVIEW_SANDBOX}
+            tabIndex={-1}
+            aria-hidden="true"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            title={`Preview of ${label}`}
+          />
+          <span className="absolute bottom-1 right-1 rounded border border-border bg-background/95 px-1.5 py-0.5 text-[9px] text-muted-foreground">
+            Live iframe
+          </span>
+        </>
+      ) : (
+        <span className="flex h-full items-center justify-center px-3 text-center text-[10px] text-muted-foreground">
+          Open Preview to view this page
+        </span>
+      )}
+    </div>
+  );
+}
 
 export const PageNode = memo(function PageNode({
   id,
@@ -147,21 +182,21 @@ export const PageNode = memo(function PageNode({
   const config = PAGE_TYPE_CONFIG[data.pageType] ?? PAGE_TYPE_CONFIG.other;
   const Icon = config.Icon;
 
-  const previewUrl = `/api/projects/${data.projectId}/preview/${data.filePath}`;
+  const route = pageRouteFromFilePath(data.filePath, data.notes);
+  const previewUrl = data.filePath ? pagePreviewUrl(data.projectId, route) : null;
 
   if (data.planned) {
     return (
       <div
         className={cn(
-          "relative bg-card/60 border-2 border-dashed rounded-xl shadow-md overflow-hidden cursor-pointer transition-all duration-200",
+          "relative bg-card border border-dashed rounded-xl shadow-sm overflow-hidden transition-colors duration-200",
           "w-52",
           selected
             ? "border-primary shadow-primary/20 ring-2 ring-primary ring-offset-1 ring-offset-background"
-            : "border-primary/40 hover:border-primary/70 hover:shadow-lg",
-          data.isBuilding && "animate-pulse",
+            : "border-border hover:border-primary/40",
+          data.isBuilding && "motion-safe:animate-pulse",
           data.dimmed && !selected && "opacity-40 hover:opacity-100",
         )}
-        onClick={() => data.onNodeClick?.(id)}
       >
         <Handle
           type="target"
@@ -169,43 +204,47 @@ export const PageNode = memo(function PageNode({
           className="!w-2.5 !h-2.5 !bg-border !border-2 !border-background hover:!bg-primary transition-colors"
         />
 
-        {/* Card header */}
-        <div className="px-3 py-2 border-b border-dashed border-border/60 bg-card/50">
-          <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border",
-                config.bg,
-                config.color,
-              )}
-            >
-              <Icon className="h-2.5 w-2.5 shrink-0" />
-              {config.label}
+        <button
+          type="button"
+          className="nodrag nopan block w-full rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          aria-label={`View details for ${data.label || "Untitled Page"}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onNodeClick?.(id);
+          }}
+        >
+          {/* Card header */}
+          <div className="px-3 py-2 border-b border-dashed border-border/60 bg-card/50">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-border bg-muted text-muted-foreground">
+                <Icon className="h-2.5 w-2.5 shrink-0" />
+                {config.label}
+              </div>
+              <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium border border-border">
+                Planned
+              </span>
             </div>
-            <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary font-bold border border-primary/20">
-              PLANNED
+            <div className="mt-1.5 text-xs font-semibold text-foreground truncate">
+              {data.label || "Untitled Page"}
+            </div>
+            {data.notes && (
+              <div className="text-[10px] text-muted-foreground truncate mt-0.5 italic">
+                {data.notes}
+              </div>
+            )}
+          </div>
+
+          {/* Placeholder body */}
+          <div
+            className="flex flex-col items-center justify-center gap-1.5 bg-muted/20"
+            style={{ height: 72 }}
+          >
+            <FilePlus className="h-5 w-5 text-muted-foreground" />
+            <span className="text-[9px] text-muted-foreground font-medium">
+              {data.filePath ? "Planned page" : "No file mapped yet"}
             </span>
           </div>
-          <div className="mt-1.5 text-xs font-semibold text-foreground truncate">
-            {data.label || "Untitled Page"}
-          </div>
-          {data.notes && (
-            <div className="text-[10px] text-muted-foreground truncate mt-0.5 italic">
-              {data.notes}
-            </div>
-          )}
-        </div>
-
-        {/* Placeholder body */}
-        <div
-          className="flex flex-col items-center justify-center gap-1.5 bg-muted/20"
-          style={{ height: 72 }}
-        >
-          <FilePlus className="h-5 w-5 text-primary/40" />
-          <span className="text-[9px] text-muted-foreground font-medium">
-            No file yet — build to create
-          </span>
-        </div>
+        </button>
 
         <Handle
           type="source"
@@ -216,33 +255,26 @@ export const PageNode = memo(function PageNode({
     );
   }
 
-  const hasWiringIssue = !!data.isOrphan || !!data.isDeadEnd;
+  const hasMappingGap = !!data.isOrphan || !!data.isDeadEnd;
   const issueLabel =
     data.isOrphan && data.isDeadEnd
-      ? "Not linked · goes nowhere"
+      ? "No connections mapped yet"
       : data.isOrphan
-        ? "Not linked from anywhere"
+        ? "No incoming connection mapped"
         : data.isDeadEnd
-          ? "Goes nowhere"
+          ? "No outgoing connection mapped"
           : null;
 
   return (
     <div
       className={cn(
-        "relative bg-card border rounded-xl shadow-lg overflow-hidden cursor-pointer transition-all duration-200",
+        "relative bg-card border border-border rounded-xl shadow-sm overflow-hidden transition-colors duration-200",
         "w-52",
-        selected
-          ? "ring-2 ring-primary shadow-primary/20"
-          : "hover:shadow-xl hover:border-primary/40",
-        data.isNew &&
-          !data.hasError &&
-          "ring-2 ring-green-400 ring-offset-1 ring-offset-background",
-        data.hasError && "ring-2 ring-red-500 ring-offset-1 ring-offset-background",
-        hasWiringIssue && !data.hasError && !selected && "border-amber-500/40",
-        data.isBuilding && "animate-pulse",
+        selected ? "ring-2 ring-primary shadow-primary/20" : "hover:border-primary/40",
+        data.isNew && !data.hasError && "border-primary/40",
+        data.isBuilding && "motion-safe:animate-pulse",
         data.dimmed && !selected && "opacity-40 hover:opacity-100",
       )}
-      onClick={() => data.onNodeClick?.(id)}
     >
       <Handle
         type="target"
@@ -251,34 +283,28 @@ export const PageNode = memo(function PageNode({
       />
 
       {/* Card header */}
-      <div className="px-3 py-2 border-b border-border/60 bg-card/80">
+      <button
+        type="button"
+        className="nodrag nopan block w-full px-3 py-2 text-left border-b border-border/60 bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+        aria-label={`View details for ${data.label || "Untitled Page"}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          data.onNodeClick?.(id);
+        }}
+      >
         <div className="flex items-center gap-2">
-          <div
-            className={cn(
-              "flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border",
-              config.bg,
-              config.color,
-            )}
-          >
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border border-border bg-muted text-muted-foreground">
             <Icon className="h-2.5 w-2.5 shrink-0" />
             {config.label}
           </div>
-          {hasWiringIssue && (
-            <span
-              title={issueLabel ?? "Wiring issue"}
-              className="flex items-center px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30"
-            >
-              <AlertTriangle className="h-2.5 w-2.5" />
-            </span>
-          )}
           {data.aiGenerated && (
-            <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary font-bold border border-primary/20">
+            <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-muted text-muted-foreground font-medium border border-border">
               AI
             </span>
           )}
           {data.isNew && (
-            <span className="text-[9px] px-1 py-0.5 rounded bg-green-500/15 text-green-400 font-bold border border-green-500/20">
-              NEW
+            <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary font-medium border border-primary/20">
+              New
             </span>
           )}
         </div>
@@ -286,50 +312,66 @@ export const PageNode = memo(function PageNode({
         <div className="text-[10px] text-muted-foreground font-mono truncate mt-0.5">
           {data.filePath}
         </div>
-      </div>
+      </button>
 
-      {/* Mini preview thumbnail */}
+      {/* Sandboxed live preview; loading a frame is not runtime verification. */}
       <div
-        className="relative overflow-hidden bg-muted/40 group"
+        className="nodrag nopan relative overflow-hidden bg-muted/40 group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
         style={{ height: 72 }}
         onClick={(e) => {
           e.stopPropagation();
-          data.onPreviewClick?.(data.filePath);
+          if (previewUrl) data.onPreviewClick?.(data.filePath, route);
+          else data.onNodeClick?.(id);
         }}
-        title="Click to open in Preview tab"
+        role="button"
+        tabIndex={0}
+        aria-label={previewUrl ? "Open preview: " + data.label : "View page details: " + data.label}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (previewUrl) data.onPreviewClick?.(data.filePath, route);
+          else data.onNodeClick?.(id);
+        }}
+        title={previewUrl ? "Click to open in Preview tab" : "A concrete app route is needed"}
       >
-        <iframe
-          src={previewUrl}
-          className="absolute inset-0 w-full pointer-events-none"
-          style={{
-            height: 400,
-            transform: "scale(0.18)",
-            transformOrigin: "top left",
-            width: "555%",
-          }}
-          sandbox="allow-scripts"
-          title={`Preview of ${data.label}`}
-        />
-        <div className="absolute inset-0 bg-transparent group-hover:bg-primary/5 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+        {previewUrl ? (
+          <PageMapLivePreview
+            projectId={data.projectId}
+            route={route}
+            label={data.label}
+            enabled={data.previewEnabled !== false}
+            revision={data.previewRevision}
+          />
+        ) : (
+          <span className="flex h-full items-center justify-center px-3 text-center text-[10px] text-muted-foreground">
+            Preview needs a concrete app route
+          </span>
+        )}
+        <div className="absolute inset-0 bg-transparent group-hover:bg-primary/5 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100">
           <span className="text-[9px] font-medium text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded">
-            Open preview
+            {previewUrl ? "Open preview" : "View details"}
           </span>
         </div>
       </div>
 
       {data.hasError && (
-        <div className="px-2 py-1 bg-red-500/10 border-t border-red-500/20 flex items-center gap-1">
-          <AlertCircle className="h-2.5 w-2.5 text-red-400 shrink-0" />
-          <span className="text-[9px] text-red-400">Build error</span>
+        <div className="px-2 py-1 bg-muted border-t border-border flex items-center gap-1 text-muted-foreground">
+          <AlertCircle className="h-2.5 w-2.5 shrink-0" />
+          <span className="text-[9px]">Issue reported</span>
         </div>
       )}
 
-      {!data.hasError && hasWiringIssue && (
-        <div className="px-2 py-1 bg-amber-500/10 border-t border-amber-500/20 flex items-center gap-1">
-          <Unlink className="h-2.5 w-2.5 text-amber-400 shrink-0" />
-          <span className="text-[9px] text-amber-400 truncate">{issueLabel}</span>
+      {hasMappingGap && (
+        <div className="px-2 py-1 bg-muted/40 border-t border-border flex items-center gap-1 text-muted-foreground">
+          <Unlink className="h-2.5 w-2.5 shrink-0" />
+          <span className="text-[9px]">{issueLabel}</span>
         </div>
       )}
+
+      <div className="border-t border-border px-2 py-1 text-[9px] text-muted-foreground">
+        Runtime navigation not verified
+      </div>
 
       <Handle
         type="source"

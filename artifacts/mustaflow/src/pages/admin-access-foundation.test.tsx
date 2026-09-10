@@ -6,6 +6,11 @@ const sourceRoot = resolve(process.cwd(), "src");
 const pageSource = readFileSync(resolve(sourceRoot, "pages/admin.tsx"), "utf8");
 const appSource = readFileSync(resolve(sourceRoot, "App.tsx"), "utf8");
 const sidebarSource = readFileSync(resolve(sourceRoot, "components/layout/sidebar.tsx"), "utf8");
+const drawerSource = readFileSync(
+  resolve(sourceRoot, "components/layout/slide-out-nav.tsx"),
+  "utf8",
+);
+const gateSource = readFileSync(resolve(sourceRoot, "hooks/use-admin-access.ts"), "utf8");
 const trustSource = readFileSync(resolve(sourceRoot, "pages/trust.tsx"), "utf8");
 
 describe("Admin Page shell", () => {
@@ -21,8 +26,13 @@ describe("Admin Page shell", () => {
   });
 
   it("keeps both the navigation entry and route guard bound to the server gate", () => {
-    expect(sidebarSource).toContain('authFetch("/api/admin/me")');
-    expect(sidebarSource).toContain("if (!staffRole) return null");
+    expect(gateSource).toContain('authFetch("/api/admin/me",');
+    expect(gateSource).toContain("data?.isAdmin === true");
+    expect(gateSource).toContain("evidence?.userId === userId");
+    for (const navigation of [sidebarSource, drawerSource]) {
+      expect(navigation).toContain("useAdminAccess()");
+      expect(navigation).toContain("if (!isAdmin) return null");
+    }
     expect(sidebarSource).toContain("canViewSupport");
     expect(sidebarSource).toContain("Admin Page");
     expect(appSource).toContain("useGetAdminMe()");

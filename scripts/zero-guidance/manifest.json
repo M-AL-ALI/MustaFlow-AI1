@@ -5,8 +5,8 @@
       "consumers": [
         "agent-loop"
       ],
-      "contentBytes": 18980,
-      "contentSha256": "c539603cd7d490f19ca96df5576c240cfe133980facccf90c1563b0564a166f3",
+      "contentBytes": 19413,
+      "contentSha256": "770f045a6b4edd349d41e26d28f16537d7efd24ec63efcb6b779da2e769bd591",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:agent-loop"
@@ -26,8 +26,8 @@
         "agent-loop",
         "blueprints"
       ],
-      "contentBytes": 3567,
-      "contentSha256": "435fb342528c0f9d2b638c040475631939448595d7a9a99e71c47a3319f631b0",
+      "contentBytes": 3875,
+      "contentSha256": "841ac2c57a4213a9ecd536b6969337eafaf192b662a1653d75d9ccb29dc519b7",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:blueprint-guidance"
@@ -87,8 +87,8 @@
         "eligibility",
         "jobs"
       ],
-      "contentBytes": 1189,
-      "contentSha256": "d6fa5c6e938b392661e7d3d3b20fc8ce171d3bc23089fba1383be8a3faeab843",
+      "contentBytes": 1655,
+      "contentSha256": "0115d134f235aa3c7f1e6578994d2542e9e392302a2c1a462dd9cef11e883e4c",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:sealed-eligibility"
@@ -125,8 +125,8 @@
         "jobs",
         "knowledge"
       ],
-      "contentBytes": 2799,
-      "contentSha256": "f74fe23b1043dfdb4562ce89227bce409df5c97017742d1b5b88cfebe3fcb06a",
+      "contentBytes": 4783,
+      "contentSha256": "e90ab834d75c09c72f1a83bd6cd50a50418f5bd1d4d8739063eb073b87e7a6c1",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:jobs-context"
@@ -167,8 +167,8 @@
         "generation",
         "jobs"
       ],
-      "contentBytes": 230036,
-      "contentSha256": "2d160c6a3be6ffc15cb4ed5d363bcdc2e506294ae5d3eb52e0eca35853fef14a",
+      "contentBytes": 240800,
+      "contentSha256": "edff9cc8151794c35c50ed853313a8fc12a684ac53979f3fc8d2ba574245b186",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:jobs-context"
@@ -209,8 +209,8 @@
         "intent-routing",
         "messages"
       ],
-      "contentBytes": 81748,
-      "contentSha256": "0c16b46cf05967f57aa47496d5a61647739952d3acf26938cc99d46e0131c99e",
+      "contentBytes": 104500,
+      "contentSha256": "2e181e6a8d6d843454c15b7d69f86b9186a62763ce1c476bf62d8950b3b28669",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:message-routing"
@@ -2073,8 +2073,8 @@
         "intent-routing",
         "messages"
       ],
-      "contentBytes": 1723,
-      "contentSha256": "4e9a68055b824c3808792add54c2cae3d15cb8132e24201d7b329e230e4ab6a8",
+      "contentBytes": 1905,
+      "contentSha256": "6690900ad662e0a7bba4f5e503e7e9299e2f92656e333600fc76e6eaf23e7776",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:intent-admission"
@@ -2094,8 +2094,8 @@
         "intent-routing",
         "messages"
       ],
-      "contentBytes": 81748,
-      "contentSha256": "0c16b46cf05967f57aa47496d5a61647739952d3acf26938cc99d46e0131c99e",
+      "contentBytes": 104500,
+      "contentSha256": "2e181e6a8d6d843454c15b7d69f86b9186a62763ce1c476bf62d8950b3b28669",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:intent-admission"
@@ -2178,8 +2178,8 @@
         "snapshot-observe",
         "workspace"
       ],
-      "contentBytes": 942,
-      "contentSha256": "f04968dd9ee85d9fb1d25092a4cc4577f923e2a896ceeea934134e5f66deb0e6",
+      "contentBytes": 1135,
+      "contentSha256": "f5f6769f5c1d44d2af672f61179c85d780e8e88844522462517b5f4be1cf24d7",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:snapshot-observe"
@@ -2199,8 +2199,8 @@
         "snapshot-observe",
         "vision"
       ],
-      "contentBytes": 2708,
-      "contentSha256": "33f598ce0ed8fec160fce532deadc3bfc14a93d85ee42984e4b8fada481d7f06",
+      "contentBytes": 7184,
+      "contentSha256": "b420cbf19e47604dec32fecb9442905711694dadea8e22518175bdccc7fce9df",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:snapshot-observe"
@@ -2221,8 +2221,8 @@
         "messages",
         "workspace"
       ],
-      "contentBytes": 4161,
-      "contentSha256": "156d6538a33e920bf6c15fca37ac69dba1ab80d6136d88f64d7518fe75671eec",
+      "contentBytes": 4073,
+      "contentSha256": "e07aa13283bca3eaa77d8fd8d984bb071390dac517a93c4a9006943ffe07d175",
       "coverageIds": [
         "deterministic:manifest-integrity",
         "live:terminal-honesty"

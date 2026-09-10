@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
   db,
   projectsTable,
@@ -7,8 +7,9 @@ import {
   agentTasksTable,
   projectVersionsTable,
 } from "@workspace/db";
-import { GetRecentActivityResponse } from "@workspace/api-zod";
+import { GetRecentActivityQueryParams, GetRecentActivityResponse } from "@workspace/api-zod";
 import { listAccessibleProjectIds } from "../lib/auth";
+import { parseWorkspaceQueryFilter } from "../lib/workspace-query-filter";
 
 const router: IRouter = Router();
 
@@ -19,12 +20,26 @@ router.get("/activity", async (req, res): Promise<void> => {
     return;
   }
 
+  const filter = parseWorkspaceQueryFilter(req.query.workspaceId);
+  const query = GetRecentActivityQueryParams.safeParse(req.query);
+  // The generated API contract supplies validated values; the stricter parser
+  // also rejects coercible but noncanonical IDs rather than widening scope.
+  if (!filter.ok || !query.success) {
+    res.status(400).json({ error: "Invalid workspace selection" });
+    return;
+  }
   const projectIds = await listAccessibleProjectIds(userId, "viewer");
   if (projectIds.length === 0) {
     res.json([]);
     return;
   }
 
+  const workspaceId = query.data.workspaceId ?? null;
+  const scope = and(
+    inArray(projectsTable.id, projectIds),
+    isNull(projectsTable.deletedAt),
+    workspaceId === null ? undefined : eq(projectsTable.workspaceId, workspaceId),
+  );
   const [messages, tasks, versions, projects] = await Promise.all([
     db
       .select({
@@ -37,7 +52,7 @@ router.get("/activity", async (req, res): Promise<void> => {
       })
       .from(chatMessagesTable)
       .leftJoin(projectsTable, eq(projectsTable.id, chatMessagesTable.projectId))
-      .where(inArray(chatMessagesTable.projectId, projectIds))
+      .where(scope)
       .orderBy(desc(chatMessagesTable.createdAt))
       .limit(15),
     db
@@ -51,7 +66,7 @@ router.get("/activity", async (req, res): Promise<void> => {
       })
       .from(agentTasksTable)
       .leftJoin(projectsTable, eq(projectsTable.id, agentTasksTable.projectId))
-      .where(inArray(agentTasksTable.projectId, projectIds))
+      .where(scope)
       .orderBy(desc(agentTasksTable.createdAt))
       .limit(15),
     db
@@ -64,15 +79,10 @@ router.get("/activity", async (req, res): Promise<void> => {
       })
       .from(projectVersionsTable)
       .leftJoin(projectsTable, eq(projectsTable.id, projectVersionsTable.projectId))
-      .where(inArray(projectVersionsTable.projectId, projectIds))
+      .where(scope)
       .orderBy(desc(projectVersionsTable.createdAt))
       .limit(15),
-    db
-      .select()
-      .from(projectsTable)
-      .where(inArray(projectsTable.id, projectIds))
-      .orderBy(desc(projectsTable.createdAt))
-      .limit(10),
+    db.select().from(projectsTable).where(scope).orderBy(desc(projectsTable.createdAt)).limit(10),
   ]);
 
   const items = [

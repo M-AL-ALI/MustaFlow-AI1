@@ -15,6 +15,8 @@ import type {
   RuntimeReconciliationRepairAction,
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
+import { PREVIEW_CAPTURE_FORWARD_ORIGIN } from "./preview-capture-policy";
+import { forwardPreviewCaptureInSandbox } from "./preview-capture-sandbox";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
 import type {
   StoredRuntime,
@@ -204,6 +206,9 @@ export class NabuflowSandbox extends Sandbox<WorkerBindings> {
    * Sandbox execution context. Availability remains a separate value-only RPC.
    */
   async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).origin === PREVIEW_CAPTURE_FORWARD_ORIGIN) {
+      return forwardPreviewCaptureInSandbox(this.ctx.container, () => this.getState(), request);
+    }
     if (new URL(request.url).origin === PUBLISHED_RUNTIME_FORWARD_ORIGIN) {
       return forwardPublishedRuntimeRequestInSandbox(this, request);
     }

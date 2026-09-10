@@ -18,7 +18,11 @@ import {
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { uploadProjectAsset } from "@/lib/asset-upload";
+import {
+  createAssetUploadLifetime,
+  uploadProjectAsset,
+  type AssetUploadLifetime,
+} from "@/lib/asset-upload";
 
 interface ProjectUpload {
   id: number;
@@ -206,68 +210,92 @@ export function ObjectStoragePanel({ projectId }: ObjectStoragePanelProps) {
   const [showSnippet, setShowSnippet] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadFiles = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [assetResponse, legacyResponse] = await Promise.all([
-        authFetch(`/api/assets?projectId=${projectId}&limit=100`, { credentials: "include" }),
-        authFetch(`/api/projects/${projectId}/uploads`, { credentials: "include" }),
-      ]);
-      if (assetResponse.ok && legacyResponse.ok) {
-        const assetData = (await assetResponse.json()) as {
-          assets?: Array<{
-            id: number;
-            filename: string;
-            mimeType: string;
-            sizeBytes: number;
-            contentUrl: string;
-            createdAt: string;
-            source: string;
-          }>;
-        };
-        const legacyData = (await legacyResponse.json()) as {
-          uploads?: Array<{
-            id: number;
-            filename: string;
-            mimeType: string;
-            sizeBytes: number;
-            createdAt: string;
-          }>;
-        };
-        setFiles([
-          ...(assetData.assets ?? [])
-            .filter((asset) => asset.source !== "legacy-project-upload")
-            .map((asset) => ({
-              id: asset.id,
-              name: asset.filename,
-              objectPath: asset.contentUrl,
-              publicUrl: asset.contentUrl,
-              contentType: asset.mimeType,
-              sizeBytes: asset.sizeBytes,
-              createdAt: asset.createdAt,
-              backend: "asset" as const,
-            })),
-          ...(legacyData.uploads ?? []).map((upload) => ({
-            id: upload.id,
-            name: upload.filename,
-            objectPath: String(upload.id),
-            publicUrl: `/api/projects/${projectId}/uploads/${upload.id}/content`,
-            contentType: upload.mimeType,
-            sizeBytes: upload.sizeBytes,
-            createdAt: upload.createdAt,
-            backend: "legacy" as const,
-          })),
-        ]);
-      } else {
-        setError("Failed to load files.");
-      }
-    } catch {
-      setError("Network error.");
-    } finally {
-      setLoading(false);
-    }
+  const uploadScopes = useRef(new Set<AssetUploadLifetime>());
+  useEffect(() => {
+    const activeScopes = uploadScopes.current;
+    return () => {
+      for (const scope of activeScopes) scope.dispose();
+      activeScopes.clear();
+    };
   }, [projectId]);
+
+  const loadFiles = useCallback(
+    async (scope?: AssetUploadLifetime) => {
+      scope?.assertCurrent();
+      setLoading(true);
+      setError(null);
+      try {
+        const [assetResponse, legacyResponse] = await Promise.all([
+          authFetch(
+            `/api/assets?projectId=${projectId}&limit=100`,
+            { credentials: "include", signal: scope?.signal },
+            scope ? () => scope.assertCurrent() : undefined,
+          ),
+          authFetch(
+            `/api/projects/${projectId}/uploads`,
+            { credentials: "include", signal: scope?.signal },
+            scope ? () => scope.assertCurrent() : undefined,
+          ),
+        ]);
+        scope?.assertCurrent();
+        if (assetResponse.ok && legacyResponse.ok) {
+          const assetData = (await assetResponse.json()) as {
+            assets?: Array<{
+              id: number;
+              filename: string;
+              mimeType: string;
+              sizeBytes: number;
+              contentUrl: string;
+              createdAt: string;
+              source: string;
+            }>;
+          };
+          scope?.assertCurrent();
+          const legacyData = (await legacyResponse.json()) as {
+            uploads?: Array<{
+              id: number;
+              filename: string;
+              mimeType: string;
+              sizeBytes: number;
+              createdAt: string;
+            }>;
+          };
+          scope?.assertCurrent();
+          setFiles([
+            ...(assetData.assets ?? [])
+              .filter((asset) => asset.source !== "legacy-project-upload")
+              .map((asset) => ({
+                id: asset.id,
+                name: asset.filename,
+                objectPath: asset.contentUrl,
+                publicUrl: asset.contentUrl,
+                contentType: asset.mimeType,
+                sizeBytes: asset.sizeBytes,
+                createdAt: asset.createdAt,
+                backend: "asset" as const,
+              })),
+            ...(legacyData.uploads ?? []).map((upload) => ({
+              id: upload.id,
+              name: upload.filename,
+              objectPath: String(upload.id),
+              publicUrl: `/api/projects/${projectId}/uploads/${upload.id}/content`,
+              contentType: upload.mimeType,
+              sizeBytes: upload.sizeBytes,
+              createdAt: upload.createdAt,
+              backend: "legacy" as const,
+            })),
+          ]);
+        } else {
+          setError("Failed to load files.");
+        }
+      } catch {
+        if (!scope || scope.isCurrent()) setError("Network error.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [projectId],
+  );
 
   useEffect(() => {
     void loadFiles();
@@ -276,18 +304,26 @@ export function ObjectStoragePanel({ projectId }: ObjectStoragePanelProps) {
   const handleUpload = useCallback(
     async (fileList: FileList | null) => {
       if (!fileList || fileList.length === 0) return;
-      setUploading(true);
-      setError(null);
+      const scope = createAssetUploadLifetime();
+      uploadScopes.current.add(scope);
       try {
+        scope.assertCurrent();
+        setUploading(true);
+        setError(null);
         for (const file of Array.from(fileList)) {
-          await uploadProjectAsset({ projectId, file, source: "picker" });
+          scope.assertCurrent();
+          await uploadProjectAsset({ projectId, file, source: "picker", signal: scope.signal });
+          scope.assertCurrent();
         }
-        await loadFiles();
+        await loadFiles(scope);
+        scope.assertCurrent();
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Upload failed.");
+        if (scope.isCurrent()) setError(e instanceof Error ? e.message : "Upload failed.");
       } finally {
         setUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = "";
+        uploadScopes.current.delete(scope);
+        scope.dispose();
       }
     },
     [projectId, loadFiles],

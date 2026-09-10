@@ -24,7 +24,11 @@ import {
 } from "@workspace/ora-contracts";
 import type { DatasetAnalysisResult } from "@/types/dataset-analysis";
 import { authFetch } from "@/lib/api-fetch";
-import { uploadAccountAsset } from "@/lib/asset-upload";
+import {
+  createAssetUploadLifetime,
+  uploadAccountAsset,
+  type AssetUploadLifetime,
+} from "@/lib/asset-upload";
 import { markOraActive } from "@/lib/ora-idle-reset";
 import { useOraConversationsOptional } from "@/hooks/ora-conversations-context";
 import { getReferenceSavedMemories, getReferenceChatHistory } from "@/lib/ora-memory-settings";
@@ -380,9 +384,13 @@ function isNetworkFetchError(err: unknown): boolean {
  * friendly error carrying `network: true`, so callers can distinguish "the
  * server never received this" (retryable) from an HTTP-level error.
  */
-async function safeAuthFetch(input: string, init: RequestInit = {}): Promise<Response> {
+async function safeAuthFetch(
+  input: string,
+  init: RequestInit = {},
+  beforeRequest?: () => void,
+): Promise<Response> {
   try {
-    return await authFetch(input, init);
+    return await authFetch(input, init, beforeRequest);
   } catch (err: unknown) {
     if (isNetworkFetchError(err)) {
       throw Object.assign(new Error(NETWORK_ERROR_MESSAGE), { network: true });
@@ -1199,6 +1207,8 @@ export function useOraChat(): UseOraChatReturn {
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadScope = useRef<AssetUploadLifetime | null>(null);
+  useEffect(() => () => uploadScope.current?.dispose(), []);
   const [pendingImageAnalysis, setPendingImageAnalysis] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [mode, setModeState] = useState<OraMode>(getStoredMode);
@@ -1299,6 +1309,8 @@ export function useOraChat(): UseOraChatReturn {
   );
 
   const retireThreadWork = useCallback(() => {
+    uploadScope.current?.dispose();
+    uploadScope.current = null;
     conversationResetGenRef.current += 1;
     editGenRef.current += 1;
     if (saveTimerRef.current) {
@@ -1709,224 +1721,265 @@ export function useOraChat(): UseOraChatReturn {
 
   const uploadFile = useCallback(
     async (file: File) => {
-      const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-
-      if (!ALLOWED_EXTENSIONS.includes(ext)) {
-        setUploadState("error");
-        setUploadError(
-          `Unsupported file type "${ext}". Please upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, ZIP, PNG, JPG, or WEBP file.`,
-        );
-        return;
+      // Guests retain their existing anonymous upload path.
+      const scope = isSignedIn ? createAssetUploadLifetime() : undefined;
+      const retire = () => {
+        if (uploadScope.current === scope) {
+          setUploadState("idle");
+          setUploadError(null);
+        }
+      };
+      if (scope) {
+        uploadScope.current?.dispose();
+        uploadScope.current = scope;
+        scope.signal.addEventListener("abort", retire, { once: true });
       }
-
-      const isImg = isImageExt(ext);
-
-      if (isImg) {
-        // Anonymous-session image cap applies ONLY to not-signed-in visitors.
-        // Signed-in users are unlimited on the backend, so don't block them on
-        // the per-session counter here.
-        if (
-          !isSignedIn &&
-          session &&
-          (session.imageCount ?? 0) >= (session.imageLimit ?? IMAGE_LIMIT)
-        ) {
-          setUploadState("error");
-          setUploadError(
-            `Image limit reached (${session.imageLimit ?? IMAGE_LIMIT}/${session.imageLimit ?? IMAGE_LIMIT}). Start a new session to upload more images.`,
-          );
-          return;
-        }
-      } else {
-        // Anonymous uploads retain the bounded legacy-session envelope. Signed-in
-        // users are admitted only by their account's remaining aggregate storage.
-        if (!isSignedIn && file.size > MAX_FILE_SIZE) {
-          setUploadState("error");
-          setUploadError(
-            `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 100 MB.`,
-          );
-          return;
-        }
-        // Anonymous-session file count cap applies ONLY to not-signed-in visitors.
-        if (!isSignedIn && session && session.fileCount >= session.fileLimit) {
-          setUploadState("error");
-          setUploadError(
-            `File limit reached (${session.fileLimit}/${session.fileLimit}). Start a new session to upload more files.`,
-          );
-          return;
-        }
-      }
-
-      setUploadState("uploading");
-      setUploadError(null);
-
       try {
-        // The shared account-asset uploader performs signed-in image downscaling.
-        // Keep this compatibility compressor only for the anonymous multipart path.
-        const uploadBlob = isImg && !isSignedIn ? await compressImageForUpload(file) : file;
+        scope?.assertCurrent();
+        const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
 
-        // The legacy anonymous path keeps its memory-safety envelope. Signed-in
-        // images use the streamed account-asset path and its aggregate allowance.
-        if (!isSignedIn && isImg && uploadBlob.size > MAX_IMAGE_SIZE) {
+        if (!ALLOWED_EXTENSIONS.includes(ext)) {
           setUploadState("error");
           setUploadError(
-            `Image is too large even after compression (${(uploadBlob.size / 1024 / 1024).toFixed(1)} MB). Please crop it first.`,
+            `Unsupported file type "${ext}". Please upload a PDF, DOCX, PPTX, TXT, CSV, XLSX, ZIP, PNG, JPG, or WEBP file.`,
           );
           return;
         }
 
-        // When compressImageForUpload re-encodes a .webp as image/jpeg, the
-        // server's magic-byte validator would reject JPEG bytes under a .webp
-        // name. Rename the file to .jpg in that case so the extension matches.
-        const uploadName = (() => {
-          if (uploadBlob === (file as Blob)) return file.name;
-          if (uploadBlob.type === "image/jpeg" && !/\.(jpe?g)$/i.test(file.name)) {
-            return file.name.replace(/\.[^.]+$/, ".jpg");
-          }
-          return file.name;
-        })();
+        const isImg = isImageExt(ext);
 
-        const uploadProjectId = currentOraProjectId();
-        let data: {
-          fileRef?: string;
-          imageRef?: string;
-          assetId?: number;
-          filename: string;
-          fileType: string;
-          charCount?: number;
-          rowCount?: number;
-          colCount?: number;
-          truncated?: boolean;
-          sanitizedCells?: number;
-          hiddenSheetsSkipped?: number;
-          fileCount?: number;
-          fileLimit?: number;
-          imageCount?: number;
-          imageLimit?: number;
-          sizeBytes?: number;
-          width?: number;
-          height?: number;
-          analysisStatus?: "ready" | "unavailable";
-          analysisMessage?: string;
-        };
-        if (isSignedIn) {
-          // Account assets use the governed two-stage stream: reserve the exact
-          // aggregate bytes, PUT the Blob directly to private R2, then attach
-          // only its asset id to Ora. No multipart body enters Node memory.
-          const streamedFile = new File([uploadBlob], uploadName, {
-            type: uploadBlob.type || file.type,
-          });
-          const uploaded = await uploadAccountAsset({
-            file: streamedFile,
-            source: "picker",
-          });
-          const attach = await safeAuthFetch(`${BASE}/api/public-ai/upload/attach`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              assetId: uploaded.assetId,
-              ...(uploadProjectId == null ? {} : { oraProjectId: uploadProjectId }),
-            }),
-          });
-          data = (await attach.json().catch(() => ({}))) as typeof data;
-          if (!attach.ok) {
-            throw new Error(
-              (data as { error?: string }).error ?? `Upload attach failed (HTTP ${attach.status})`,
-            );
-          }
-          if (data.analysisStatus === "unavailable") {
+        if (isImg) {
+          // Anonymous-session image cap applies ONLY to not-signed-in visitors.
+          // Signed-in users are unlimited on the backend, so don't block them on
+          // the per-session counter here.
+          if (
+            !isSignedIn &&
+            session &&
+            (session.imageCount ?? 0) >= (session.imageLimit ?? IMAGE_LIMIT)
+          ) {
             setUploadState("error");
             setUploadError(
-              data.analysisMessage ??
-                "Your file is saved, but it could not be prepared for chat analysis right now.",
+              `Image limit reached (${session.imageLimit ?? IMAGE_LIMIT}/${session.imageLimit ?? IMAGE_LIMIT}). Start a new session to upload more images.`,
             );
             return;
           }
-          if (data.fileType === "image" ? !data.imageRef : !data.fileRef) {
-            throw new Error("Your file is saved, but it could not be attached to chat right now.");
-          }
         } else {
-          const formData = new FormData();
-          formData.append("file", uploadBlob, uploadName);
-          const response = await safeAuthFetch(`${BASE}/api/public-ai/upload`, {
-            method: "POST",
-            body: formData,
-          });
-          if (!response.ok) {
-            const failure = (await response.json().catch(() => ({}))) as { error?: string };
-            throw new Error(failure.error ?? `Upload failed (HTTP ${response.status})`);
+          // Anonymous uploads retain the bounded legacy-session envelope. Signed-in
+          // users are admitted only by their account's remaining aggregate storage.
+          if (!isSignedIn && file.size > MAX_FILE_SIZE) {
+            setUploadState("error");
+            setUploadError(
+              `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum size is 100 MB.`,
+            );
+            return;
           }
-          data = (await response.json()) as typeof data;
+          // Anonymous-session file count cap applies ONLY to not-signed-in visitors.
+          if (!isSignedIn && session && session.fileCount >= session.fileLimit) {
+            setUploadState("error");
+            setUploadError(
+              `File limit reached (${session.fileLimit}/${session.fileLimit}). Start a new session to upload more files.`,
+            );
+            return;
+          }
         }
 
-        if (data.fileType === "image") {
-          setAttachedFile({
-            fileRef: data.imageRef ?? "",
-            filename: data.filename,
-            fileType: data.fileType,
-            charCount: 0,
-            isDataset: false,
-            isImage: true,
-            sizeBytes: data.sizeBytes,
-            width: data.width,
-            height: data.height,
-          });
-          setUploadState("attached");
-          setSession((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  imageCount: data.imageCount ?? (prev.imageCount ?? 0) + 1,
-                  imageLimit: data.imageLimit ?? prev.imageLimit ?? IMAGE_LIMIT,
-                }
-              : null,
-          );
-        } else {
-          const isDataset = data.fileType === "csv" || data.fileType === "xlsx";
-          setAttachedFile({
-            fileRef: data.fileRef ?? "",
-            filename: data.filename,
-            fileType: data.fileType,
-            charCount: data.charCount ?? 0,
-            isDataset,
-            rowCount: data.rowCount,
-            colCount: data.colCount,
-            truncated: data.truncated,
-            sanitizedCells: data.sanitizedCells,
-            hiddenSheetsSkipped: data.hiddenSheetsSkipped,
-          });
-          setUploadState("attached");
-          // Remember non-image upload refs (documents AND datasets) so later
-          // plain chat turns can re-hydrate them for follow-up questions. Keep
-          // only the most recent few (server caps re-hydration at 5). Mirrored
-          // to sessionStorage (skipped in temporary mode) so a reload doesn't
-          // lose the refs and turn an in-place "Revise" into a regeneration.
-          if (data.fileRef) {
-            const next = [...documentRefsRef.current, data.fileRef].slice(-5);
-            documentRefsRef.current = next;
-            if (!temporaryRef.current) {
-              storeDocumentRefs(docRefsKey(convRef.current?.currentConversationId ?? null), next);
-            }
+        setUploadState("uploading");
+        setUploadError(null);
+
+        try {
+          // The shared account-asset uploader performs signed-in image downscaling.
+          // Keep this compatibility compressor only for the anonymous multipart path.
+          const uploadBlob = isImg && !isSignedIn ? await compressImageForUpload(file) : file;
+          scope?.assertCurrent();
+
+          // The legacy anonymous path keeps its memory-safety envelope. Signed-in
+          // images use the streamed account-asset path and its aggregate allowance.
+          if (!isSignedIn && isImg && uploadBlob.size > MAX_IMAGE_SIZE) {
+            setUploadState("error");
+            setUploadError(
+              `Image is too large even after compression (${(uploadBlob.size / 1024 / 1024).toFixed(1)} MB). Please crop it first.`,
+            );
+            return;
           }
-          setSession((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  fileCount: data.fileCount ?? prev.fileCount,
-                  fileLimit: data.fileLimit ?? prev.fileLimit,
-                }
-              : null,
-          );
+
+          // When compressImageForUpload re-encodes a .webp as image/jpeg, the
+          // server's magic-byte validator would reject JPEG bytes under a .webp
+          // name. Rename the file to .jpg in that case so the extension matches.
+          const uploadName = (() => {
+            if (uploadBlob === (file as Blob)) return file.name;
+            if (uploadBlob.type === "image/jpeg" && !/\.(jpe?g)$/i.test(file.name)) {
+              return file.name.replace(/\.[^.]+$/, ".jpg");
+            }
+            return file.name;
+          })();
+
+          const uploadProjectId = currentOraProjectId();
+          let data: {
+            fileRef?: string;
+            imageRef?: string;
+            assetId?: number;
+            filename: string;
+            fileType: string;
+            charCount?: number;
+            rowCount?: number;
+            colCount?: number;
+            truncated?: boolean;
+            sanitizedCells?: number;
+            hiddenSheetsSkipped?: number;
+            fileCount?: number;
+            fileLimit?: number;
+            imageCount?: number;
+            imageLimit?: number;
+            sizeBytes?: number;
+            width?: number;
+            height?: number;
+            analysisStatus?: "ready" | "unavailable";
+            analysisMessage?: string;
+          };
+          if (isSignedIn) {
+            // Account assets use the governed two-stage stream: reserve the exact
+            // aggregate bytes, PUT the Blob directly to private R2, then attach
+            // only its asset id to Ora. No multipart body enters Node memory.
+            const streamedFile = new File([uploadBlob], uploadName, {
+              type: uploadBlob.type || file.type,
+            });
+            const uploaded = await uploadAccountAsset({
+              file: streamedFile,
+              source: "picker",
+              signal: scope?.signal,
+            });
+            scope?.assertCurrent();
+            const attach = await safeAuthFetch(
+              `${BASE}/api/public-ai/upload/attach`,
+              {
+                method: "POST",
+                signal: scope?.signal,
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  assetId: uploaded.assetId,
+                  ...(uploadProjectId == null ? {} : { oraProjectId: uploadProjectId }),
+                }),
+              },
+              scope ? () => scope.assertCurrent() : undefined,
+            );
+            scope?.assertCurrent();
+            data = (await attach.json().catch(() => ({}))) as typeof data;
+            scope?.assertCurrent();
+            if (!attach.ok) {
+              throw new Error(
+                (data as { error?: string }).error ??
+                  `Upload attach failed (HTTP ${attach.status})`,
+              );
+            }
+            if (data.analysisStatus === "unavailable") {
+              setUploadState("error");
+              setUploadError(
+                data.analysisMessage ??
+                  "Your file is saved, but it could not be prepared for chat analysis right now.",
+              );
+              return;
+            }
+            if (data.fileType === "image" ? !data.imageRef : !data.fileRef) {
+              throw new Error(
+                "Your file is saved, but it could not be attached to chat right now.",
+              );
+            }
+          } else {
+            const formData = new FormData();
+            formData.append("file", uploadBlob, uploadName);
+            const response = await safeAuthFetch(`${BASE}/api/public-ai/upload`, {
+              method: "POST",
+              body: formData,
+            });
+            if (!response.ok) {
+              const failure = (await response.json().catch(() => ({}))) as { error?: string };
+              throw new Error(failure.error ?? `Upload failed (HTTP ${response.status})`);
+            }
+            data = (await response.json()) as typeof data;
+          }
+
+          scope?.assertCurrent();
+          if (data.fileType === "image") {
+            setAttachedFile({
+              fileRef: data.imageRef ?? "",
+              filename: data.filename,
+              fileType: data.fileType,
+              charCount: 0,
+              isDataset: false,
+              isImage: true,
+              sizeBytes: data.sizeBytes,
+              width: data.width,
+              height: data.height,
+            });
+            setUploadState("attached");
+            setSession((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    imageCount: data.imageCount ?? (prev.imageCount ?? 0) + 1,
+                    imageLimit: data.imageLimit ?? prev.imageLimit ?? IMAGE_LIMIT,
+                  }
+                : null,
+            );
+          } else {
+            const isDataset = data.fileType === "csv" || data.fileType === "xlsx";
+            setAttachedFile({
+              fileRef: data.fileRef ?? "",
+              filename: data.filename,
+              fileType: data.fileType,
+              charCount: data.charCount ?? 0,
+              isDataset,
+              rowCount: data.rowCount,
+              colCount: data.colCount,
+              truncated: data.truncated,
+              sanitizedCells: data.sanitizedCells,
+              hiddenSheetsSkipped: data.hiddenSheetsSkipped,
+            });
+            setUploadState("attached");
+            // Remember non-image upload refs (documents AND datasets) so later
+            // plain chat turns can re-hydrate them for follow-up questions. Keep
+            // only the most recent few (server caps re-hydration at 5). Mirrored
+            // to sessionStorage (skipped in temporary mode) so a reload doesn't
+            // lose the refs and turn an in-place "Revise" into a regeneration.
+            if (data.fileRef) {
+              const next = [...documentRefsRef.current, data.fileRef].slice(-5);
+              documentRefsRef.current = next;
+              if (!temporaryRef.current) {
+                storeDocumentRefs(docRefsKey(convRef.current?.currentConversationId ?? null), next);
+              }
+            }
+            setSession((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    fileCount: data.fileCount ?? prev.fileCount,
+                    fileLimit: data.fileLimit ?? prev.fileLimit,
+                  }
+                : null,
+            );
+          }
+        } catch (err: unknown) {
+          if (scope && !scope.isCurrent()) return;
+          const msg = (err as Error).message ?? "Upload failed. Please try again.";
+          setUploadState("error");
+          setUploadError(msg);
         }
-      } catch (err: unknown) {
-        const msg = (err as Error).message ?? "Upload failed. Please try again.";
-        setUploadState("error");
-        setUploadError(msg);
+      } catch (error) {
+        if (!scope || scope.isCurrent()) throw error;
+      } finally {
+        if (scope) {
+          scope.signal.removeEventListener("abort", retire);
+          if (uploadScope.current === scope) uploadScope.current = null;
+          scope.dispose();
+        }
       }
     },
     [session, isSignedIn, currentOraProjectId],
   );
 
   const clearAttachment = useCallback(() => {
+    uploadScope.current?.dispose();
+    uploadScope.current = null;
     setAttachedFile(null);
     setUploadState("idle");
     setUploadError(null);

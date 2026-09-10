@@ -30,7 +30,6 @@ import {
 } from "lucide-react";
 import {
   WORKSPACE_TOOL_CATEGORIES,
-  WORKSPACE_TOOLS,
   type WorkspaceToolId,
   type WorkspaceToolOpen,
 } from "@workspace/nabuflow-workspace-tools";
@@ -45,6 +44,7 @@ import {
 } from "@/components/ui/command";
 import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { findProjectTools, projectToolSearchText } from "./project-tool-search";
 
 type CommandCenterProps = {
   open: boolean;
@@ -93,18 +93,7 @@ const CATEGORY_GRID_CLASSES = {
 export function CommandPalette({ open, onClose, onNavigate, isPublished }: CommandCenterProps) {
   const [query, setQuery] = useState("");
   const isFiltering = query.trim().length > 0;
-  const visibleTools = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    return WORKSPACE_TOOLS.filter((tool) => {
-      const isAvailable =
-        tool.availability === "always" || (tool.availability === "published" && isPublished);
-      if (!isAvailable) return false;
-      if (!normalizedQuery) return true;
-      return `${tool.name} ${tool.description} ${tool.category}`
-        .toLocaleLowerCase()
-        .includes(normalizedQuery);
-    });
-  }, [isPublished, query]);
+  const visibleTools = useMemo(() => findProjectTools(query, isPublished), [isPublished, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -149,7 +138,7 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
             "sm:[&_[cmdk-list-sizer]]:grid sm:[&_[cmdk-list-sizer]]:grid-cols-2 sm:[&_[cmdk-list-sizer]]:items-start sm:[&_[cmdk-list-sizer]]:gap-3",
         )}
       >
-        <CommandEmpty>No matching tool found.</CommandEmpty>
+        <CommandEmpty>No matching tools. Try database, shell, images, or publishing.</CommandEmpty>
         {WORKSPACE_TOOL_CATEGORIES.map((category) => {
           const categoryTools = visibleTools.filter((tool) => tool.category === category);
           if (categoryTools.length === 0) return null;
@@ -161,7 +150,7 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
                 "rounded-lg border border-border/70 bg-muted/10 !p-1",
                 !isFiltering && [
                   CATEGORY_GRID_CLASSES[category],
-                  "sm:[&_[cmdk-group-items]]:grid sm:[&_[cmdk-group-items]]:grid-cols-2 sm:[&_[cmdk-group-items]]:gap-0.5",
+                  "sm:[&_[cmdk-group-items]]:grid sm:[&_[cmdk-group-items]]:grid-cols-1 sm:[&_[cmdk-group-items]]:gap-0.5",
                 ],
               )}
             >
@@ -170,21 +159,19 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
                 return (
                   <CommandItem
                     key={tool.id}
-                    value={`${tool.name} ${tool.description} ${tool.category}`}
+                    value={projectToolSearchText(tool)}
                     onSelect={() => {
                       onNavigate(tool.open);
                       onClose();
                     }}
-                    className="items-center gap-2 px-2 !py-1.5"
+                    className="min-h-12 items-center gap-3 px-3 !py-2"
                   >
                     <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground">
                       <Icon className="!h-3.5 !w-3.5" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[11px] font-medium text-foreground">
-                        {tool.name}
-                      </span>
-                      <span className="block truncate text-[10px] leading-4 text-muted-foreground">
+                      <span className="block text-sm font-medium text-foreground">{tool.name}</span>
+                      <span className="block text-xs leading-5 text-muted-foreground">
                         {tool.description}
                       </span>
                     </span>

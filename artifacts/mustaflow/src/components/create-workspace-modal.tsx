@@ -1,118 +1,188 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/contexts/workspace-context";
-import { Briefcase, User, Users, Building2 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 const WORKSPACE_TYPES = [
-  { value: "personal", label: "Personal", desc: "Solo projects and experiments", Icon: User },
-  { value: "business", label: "Business", desc: "Company or product apps", Icon: Building2 },
-  { value: "client", label: "Client Work", desc: "Projects for your clients", Icon: Briefcase },
-  { value: "team", label: "Team", desc: "Collaborate with others", Icon: Users },
+  { value: "personal", label: "Personal" },
+  { value: "business", label: "Business" },
+  { value: "client", label: "Client work" },
+  { value: "team", label: "Team" },
 ] as const;
 
 interface CreateWorkspaceModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreated?: (workspaceId: number) => void;
 }
 
-export function CreateWorkspaceModal({ open, onOpenChange }: CreateWorkspaceModalProps) {
+export function CreateWorkspaceModal({ open, onOpenChange, onCreated }: CreateWorkspaceModalProps) {
   const { createWorkspace, isCreating } = useWorkspace();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<"personal" | "business" | "client" | "team">("personal");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+  const id = useId();
+  const busy = pending || isCreating;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
-  const handleCreate = () => {
-    if (!name.trim()) return;
-    createWorkspace({ name: name.trim(), description: description.trim() || undefined, type });
-    onOpenChange(false);
-    setName("");
-    setDescription("");
-    setType("personal");
+  const handleCreate = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!name.trim() || inFlight.current || isCreating) return;
+    inFlight.current = true;
+    setPending(true);
+    setError(null);
+    try {
+      const created = await createWorkspace({
+        name: name.trim(),
+        description: description.trim() || undefined,
+        type,
+      });
+      if (!mounted.current) return;
+      setName("");
+      setDescription("");
+      setType("personal");
+      onOpenChange(false);
+      onCreated?.(created.id);
+    } catch {
+      if (mounted.current)
+        setError(
+          "We couldn't confirm workspace creation. Your details are unchanged. Check your workspace list before trying again.",
+        );
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setPending(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) onOpenChange(next);
+      }}
+    >
       <DialogContent className="sm:max-w-md bg-card border-border text-foreground">
-        <DialogHeader>
-          <DialogTitle className="text-base font-semibold">Create Workspace</DialogTitle>
-          <p className="text-xs text-muted-foreground mt-1">
-            Workspaces are containers that hold multiple projects.
-          </p>
-        </DialogHeader>
-
-        <div className="space-y-4 py-2">
-          <div>
-            <label className="text-xs font-medium text-foreground mb-1.5 block">
-              Workspace name <span className="text-destructive">*</span>
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Mustafa Business Apps"
-              className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-              autoFocus
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-foreground mb-1.5 block">
-              Description <span className="text-muted-foreground font-normal">(optional)</span>
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What is this workspace for?"
-              className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-foreground mb-2 block">Workspace type</label>
-            <div className="grid grid-cols-2 gap-2">
-              {WORKSPACE_TYPES.map(({ value, label, desc, Icon }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setType(value)}
-                  className={cn(
-                    "flex items-start gap-2.5 p-2.5 rounded-xl border text-left transition-all",
-                    type === value
-                      ? "border-primary/60 bg-primary/10 text-foreground"
-                      : "border-border bg-muted/50 text-muted-foreground hover:border-border/80 hover:text-foreground",
-                  )}
-                >
-                  <Icon
-                    className={cn("h-4 w-4 mt-0.5 shrink-0", type === value ? "text-primary" : "")}
-                  />
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold">{label}</div>
-                    <div className="text-[10px] leading-snug mt-0.5 opacity-70">{desc}</div>
-                  </div>
-                </button>
-              ))}
+        <form
+          onSubmit={handleCreate}
+          aria-busy={busy}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold tracking-tight">
+              Create workspace
+            </DialogTitle>
+            <DialogDescription>
+              Keep related projects together. Your new workspace will be selected when it is ready.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 py-6">
+            <div>
+              <label htmlFor={`${id}-name`} className="mb-2 block text-sm font-medium">
+                Workspace name
+              </label>
+              <input
+                id={`${id}-name`}
+                required
+                maxLength={100}
+                type="text"
+                value={name}
+                disabled={busy}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="e.g. Product studio"
+                autoFocus
+                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+              />
             </div>
+            <details className="rounded-lg border border-border px-3 py-3">
+              <summary className="cursor-pointer text-sm text-muted-foreground">
+                Optional details
+              </summary>
+              <div className="mt-4 space-y-4">
+                <div>
+                  <label htmlFor={`${id}-description`} className="mb-2 block text-sm font-medium">
+                    Description
+                  </label>
+                  <input
+                    id={`${id}-description`}
+                    maxLength={500}
+                    type="text"
+                    value={description}
+                    disabled={busy}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder="What will you build here?"
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  />
+                </div>
+                <fieldset disabled={busy}>
+                  <legend className="mb-2 text-sm font-medium">Workspace category</legend>
+                  <div className="grid grid-cols-2 gap-3">
+                    {WORKSPACE_TYPES.map((item) => (
+                      <label
+                        key={item.value}
+                        className="flex cursor-pointer items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="radio"
+                          name={`${id}-category`}
+                          value={item.value}
+                          checked={type === item.value}
+                          onChange={() => setType(item.value)}
+                          className="accent-primary"
+                        />
+                        {item.label}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                    A category organizes your work. It does not invite people or change their
+                    permissions.
+                  </p>
+                </fieldset>
+              </div>
+            </details>
+            {error && (
+              <p role="alert" className="rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                {error}
+              </p>
+            )}
+            {busy && (
+              <p role="status" className="text-sm text-muted-foreground">
+                Creating your workspace. Please keep this window open.
+              </p>
+            )}
           </div>
-        </div>
-
-        <DialogFooter className="gap-2 sm:gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button size="sm" onClick={handleCreate} disabled={!name.trim() || isCreating}>
-            {isCreating ? "Creating…" : "Create Workspace"}
-          </Button>
-        </DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!name.trim() || busy}>
+              {busy ? "Creating workspace..." : "Create workspace"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

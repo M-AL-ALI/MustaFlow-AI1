@@ -18,7 +18,7 @@ describe("project workspace performance rails", () => {
       "ZeroAgentPanel",
     ]) {
       expect(workspaceSource).toMatch(
-        new RegExp(`const ${component} = builderLazy\\(\\(\\) =>[\\s\\S]*?${component}`),
+        new RegExp(`const ${component} = builderLazy\\(\\s*\\(\\) =>[\\s\\S]*?${component}`),
       );
     }
   });

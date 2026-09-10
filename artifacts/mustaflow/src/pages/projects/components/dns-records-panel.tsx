@@ -1126,9 +1126,6 @@ export function DnsRecordsPanel({
     }
   }, [projectId, domain.id]);
 
-  const registrar =
-    REGISTRAR_GUIDES.find((g) => g.id === selectedRegistrar) ?? REGISTRAR_GUIDES[0]!;
-
   // 14-day expiry warning
   const certExpiringSoon =
     certInfo.byoCertExpiresAt &&
@@ -1692,41 +1689,10 @@ export function DnsRecordsPanel({
       {/* Tab: Setup Guide */}
       {tab === "guide" && (
         <div className="p-4 space-y-4">
-          <div className="space-y-2">
-            <label className="text-[10px] font-medium text-muted-foreground block uppercase tracking-wide">
-              Your DNS Provider / Registrar
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {REGISTRAR_GUIDES.map((g) => (
-                <button
-                  key={g.id}
-                  onClick={() => setSelectedRegistrar(g.id)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
-                    selectedRegistrar === g.id
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40",
-                  )}
-                >
-                  {g.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <p className="text-xs font-semibold">{registrar.name} — Setup Steps</p>
-            <ol className="space-y-1.5">
-              {registrar.steps.map((step, i) => (
-                <li key={i} className="flex items-start gap-2.5 text-xs text-muted-foreground">
-                  <span className="shrink-0 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-foreground mt-0.5">
-                    {i + 1}
-                  </span>
-                  {step}
-                </li>
-              ))}
-            </ol>
-          </div>
+          <RegistrarGuideContent
+            selectedRegistrar={selectedRegistrar}
+            onSelect={setSelectedRegistrar}
+          />
 
           {/* Pre-filled DNS records for this domain */}
           <div className="space-y-2">
@@ -1804,23 +1770,46 @@ export function DnsRecordsPanel({
 
 export function RegistrarGuideSection() {
   const [selectedRegistrar, setSelectedRegistrar] = useState("godaddy");
+  return (
+    <RegistrarGuideContent selectedRegistrar={selectedRegistrar} onSelect={setSelectedRegistrar} />
+  );
+}
+
+function RegistrarGuideContent({
+  selectedRegistrar,
+  onSelect,
+}: {
+  selectedRegistrar: string;
+  onSelect: (registrar: string) => void;
+}) {
   const registrar =
     REGISTRAR_GUIDES.find((g) => g.id === selectedRegistrar) ?? REGISTRAR_GUIDES[0]!;
 
   return (
-    <div className="space-y-3">
-      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-        Which registrar are you using?
-      </p>
-      <div className="flex flex-wrap gap-1.5">
+    <section aria-label="Domain ownership and DNS setup" className="space-y-4">
+      <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+        <p className="font-medium text-foreground">Connect a domain you control</p>
+        <p className="mt-1">
+          Use an account authorized to manage this domain's DNS. A verification record demonstrates
+          DNS control; adding records does not transfer domain registration.
+        </p>
+        <p className="mt-2">
+          Registration ownership, renewal charges and renewal settings are managed with your
+          registrar. DNS propagation, TLS and live-site health are separate checks.
+        </p>
+      </div>
+      <p className="text-xs font-semibold">Choose your DNS provider or registrar</p>
+      <div role="group" aria-label="Registrar instructions" className="flex flex-wrap gap-2">
         {REGISTRAR_GUIDES.map((g) => (
           <button
             key={g.id}
-            onClick={() => setSelectedRegistrar(g.id)}
+            type="button"
+            aria-pressed={selectedRegistrar === g.id}
+            onClick={() => onSelect(g.id)}
             className={cn(
-              "px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors",
+              "px-3 py-2 rounded-lg text-xs font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               selectedRegistrar === g.id
-                ? "bg-primary text-primary-foreground border-primary"
+                ? "bg-muted text-foreground border-foreground/40"
                 : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/40",
             )}
           >
@@ -1828,12 +1817,18 @@ export function RegistrarGuideSection() {
           </button>
         ))}
       </div>
-      <div className="space-y-1.5">
-        <p className="text-xs font-semibold">{registrar.name} — How to add these records</p>
-        <ol className="space-y-1">
+      <div className="space-y-2 rounded-lg border border-border p-4">
+        <h4 className="text-sm font-semibold">{registrar.name}: add the required records</h4>
+        <ol className="space-y-2">
           {registrar.steps.map((step, i) => (
-            <li key={i} className="flex items-start gap-2 text-[11px] text-muted-foreground">
-              <span className="shrink-0 w-4 h-4 rounded-full bg-muted flex items-center justify-center text-[9px] font-bold text-foreground mt-0.5">
+            <li
+              key={i}
+              className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground"
+            >
+              <span
+                aria-hidden="true"
+                className="shrink-0 w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-medium text-foreground"
+              >
                 {i + 1}
               </span>
               {step}
@@ -1841,6 +1836,6 @@ export function RegistrarGuideSection() {
           ))}
         </ol>
       </div>
-    </div>
+    </section>
   );
 }

@@ -38,6 +38,13 @@ import {
 } from "../lib/asset-registry";
 import { deleteAssetObject, putAssetBuffer } from "../lib/asset-r2";
 import { nabuflowGateHttpError } from "../lib/nabuflow-billing";
+import { holdResponseProjectLifecycleSession } from "../lib/project-lifecycle";
+import {
+  bindPreviewVersion,
+  readPreviewVersionWitness,
+  type PreviewVersionProvenance,
+  type PreviewVersionWitness,
+} from "../lib/preview-version-provenance";
 
 export const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 const SNAPSHOT_UNAVAILABLE_MESSAGE =
@@ -131,6 +138,7 @@ export type SnapshotProject = {
 
 export type SnapshotCompletionInput = {
   project: SnapshotProject;
+  versionProvenance: PreviewVersionProvenance;
   previewClass: SnapshotPreviewClass;
   dataUri: string;
   actorUserId: string;
@@ -144,6 +152,8 @@ export type SnapshotCompletionInput = {
 
 export type SnapshotObserveDependencies = {
   loadProject(projectId: number): Promise<SnapshotProject | null>;
+  readVersionWitness?(project: SnapshotProject): Promise<PreviewVersionWitness | null>;
+  holdLifecycle?(res: Response): () => Promise<void>;
   authorizeVision?(
     project: SnapshotProject,
   ): Promise<{ status: number; body: Record<string, unknown> } | null>;
@@ -266,7 +276,7 @@ export function createSnapshotObserveRouter(
 ): IRouter {
   const router: IRouter = Router();
 
-  router.post("/projects/:id/observe/snapshot", ownership, async (req, res): Promise<void> => {
+  const observe = async (req: Request, res: Response): Promise<void> => {
     const projectId = Number(req.params.id);
     if (!Number.isSafeInteger(projectId) || projectId < 1) {
       res.status(400).json({ error: "Invalid project id" });
@@ -370,6 +380,7 @@ export function createSnapshotObserveRouter(
     let capture: ScreenshotResult | undefined;
     let activeStage: "capture" | "completion" = "capture";
     try {
+      const before = (await dependencies.readVersionWitness?.(project)) ?? null;
       capture = await dependencies.capture({
         url: captureUrl,
         width: parsed.data.viewport.width,
@@ -378,6 +389,7 @@ export function createSnapshotObserveRouter(
         signal: AbortSignal.timeout(25_000),
         exactOriginCookies: captureCookies,
         exactCookieOrigin: captureCookieOrigin,
+        exactCookiePath: captureCookies ? `/api/projects/${projectId}/preview/` : undefined,
         trustedLoopbackOrigin,
         clip: parsed.data.region,
         captureOverlay: {
@@ -428,8 +440,14 @@ export function createSnapshotObserveRouter(
       }
       const dataUri = `data:image/png;base64,${base64}`;
       activeStage = "completion";
+      const after = (await dependencies.readVersionWitness?.(project)) ?? null;
+      const versionProvenance = bindPreviewVersion(projectId, before, after);
       const result = await dependencies.complete({
-        project,
+        project: {
+          ...project,
+          versionId: versionProvenance.state === "verified" ? versionProvenance.versionId : null,
+        },
+        versionProvenance,
         previewClass,
         dataUri,
         actorUserId,
@@ -458,6 +476,15 @@ export function createSnapshotObserveRouter(
       });
     } finally {
       if (capture) delete capture.base64;
+    }
+  };
+
+  router.post("/projects/:id/observe/snapshot", ownership, async (req, res): Promise<void> => {
+    const release = dependencies.holdLifecycle?.(res);
+    try {
+      await observe(req, res);
+    } finally {
+      await release?.();
     }
   });
 
@@ -509,6 +536,7 @@ async function completeSnapshotObservation(
     sizeBytes: png.length,
     versionId: input.project.versionId,
     context: {
+      versionProvenance: input.versionProvenance,
       route: input.path,
       viewport: input.viewport,
       region: input.region,
@@ -796,6 +824,8 @@ async function completeSnapshotObservation(
 
 const router = createSnapshotObserveRouter({
   loadProject: loadSnapshotProject,
+  readVersionWitness: readPreviewVersionWitness,
+  holdLifecycle: holdResponseProjectLifecycleSession,
   authorizeVision: (project) =>
     nabuflowGateHttpError(project.ownerId, {
       engineMode: "eco",

@@ -1,9 +1,9 @@
 // Billing & Usage — Usage dashboard. All charts derive from the same ledger
 // rows (GET /billing/nabuflow/usage) and the billing state read model, so the
-// numbers always match what was charged. Light/dark friendly, reduced-motion
+// charts describe the loaded records, not the payment status of an invoice. Reduced-motion
 // aware, cycle selector + CSV export.
 import { useMemo, useState } from "react";
-import { Download, Gauge } from "lucide-react";
+import { Download, Gauge, RefreshCw } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -73,8 +73,20 @@ function csvEscape(v: unknown): string {
 }
 
 export function UsageSection() {
-  const { data: state, isLoading: stateLoading } = useNabuflowState();
-  const { data: usageData, isLoading: usageLoading } = useListNabuflowUsage(
+  const {
+    data: state,
+    isLoading: stateLoading,
+    isError: stateError,
+    isFetching: stateFetching,
+    refetch: refetchState,
+  } = useNabuflowState();
+  const {
+    data: usageData,
+    isLoading: usageLoading,
+    isError: usageError,
+    isFetching: usageFetching,
+    refetch: refetchUsage,
+  } = useListNabuflowUsage(
     { limit: 200 },
     {
       query: {
@@ -269,10 +281,11 @@ export function UsageSection() {
       "description",
       "reversedAt",
     ] as const;
-    const rowsInRange = allEvents.filter((e) => {
-      if (!e.createdAt) return false;
-      const t = new Date(e.createdAt).getTime();
-      return t >= range.start.getTime() && t < range.end.getTime();
+    const rowsInRange = filterUsageEventsForPreset(allEvents, {
+      preset,
+      currentCycleId: cycle?.id ?? null,
+      start: range.start,
+      end: range.end,
     });
     const lines = [
       cols.join(","),
@@ -291,13 +304,36 @@ export function UsageSection() {
 
   if (stateLoading || usageLoading) {
     return (
-      <div className="space-y-4" data-testid="usage-loading">
+      <div className="space-y-4" data-testid="usage-loading" role="status" aria-busy="true">
+        <span className="sr-only">Loading recorded usage</span>
         <Skeleton className="h-10 w-full rounded-lg" />
         <div className="grid gap-4 md:grid-cols-2">
           <Skeleton className="h-56 rounded-xl" />
           <Skeleton className="h-56 rounded-xl" />
         </div>
       </div>
+    );
+  }
+
+  if (stateError || usageError || !state || !usageData) {
+    return (
+      <SectionCard title="Usage is unavailable">
+        <p role="alert" className="text-sm text-muted-foreground">
+          We could not load billing and usage records. No zero balance or empty history can be
+          confirmed.
+        </p>
+        <Button
+          variant="outline"
+          className="mt-4"
+          disabled={stateFetching || usageFetching}
+          onClick={() => {
+            void refetchState();
+            void refetchUsage();
+          }}
+        >
+          <RefreshCw aria-hidden="true" className="mr-2 h-4 w-4" /> Retry usage
+        </Button>
+      </SectionCard>
     );
   }
 
@@ -310,10 +346,12 @@ export function UsageSection() {
       type="button"
       onClick={() => setPreset(id)}
       data-testid={`cycle-preset-${id}`}
+      aria-pressed={preset === id}
       className={
-        preset === id
+        "min-h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
+        (preset === id
           ? "rounded-md bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground"
-          : "rounded-md px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          : "rounded-md px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground")
       }
     >
       {label}
@@ -322,14 +360,25 @@ export function UsageSection() {
 
   return (
     <div className="space-y-4" data-testid="billing-usage-dashboard">
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">Recorded build usage</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          Charts and CSV cover the loaded ledger records, up to the most recent 200 events. Recorded
+          overage is separate from your plan price; invoices show payment status.
+        </p>
+      </div>
       {/* Toolbar: cycle selector + CSV export */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-3 py-2">
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label="Usage date range"
+        >
           {presetBtn("current", "This cycle")}
-          {presetBtn("last", "Last cycle")}
+          {presetBtn("last", "Previous window")}
           {presetBtn("custom", "Custom")}
           {preset === "custom" && (
-            <span className="ml-1 flex items-center gap-1.5">
+            <span className="ml-1 flex flex-wrap items-center gap-1.5">
               <input
                 type="date"
                 value={customStart}
@@ -359,10 +408,34 @@ export function UsageSection() {
             disabled={allEvents.length === 0}
             data-testid="usage-export-csv"
           >
-            <Download className="mr-1.5 h-3.5 w-3.5" /> Export CSV
+            <Download aria-hidden="true" className="mr-1.5 h-3.5 w-3.5" /> Export loaded records
           </Button>
         </div>
       </div>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {preset === "last"
+          ? "The previous window uses the current cycle's duration; it may differ from a historical invoice period. "
+          : !sub?.currentCycleStart && preset === "current"
+            ? "No subscription dates are available; chart dates use the current calendar month. "
+            : ""}
+        Current-cycle counters below stay live when you change the chart date range.
+      </p>
+
+      <dl className="grid gap-3 sm:grid-cols-3" aria-label="Recorded totals in loaded records">
+        {[
+          { label: "Recorded builds", value: totals.builds.toLocaleString() },
+          { label: "Credits consumed", value: totals.credits.toLocaleString() },
+          { label: "Recorded overage (USD)", value: formatUsdCents(totals.overageUsdCents) },
+        ].map((item) => (
+          <div key={item.label} className="rounded-2xl border border-border bg-card p-5">
+            <dt className="text-xs text-muted-foreground">{item.label}</dt>
+            <dd className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">
+              {item.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
 
       {(allEvents.length >= 200 || reversedCount > 0) && (
         <p className="text-[11px] text-muted-foreground">
@@ -428,9 +501,12 @@ export function UsageSection() {
         <SectionCard testId="usage-empty">
           <div className="flex flex-col items-center gap-2 py-10 text-center">
             <Gauge className="h-6 w-6 text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">No usage in this window</p>
+            <p className="text-sm font-medium text-foreground">
+              No recorded usage in the loaded records for this window
+            </p>
             <p className="text-xs text-muted-foreground">
-              Run a build and it'll show up here within a minute.
+              Try another date range. Older events may be outside the latest 200 records; reversed
+              entries are excluded from chart totals. Recent usage appears after it is recorded.
             </p>
           </div>
         </SectionCard>
@@ -439,9 +515,13 @@ export function UsageSection() {
           <div className="grid gap-4 md:grid-cols-2">
             {/* 1. Spend vs cap */}
             <SectionCard
-              title="Spend vs cap"
+              title={
+                preset === "current"
+                  ? "Recorded overage vs current cap"
+                  : "Recorded overage in this window"
+              }
               description={
-                resetDate
+                preset === "current" && resetDate
                   ? `Pay-as-you-go spend this window · cap resets ${resetDate}`
                   : "Pay-as-you-go spend this window"
               }
@@ -473,7 +553,7 @@ export function UsageSection() {
                   <ChartTooltip
                     content={<ChartTooltipContent labelFormatter={(l) => shortDay(String(l))} />}
                   />
-                  {capUsd > 0 && (
+                  {preset === "current" && capUsd > 0 && (
                     <ReferenceLine
                       y={capUsd}
                       stroke="#ef4444"
@@ -639,10 +719,10 @@ export function UsageSection() {
             {/* 5. Deep reasoning share + flat-price difference */}
             <SectionCard
               title="Deep-reasoning builds"
-              description="Count, share and the Deep portion of each flat build price in this window"
+              description="Recorded build counts and an estimated comparison with current standard-mode prices."
               testId="chart-deep"
             >
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-4">
                 <ChartContainer
                   config={{ value: { label: "Builds" } } satisfies ChartConfig}
                   className="h-40 w-40 shrink-0"
@@ -675,23 +755,24 @@ export function UsageSection() {
                     </span>
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Deep price difference:{" "}
+                    Estimated Deep price difference:{" "}
                     <span className="font-semibold text-foreground">
                       ≈{deepStats.surchargeCredits.toLocaleString()} credits (
                       {formatUsdCents(deepStats.surchargeUsd)})
                     </span>{" "}
-                    within the flat Deep build price.
+                    compared with current standard-mode prices.
                   </p>
                   <p className="text-[10px] text-muted-foreground">
                     Deep builds consumed {deepStats.deepCredits.toLocaleString()} credits total.
-                    Each Deep build is one flat charge; this comparison is not a separate surcharge.
+                    Historical prices may differ. This estimate is not a separate charge or an
+                    invoice amount.
                   </p>
                 </div>
               </div>
             </SectionCard>
 
             {/* 6. Cost by project */}
-            <SectionCard title="Cost by project" testId="chart-projects">
+            <SectionCard title="Credits consumed by project" testId="chart-projects">
               {projectTotals.length === 0 ? (
                 <p className="py-8 text-center text-xs text-muted-foreground">
                   No project usage in this window.

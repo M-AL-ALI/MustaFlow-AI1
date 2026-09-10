@@ -1,18 +1,16 @@
 import { useLocation, Link } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { ProjectEntry } from "@/components/projects/project-entry";
+import { savePublicCreationDraft } from "@/lib/creation-draft";
 import { AgentIcon } from "@/components/agent-icon";
 import {
-  Monitor,
-  LayoutDashboard,
   Zap,
   Database,
   MessageSquare,
   Sparkles,
   ArrowRight,
-  LayoutTemplate,
-  X,
   FileText,
+  LayoutTemplate,
   Globe,
   CheckCircle2,
   BookOpen,
@@ -33,29 +31,20 @@ import {
   Plug,
   ShieldCheck,
   Smartphone,
-  Presentation,
   Bot,
   Lightbulb,
   Rocket,
-  Paperclip,
   Mic,
   Image as ImageIcon,
-  SlidersHorizontal,
   Brain,
   Languages,
   BarChart2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import {
-  useCreateProject,
-  getListProjectsQueryKey,
-  getGetProjectQueryKey,
-  useListNabuflowPlans,
-} from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useListNabuflowPlans } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { TemplatePicker } from "@/components/template-picker";
-import { OnboardingWizard, hasCompletedOnboarding } from "@/components/onboarding-wizard";
+import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { type TemplateDefinition } from "@/lib/templates";
 import { INDUSTRY_PERSONAS } from "@/lib/templates";
 import { cn } from "@/lib/utils";
@@ -157,61 +146,7 @@ const ORA_ACCENT: Record<string, { bg: string; border: string; text: string }> =
   cyan: { bg: "bg-cyan-500/10", border: "border-cyan-500/20", text: "text-cyan-500" },
 };
 
-// Capability chips — speak to ideas, not stacks. Each pre-fills the prompt input.
-const CAPABILITY_CHIPS = [
-  {
-    name: "Brainstorm an idea",
-    icon: Lightbulb,
-    prompt: "I have a rough idea — help me think through what to build and how it should work",
-  },
-  {
-    name: "Mobile app",
-    icon: Smartphone,
-    prompt: "A mobile app that helps me track my daily habits with reminders and streaks",
-  },
-  {
-    name: "Web app",
-    icon: Monitor,
-    prompt: "A web app where small businesses can manage bookings, customers, and invoices",
-  },
-  {
-    name: "Landing page",
-    icon: Rocket,
-    prompt: "A clean, modern landing page for my startup with a hero, features, and a signup form",
-  },
-  {
-    name: "Dashboard",
-    icon: LayoutDashboard,
-    prompt: "A dashboard that shows my key metrics with charts, filters, and live updates",
-  },
-  {
-    name: "AI chatbot",
-    icon: Bot,
-    prompt: "An AI chatbot that answers questions about my product, with chat history",
-  },
-  {
-    name: "Slide deck",
-    icon: Presentation,
-    prompt: "A pitch deck for my startup with problem, solution, market, and ask slides",
-  },
-  {
-    name: "Data automation",
-    icon: Zap,
-    prompt: "An automation that pulls data from a source on a schedule and emails me a summary",
-  },
-];
-
-// Rotating placeholder examples — cycles through the chat input when empty
-const ROTATING_PROMPTS = [
-  "A mobile app for tracking my daily habits…",
-  "A landing page for my new coffee shop…",
-  "A dashboard that shows my sales by region…",
-  "An AI chatbot that answers customer questions…",
-  "A simple booking site for my photography business…",
-  "A pitch deck for my startup's seed round…",
-  "An automation that emails me a weekly summary…",
-  "A web app for organising my recipe collection…",
-];
+// Entry examples and platform controls are shared with the project dashboard.
 
 // Developer feature cards — all features already exist in the platform
 const DEV_FEATURES = [
@@ -306,44 +241,23 @@ export default function HomePage() {
   const [showTemplateBrowser, setShowTemplateBrowser] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [activePersona, setActivePersona] = useState(0);
-  const [activeChipLabel, setActiveChipLabel] = useState<string | undefined>();
-  const [placeholderIdx, setPlaceholderIdx] = useState(0);
-  const queryClient = useQueryClient();
-  const createProject = useCreateProject();
+
   const oraChat = useOraChat();
 
-  // Rotate the placeholder example every 3.2s while the input is empty
-  useEffect(() => {
-    if (prompt.trim().length > 0) return;
-    const id = setInterval(() => {
-      setPlaceholderIdx((i) => (i + 1) % ROTATING_PROMPTS.length);
-    }, 3200);
-    return () => clearInterval(id);
-  }, [prompt]);
-
   function handleBrainstorm() {
-    // Seed the brainstorm panel with any current prompt and route to the
-    // workspace where the panel can actually call the auth-protected API.
-    // Signed-out visitors get sent through sign-up first.
-    try {
-      sessionStorage.setItem("mustaflow_brainstorm_seed", prompt.trim());
-    } catch {
-      /* ignore quota / privacy-mode errors */
+    if (!savePublicCreationDraft({ intent: "brainstorm", prompt, platform: "web" })) {
+      toast({
+        title: "Your idea is still here",
+        description: "Browser storage is unavailable. Please keep this page open and try again.",
+        variant: "destructive",
+      });
+      return;
     }
     setLocation("/projects");
   }
-
   const { toast } = useToast();
 
-  // Show onboarding wizard for first-time visitors
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!hasCompletedOnboarding()) {
-        setShowOnboarding(true);
-      }
-    }, 800);
-    return () => clearTimeout(timer);
-  }, []);
+  // Guidance is opened explicitly, never on a timer that interrupts typing.
 
   // Auto-rotate industry personas every 4s
   useEffect(() => {
@@ -355,44 +269,22 @@ export default function HomePage() {
 
   const handleBuild = (kind: string = "web") => {
     if (!prompt.trim()) return;
-    const words = prompt.trim().split(/\s+/).slice(0, 5).join(" ");
-    const name = words.charAt(0).toUpperCase() + words.slice(1);
-    createProject.mutate(
-      {
-        data: {
-          name,
-          description: prompt,
-          kind: kind as Parameters<typeof createProject.mutate>[0]["data"]["kind"],
-          initialPrompt: prompt,
-          ...(activeChipLabel ? { chipLabel: activeChipLabel } : {}),
-        },
-      },
-      {
-        onSuccess: (project) => {
-          queryClient.setQueryData(getGetProjectQueryKey(project.id), project);
-          void queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
-          setLocation(`/projects/${project.id}`);
-        },
-        onError: (err: unknown) => {
-          const status = (err as { status?: number })?.status;
-          if (status === 401) {
-            toast({
-              title: "Sign in to build",
-              description: "Create a free account to start building your app.",
-            });
-            setLocation("/sign-in");
-          } else {
-            toast({
-              title: "Something went wrong",
-              description: "Could not create your project. Please try again.",
-              variant: "destructive",
-            });
-          }
-        },
-      },
-    );
+    if (
+      !savePublicCreationDraft({
+        intent: "build",
+        prompt,
+        platform: kind.startsWith("mobile") ? "mobile" : "web",
+      })
+    ) {
+      toast({
+        title: "Your idea is still here",
+        description: "Browser storage is unavailable. Please keep this page open and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setLocation("/projects/new?draft=1");
   };
-
   function handleTemplateSelect(template: TemplateDefinition) {
     setShowTemplateBrowser(false);
     setLocation(`/projects/new?template=${encodeURIComponent(template.id)}`);
@@ -456,160 +348,15 @@ export default function HomePage() {
 
         {/* Hero Section */}
         <div className="max-w-4xl mx-auto pt-10 px-6">
-          {/* Big logo treatment */}
-          <div className="flex justify-center mb-10">
-            <div className="relative">
-              <div className="absolute -inset-10 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.35)_0%,transparent_70%)] blur-3xl pointer-events-none" />
-              <div className="relative rounded-[2.5rem] border-2 border-border bg-gradient-to-br from-card via-card to-primary/5 p-3 shadow-2xl ring-1 ring-primary/20">
-                <img
-                  src={`${import.meta.env.BASE_URL}logo.png`}
-                  alt="MustaFlow AI"
-                  className="h-48 w-56 sm:h-56 sm:w-64 object-contain"
-                />
-              </div>
-            </div>
-          </div>
-          <div className="text-center mb-5">
-            <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-primary/80 border border-primary/20 bg-primary/5 rounded-full px-3 py-1 mb-5">
-              <Sparkles className="h-3 w-3" />
-              Code optional
-            </p>
-            <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight gradient-text mb-4 leading-tight">
-              Build. Debug. Deploy.
-            </h1>
-            <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              Describe it or write it — NabuFlow plans, builds, tests, and ships your app, whether
-              you code or not.
-            </p>
-          </div>
-
-          {/* Capability chips — dual-audience, pre-fill prompt */}
-          <div className="flex items-center justify-center gap-2 mb-4 flex-wrap">
-            {CAPABILITY_CHIPS.map((chip) => {
-              const Icon = chip.icon;
-              return (
-                <button
-                  key={chip.name}
-                  type="button"
-                  onClick={() => {
-                    setPrompt(chip.prompt);
-                    setActiveChipLabel(chip.name);
-                  }}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-medium transition-all",
-                    prompt === chip.prompt
-                      ? "border-primary bg-primary/10 text-primary shadow-sm"
-                      : "border-border text-muted-foreground hover:text-foreground hover:border-border/80 hover:bg-muted/50",
-                  )}
-                >
-                  <Icon className="h-3 w-3" />
-                  {chip.name}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="relative max-w-2xl mx-auto mb-4">
-            <div className="absolute -inset-6 bg-[radial-gradient(ellipse_at_center,hsl(var(--primary)/0.18)_0%,transparent_70%)] blur-2xl rounded-full pointer-events-none" />
-            <div className="relative bg-card border border-border shadow-xl rounded-2xl input-glow overflow-hidden">
-              {/* Input row */}
-              <div className="flex items-center gap-2 p-2">
-                <div className="pl-4 text-primary">
-                  <AgentIcon size={24} />
-                </div>
-                <Input
-                  value={prompt}
-                  onChange={(e) => {
-                    setPrompt(e.target.value);
-                    if (e.target.value !== activeChipLabel && activeChipLabel) {
-                      setActiveChipLabel(undefined);
-                    }
-                  }}
-                  placeholder={ROTATING_PROMPTS[placeholderIdx]}
-                  className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 text-lg h-14 bg-transparent shadow-none"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleBuild();
-                  }}
-                />
-                <Button
-                  size="lg"
-                  className="rounded-xl px-6 h-12 shrink-0"
-                  onClick={() => handleBuild()}
-                  disabled={createProject.isPending || !prompt.trim()}
-                >
-                  {createProject.isPending ? "Starting..." : "Start Building"}
-                  {!createProject.isPending && <ArrowRight className="ml-2 h-5 w-5" />}
-                </Button>
-              </div>
-              {/* Tool row — mirrors the in-app AI Builder; signed-out so each tool routes to sign-up */}
-              <div className="flex items-center gap-1 px-3 py-2 border-t border-border/60 bg-muted/30">
-                {[
-                  { icon: Paperclip, label: "Attach a file" },
-                  { icon: ImageIcon, label: "Add an image" },
-                  { icon: Mic, label: "Voice input" },
-                  { icon: SlidersHorizontal, label: "Agent mode" },
-                ].map(({ icon: Icon, label }) => (
-                  <a
-                    key={label}
-                    href="/sign-up"
-                    title={`${label} — sign in to use`}
-                    aria-label={`${label} (sign in to use)`}
-                    className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/70 transition-colors"
-                  >
-                    <Icon className="h-4 w-4" />
-                  </a>
-                ))}
-                <div className="ml-auto text-xs text-muted-foreground pr-2 hidden sm:block">
-                  Press{" "}
-                  <kbd className="px-1.5 py-0.5 rounded border border-border bg-background text-[10px] font-mono">
-                    Enter
-                  </kbd>{" "}
-                  to build
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* CTA row with secondary API link */}
-          <div className="flex items-center justify-center gap-4 mb-4">
-            <button
-              type="button"
-              onClick={() => setShowTemplateBrowser((v) => !v)}
-              className={cn(
-                "flex items-center gap-1.5 text-sm font-medium px-4 py-1.5 rounded-full border transition-colors",
-                showTemplateBrowser
-                  ? "border-primary/50 bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:text-foreground hover:border-border/80 hover:bg-muted/50",
-              )}
-            >
-              {showTemplateBrowser ? (
-                <>
-                  <X className="h-3.5 w-3.5" />
-                  Hide templates
-                </>
-              ) : (
-                <>
-                  <LayoutTemplate className="h-3.5 w-3.5" />
-                  Start from a template
-                </>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={handleBrainstorm}
-              className="flex items-center gap-1.5 text-sm font-medium px-4 py-1.5 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-border/80 hover:bg-muted/50 transition-colors"
-            >
-              <Lightbulb className="h-3.5 w-3.5" />
-              Brainstorm first
-            </button>
-            <Link
-              href="/developers"
-              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Explore the API
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
+          <ProjectEntry
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            onContinue={(_, platform) => handleBuild(platform)}
+            onBrainstorm={handleBrainstorm}
+            templatesOpen={showTemplateBrowser}
+            onTemplates={() => setShowTemplateBrowser((open) => !open)}
+            onGuide={() => setShowOnboarding(true)}
+          />
 
           {/* Template browser panel */}
           {showTemplateBrowser && (
@@ -1459,7 +1206,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Onboarding wizard — shown on first visit */}
+      {/* Optional introductory guide */}
       {showOnboarding && (
         <OnboardingWizard
           onUseTemplate={(template) => {

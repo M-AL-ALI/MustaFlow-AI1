@@ -1,5 +1,10 @@
 import { authFetch } from "@/lib/api-fetch";
-import { formatAssetBytes, uploadProjectAsset } from "@/lib/asset-upload";
+import {
+  createAssetUploadLifetime,
+  formatAssetBytes,
+  uploadProjectAsset,
+  type AssetUploadLifetime,
+} from "@/lib/asset-upload";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   X,
@@ -50,6 +55,33 @@ import {
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { terminalPresentationFor, terminalTaskStatus } from "@/lib/zero-terminal";
+
+// Browser media promises may settle after cancellation.
+function duringRecording<T>(scope: AssetUploadLifetime, pending: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      scope.signal.removeEventListener("abort", abort);
+      reject(new DOMException("Upload cancelled", "AbortError"));
+    };
+    scope.signal.addEventListener("abort", abort, { once: true });
+    if (scope.signal.aborted) abort();
+    pending.then(
+      (value) => {
+        scope.signal.removeEventListener("abort", abort);
+        try {
+          scope.assertCurrent();
+          resolve(value);
+        } catch (error) {
+          reject(error);
+        }
+      },
+      (error) => {
+        scope.signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
 
 type AgentMode = BuilderAgentMode;
 
@@ -421,6 +453,7 @@ export function ZeroAgentPanel({
   const appliedSupportSessionRef = useRef<number | null>(null);
   const [uploadingCount, setUploadingCount] = useState(0);
   const [recordingPreview, setRecordingPreview] = useState(false);
+  const recordingLifetime = useRef<AssetUploadLifetime | null>(null);
   const [assetQuota, setAssetQuota] = useState<{
     usedBytes: number;
     reservedBytes: number;
@@ -433,6 +466,15 @@ export function ZeroAgentPanel({
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadScopes = useRef(new Set<AssetUploadLifetime>());
+  useEffect(() => {
+    const activeScopes = uploadScopes.current;
+    return () => {
+      for (const scope of activeScopes) scope.dispose();
+      activeScopes.clear();
+    };
+  }, [projectId, isOpen]);
 
   const sendMessage = useSendMessage();
   const rollbackVersion = useRollbackVersion();
@@ -523,87 +565,139 @@ export function ZeroAgentPanel({
     savePersistedMode(m);
   }, []);
 
-  const loadAssetQuota = useCallback(async () => {
-    const response = await authFetch(`/api/projects/${projectId}/assets/quota`);
-    if (!response.ok) return;
-    setAssetQuota(
-      (await response.json()) as {
+  const loadAssetQuota = useCallback(
+    async (scope?: AssetUploadLifetime) => {
+      scope?.assertCurrent();
+      const response = await authFetch(
+        `/api/projects/${projectId}/assets/quota`,
+        { signal: scope?.signal },
+        scope ? () => scope.assertCurrent() : undefined,
+      );
+      scope?.assertCurrent();
+      if (!response.ok) return;
+      const quota = (await response.json()) as {
         usedBytes: number;
         reservedBytes: number;
         limitBytes: number;
-      },
-    );
-  }, [projectId]);
+      };
+      scope?.assertCurrent();
+      setAssetQuota(quota);
+    },
+    [projectId],
+  );
 
   useEffect(() => {
     if (isOpen) void loadAssetQuota();
   }, [isOpen, loadAssetQuota]);
 
-  // ── File upload ──────────────────────────────────────────────────────────
   const handleFiles = useCallback(
     async (
       files: FileList | File[],
       source: "picker" | "paste" | "drop" | "recording" = "picker",
+      recordingScope?: AssetUploadLifetime,
     ) => {
-      const list = Array.from(files);
-      for (const file of list) {
-        const abortController = new AbortController();
-        const placeholder: PendingAttachment = {
-          kind: file.type.startsWith("image/") ? "image" : "file",
-          name: file.name,
-          uploading: true,
-          progress: 0,
-          abortController,
-        };
-        setAttachments((prev) => [...prev, placeholder]);
-        setUploadingCount((count) => count + 1);
-        try {
-          const result = await uploadProjectAsset({
-            projectId,
-            file,
-            source,
-            signal: abortController.signal,
-            onProgress: (progress) => {
-              setAttachments((current) =>
-                current.map((item) => (item === placeholder ? { ...item, progress } : item)),
-              );
-            },
-          });
-          setAttachments((current) =>
-            current.map((item) =>
-              item === placeholder
-                ? {
-                    kind: result.mimeType.startsWith("image/") ? "image" : "file",
-                    name: result.name,
-                    assetId: result.assetId,
-                    url: result.contentUrl,
-                    resized: result.resized,
-                    uploading: false,
-                    progress: 100,
-                  }
-                : item,
-            ),
-          );
-        } catch (error) {
-          setAttachments((current) =>
-            current.map((item) =>
-              item === placeholder
-                ? {
-                    ...item,
-                    uploading: false,
-                    error:
-                      error instanceof DOMException && error.name === "AbortError"
-                        ? "Upload cancelled"
-                        : error instanceof Error
-                          ? error.message
-                          : "The upload could not be completed.",
-                  }
-                : item,
-            ),
-          );
-        } finally {
-          setUploadingCount((count) => Math.max(0, count - 1));
-          void loadAssetQuota();
+      const scope = recordingScope ?? createAssetUploadLifetime();
+      if (!recordingScope) uploadScopes.current.add(scope);
+      const controllers = new Set<AbortController>();
+      let pendingCount = 0;
+      const retire = () => {
+        for (const controller of controllers) controller.abort();
+        setAttachments((current) =>
+          current.filter((item) => !item.abortController || !controllers.has(item.abortController)),
+        );
+        const count = pendingCount;
+        pendingCount = 0;
+        setUploadingCount((current) => Math.max(0, current - count));
+      };
+      scope.signal.addEventListener("abort", retire, { once: true });
+      try {
+        scope.assertCurrent();
+        for (const file of Array.from(files)) {
+          scope.assertCurrent();
+          const abortController = new AbortController();
+          controllers.add(abortController);
+          // Account departure cancels every file; cancelling one file keeps the batch alive.
+          const placeholder: PendingAttachment = {
+            kind: file.type.startsWith("image/") ? "image" : "file",
+            name: file.name,
+            uploading: true,
+            progress: 0,
+            abortController,
+          };
+          let settled = false;
+          pendingCount += 1;
+          setAttachments((current) => [...current, placeholder]);
+          setUploadingCount((count) => count + 1);
+          try {
+            scope.assertCurrent();
+            const result = await uploadProjectAsset({
+              projectId,
+              file,
+              source,
+              signal: abortController.signal,
+              onProgress: (progress) => {
+                if (settled || !scope.isCurrent() || abortController.signal.aborted) return;
+                setAttachments((current) =>
+                  current.map((item) =>
+                    item.abortController === abortController ? { ...item, progress } : item,
+                  ),
+                );
+              },
+            });
+            scope.assertCurrent();
+            abortController.signal.throwIfAborted();
+            setAttachments((current) =>
+              current.map((item) =>
+                item.abortController === abortController
+                  ? {
+                      kind: result.mimeType.startsWith("image/") ? "image" : "file",
+                      name: result.name,
+                      assetId: result.assetId,
+                      url: result.contentUrl,
+                      resized: result.resized,
+                      uploading: false,
+                      progress: 100,
+                      abortController,
+                    }
+                  : item,
+              ),
+            );
+          } catch (error) {
+            if (!scope.isCurrent()) return;
+            setAttachments((current) =>
+              current.map((item) =>
+                item.abortController === abortController
+                  ? {
+                      ...item,
+                      uploading: false,
+                      error:
+                        error instanceof DOMException && error.name === "AbortError"
+                          ? "Upload cancelled"
+                          : error instanceof Error
+                            ? error.message
+                            : "The upload could not be completed.",
+                    }
+                  : item,
+              ),
+            );
+          } finally {
+            settled = true;
+            if (pendingCount > 0) {
+              pendingCount -= 1;
+              setUploadingCount((count) => Math.max(0, count - 1));
+            }
+          }
+        }
+        scope.assertCurrent();
+        await loadAssetQuota(scope).catch(() => {});
+        scope.assertCurrent();
+      } catch {
+        if (!scope.isCurrent()) retire();
+      } finally {
+        scope.signal.removeEventListener("abort", retire);
+        if (!recordingScope) {
+          uploadScopes.current.delete(scope);
+          scope.dispose();
         }
       }
     },
@@ -612,47 +706,96 @@ export function ZeroAgentPanel({
 
   const recordPreview = useCallback(async () => {
     if (recordingPreview || isBusy) return;
-    setRecordingPreview(true);
+    const scope = createAssetUploadLifetime();
+    uploadScopes.current.add(scope);
+    recordingLifetime.current = scope;
     let stream: MediaStream | null = null;
+    let recorder: MediaRecorder | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stopMedia = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      if (recorder) {
+        recorder.ondataavailable = null;
+        recorder.onstop = null;
+        if (recorder.state !== "inactive") {
+          try {
+            recorder.stop();
+          } catch {
+            /* Already stopped by the browser. */
+          }
+        }
+      }
+      stream?.getTracks().forEach((track) => track.stop());
+      if (recordingLifetime.current === scope) setRecordingPreview(false);
+    };
+    scope.signal.addEventListener("abort", stopMedia, { once: true });
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      scope.assertCurrent();
+      setRecordingPreview(true);
+      const acquisition = navigator.mediaDevices
+        .getDisplayMedia({ video: true, audio: false })
+        .then((acquired) => {
+          stream = acquired;
+          if (!scope.isCurrent()) {
+            acquired.getTracks().forEach((track) => track.stop());
+            scope.assertCurrent();
+          }
+          return acquired;
+        });
+      stream = await duringRecording(scope, acquisition);
+      scope.assertCurrent();
       const video = document.createElement("video");
       video.srcObject = stream;
       video.muted = true;
-      await video.play();
+      await duringRecording(scope, video.play());
+      scope.assertCurrent();
       const frame = async (name: string) => {
+        scope.assertCurrent();
         const canvas = document.createElement("canvas");
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         canvas.getContext("2d")?.drawImage(video, 0, 0);
-        const blob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob(resolve, "image/png"),
+        const blob = await duringRecording(
+          scope,
+          new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png")),
         );
+        scope.assertCurrent();
         if (!blob) throw new Error("The preview frame could not be captured.");
         return new File([blob], name, { type: "image/png" });
       };
       const startFrame = await frame("preview-start.png");
+      scope.assertCurrent();
       const chunks: BlobPart[] = [];
-      const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+      recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
+        if (scope.isCurrent() && event.data.size > 0) chunks.push(event.data);
       };
       const stopped = new Promise<void>((resolve) => {
-        recorder.onstop = () => resolve();
+        recorder!.onstop = () => resolve();
       });
       recorder.start();
-      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      await duringRecording(
+        scope,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 8_000);
+        }),
+      );
+      scope.assertCurrent();
       const endFrame = await frame("preview-end.png");
+      scope.assertCurrent();
       recorder.stop();
-      await stopped;
+      await duringRecording(scope, stopped);
+      scope.assertCurrent();
       const recording = new File(chunks, "preview-8-seconds.webm", { type: "video/webm" });
-      await handleFiles([startFrame, endFrame, recording], "recording");
+      await handleFiles([startFrame, endFrame, recording], "recording", scope);
+      scope.assertCurrent();
       setPrompt((current) =>
         current.trim()
           ? current
           : "Compare the attached start and end frames, explain what changed during the eight-second preview recording, and suggest the next step without changing the project.",
       );
     } catch (recordError) {
+      if (!scope.isCurrent()) return;
       setAttachments((current) => [
         ...current,
         {
@@ -666,8 +809,11 @@ export function ZeroAgentPanel({
         },
       ]);
     } finally {
-      stream?.getTracks().forEach((track) => track.stop());
-      setRecordingPreview(false);
+      scope.signal.removeEventListener("abort", stopMedia);
+      stopMedia();
+      if (recordingLifetime.current === scope) recordingLifetime.current = null;
+      uploadScopes.current.delete(scope);
+      scope.dispose();
     }
   }, [handleFiles, isBusy, recordingPreview]);
 

@@ -216,6 +216,35 @@ export function supportsZeroGeneration(
   );
 }
 
+/** Read-only rendering of the exact private preview; no runtime start or arbitrary URL. */
+export interface ProjectPreviewCaptureInput {
+  projectId: number;
+  runtimeIdentity: string;
+  manifestRevision: string;
+  sealedArtifactSha256: string;
+  route: "/";
+  viewport: { width: 1280; height: 800 };
+}
+export interface ProjectPreviewCaptureOptions {
+  idempotencyKey: string;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+export interface ProjectPreviewCapturingTenantRuntimeProvider extends TenantRuntimeProvider {
+  captureProjectPreview(
+    input: ProjectPreviewCaptureInput,
+    options: ProjectPreviewCaptureOptions,
+  ): Promise<unknown>;
+}
+export function supportsProjectPreviewCapture(
+  provider: TenantRuntimeProvider,
+): provider is ProjectPreviewCapturingTenantRuntimeProvider {
+  return (
+    typeof (provider as Partial<ProjectPreviewCapturingTenantRuntimeProvider>)
+      .captureProjectPreview === "function"
+  );
+}
+
 export interface ProductionArtifactPromotingTenantRuntimeProvider extends ZeroGenerationTenantRuntimeProvider {
   promoteProductionArtifact(input: {
     projectId: number;

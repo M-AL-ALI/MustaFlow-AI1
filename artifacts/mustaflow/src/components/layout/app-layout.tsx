@@ -7,9 +7,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isSignedIn) {
     return (
-      <div className="h-screen bg-background text-foreground w-full overflow-hidden">
+      <div className="nabuflow-shell h-dvh bg-background text-foreground w-full overflow-hidden">
+        <a href="#nabuflow-main" className="nf-skip-link">
+          Skip to workspace content
+        </a>
         <SlideOutNav />
-        <main className="h-full w-full overflow-y-auto pl-14 pt-3">{children}</main>
+        <main
+          id="nabuflow-main"
+          tabIndex={-1}
+          className="h-full w-full overflow-y-auto pt-16 md:pl-20 md:pt-0"
+        >
+          {children}
+        </main>
       </div>
     );
   }

@@ -36,6 +36,11 @@ import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { withActiveProjectLifecycle } from "./project-lifecycle";
+import { previewDocumentCsp } from "./preview-document-policy";
+import {
+  filterPreviewResponseCookies,
+  stripPreviewUpstreamCredentials,
+} from "./preview-credentials";
 
 type PreviewProxyState =
   | "container-starting"
@@ -353,6 +358,22 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
     return rest + query;
   },
   on: {
+    proxyReq: stripPreviewUpstreamCredentials,
+    proxyReqWs: stripPreviewUpstreamCredentials,
+    proxyRes: (response, req) => {
+      const cookies = filterPreviewResponseCookies(response.headers["set-cookie"]);
+      if (cookies) response.headers["set-cookie"] = cookies;
+      else delete response.headers["set-cookie"];
+      const previewRequest = req as PreviewProxyRequest;
+      const pathname = (previewRequest.originalUrl ?? req.url ?? "").split("?")[0];
+      if (!previewRequest.mustaFlowPublicPreview && matchPreviewPath(pathname)) {
+        response.headers["content-security-policy"] = previewDocumentCsp(
+          response.headers["content-security-policy"],
+        );
+        response.headers["referrer-policy"] = "no-referrer";
+        response.headers["x-content-type-options"] = "nosniff";
+      }
+    },
     error: (err, req, target) => {
       logger.warn({ err }, "Preview proxy upstream error");
       const expressReq = req as PreviewProxyRequest;

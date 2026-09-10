@@ -1,5 +1,9 @@
 import { authFetch } from "@/lib/api-fetch";
-import { uploadProjectAsset } from "@/lib/asset-upload";
+import {
+  createAssetUploadLifetime,
+  uploadProjectAsset,
+  type AssetUploadLifetime,
+} from "@/lib/asset-upload";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Rocket,
@@ -309,11 +313,22 @@ export function QueueComposer({
   const [showBrainstorm, setShowBrainstorm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const uploadScopes = useRef(new Set<AssetUploadLifetime>());
+  useEffect(() => {
+    const activeScopes = uploadScopes.current;
+    return () => {
+      for (const scope of activeScopes) scope.dispose();
+      activeScopes.clear();
+    };
+  }, [projectId]);
+
   const uploadFile = useCallback(
     async (
       file: File,
       source: "picker" | "paste" | "drop",
+      scope: AssetUploadLifetime,
     ): Promise<{ attachment: ComposerAttachment | null; error?: string }> => {
+      scope.assertCurrent();
       if (file.type.startsWith("image/")) {
         if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
           return {
@@ -329,7 +344,9 @@ export function QueueComposer({
           projectId,
           file,
           source,
+          signal: scope.signal,
         });
+        scope.assertCurrent();
         if (uploaded.mimeType.startsWith("image/")) {
           return {
             attachment: {
@@ -352,6 +369,7 @@ export function QueueComposer({
           },
         };
       } catch (err) {
+        scope.assertCurrent();
         // eslint-disable-next-line no-console
         console.error("Upload failed:", err);
         return {
@@ -367,52 +385,65 @@ export function QueueComposer({
 
   const handleFiles = useCallback(
     async (files: FileList | File[], source: "picker" | "paste" | "drop") => {
-      const arr = Array.from(files);
-      if (arr.length === 0) return;
+      const scope = createAssetUploadLifetime();
+      uploadScopes.current.add(scope);
+      try {
+        scope.assertCurrent();
+        const arr = Array.from(files);
+        if (arr.length === 0) return;
 
-      const newErrors: string[] = [];
+        const newErrors: string[] = [];
 
-      // Separate images from other files so we can enforce the per-message image cap.
-      const imageFiles = arr.filter((f) => f.type.startsWith("image/"));
-      const otherFiles = arr.filter((f) => !f.type.startsWith("image/"));
+        // Separate images from other files so we can enforce the per-message image cap.
+        const imageFiles = arr.filter((f) => f.type.startsWith("image/"));
+        const otherFiles = arr.filter((f) => !f.type.startsWith("image/"));
 
-      // Determine how many image slots are still available.
-      // Include in-flight uploads (uploadingCount) to avoid overrun during concurrent attaches.
-      const currentImageCount =
-        attachments.filter((a) => a.kind === "image").length + uploadingCount;
-      const remainingSlots = Math.max(0, MAX_IMAGES_PER_MESSAGE - currentImageCount);
+        // Determine how many image slots are still available.
+        // Include in-flight uploads (uploadingCount) to avoid overrun during concurrent attaches.
+        const currentImageCount =
+          attachments.filter((a) => a.kind === "image").length + uploadingCount;
+        const remainingSlots = Math.max(0, MAX_IMAGES_PER_MESSAGE - currentImageCount);
 
-      // Images that exceed the per-message cap are rejected immediately.
-      const imagesToProcess = imageFiles.slice(0, remainingSlots);
-      const rejectedImages = imageFiles.slice(remainingSlots);
-      for (const f of rejectedImages) {
-        newErrors.push(
-          `"${f.name}" skipped — maximum of ${MAX_IMAGES_PER_MESSAGE} images per message.`,
+        // Images that exceed the per-message cap are rejected immediately.
+        const imagesToProcess = imageFiles.slice(0, remainingSlots);
+        const rejectedImages = imageFiles.slice(remainingSlots);
+        for (const f of rejectedImages) {
+          newErrors.push(
+            `"${f.name}" skipped — maximum of ${MAX_IMAGES_PER_MESSAGE} images per message.`,
+          );
+        }
+
+        const filesToProcess = [...imagesToProcess, ...otherFiles];
+        if (filesToProcess.length === 0) {
+          if (newErrors.length > 0) setAttachErrors(newErrors);
+          return;
+        }
+
+        const results = await Promise.all(
+          filesToProcess.map((file) => uploadFile(file, source, scope)),
         );
-      }
+        scope.assertCurrent();
+        const ok: ComposerAttachment[] = [];
+        for (const r of results) {
+          if (r.attachment) ok.push(r.attachment);
+          if (r.error) newErrors.push(r.error);
+        }
 
-      const filesToProcess = [...imagesToProcess, ...otherFiles];
-      if (filesToProcess.length === 0) {
-        if (newErrors.length > 0) setAttachErrors(newErrors);
-        return;
+        if (ok.length > 0) setAttachments((prev) => [...prev, ...ok]);
+        setAttachNotices(
+          ok.some((attachment) => attachment.kind === "image" && attachment.resized)
+            ? ["The image was resized for a faster app while keeping full visual detail."]
+            : [],
+        );
+        // Always update errors (even if empty) so stale errors from a previous
+        // attempt are cleared when a subsequent attach succeeds.
+        setAttachErrors(newErrors);
+      } catch {
+        // An obsolete selection must not publish results into the next account.
+      } finally {
+        uploadScopes.current.delete(scope);
+        scope.dispose();
       }
-
-      const results = await Promise.all(filesToProcess.map((file) => uploadFile(file, source)));
-      const ok: ComposerAttachment[] = [];
-      for (const r of results) {
-        if (r.attachment) ok.push(r.attachment);
-        if (r.error) newErrors.push(r.error);
-      }
-
-      if (ok.length > 0) setAttachments((prev) => [...prev, ...ok]);
-      setAttachNotices(
-        ok.some((attachment) => attachment.kind === "image" && attachment.resized)
-          ? ["The image was resized for a faster app while keeping full visual detail."]
-          : [],
-      );
-      // Always update errors (even if empty) so stale errors from a previous
-      // attempt are cleared when a subsequent attach succeeds.
-      setAttachErrors(newErrors);
     },
     [uploadFile, attachments, uploadingCount],
   );

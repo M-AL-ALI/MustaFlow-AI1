@@ -30,7 +30,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
-  getGetNabuflowBillingStateQueryKey,
+  getSubscribeNabuflowPlanUrl,
+  getSwitchNabuflowPlanUrl,
+  getCancelNabuflowSubscriptionUrl,
+  getResumeNabuflowSubscriptionUrl,
+  type subscribeNabuflowPlan,
+  type switchNabuflowPlan,
+  type cancelNabuflowSubscription,
+  type resumeNabuflowSubscription,
   useCancelNabuflowSubscription,
   useListNabuflowPlans,
   useResumeNabuflowSubscription,
@@ -41,14 +48,24 @@ import {
 } from "@workspace/api-client-react";
 import {
   formatResetDate,
-  formatUsdCents,
   nabuflowLadderLines,
-  parseProrationPreview,
   type NabuflowProrationPreview,
 } from "@/lib/nabuflow-billing";
 import { CardSetupDialog } from "@/components/billing/card-setup-dialog";
 import { OrgSetupDialog } from "./org";
-import { useNabuflowState } from "./shared";
+import { SectionCard, billingStateQueryKey, useNabuflowState } from "./shared";
+import {
+  billingAccountRequest,
+  useBillingAccount,
+  useBillingAccountLifetime,
+  type BillingAccount,
+} from "@/lib/billing-account-lifetime";
+import {
+  formatBillingAmount,
+  planChangeKind,
+  prorationAmountLabel,
+  reviewableProration,
+} from "./presentation";
 import { SupportErrorMessage } from "@/components/support-report-link";
 
 const ACTIVE_SUB_STATUSES = new Set(["active", "trialing", "past_due"]);
@@ -69,17 +86,91 @@ function fmtPerCredit(v: number): string {
 }
 
 export function PlansSection() {
-  const { data: state } = useNabuflowState();
-  const { data: plansData, isLoading } = useListNabuflowPlans();
+  const account = useBillingAccount();
+  if (!account) {
+    return (
+      <SectionCard title="Plans are unavailable">
+        <p role="status">Your account must be ready before choosing a plan.</p>
+      </SectionCard>
+    );
+  }
+  return <AccountPlansSection key={account.key} account={account} />;
+}
+
+function AccountPlansSection({ account }: { account: BillingAccount }) {
+  const lifetime = useBillingAccountLifetime(account);
+  const isCurrent = () => lifetime?.isCurrent() ?? false;
+  const {
+    data: state,
+    isLoading: stateLoading,
+    isError: stateError,
+    isFetching: stateFetching,
+    refetch: refetchState,
+  } = useNabuflowState();
+  const {
+    data: plansData,
+    isLoading,
+    isError: plansError,
+    isFetching: plansFetching,
+    refetch: refetchPlans,
+  } = useListNabuflowPlans();
   const search = useSearch();
   const highlight = useMemo(() => new URLSearchParams(search).get("highlight"), [search]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const subscribeMutation = useSubscribeNabuflowPlan();
-  const switchMutation = useSwitchNabuflowPlan();
-  const cancelMutation = useCancelNabuflowSubscription();
-  const resumeMutation = useResumeNabuflowSubscription();
+  const subscribeMutation = useSubscribeNabuflowPlan({
+    request: { signal: lifetime?.signal },
+    mutation: {
+      mutationFn: ({ data }) =>
+        billingAccountRequest<Awaited<ReturnType<typeof subscribeNabuflowPlan>>>(
+          lifetime,
+          getSubscribeNabuflowPlanUrl(),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          },
+        ),
+    },
+  });
+  const switchMutation = useSwitchNabuflowPlan({
+    request: { signal: lifetime?.signal },
+    mutation: {
+      mutationFn: ({ data }) =>
+        billingAccountRequest<Awaited<ReturnType<typeof switchNabuflowPlan>>>(
+          lifetime,
+          getSwitchNabuflowPlanUrl(),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          },
+        ),
+    },
+  });
+  const cancelMutation = useCancelNabuflowSubscription({
+    request: { signal: lifetime?.signal },
+    mutation: {
+      mutationFn: () =>
+        billingAccountRequest<Awaited<ReturnType<typeof cancelNabuflowSubscription>>>(
+          lifetime,
+          getCancelNabuflowSubscriptionUrl(),
+          { method: "POST" },
+        ),
+    },
+  });
+  const resumeMutation = useResumeNabuflowSubscription({
+    request: { signal: lifetime?.signal },
+    mutation: {
+      mutationFn: () =>
+        billingAccountRequest<Awaited<ReturnType<typeof resumeNabuflowSubscription>>>(
+          lifetime,
+          getResumeNabuflowSubscriptionUrl(),
+          { method: "POST" },
+        ),
+    },
+  });
 
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
   const [cardCaptureFor, setCardCaptureFor] = useState<string | null>(null);
@@ -89,9 +180,16 @@ export function PlansSection() {
     preview: NabuflowProrationPreview | null;
   } | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [orgSetupOpen, setOrgSetupOpen] = useState(false);
   const highlightRef = useRef<HTMLDivElement | null>(null);
+  const cardAttemptRef = useRef<object | null>(null);
+  const previewAttemptRef = useRef<object | null>(null);
+  const cancelAttemptRef = useRef<object | null>(null);
+  const cardAttempt = cardAttemptRef.current;
+  const previewAttempt = previewAttemptRef.current;
+  const cancelAttempt = cancelAttemptRef.current;
 
   const plans = plansData?.plans ?? [];
   const selfServe = plans.filter((p) => p.available);
@@ -109,73 +207,105 @@ export function PlansSection() {
   const previewTargetPlan = previewState?.preview
     ? plans.find((plan) => plan.id === previewState.preview?.targetPlanId)
     : null;
-  const previewIsDowngrade =
-    previewCurrentPlan?.priceUsd != null &&
-    previewTargetPlan?.priceUsd != null &&
-    previewTargetPlan.priceUsd < previewCurrentPlan.priceUsd;
+  const previewKind = planChangeKind(previewCurrentPlan?.priceUsd, previewTargetPlan?.priceUsd);
+  const previewIsDowngrade = previewKind === "downgrade";
+  const actionPending =
+    subscribeMutation.isPending ||
+    switchMutation.isPending ||
+    cancelMutation.isPending ||
+    resumeMutation.isPending;
 
   useEffect(() => {
     if (highlight && highlightRef.current) {
-      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      highlightRef.current.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "center",
+      });
     }
   }, [highlight, plansData]);
 
-  const invalidate = () =>
-    void queryClient.invalidateQueries({ queryKey: getGetNabuflowBillingStateQueryKey() });
+  const invalidate = () => {
+    if (!isCurrent()) return;
+    void queryClient.invalidateQueries({ queryKey: billingStateQueryKey(account.userId) });
+  };
+
+  const closePreview = () => {
+    if (!isCurrent() || previewAttemptRef.current !== previewAttempt) return;
+    previewAttemptRef.current = null;
+    setPreviewState(null);
+  };
 
   const doSubscribe = (planId: string, planName: string) => {
+    if (!isCurrent()) return;
     setPendingPlanId(planId);
     subscribeMutation.mutate(
       { data: { planId: planId as SubscribeNabuflowPlanBody["planId"] } },
       {
         onSuccess: () => {
+          if (!isCurrent()) return;
           toast({
-            title: `Welcome to ${planName}`,
-            description: "Your plan is active — happy building.",
+            title: `${planName} subscription request accepted`,
+            description: "Refreshing your plan details to show its current status.",
           });
           invalidate();
         },
-        onError: (err) =>
+        onError: (err) => {
+          if (!isCurrent()) return;
           toast({
             title: "Couldn't start the plan",
             description: <SupportErrorMessage message={apiErrorMessage(err)} />,
             variant: "destructive",
-          }),
-        onSettled: () => setPendingPlanId(null),
+          });
+        },
+        onSettled: () => {
+          if (isCurrent()) setPendingPlanId(null);
+        },
       },
     );
   };
 
   const openSwitchPreview = (plan: NabuflowPlan) => {
+    if (!isCurrent()) return;
+    const attempt = {};
+    previewAttemptRef.current = attempt;
+    setPreviewError(null);
     setPreviewState({ planId: plan.id, planName: plan.name, preview: null });
     switchMutation.mutate(
       { data: { planId: plan.id as SubscribeNabuflowPlanBody["planId"], confirm: false } },
       {
-        onSuccess: (res) =>
-          setPreviewState((prev) =>
-            prev?.planId === plan.id
-              ? { ...prev, preview: parseProrationPreview(res.preview) }
-              : prev,
-          ),
+        onSuccess: (res) => {
+          if (!isCurrent() || previewAttemptRef.current !== attempt) return;
+          const preview = reviewableProration(res.preview, plan.id);
+          if (!preview)
+            setPreviewError(
+              "A complete estimate was not returned. Retry before confirming a plan change.",
+            );
+          setPreviewState((prev) => (prev?.planId === plan.id ? { ...prev, preview } : prev));
+        },
         onError: (err) => {
-          setPreviewState(null);
-          toast({
-            title: "Couldn't preview the switch",
-            description: <SupportErrorMessage message={apiErrorMessage(err)} />,
-            variant: "destructive",
-          });
+          if (!isCurrent() || previewAttemptRef.current !== attempt) return;
+          setPreviewError(apiErrorMessage(err));
         },
       },
     );
   };
 
   const confirmSwitch = () => {
-    if (!previewState) return;
-    const { planId, planName, preview } = previewState;
+    if (
+      !isCurrent() ||
+      !previewAttempt ||
+      previewAttemptRef.current !== previewAttempt ||
+      !previewState?.preview ||
+      previewError ||
+      switchMutation.isPending
+    )
+      return;
+    const { planId, planName } = previewState;
     switchMutation.mutate(
       { data: { planId: planId as SubscribeNabuflowPlanBody["planId"], confirm: true } },
       {
         onSuccess: (res) => {
+          if (!isCurrent() || previewAttemptRef.current !== previewAttempt) return;
           const granted = res.upgradedCreditsGranted ?? 0;
           const scheduled = !!res.pendingPlanId;
           toast({
@@ -184,30 +314,33 @@ export function PlansSection() {
               ? `Your current plan stays active until ${formatResetDate(res.pendingEffectiveAt) ?? "the next renewal"}.`
               : granted > 0
                 ? `${granted.toLocaleString()} credits were added to this cycle right away.`
-                : preview && preview.amountDueCents <= 0
-                  ? "Your change applies at the next renewal."
-                  : "Your plan has been updated.",
+                : "The server confirmed your plan change. Refreshing plan details.",
           });
+          previewAttemptRef.current = null;
           setPreviewState(null);
           invalidate();
         },
-        onError: (err) =>
+        onError: (err) => {
+          if (!isCurrent() || previewAttemptRef.current !== previewAttempt) return;
           toast({
             title: "Couldn't switch plans",
             description: <SupportErrorMessage message={apiErrorMessage(err)} />,
             variant: "destructive",
-          }),
+          });
+        },
       },
     );
   };
 
   const choosePlan = (plan: NabuflowPlan) => {
+    if (!isCurrent() || !state || actionPending || !plan.available) return;
     if (plan.id === currentPlanId) return;
     if (hasActiveSub) {
       openSwitchPreview(plan);
       return;
     }
     if (!state?.card?.last4) {
+      cardAttemptRef.current = {};
       setCardCaptureFor(plan.id);
       return;
     }
@@ -216,9 +349,15 @@ export function PlansSection() {
 
   const cardCapturePlan = cardCaptureFor ? plans.find((p) => p.id === cardCaptureFor) : null;
 
-  if (isLoading) {
+  if (isLoading || stateLoading) {
     return (
-      <div className="grid gap-4 md:grid-cols-3" data-testid="plans-loading">
+      <div
+        className="grid gap-4 md:grid-cols-3"
+        data-testid="plans-loading"
+        role="status"
+        aria-busy="true"
+      >
+        <span className="sr-only">Loading plans and current subscription</span>
         {[0, 1, 2].map((i) => (
           <Skeleton key={i} className="h-80 rounded-xl" />
         ))}
@@ -226,15 +365,67 @@ export function PlansSection() {
     );
   }
 
+  if (stateError || plansError || !state || !plansData) {
+    return (
+      <SectionCard title="Plans are unavailable">
+        <p role="alert" className="text-sm text-muted-foreground">
+          We could not load your current subscription and available plans. Retry before choosing a
+          plan.
+        </p>
+        <Button
+          className="mt-4"
+          variant="outline"
+          disabled={stateFetching || plansFetching}
+          onClick={() => {
+            if (!isCurrent()) return;
+            void refetchState();
+            void refetchPlans();
+          }}
+        >
+          Retry plans
+        </Button>
+      </SectionCard>
+    );
+  }
+
+  if (plans.length === 0) {
+    return (
+      <SectionCard title="No plans available">
+        <p className="text-sm text-muted-foreground">
+          No plans were returned. Your existing subscription has not been changed.
+        </p>
+        <Button
+          className="mt-4"
+          variant="outline"
+          disabled={plansFetching}
+          onClick={() => {
+            if (isCurrent()) void refetchPlans();
+          }}
+        >
+          Refresh plans
+        </Button>
+      </SectionCard>
+    );
+  }
+
   return (
     <div className="space-y-4" data-testid="billing-plans">
+      <div className="pb-2">
+        <h2 className="text-lg font-semibold tracking-tight">Choose the capacity you need</h2>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          {hasActiveSub
+            ? "Review a server estimate before confirming a change. Your current plan stays selected until the server confirms the result."
+            : "Prices below are monthly subscription amounts. With a saved card, Subscribe starts the selected plan; otherwise you will add a card first."}
+        </p>
+      </div>
       <div className="grid items-stretch gap-4 md:grid-cols-3">
         {selfServe.map((plan) => {
-          const isCurrent = plan.id === currentPlanId;
+          const isCurrentPlan = plan.id === currentPlanId;
           const isPendingTarget = plan.id === sub?.pendingPlanId;
-          const isHighlight = highlight === plan.id && !isCurrent;
+          const isHighlight = highlight === plan.id && !isCurrentPlan;
           const ladder = nabuflowLadderLines(plan, plans);
-          const priceHigher = (plan.priceUsd ?? 0) > (state?.plan?.priceUsd ?? 0);
+          const changeKind = planChangeKind(state?.plan?.priceUsd, plan.priceUsd);
+          const priceHigher = changeKind === "upgrade";
           const busy =
             (subscribeMutation.isPending && pendingPlanId === plan.id) ||
             (switchMutation.isPending && previewState?.planId === plan.id);
@@ -245,22 +436,22 @@ export function PlansSection() {
               ref={isHighlight ? highlightRef : undefined}
               data-testid={`plan-card-${plan.id}`}
               className={cn(
-                "relative flex flex-col rounded-xl border bg-card p-5",
-                isCurrent
-                  ? "border-primary ring-1 ring-primary"
+                "relative flex flex-col rounded-2xl border bg-card p-5 pt-6",
+                isCurrentPlan
+                  ? "border-primary/60 bg-primary/5"
                   : isHighlight
                     ? "border-primary/60 ring-2 ring-primary/30"
                     : "border-border",
               )}
             >
-              {isCurrent && <Badge className="absolute -top-2.5 left-4">Current plan</Badge>}
+              {isCurrentPlan && <Badge className="absolute -top-2.5 left-4">Current plan</Badge>}
               {isHighlight && (
                 <Badge variant="secondary" className="absolute -top-2.5 left-4">
-                  Recommended
+                  Selected for review
                 </Badge>
               )}
 
-              {isCurrent && pendingPlan && (
+              {isCurrentPlan && pendingPlan && (
                 <div
                   className="mb-4 mt-2 rounded-lg bg-muted/60 px-3 py-2 text-xs text-muted-foreground"
                   data-testid="pending-plan-note"
@@ -275,7 +466,7 @@ export function PlansSection() {
               <h3 className="text-base font-bold text-foreground">{plan.name}</h3>
               <p className="mt-1.5">
                 <span className="text-2xl font-bold tabular-nums text-foreground">
-                  ${plan.priceUsd}
+                  {plan.priceUsd == null ? "Price unavailable" : `$${plan.priceUsd}`}
                 </span>
                 <span className="text-xs text-muted-foreground">/month</span>
               </p>
@@ -313,16 +504,18 @@ export function PlansSection() {
               </ul>
 
               <div className="mt-5">
-                {isCurrent ? (
+                {isCurrentPlan ? (
                   sub?.cancelAtPeriodEnd ? (
                     <div className="space-y-1.5">
                       <Button
                         size="sm"
                         className="w-full"
-                        disabled={resumeMutation.isPending}
-                        onClick={() =>
+                        disabled={actionPending}
+                        onClick={() => {
+                          if (!isCurrent()) return;
                           resumeMutation.mutate(undefined, {
                             onSuccess: () => {
+                              if (!isCurrent()) return;
                               toast({
                                 title: "Auto-renew resumed",
                                 description:
@@ -330,14 +523,16 @@ export function PlansSection() {
                               });
                               invalidate();
                             },
-                            onError: (err) =>
+                            onError: (err) => {
+                              if (!isCurrent()) return;
                               toast({
                                 title: "Couldn't resume",
                                 description: <SupportErrorMessage message={apiErrorMessage(err)} />,
                                 variant: "destructive",
-                              }),
-                          })
-                        }
+                              });
+                            },
+                          });
+                        }}
                         data-testid="plan-resume-btn"
                       >
                         {resumeMutation.isPending && (
@@ -358,8 +553,11 @@ export function PlansSection() {
                       </Button>
                       <button
                         type="button"
-                        className="text-[11px] text-muted-foreground transition-colors hover:text-destructive"
+                        className="min-h-9 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        disabled={actionPending}
                         onClick={() => {
+                          if (!isCurrent()) return;
+                          cancelAttemptRef.current = {};
                           setCancelError(null);
                           setConfirmCancel(true);
                         }}
@@ -374,7 +572,8 @@ export function PlansSection() {
                     size="sm"
                     className="w-full"
                     variant={!hasActiveSub || priceHigher ? "default" : "outline"}
-                    disabled={busy || isPendingTarget}
+                    disabled={actionPending || isPendingTarget || plan.priceUsd == null}
+                    aria-busy={busy}
                     onClick={() => choosePlan(plan)}
                     data-testid={`plan-cta-${plan.id}`}
                   >
@@ -386,10 +585,8 @@ export function PlansSection() {
                     {isPendingTarget
                       ? `${plan.name} scheduled`
                       : hasActiveSub
-                        ? priceHigher
-                          ? `Upgrade to ${plan.name}`
-                          : `Downgrade to ${plan.name}`
-                        : `Choose ${plan.name}`}
+                        ? `Review ${changeKind} to ${plan.name}`
+                        : `Subscribe to ${plan.name}`}
                   </Button>
                 )}
               </div>
@@ -422,7 +619,9 @@ export function PlansSection() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setOrgSetupOpen(true)}
+                onClick={() => {
+                  if (isCurrent()) setOrgSetupOpen(true);
+                }}
                 data-testid="constellation-contact"
               >
                 Contact us / Set up enterprise
@@ -442,23 +641,47 @@ export function PlansSection() {
       <Dialog
         open={!!previewState}
         onOpenChange={(open) => {
-          if (!open && !switchMutation.isPending) setPreviewState(null);
+          if (!open && !switchMutation.isPending) closePreview();
         }}
       >
-        <DialogContent className="max-w-md" data-testid="proration-dialog">
+        <DialogContent
+          className="max-h-[90dvh] max-w-lg overflow-y-auto"
+          data-testid="proration-dialog"
+        >
           <DialogHeader>
-            <DialogTitle>
-              {previewIsDowngrade ? "Schedule" : "Switch to"} {previewState?.planName}
-            </DialogTitle>
+            <DialogTitle>Review {previewState?.planName}</DialogTitle>
             <DialogDescription>
-              {previewIsDowngrade
-                ? "No charge, refund or credit note now. Your current plan stays active through this billing cycle."
-                : "You are charged now, prorated for the days remaining in this billing cycle."}
+              {!previewState?.preview
+                ? "Load the server estimate to review the amount and timing before you confirm."
+                : previewIsDowngrade
+                  ? "This downgrade is scheduled for renewal. Your current plan continues through this billing cycle."
+                  : "Review the estimated adjustment below. A plan change is only applied after confirmation succeeds."}
             </DialogDescription>
           </DialogHeader>
 
-          {previewState && !previewState.preview ? (
-            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+          {previewError ? (
+            <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4">
+              <p role="alert" className="text-sm">
+                <SupportErrorMessage message={previewError} />
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={switchMutation.isPending}
+                onClick={() => {
+                  const target = plans.find((plan) => plan.id === previewState?.planId);
+                  if (target) openSwitchPreview(target);
+                }}
+              >
+                Retry estimate
+              </Button>
+            </div>
+          ) : previewState && !previewState.preview ? (
+            <div
+              role="status"
+              aria-busy="true"
+              className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"
+            >
               <Loader2 className="h-4 w-4 animate-spin" /> Calculating proration…
             </div>
           ) : previewState?.preview ? (
@@ -476,23 +699,29 @@ export function PlansSection() {
                           l.amountCents < 0 && "text-emerald-600 dark:text-emerald-400",
                         )}
                       >
-                        {formatUsdCents(l.amountCents)}
+                        {formatBillingAmount(l.amountCents, previewState.preview!.currency)}
                       </span>
                     </li>
                   ))}
                 </ul>
               )}
               <div className="flex justify-between text-sm font-semibold text-foreground">
-                <span>
-                  {previewState.preview.amountDueCents >= 0 ? "Due now" : "Credit applied"}
-                </span>
+                <span>{prorationAmountLabel(previewState.preview.amountDueCents)}</span>
                 <span className="tabular-nums" data-testid="proration-total">
-                  {formatUsdCents(Math.abs(previewState.preview.amountDueCents))}
+                  {formatBillingAmount(
+                    previewState.preview.amountDueCents,
+                    previewState.preview.currency,
+                  )}
                 </span>
               </div>
-              {previewState.preview.nextCycleAmountCents > 0 && (
+              {previewState.preview.nextCycleAmountCents >= 0 && (
                 <p className="text-xs text-muted-foreground" data-testid="next-cycle-charge">
-                  Then {formatUsdCents(previewState.preview.nextCycleAmountCents)}/mo
+                  Next-cycle estimate:{" "}
+                  {formatBillingAmount(
+                    previewState.preview.nextCycleAmountCents,
+                    previewState.preview.currency,
+                  )}
+                  /month
                   {previewState.preview.nextCycleStartsAt
                     ? ` starting ${formatResetDate(previewState.preview.nextCycleStartsAt)}`
                     : " at the next renewal"}
@@ -502,10 +731,16 @@ export function PlansSection() {
               <p className="text-[11px] leading-snug text-muted-foreground">
                 {previewIsDowngrade
                   ? "Your current plan, credits and engine access continue until renewal. The new plan and price start then; upgrading before renewal cancels this pending change."
-                  : "The new plan and its credits start immediately. Any usage charges from this cycle that haven't been billed yet are included on this invoice, so the charged total can be slightly higher than the preview."}
+                  : previewKind === "upgrade"
+                    ? "The upgrade and additional credits take effect after the server confirms the change. Unbilled usage can change the final invoice amount."
+                    : "The server confirms the effective date and final amount. Review the updated plan details after confirmation."}
                 {previewState.preview.periodEnd
                   ? ` Current period ends ${formatResetDate(previewState.preview.periodEnd)}.`
                   : ""}
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                This preview is an estimate, not a receipt. A negative adjustment is not
+                confirmation of a cash refund.
               </p>
             </div>
           ) : null}
@@ -514,7 +749,7 @@ export function PlansSection() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setPreviewState(null)}
+              onClick={closePreview}
               disabled={switchMutation.isPending}
             >
               Cancel
@@ -522,7 +757,8 @@ export function PlansSection() {
             <Button
               size="sm"
               onClick={confirmSwitch}
-              disabled={!previewState?.preview || switchMutation.isPending}
+              disabled={!previewState?.preview || !!previewError || switchMutation.isPending}
+              aria-busy={switchMutation.isPending && !!previewState?.preview}
               data-testid="proration-confirm"
             >
               {switchMutation.isPending && previewState?.preview && (
@@ -538,8 +774,12 @@ export function PlansSection() {
       <AlertDialog
         open={confirmCancel}
         onOpenChange={(open) => {
+          if (!isCurrent()) return;
           setConfirmCancel(open);
-          if (!open) setCancelError(null);
+          if (!open) {
+            cancelAttemptRef.current = null;
+            setCancelError(null);
+          }
         }}
       >
         <AlertDialogContent>
@@ -562,9 +802,13 @@ export function PlansSection() {
             <AlertDialogAction
               onClick={(event) => {
                 event.preventDefault();
+                if (!isCurrent() || !cancelAttempt || cancelAttemptRef.current !== cancelAttempt)
+                  return;
                 setCancelError(null);
                 cancelMutation.mutate(undefined, {
                   onSuccess: () => {
+                    if (!isCurrent() || cancelAttemptRef.current !== cancelAttempt) return;
+                    cancelAttemptRef.current = null;
                     setConfirmCancel(false);
                     toast({
                       title: "Plan set to cancel",
@@ -572,7 +816,11 @@ export function PlansSection() {
                     });
                     invalidate();
                   },
-                  onError: (err) => setCancelError(apiErrorMessage(err)),
+                  onError: (err) => {
+                    if (isCurrent() && cancelAttemptRef.current === cancelAttempt) {
+                      setCancelError(apiErrorMessage(err));
+                    }
+                  },
                 });
               }}
               disabled={cancelMutation.isPending}
@@ -588,8 +836,14 @@ export function PlansSection() {
       {/* Card capture before first subscription */}
       <CardSetupDialog
         open={!!cardCaptureFor}
-        onClose={() => setCardCaptureFor(null)}
+        onClose={() => {
+          if (!isCurrent() || cardAttemptRef.current !== cardAttempt) return;
+          cardAttemptRef.current = null;
+          setCardCaptureFor(null);
+        }}
         onSaved={() => {
+          if (!isCurrent() || !cardAttempt || cardAttemptRef.current !== cardAttempt) return;
+          cardAttemptRef.current = null;
           const planId = cardCaptureFor;
           setCardCaptureFor(null);
           invalidate();
@@ -605,7 +859,12 @@ export function PlansSection() {
       />
 
       {/* Constellation enterprise setup (gated — no self-serve checkout) */}
-      <OrgSetupDialog open={orgSetupOpen} onClose={() => setOrgSetupOpen(false)} />
+      <OrgSetupDialog
+        open={orgSetupOpen}
+        onClose={() => {
+          if (isCurrent()) setOrgSetupOpen(false);
+        }}
+      />
     </div>
   );
 }

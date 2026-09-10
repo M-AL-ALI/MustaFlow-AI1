@@ -1,5 +1,5 @@
 import { authFetch } from "@/lib/api-fetch";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import { useListKnowledge, getListKnowledgeQueryKey } from "@workspace/api-client-react";
 import type { KnowledgeEntry } from "@workspace/api-client-react";
@@ -27,7 +27,11 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { uploadAccountAsset } from "@/lib/asset-upload";
+import {
+  createAssetUploadLifetime,
+  uploadAccountAsset,
+  type AssetUploadLifetime,
+} from "@/lib/asset-upload";
 import {
   getReferenceSavedMemories,
   setReferenceSavedMemories,
@@ -190,6 +194,8 @@ function BrandProfileSection() {
   const [saving, setSaving] = useState(false);
   const [hasSaved, setHasSaved] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoUpload = useRef<AssetUploadLifetime | null>(null);
+  useEffect(() => () => logoUpload.current?.dispose(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,17 +239,32 @@ function BrandProfileSection() {
 
   const handleLogo = async (file: File | undefined) => {
     if (!file) return;
-    setUploadingLogo(true);
+    logoUpload.current?.dispose();
+    const scope = createAssetUploadLifetime();
+    logoUpload.current = scope;
+    const retire = () => {
+      if (logoUpload.current === scope) setUploadingLogo(false);
+    };
+    scope.signal.addEventListener("abort", retire, { once: true });
     try {
-      const uploaded = await uploadAccountAsset({ file, source: "picker" });
+      scope.assertCurrent();
+      setUploadingLogo(true);
+      const uploaded = await uploadAccountAsset({ file, source: "picker", signal: scope.signal });
+      scope.assertCurrent();
       if (!uploaded.mimeType.startsWith("image/")) {
         throw new Error("Choose an image for your logo.");
       }
-      const metadata = await authFetch(`/api/assets/${uploaded.assetId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandRole: "logo", altText: "Brand logo" }),
-      });
+      const metadata = await authFetch(
+        `/api/assets/${uploaded.assetId}`,
+        {
+          method: "PATCH",
+          signal: scope.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ brandRole: "logo", altText: "Brand logo" }),
+        },
+        () => scope.assertCurrent(),
+      );
+      scope.assertCurrent();
       if (!metadata.ok) throw new Error("The logo could not be added to your brand kit.");
       setProfile((current) => ({
         ...current,
@@ -257,12 +278,18 @@ function BrandProfileSection() {
           : "Save the brand kit to reuse this logo in every build.",
       });
     } catch (error) {
+      if (!scope.isCurrent()) return;
       toast({
         title: error instanceof Error ? error.message : "The logo could not be uploaded.",
         variant: "destructive",
       });
     } finally {
-      setUploadingLogo(false);
+      scope.signal.removeEventListener("abort", retire);
+      if (logoUpload.current === scope) {
+        setUploadingLogo(false);
+        logoUpload.current = null;
+      }
+      scope.dispose();
     }
   };
 

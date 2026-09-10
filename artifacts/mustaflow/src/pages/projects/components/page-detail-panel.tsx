@@ -16,6 +16,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { PageType } from "./page-node";
+import {
+  transitionEvidenceLabel,
+  transitionSummary,
+  type PageMapTransition,
+} from "./page-map-transition-model";
 
 export type PageMapNodeState = {
   id: string;
@@ -40,6 +45,8 @@ export type WiringPage = {
 export type WiringEdge = {
   edgeId: string;
   page: WiringPage;
+  transition?: PageMapTransition;
+  pending?: boolean;
 };
 
 const WEB_PAGE_TYPES: { value: PageType; label: string }[] = [
@@ -71,6 +78,8 @@ type PageDetailPanelProps = {
   onJumpToNode?: (nodeId: string) => void;
   onWireTo?: (targetNodeId: string) => void;
   onUnwire?: (edgeId: string) => void;
+  onInspectTransition?: (edgeId: string) => void;
+  onDraftStart?: () => void;
   onAskAiToWire?: (node: PageMapNodeState) => void;
   /**
    * Optional slot rendered below the file path on built pages. Used to host
@@ -95,6 +104,8 @@ export function PageDetailPanel({
   onJumpToNode,
   onWireTo,
   onUnwire,
+  onInspectTransition,
+  onDraftStart,
   onAskAiToWire,
   blocksSlot,
 }: PageDetailPanelProps) {
@@ -149,6 +160,7 @@ export function PageDetailPanel({
         <span className="text-sm font-semibold text-foreground truncate">{node.label}</span>
         <button
           onClick={onClose}
+          aria-label={dirty ? "Discard draft and close page details" : "Close page details"}
           className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         >
           <X className="h-4 w-4" />
@@ -184,8 +196,10 @@ export function PageDetailPanel({
             Page Name
           </label>
           <input
+            aria-label="Page name"
             value={label}
             onChange={(e) => {
+              onDraftStart?.();
               setLabel(e.target.value);
               setDirty(true);
             }}
@@ -200,8 +214,10 @@ export function PageDetailPanel({
             Page Type
           </label>
           <select
+            aria-label="Page type"
             value={pageType}
             onChange={(e) => {
+              onDraftStart?.();
               setPageType(e.target.value as PageType);
               setDirty(true);
             }}
@@ -221,8 +237,10 @@ export function PageDetailPanel({
             Notes
           </label>
           <textarea
+            aria-label="Page notes"
             value={notes}
             onChange={(e) => {
+              onDraftStart?.();
               setNotes(e.target.value);
               setDirty(true);
             }}
@@ -236,37 +254,58 @@ export function PageDetailPanel({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-              Linked from
+              Mapped from
             </label>
             <span className="text-[10px] text-muted-foreground tabular-nums">
               {incoming.length}
             </span>
           </div>
           {incoming.length === 0 ? (
-            <div className="text-[11px] text-muted-foreground italic px-1">Nothing links here.</div>
+            <div className="text-[11px] text-muted-foreground italic px-1">
+              No incoming transition mapped.
+            </div>
           ) : (
             <div className="space-y-1">
-              {incoming.map(({ edgeId, page }) => (
+              {incoming.map(({ edgeId, page, transition, pending }) => (
                 <div
                   key={edgeId}
-                  className="flex items-center gap-1.5 bg-muted/40 border border-border rounded-md px-2 py-1.5 group"
+                  className="group rounded-md border border-border bg-muted/40 px-2 py-1.5"
                 >
-                  <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                  <button
-                    onClick={() => onJumpToNode?.(page.id)}
-                    className="flex-1 text-left text-[11px] text-foreground truncate hover:text-primary transition-colors"
-                  >
-                    {page.label}
-                  </button>
-                  {onUnwire && (
+                  <div className="flex items-center gap-1.5">
+                    <ArrowRight
+                      className="h-3 w-3 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
                     <button
-                      onClick={() => onUnwire(edgeId)}
-                      title="Remove this link"
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+                      type="button"
+                      onClick={() => onJumpToNode?.(page.id)}
+                      className="min-w-0 flex-1 truncate text-left text-[11px] text-foreground hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
                     >
-                      <Unlink className="h-3 w-3" />
+                      {page.label}
                     </button>
-                  )}
+                    {onUnwire && (
+                      <button
+                        type="button"
+                        onClick={() => onUnwire(edgeId)}
+                        aria-label={"Remove mapped transition " + edgeId}
+                        className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <Unlink className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!onInspectTransition}
+                    onClick={() => onInspectTransition?.(edgeId)}
+                    aria-label={"Inspect transition " + edgeId}
+                    className="mt-1 block w-full rounded text-left text-[10px] focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <span className="block break-words">{transitionSummary(transition)}</span>
+                    <span className="block break-words text-muted-foreground">
+                      {edgeId}: {transitionEvidenceLabel(transition, pending)}
+                    </span>
+                  </button>
                 </div>
               ))}
             </div>
@@ -277,7 +316,7 @@ export function PageDetailPanel({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-              Links to
+              Mapped to
             </label>
             <span className="text-[10px] text-muted-foreground tabular-nums">
               {outgoing.length}
@@ -285,39 +324,62 @@ export function PageDetailPanel({
           </div>
           {outgoing.length === 0 ? (
             <div className="text-[11px] text-muted-foreground italic px-1">
-              This page links nowhere.
+              No outgoing transition mapped.
             </div>
           ) : (
             <div className="space-y-1">
-              {outgoing.map(({ edgeId, page }) => (
+              {outgoing.map(({ edgeId, page, transition, pending }) => (
                 <div
                   key={edgeId}
-                  className="flex items-center gap-1.5 bg-muted/40 border border-border rounded-md px-2 py-1.5 group"
+                  className="group rounded-md border border-border bg-muted/40 px-2 py-1.5"
                 >
-                  <ArrowLeft className="h-3 w-3 text-muted-foreground shrink-0 rotate-180" />
-                  <button
-                    onClick={() => onJumpToNode?.(page.id)}
-                    className="flex-1 text-left text-[11px] text-foreground truncate hover:text-primary transition-colors"
-                  >
-                    {page.label}
-                  </button>
-                  {onUnwire && (
+                  <div className="flex items-center gap-1.5">
+                    <ArrowLeft
+                      className="h-3 w-3 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
                     <button
-                      onClick={() => onUnwire(edgeId)}
-                      title="Remove this link"
-                      className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+                      type="button"
+                      onClick={() => onJumpToNode?.(page.id)}
+                      className="min-w-0 flex-1 truncate text-left text-[11px] text-foreground hover:text-primary focus-visible:ring-2 focus-visible:ring-primary"
                     >
-                      <Unlink className="h-3 w-3" />
+                      {page.label}
                     </button>
-                  )}
+                    {onUnwire && (
+                      <button
+                        type="button"
+                        onClick={() => onUnwire(edgeId)}
+                        aria-label={"Remove mapped transition " + edgeId}
+                        className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <Unlink className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!onInspectTransition}
+                    onClick={() => onInspectTransition?.(edgeId)}
+                    aria-label={"Inspect transition " + edgeId}
+                    className="mt-1 block w-full rounded text-left text-[10px] focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <span className="block break-words">{transitionSummary(transition)}</span>
+                    <span className="block break-words text-muted-foreground">
+                      {edgeId}: {transitionEvidenceLabel(transition, pending)}
+                    </span>
+                  </button>
                 </div>
               ))}
             </div>
           )}
 
+          <p className="text-[11px] text-muted-foreground">
+            Multiple transitions can share a target. Map edits do not change app navigation.
+          </p>
           {wiringTargetOptions.length > 0 && onWireTo && (
             <div className="flex gap-1.5 pt-1">
               <select
+                aria-label="Target page for new mapped transition"
                 value={wireTarget}
                 onChange={(e) => setWireTarget(e.target.value)}
                 className="flex-1 bg-muted border border-border rounded-md px-2 py-1.5 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -338,13 +400,17 @@ export function PageDetailPanel({
                 className="h-7 px-2 text-[11px] gap-1"
               >
                 <Link2 className="h-3 w-3" />
-                Link
+                Add transition
               </Button>
             </div>
           )}
         </div>
 
-        {/* File path — only shown for built pages */}
+        <p className="text-[11px] text-muted-foreground">
+          A mapped source file is not runtime or thumbnail verification. Inspect Preview separately.
+        </p>
+
+        {/* File path: source or manual mapping, not runtime proof */}
         {!node.planned && (
           <div className="space-y-1.5">
             <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">

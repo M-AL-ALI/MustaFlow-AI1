@@ -33,7 +33,7 @@ describe("Zero prompt queue reachability", () => {
       /<Route path="\/projects\/:id">[\s\S]*?<ProjectWorkspacePage \/>[\s\S]*?<\/Route>/,
     );
     expect(projectWorkspaceSource).toMatch(
-      /const ZeroAgentPanel = builderLazy\(\(\) =>[\s\S]*?\.\/components\/zero-agent-panel/,
+      /const ZeroAgentPanel = builderLazy\(\s*\(\) =>[\s\S]*?\.\/components\/zero-agent-panel/,
     );
     expect(projectWorkspaceSource).toContain("<ZeroAgentPanel");
     expect(zeroAgentPanelSource).toContain(

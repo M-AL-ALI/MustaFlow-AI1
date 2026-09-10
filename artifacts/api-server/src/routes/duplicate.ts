@@ -1,3 +1,4 @@
+import { withProjectWorkspaceAdmission, WorkspaceAdmissionError } from "../lib/workspace-lifecycle";
 import { Router, type IRouter } from "express";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, projectsTable, projectFilesTable, projectActivityTable } from "@workspace/db";
@@ -35,7 +36,9 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
   try {
     workspaceId = await resolveProjectWorkspaceId({
       userId: req.userId!,
-      requestedWorkspaceId: original.workspaceId,
+      // Copying has no explicit destination choice. Preserve source placement
+      // only with creation authority; otherwise use the caller's owner default.
+      preferredWorkspaceId: original.workspaceId,
     });
   } catch (error) {
     if (error instanceof ProjectWorkspaceUnavailableError) {
@@ -45,30 +48,42 @@ router.post("/projects/:id/duplicate", requireProjectOwnership, async (req, res)
     throw error;
   }
 
-  const [newProject] = await db
-    .insert(projectsTable)
-    .values({
-      name: `${original.name} (copy)`,
-      kind: original.kind,
-      description: original.description,
-      ownerId: req.userId!,
-      workspaceId,
-      status: "draft",
-      agentMode: original.agentMode,
-      lastTaskSummary: `Duplicated from "${original.name}"`,
-      lastTaskSummaryProvenance: projectSummaryProvenance({
-        sourceKind: "duplicate",
-        sourceIdentity: `project:${original.id}`,
-        sourceProjectId: original.id,
-        actorUserId: req.userId,
-        content: `Duplicated from "${original.name}"`,
-      }),
-      // Task #738 — duplicated projects are brand-new infra and must get
-      // their own container + Neon DB, not reuse the source project's.
-      builderMode: "agentic",
-      provisioningStatus: "provisioning",
-    })
-    .returning();
+  const newProjectRows = await withProjectWorkspaceAdmission(
+    { workspaceId, userId: req.userId! },
+    async (tx) =>
+      tx
+        .insert(projectsTable)
+        .values({
+          name: `${original.name} (copy)`,
+          kind: original.kind,
+          description: original.description,
+          ownerId: req.userId!,
+          workspaceId,
+          status: "draft",
+          agentMode: original.agentMode,
+          lastTaskSummary: `Duplicated from "${original.name}"`,
+          lastTaskSummaryProvenance: projectSummaryProvenance({
+            sourceKind: "duplicate",
+            sourceIdentity: `project:${original.id}`,
+            sourceProjectId: original.id,
+            actorUserId: req.userId,
+            content: `Duplicated from "${original.name}"`,
+          }),
+          // Task #738 — duplicated projects are brand-new infra and must get
+          // their own container + Neon DB, not reuse the source project's.
+          builderMode: "agentic",
+          provisioningStatus: "provisioning",
+        })
+        .returning(),
+  ).catch((error: unknown) => {
+    if (error instanceof WorkspaceAdmissionError) {
+      res.status(409).json({ error: error.code });
+      return null;
+    }
+    throw error;
+  });
+  if (!newProjectRows) return;
+  const [newProject] = newProjectRows;
 
   if (!newProject) {
     res.status(500).json({ error: "Failed to create duplicate project" });

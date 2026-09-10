@@ -26,7 +26,56 @@ function isMethodCall(call: ts.CallExpression, receiver: string, method: string)
   );
 }
 
+function governedUploadOptions(source: string): Record<string, string>[] {
+  const ast = ts.createSourceFile(
+    "panel.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const printer = ts.createPrinter({ removeComments: true });
+  const options: Record<string, string>[] = [];
+  function visit(node: ts.Node): void {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "uploadProjectAsset" &&
+      node.arguments[0] &&
+      ts.isObjectLiteralExpression(node.arguments[0])
+    ) {
+      const fields: Record<string, string> = {};
+      for (const property of node.arguments[0].properties) {
+        if (ts.isShorthandPropertyAssignment(property)) {
+          fields[property.name.text] = property.name.text;
+        } else if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)) {
+          fields[property.name.text] = ts.isStringLiteral(property.initializer)
+            ? property.initializer.text
+            : printer
+                .printNode(ts.EmitHint.Unspecified, property.initializer, ast)
+                .replace(/\s+/g, "");
+        }
+      }
+      options.push(fields);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(ast);
+  return options;
+}
+
 describe("project upload cost boundary", () => {
+  it("checks real upload calls independently of whitespace, quotes and comments", () => {
+    expect(
+      governedUploadOptions("// uploadProjectAsset({ projectId, file, source: 'picker' })"),
+    ).toEqual([]);
+    expect(
+      governedUploadOptions(
+        "async function upload() { await uploadProjectAsset({\n projectId,\n file,\n source: 'picker',\n signal: scope.signal,\n }); }",
+      ),
+    ).toEqual([{ projectId: "projectId", file: "file", source: "picker", signal: "scope.signal" }]);
+  });
+
   it("keeps every legacy direct project signer closed", () => {
     const source = fs.readFileSync(path.join(root, "routes", "uploads.ts"), "utf8");
     for (const next of [
@@ -197,7 +246,14 @@ describe("project upload cost boundary", () => {
     );
     expect(route).toContain("res.status(410)");
     expect(route).not.toContain("getObjectEntityUploadURL()");
-    expect(web).toContain("uploadProjectAsset({ projectId, file, source:");
+    expect(governedUploadOptions(web)).toContainEqual(
+      expect.objectContaining({
+        projectId: "projectId",
+        file: "file",
+        source: "paste",
+        signal: "scope.signal",
+      }),
+    );
     expect(web).not.toContain("/attachments/upload-url");
   });
 
@@ -216,7 +272,14 @@ describe("project upload cost boundary", () => {
       ),
       "utf8",
     );
-    expect(panel).toContain('uploadProjectAsset({ projectId, file, source: "picker" })');
+    expect(governedUploadOptions(panel)).toContainEqual(
+      expect.objectContaining({
+        projectId: "projectId",
+        file: "file",
+        source: "picker",
+        signal: "scope.signal",
+      }),
+    );
     expect(panel).toContain("/api/assets?projectId=");
     expect(panel).toContain('asset.source !== "legacy-project-upload"');
     expect(panel).not.toContain("/uploads/request-url");

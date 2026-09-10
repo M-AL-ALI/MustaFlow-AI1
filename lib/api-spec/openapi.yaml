@@ -2356,20 +2356,24 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PageMapData"
+              $ref: "#/components/schemas/PageMapSaveRequest"
       responses:
         "200":
-          description: Updated page map
+          description: Updated page map and its acknowledged revision
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/PageMapResponse"
+        "400":
+          description: Invalid page map payload, duplicate identities, dangling connections, or a nonstring or malformed expectedRevision
+        "409":
+          description: Missing expectedRevision, a well-formed but stale expectedRevision, or a retired project. No map is written; refresh the latest map and review local edits before retrying.
 
   /projects/{id}/page-map/analyze:
     post:
       operationId: analyzePageMap
       tags: [projects]
-      summary: Re-run AI extraction on project files and update the page map
+      summary: Refresh source-backed routes with best-effort HTML AI enrichment
       parameters:
         - { name: id, in: path, required: true, schema: { type: integer } }
         - in: query
@@ -2382,6 +2386,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PageMapResponse"
+        "400":
+          description: Unsupported platform
+        "409":
+          description: Project files, retirement state, or page map changed during analysis
 
   /projects/{id}/files/{fileId}/blocks:
     get:
@@ -4217,6 +4225,12 @@ paths:
       operationId: getRecentActivity
       tags: [projects]
       summary: Recent activity feed across all projects
+      parameters:
+        - name: workspaceId
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 2147483647 }
+          description: Restrict activity to accessible active projects in this workspace before limiting results.
       responses:
         "200":
           description: Recent activity
@@ -10575,6 +10589,132 @@ components:
         notes: { type: string }
         planned: { type: boolean }
 
+    PageMapTransitionSourceReference:
+      type: object
+      additionalProperties: false
+      required: [filePath, contentSha256, startOffset, endOffset]
+      description: >-
+        Server-owned historical source declaration, not execution or freshness
+        proof. Offsets are end-exclusive UTF-16 code-unit offsets in the file
+        with this exact content SHA256. endOffset must exceed startOffset.
+      properties:
+        filePath:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: Project-relative path; no empty, dot, parent, backslash, colon or control segments.
+        contentSha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+        startOffset: { type: integer, minimum: 0, maximum: 500000 }
+        endOffset: { type: integer, minimum: 0, maximum: 500000 }
+
+    PageMapTransitionEvidence:
+      type: object
+      additionalProperties: false
+      required: [basis, fields]
+      description: >-
+        Authority is assigned by the server, never by PUT input. source is
+        required exactly when basis is source. Inferred is not verified.
+        Runtime observation is unsupported in version 1.
+      properties:
+        basis: { type: string, enum: [unknown, inferred, source, manual] }
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items: { type: string, enum: [action, control, condition, outcome, destination] }
+        source: { $ref: "#/components/schemas/PageMapTransitionSourceReference" }
+
+    PageMapTransitionAction:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [unknown, click, submit, load, programmatic] }
+        label: { type: string, minLength: 1, maxLength: 240 }
+
+    PageMapTransitionControl:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: Descriptive metadata only. A locator is never executed as a selector.
+      properties:
+        kind: { type: string, enum: [unknown, link, button, form, call, other] }
+        label: { type: string, minLength: 1, maxLength: 240 }
+        locator: { type: string, minLength: 1, maxLength: 1024 }
+
+    PageMapTransitionCondition:
+      type: object
+      additionalProperties: false
+      required: [kind, branch]
+      description: >-
+        Unknown does not mean unconditional. Predicate requires expression;
+        other kinds must omit expression and use branch unknown. Expressions
+        are bounded descriptive text, never evaluated.
+      properties:
+        kind: { type: string, enum: [unknown, none, predicate] }
+        expression: { type: string, minLength: 1, maxLength: 2000 }
+        branch: { type: string, enum: [unknown, "true", "false"] }
+
+    PageMapTransitionOutcome:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [unknown, navigate, redirect, external, stay] }
+        detail: { type: string, minLength: 1, maxLength: 1000 }
+
+    PageMapTransitionDestination:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: >-
+        Unknown must omit value. Route requires a slash-prefixed non-network
+        path; it may still be unresolved or parameterized. External requires
+        credential-free HTTP(S). No backslashes, whitespace or control bytes.
+        This metadata never grants permission to fetch or open a destination.
+      properties:
+        kind: { type: string, enum: [unknown, route, external] }
+        value: { type: string, minLength: 1, maxLength: 2048 }
+
+    PageMapTransition:
+      type: object
+      additionalProperties: false
+      required: [version, action, control, condition, outcome, destination, evidence]
+      description: >-
+        Optional descriptive transition contract. Absence is legacy unknown,
+        not a confirmed link or unconditional branch. PUT preserves evidence
+        only from the same stored identity, binding and unchanged claims;
+        new or changed claims become manual regardless of submitted evidence.
+        Clear claims with an explicit all-unknown version-1 transition.
+      properties:
+        version: { type: integer, enum: [1] }
+        action: { $ref: "#/components/schemas/PageMapTransitionAction" }
+        control: { $ref: "#/components/schemas/PageMapTransitionControl" }
+        condition: { $ref: "#/components/schemas/PageMapTransitionCondition" }
+        outcome: { $ref: "#/components/schemas/PageMapTransitionOutcome" }
+        destination: { $ref: "#/components/schemas/PageMapTransitionDestination" }
+        evidence:
+          type: array
+          maxItems: 8
+          items: { $ref: "#/components/schemas/PageMapTransitionEvidence" }
+        unknowns:
+          type: array
+          maxItems: 16
+          items: { type: string, minLength: 1, maxLength: 500 }
+
+    PageMapUnresolvedTransition:
+      type: object
+      additionalProperties: false
+      required: [id, transition]
+      description: >-
+        A navigation candidate without a justified internal target edge.
+        Missing source means attribution is unknown. Never invent a target node.
+      properties:
+        id: { type: string, minLength: 1, maxLength: 128 }
+        source: { type: string, minLength: 1, maxLength: 128 }
+        transition: { $ref: "#/components/schemas/PageMapTransition" }
+
     PageMapEdge:
       type: object
       required: [id, source, target, connectionType, aiGenerated]
@@ -10586,6 +10726,7 @@ components:
           type: string
           enum: [nav, auth-gate, redirect, external]
         aiGenerated: { type: boolean }
+        transition: { $ref: "#/components/schemas/PageMapTransition" }
 
     PageMapPlatformData:
       type: object
@@ -10597,6 +10738,11 @@ components:
         edges:
           type: array
           items: { $ref: "#/components/schemas/PageMapEdge" }
+        unresolvedTransitions:
+          type: array
+          maxItems: 1000
+          description: Omission on PUT preserves current candidates whose source pages survive; an explicit empty array clears them. IDs must be unique.
+          items: { $ref: "#/components/schemas/PageMapUnresolvedTransition" }
 
     PageMapData:
       type: object
@@ -10606,11 +10752,27 @@ components:
         ios: { $ref: "#/components/schemas/PageMapPlatformData" }
         android: { $ref: "#/components/schemas/PageMapPlatformData" }
 
+    PageMapRevision:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+      description: Opaque lowercase SHA256 of canonical sorted JSON of the raw stored page map. Null and undefined storage values yield the same revision.
+
+    PageMapSaveRequest:
+      allOf:
+        - $ref: "#/components/schemas/PageMapData"
+        - type: object
+          required: [expectedRevision]
+          properties:
+            expectedRevision:
+              $ref: "#/components/schemas/PageMapRevision"
+      description: Save against the revision from the last acknowledged map response. Missing expectedRevision returns 409; a nonstring or malformed value returns 400; a well-formed but stale value returns 409.
+
     PageMapResponse:
       type: object
-      required: [pageMapData]
+      required: [pageMapData, revision]
       properties:
         pageMapData: { $ref: "#/components/schemas/PageMapData" }
+        revision: { $ref: "#/components/schemas/PageMapRevision" }
 
     FileBlock:
       type: object
