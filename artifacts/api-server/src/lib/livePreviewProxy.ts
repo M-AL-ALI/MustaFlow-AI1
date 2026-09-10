@@ -35,7 +35,7 @@ import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { withActiveProjectLifecycle } from "./project-lifecycle";
-import { previewDocumentCsp } from "./preview-document-policy";
+import { previewDocumentCsp, previewDocumentEmbedderPolicy } from "./preview-document-policy";
 import {
   filterPreviewResponseCookies,
   stripPreviewUpstreamCredentials,
@@ -367,6 +367,9 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
       if (!previewRequest.mustaFlowPublicPreview && matchPreviewPath(pathname)) {
         response.headers["content-security-policy"] = previewDocumentCsp(
           response.headers["content-security-policy"],
+        );
+        response.headers["cross-origin-embedder-policy"] = previewDocumentEmbedderPolicy(
+          response.headers["cross-origin-embedder-policy"],
         );
         response.headers["referrer-policy"] = "no-referrer";
         response.headers["x-content-type-options"] = "nosniff";

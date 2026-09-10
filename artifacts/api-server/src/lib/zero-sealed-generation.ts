@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { posix } from "node:path";
+import { parseForESLint } from "@typescript-eslint/parser";
 import {
   ZERO_GENERATION_FORMAT,
   ZERO_GENERATION_SCHEMA_VERSION,
@@ -202,20 +204,191 @@ const INSTALL_OR_REGISTRY_PATTERN =
 const SOURCE_ONLY_RUNTIME_ASSET_PATTERN = /\b(?:express\.static|[A-Za-z_$][\w$]*\.sendFile)\s*\(/u;
 const SEALED_NETWORK_BIND_PATTERN =
   /\b[A-Za-z_$][\w$]*\.listen\s*\(\s*[^,\r\n]+,\s*(["'])0\.0\.0\.0\1\s*(?:,|\))/u;
-const RELATIVE_MODULE_SPECIFIER_PATTERN =
-  /\b(?:import|export)\s+(?:[^"'\r\n]+?\s+from\s+)?(["'])(\.{1,2}\/[^"']+)\1|\bimport\s*\(\s*(["'])(\.{1,2}\/[^"']+)\3\s*\)/gu;
+const SDK_FACTORY_NAMES = new Set(["createNabuFlowDatabase", "createNabuFlowPayments"]);
+type ParsedSource = ReturnType<typeof parseForESLint>;
+type SourceReference = ParsedSource["scopeManager"]["scopes"][number]["references"][number];
+type SourceNode = { type: string; [key: string]: unknown };
 
-function firstNodeNextModuleSpecifierFailure(files: Iterable<BuilderFile>): string | undefined {
+function sourceNode(value: unknown): SourceNode | undefined {
+  return typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    typeof value.type === "string"
+    ? (value as SourceNode)
+    : undefined;
+}
+
+function literalModule(value: unknown): string | undefined {
+  const node = sourceNode(value);
+  return node?.type === "Literal" && typeof node.value === "string" ? node.value : undefined;
+}
+
+function isSdkFactory(value: unknown): boolean {
+  return typeof value === "string" && SDK_FACTORY_NAMES.has(value);
+}
+
+function isCanonicalSdkModule(filePath: string, specifier: string): boolean {
+  if (
+    !/^\.{1,2}\//u.test(specifier) ||
+    specifier.includes("\\") ||
+    specifier.split("/").some((part) => part.startsWith(".") && part !== "." && part !== "..")
+  )
+    return false;
+  const target = posix.normalize(posix.join(posix.dirname(filePath), specifier));
+  // Extensionless imports remain supported for the existing CommonJS path.
+  // The separate NodeNext check below still requires an emitted extension.
+  return target === "nabuflow/runtime/index.js" || target === "nabuflow/runtime/index";
+}
+
+function isSdkModuleReference(specifier: string): boolean {
+  return (
+    specifier.includes("nabuflow/runtime") ||
+    posix.normalize(specifier).includes("nabuflow/runtime")
+  );
+}
+
+function hasImportedBinding(
+  reference: SourceReference | undefined,
+  bindings: ReadonlySet<object>,
+): boolean {
+  const definitions = reference?.resolved?.defs;
+  const definition = definitions?.length === 1 ? definitions[0] : undefined;
+  return definition !== undefined && bindings.has(definition.name);
+}
+
+/** Inspect syntax and resolved local bindings, never comments or literal prose. */
+function inspectSealedRuntimeImports(files: Iterable<BuilderFile>, nodeNext: boolean): boolean {
+  let usesRuntimeCapability = false;
+  let sdkFailure: string | undefined;
+  let moduleFailure: string | undefined;
   for (const file of files) {
-    if (!/\.(?:[cm]?ts|tsx)$/u.test(file.path)) continue;
-    RELATIVE_MODULE_SPECIFIER_PATTERN.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = RELATIVE_MODULE_SPECIFIER_PATTERN.exec(file.content)) !== null) {
-      const specifier = match[2] ?? match[4] ?? "";
-      if (!/\.(?:[cm]?js|json)$/u.test(specifier)) return file.path;
+    if (!/\.(?:[cm]?[jt]s|[jt]sx)$/u.test(file.path)) continue;
+    let parsed: ParsedSource;
+    try {
+      parsed = parseForESLint(file.content, {
+        filePath: file.path,
+        sourceType: "module",
+        ecmaVersion: "latest",
+        ecmaFeatures: { jsx: /\.[jt]sx$/u.test(file.path) },
+        project: false,
+      });
+    } catch {
+      // An unparseable candidate cannot establish a safe SDK import contract.
+      throw new ZeroSealedSourceContractError(["sdk_import"], file.path);
+    }
+    const applicationFile = !file.path.startsWith("nabuflow/runtime/");
+    const factoryBindings = new Set<object>();
+    const namespaceBindings = new Set<object>();
+    const references = new Map<object, SourceReference>();
+    const capabilityMembers: SourceNode[] = [];
+    for (const scope of parsed.scopeManager.scopes) {
+      for (const reference of scope.references) references.set(reference.identifier, reference);
+    }
+    const rejectSdk = () => {
+      sdkFailure ??= file.path;
+    };
+    const inspectSpecifier = (specifier: string, emittedExtension = true): boolean => {
+      if (
+        nodeNext &&
+        emittedExtension &&
+        /^\.{1,2}\//u.test(specifier) &&
+        !/\.(?:[cm]?js|json)$/u.test(specifier)
+      )
+        moduleFailure ??= file.path;
+      const canonical = isCanonicalSdkModule(file.path, specifier);
+      if (applicationFile && (canonical || isSdkModuleReference(specifier))) {
+        if (canonical) usesRuntimeCapability = true;
+        else rejectSdk();
+      }
+      return canonical;
+    };
+    const visit = (value: unknown): void => {
+      const node = sourceNode(value);
+      if (node === undefined) return;
+      if (
+        node.type === "ImportDeclaration" ||
+        node.type === "ExportNamedDeclaration" ||
+        node.type === "ExportAllDeclaration"
+      ) {
+        const specifier = literalModule(node.source);
+        if (specifier !== undefined) {
+          const canonical = inspectSpecifier(specifier);
+          if (applicationFile && Array.isArray(node.specifiers)) {
+            for (const item of node.specifiers) {
+              const binding = sourceNode(item);
+              if (binding === undefined) continue;
+              const imported = sourceNode(binding.imported ?? binding.local);
+              const name = imported?.type === "Identifier" ? imported.name : imported?.value;
+              const local = sourceNode(binding.local);
+              if (isSdkFactory(name)) {
+                usesRuntimeCapability = true;
+                if (!canonical) rejectSdk();
+                else if (node.type === "ImportDeclaration" && local !== undefined) {
+                  factoryBindings.add(local);
+                }
+              }
+              if (canonical && binding.type === "ImportNamespaceSpecifier" && local !== undefined) {
+                namespaceBindings.add(local);
+              }
+            }
+          }
+        }
+      } else if (node.type === "ImportExpression") {
+        const specifier = literalModule(node.source);
+        if (specifier !== undefined) {
+          const canonical = inspectSpecifier(specifier);
+          if (applicationFile && (canonical || isSdkModuleReference(specifier))) rejectSdk();
+        }
+      } else if (
+        node.type === "TSExternalModuleReference" ||
+        (node.type === "CallExpression" && sourceNode(node.callee)?.name === "require")
+      ) {
+        const specifier = literalModule(
+          node.type === "TSExternalModuleReference"
+            ? node.expression
+            : Array.isArray(node.arguments)
+              ? node.arguments[0]
+              : undefined,
+        );
+        if (specifier !== undefined) {
+          const canonical = inspectSpecifier(specifier, false);
+          if (applicationFile && (canonical || isSdkModuleReference(specifier))) rejectSdk();
+        }
+      } else if (applicationFile && node.type === "MemberExpression") {
+        const property = sourceNode(node.property);
+        const name = node.computed ? literalModule(property) : property?.name;
+        if (isSdkFactory(name)) capabilityMembers.push(node);
+      }
+      for (const key of parsed.visitorKeys[node.type] ?? []) {
+        const child = node[key];
+        if (Array.isArray(child)) child.forEach(visit);
+        else visit(child);
+      }
+    };
+    visit(parsed.ast);
+    if (!applicationFile) continue;
+    for (const reference of references.values()) {
+      if (reference.isValueReference && isSdkFactory(reference.identifier.name)) {
+        usesRuntimeCapability = true;
+        if (!hasImportedBinding(reference, factoryBindings)) rejectSdk();
+      }
+    }
+    for (const member of capabilityMembers) {
+      usesRuntimeCapability = true;
+      const object = sourceNode(member.object);
+      if (
+        object?.type !== "Identifier" ||
+        !hasImportedBinding(references.get(object), namespaceBindings)
+      ) {
+        rejectSdk();
+      }
     }
   }
-  return undefined;
+  if (moduleFailure !== undefined) {
+    throw new ZeroSealedSourceContractError(["typescript_module_specifier"], moduleFailure);
+  }
+  if (sdkFailure !== undefined) throw new ZeroSealedSourceContractError(["sdk_import"], sdkFailure);
+  return usesRuntimeCapability;
 }
 
 function dependencyPlan(
@@ -335,19 +508,6 @@ export function prepareZeroSealedNodeSource(input: {
   if (pkg.scripts?.build !== "tsc" || pkg.scripts?.start !== "node dist/src/index.js") {
     throw new ZeroSealedSourceContractError(["runtime_scripts"], "package.json");
   }
-  const usesRuntimeCapability = [...byPath.values()].some(
-    (file) =>
-      !file.path.startsWith("nabuflow/runtime/") &&
-      (file.content.includes("createNabuFlowDatabase") ||
-        file.content.includes("createNabuFlowPayments")),
-  );
-  pkg = usesRuntimeCapability
-    ? withVendoredRuntimeDependencies(pkg)
-    : withoutUnusedVendoredRuntimeDependencies(pkg);
-  byPath.set("package.json", {
-    ...packageFile,
-    content: `${JSON.stringify(pkg, null, 2)}\n`,
-  });
   let typeScriptConfig: TypeScriptConfig;
   try {
     typeScriptConfig = JSON.parse(typeScriptConfigFile.content) as TypeScriptConfig;
@@ -360,23 +520,26 @@ export function prepareZeroSealedNodeSource(input: {
   ) {
     throw new ZeroSealedSourceContractError(["typescript_output_layout"], "tsconfig.json");
   }
-  const nodeNextModuleSpecifierFailure =
-    typeScriptConfig.compilerOptions?.module === "NodeNext" ||
-    typeScriptConfig.compilerOptions?.moduleResolution === "NodeNext"
-      ? firstNodeNextModuleSpecifierFailure(byPath.values())
-      : undefined;
-  if (nodeNextModuleSpecifierFailure !== undefined) {
-    throw new ZeroSealedSourceContractError(
-      ["typescript_module_specifier"],
-      nodeNextModuleSpecifierFailure,
-    );
+  if (input.skipEligibilityPrecheck !== true) {
+    for (const file of byPath.values()) {
+      if (SECRET_ENV_PATTERN.test(file.content) || INSTALL_OR_REGISTRY_PATTERN.test(file.content)) {
+        throw new ZeroSealedSourceContractError(["credential_or_dependency_egress"], file.path);
+      }
+    }
   }
+  const usesRuntimeCapability = inspectSealedRuntimeImports(
+    byPath.values(),
+    typeScriptConfig.compilerOptions?.module === "NodeNext" ||
+      typeScriptConfig.compilerOptions?.moduleResolution === "NodeNext",
+  );
+  pkg = usesRuntimeCapability
+    ? withVendoredRuntimeDependencies(pkg)
+    : withoutUnusedVendoredRuntimeDependencies(pkg);
+  byPath.set("package.json", {
+    ...packageFile,
+    content: `${JSON.stringify(pkg, null, 2)}\n`,
+  });
   const entryReasons: ZeroSealedSourceContractReason[] = [];
-  if (
-    usesRuntimeCapability &&
-    (!entry.content.includes("nabuflow/runtime") || entry.content.includes(".nabuflow/runtime"))
-  )
-    entryReasons.push("sdk_import");
   if (!SEALED_NETWORK_BIND_PATTERN.test(entry.content)) entryReasons.push("network_bind");
   if (!entry.content.includes("process.env.PORT")) entryReasons.push("runtime_port");
   if (!entry.content.includes(ZERO_SEALED_HEALTH_PATH)) entryReasons.push("health_route");
@@ -389,13 +552,6 @@ export function prepareZeroSealedNodeSource(input: {
       SOURCE_ONLY_RUNTIME_ASSET_PATTERN.test(file.content)
     ) {
       throw new ZeroSealedSourceContractError(["runtime_asset_dependency"], file.path);
-    }
-  }
-  if (input.skipEligibilityPrecheck !== true) {
-    for (const file of byPath.values()) {
-      if (SECRET_ENV_PATTERN.test(file.content) || INSTALL_OR_REGISTRY_PATTERN.test(file.content)) {
-        throw new ZeroSealedSourceContractError(["credential_or_dependency_egress"], file.path);
-      }
     }
   }
   const runtimeSdkFiles = getVendoredRuntimeSdkFiles();

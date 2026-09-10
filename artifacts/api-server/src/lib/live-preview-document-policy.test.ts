@@ -63,6 +63,7 @@ describe("actual private preview proxy response hook", () => {
         "sandbox allow-scripts allow-forms allow-popups",
       ]);
       expect(response.headers["set-cookie"]).toEqual(["app_session=tenant; Path=/"]);
+      expect(response.headers["cross-origin-embedder-policy"]).toBe("credentialless");
       expect(response.headers["referrer-policy"]).toBe("no-referrer");
     },
   );
@@ -73,6 +74,19 @@ describe("actual private preview proxy response hook", () => {
       "sandbox allow-scripts allow-forms allow-popups",
     );
   });
+  it.each(["require-corp", 'require-corp; report-to="preview"'])(
+    "preserves the stricter upstream singleton policy: %s",
+    (value) => {
+      const response = {
+        headers: { "cross-origin-embedder-policy": [value] } as IncomingHttpHeaders,
+      };
+      state.proxyRes!(response, { url: "/api/projects/71/preview/" });
+      expect(response.headers["cross-origin-embedder-policy"]).toBe(value);
+      expect(response.headers["content-security-policy"]).toContain(
+        "sandbox allow-scripts allow-forms allow-popups",
+      );
+    },
+  );
   it("preserves the separate public-app response contract", () => {
     const response = {
       headers: { "content-security-policy": "default-src 'self'" } as IncomingHttpHeaders,
@@ -82,5 +96,6 @@ describe("actual private preview proxy response hook", () => {
       mustaFlowPublicPreview: { projectId: 71, requestUrl: "/app" },
     });
     expect(response.headers["content-security-policy"]).toBe("default-src 'self'");
+    expect(response.headers["cross-origin-embedder-policy"]).toBeUndefined();
   });
 });

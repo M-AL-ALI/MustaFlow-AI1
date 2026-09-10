@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   Activity,
   Zap,
@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { authFetch } from "@/lib/api-fetch";
 
 interface ActivityEntry {
   id: number;
@@ -68,32 +69,89 @@ interface ActivityLogTabProps {
   projectId: number;
 }
 
-export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
-  const [entries, setEntries] = useState<ActivityEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState<string>("all");
+function isActivityEntry(value: unknown): value is ActivityEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Partial<ActivityEntry>;
+  return (
+    typeof entry.id === "number" &&
+    Number.isSafeInteger(entry.id) &&
+    typeof entry.summary === "string" &&
+    typeof entry.eventType === "string" &&
+    typeof entry.createdAt === "string" &&
+    Number.isFinite(Date.parse(entry.createdAt)) &&
+    (entry.actorName === null || typeof entry.actorName === "string") &&
+    (entry.metadata === null ||
+      (typeof entry.metadata === "object" && !Array.isArray(entry.metadata)))
+  );
+}
 
-  const fetchActivity = useCallback(async () => {
-    setLoading(true);
-    try {
-      const url =
-        filter === "all"
-          ? `/api/projects/${projectId}/activity-log?limit=100`
-          : `/api/projects/${projectId}/activity-log?limit=100&eventType=${filter}`;
-      const r = await fetch(url);
-      if (r.ok) setEntries((await r.json()) as ActivityEntry[]);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, filter]);
+export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
+  return <ActivityLogSession key={projectId} projectId={projectId} />;
+}
+
+function ActivityLogSession({ projectId }: ActivityLogTabProps) {
+  const [filter, setFilter] = useState("all");
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const requestKey = filter + ":" + reloadVersion;
+  const [result, setResult] = useState<{
+    requestKey: string;
+    entries: ActivityEntry[];
+    loading: boolean;
+    error: string | null;
+  }>({ requestKey: "", entries: [], loading: true, error: null });
+  const entries = result.requestKey === requestKey ? result.entries : [];
+  const loading = result.requestKey !== requestKey || result.loading;
+  const error = result.requestKey === requestKey ? result.error : null;
+  const refresh = () => setReloadVersion((value) => value + 1);
 
   useEffect(() => {
-    void fetchActivity();
-  }, [fetchActivity]);
+    let active = true;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    setResult({ requestKey, entries: [], loading: true, error: null });
+    void (async () => {
+      try {
+        const url = `/api/projects/${projectId}/activity-log?limit=100${filter === "all" ? "" : "&eventType=" + encodeURIComponent(filter)}`;
+        const response = await authFetch(url, { signal: controller.signal });
+        if (!response.ok) {
+          throw new Error(
+            [401, 403, 404].includes(response.status)
+              ? "Activity is not available for this project."
+              : "Could not load project activity. Try again.",
+          );
+        }
+        const data: unknown = await response.json();
+        if (!Array.isArray(data) || !data.every(isActivityEntry)) {
+          throw new Error("Could not load project activity. Try again.");
+        }
+        if (active) setResult({ requestKey, entries: data, loading: false, error: null });
+      } catch (failure) {
+        if (active)
+          setResult({
+            requestKey,
+            entries: [],
+            loading: false,
+            error:
+              failure instanceof Error &&
+              failure.message === "Activity is not available for this project."
+                ? failure.message
+                : "Could not load project activity. Try again.",
+          });
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    })();
+    return () => {
+      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [projectId, filter, requestKey]);
 
   const EVENT_FILTERS = [
     { label: "All", value: "all" },
     { label: "Builds", value: "build" },
+    { label: "Failed builds", value: "build_failed" },
     { label: "Publishes", value: "publish" },
     { label: "Comments", value: "comment" },
     { label: "Rollbacks", value: "rollback" },
@@ -129,6 +187,8 @@ export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
         {EVENT_FILTERS.map((f) => (
           <button
             key={f.value}
+            type="button"
+            aria-pressed={filter === f.value}
             onClick={() => setFilter(f.value)}
             className={cn(
               "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
@@ -144,7 +204,8 @@ export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
           size="icon"
           variant="ghost"
           className="ml-auto h-7 w-7"
-          onClick={() => void fetchActivity()}
+          aria-label="Refresh activity"
+          onClick={refresh}
           disabled={loading}
         >
           <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
@@ -154,15 +215,31 @@ export function ActivityLogTab({ projectId }: ActivityLogTabProps) {
       {/* Activity list */}
       <div className="flex-1 overflow-y-auto">
         {loading && entries.length === 0 && (
-          <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <div
+            role="status"
+            aria-label="Loading activity"
+            className="flex items-center justify-center py-12 text-muted-foreground"
+          >
             <Loader2 className="h-5 w-5 animate-spin" />
           </div>
         )}
 
-        {!loading && entries.length === 0 && (
+        {error && (
+          <div role="alert" className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+            <AlertTriangle className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+            <p className="text-sm">{error}</p>
+            <Button variant="outline" onClick={refresh}>
+              Try again
+            </Button>
+          </div>
+        )}
+
+        {!loading && !error && entries.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 text-center space-y-2 px-6">
             <Activity className="h-10 w-10 text-muted-foreground/30" />
-            <p className="text-sm font-medium text-muted-foreground">No activity yet</p>
+            <p className="text-sm font-medium text-muted-foreground">
+              {filter === "all" ? "No activity yet" : "No matching activity"}
+            </p>
             <p className="text-xs text-muted-foreground">
               Activity is logged when you build, publish, comment, and more.
             </p>

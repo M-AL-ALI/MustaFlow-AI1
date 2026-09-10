@@ -497,3 +497,126 @@ app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
     expect(promptSha256(source.replace(/\n/g, "\r\n"))).toBe(expectedSha256);
   });
 });
+
+function sdkSourceFiles(source: string, helpers: Array<{ path: string; content: string }> = []) {
+  return [
+    ...generatedFiles().map((file) => {
+      if (file.path === "src/index.ts") {
+        return {
+          ...file,
+          content: `import express from "express";
+${source}
+const app = express();
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
+        };
+      }
+      if (file.path === "tsconfig.json") {
+        return {
+          ...file,
+          content: JSON.stringify({
+            compilerOptions: { rootDir: ".", outDir: "dist", module: "NodeNext" },
+          }),
+        };
+      }
+      return file;
+    }),
+    ...helpers.map((file) => ({ ...file, mimeType: "application/typescript" })),
+  ];
+}
+
+describe("sealed SDK import syntax and bindings", () => {
+  it.each([
+    { path: "src/db.ts", entryImport: "./db.js", sdkImport: "../nabuflow/runtime/index.js" },
+    {
+      path: "src/data/db.ts",
+      entryImport: "./data/db.js",
+      sdkImport: "../../nabuflow/runtime/index.js",
+    },
+  ])("accepts a canonical capability import in $path", ({ path, entryImport, sdkImport }) => {
+    const files = sdkSourceFiles(`import { db } from "${entryImport}"; void db;`, [
+      {
+        path,
+        content: `import { createNabuFlowDatabase } from "${sdkImport}";
+export const db = createNabuFlowDatabase();`,
+      },
+    ]);
+    const prepared = prepareZeroSealedNodeSource({ files });
+    expect(prepared.files.some((file) => file.path === "nabuflow/runtime/index.ts")).toBe(true);
+    expect(prepared.files.find((file) => file.path === path)?.content).toContain(sdkImport);
+  });
+
+  it.each([
+    'import { createNabuFlowDatabase as makeDb, createNabuFlowPayments as makePayments } from "../nabuflow/runtime/index.js"; const db = makeDb(); void makePayments; void db;',
+    'import * as runtime from "../nabuflow/runtime/index.js"; const db = runtime.createNabuFlowDatabase(); void db;',
+    'import * as runtime from "../nabuflow/runtime/index.js"; const db = runtime["createNabuFlowDatabase"](); void db;',
+  ])("accepts statically bound canonical imports: %s", (source) => {
+    expect(() => prepareZeroSealedNodeSource({ files: sdkSourceFiles(source) })).not.toThrow();
+  });
+
+  it("ignores factory names and fake imports in comments, strings, and documentation", () => {
+    const files = sdkSourceFiles(`
+// import { createNabuFlowDatabase } from "../.nabuflow/runtime/index";
+const prose = "createNabuFlowPayments";
+const sample = 'import { createNabuFlowDatabase } from "../missing"';
+void prose; void sample;`);
+    files.push({ path: "README.md", mimeType: "text/markdown", content: "createNabuFlowDatabase" });
+    const prepared = prepareZeroSealedNodeSource({ files });
+    expect(prepared.files.some((file) => file.path.startsWith("nabuflow/runtime/"))).toBe(false);
+    expect(prepared.dependencyPlan.intents.some((intent) => intent.name === "pg")).toBe(false);
+  });
+
+  it("does not reject a canonical import because a comment mentions a hidden old path", () => {
+    expect(() =>
+      prepareZeroSealedNodeSource({
+        files: sdkSourceFiles(`
+import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js";
+// Previously: import { createNabuFlowDatabase } from "../.nabuflow/runtime/index";
+const db = createNabuFlowDatabase(); void db;`),
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    "../.nabuflow/runtime/index.js",
+    "./nabuflow/runtime/index.js",
+    "../nabuflow/runtime/db.js",
+    "../../nabuflow/runtime/index.js",
+    "./missing.js",
+    "nabuflow/runtime/index.js",
+  ])("rejects a hidden, unresolved, or wrong SDK target: %s", (specifier) => {
+    expect(() =>
+      prepareZeroSealedNodeSource({
+        files: sdkSourceFiles(
+          `import { createNabuFlowDatabase } from "${specifier}"; const db = createNabuFlowDatabase(); void db;`,
+        ),
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        reasons: ["sdk_import"],
+        path: "src/index.ts",
+      }),
+    );
+  });
+
+  it.each([
+    '// "../nabuflow/runtime/index.js"\nconst db = createNabuFlowDatabase(); void db;',
+    'import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js"; function use(createNabuFlowDatabase: () => unknown) { return createNabuFlowDatabase(); } void use;',
+    'import * as runtime from "../nabuflow/runtime/index.js"; function use(runtime: { createNabuFlowDatabase(): unknown }) { return runtime.createNabuFlowDatabase(); } void use;',
+    'const runtime = await import("../nabuflow/runtime/index.js"); void runtime;',
+  ])("does not accept unbound, shadowed, or dynamic capability access: %s", (source) => {
+    expect(() => prepareZeroSealedNodeSource({ files: sdkSourceFiles(source) })).toThrow(
+      expect.objectContaining({ reasons: ["sdk_import"], path: "src/index.ts" }),
+    );
+  });
+
+  it("does not let a valid entry import cover an unresolved factory in another module", () => {
+    const files = sdkSourceFiles(
+      'import { createNabuFlowDatabase } from "../nabuflow/runtime/index.js"; const db = createNabuFlowDatabase(); void db;',
+      [{ path: "src/other.ts", content: "export const other = createNabuFlowDatabase();" }],
+    );
+    expect(() => prepareZeroSealedNodeSource({ files })).toThrow(
+      expect.objectContaining({ reasons: ["sdk_import"], path: "src/other.ts" }),
+    );
+  });
+});

@@ -48,15 +48,18 @@ describe("database-backed editor preview isolation", () => {
     expect(response.headers["content-security-policy"]).toBe(
       "sandbox allow-scripts allow-forms allow-popups",
     );
+    expect(response.headers["cross-origin-embedder-policy"]).toBe("credentialless");
     expect(response.text).toContain("window.tenant = true");
   });
   it("also applies the policy to empty-project documents", async () => {
     state.rows = [];
     const response = await request(appFor(true)).get("/preview").expect(404);
     expect(response.headers["content-security-policy"]).toContain("sandbox allow-scripts");
+    expect(response.headers["cross-origin-embedder-policy"]).toBe("credentialless");
   });
   it("does not silently sandbox the separate non-editor public-app serving contract", async () => {
     const response = await request(appFor(false)).get("/preview").expect(200);
     expect(response.headers["content-security-policy"]).toBeUndefined();
+    expect(response.headers["cross-origin-embedder-policy"]).toBeUndefined();
   });
 });

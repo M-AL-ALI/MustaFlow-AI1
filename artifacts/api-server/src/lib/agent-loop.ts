@@ -113,7 +113,10 @@ import {
   isZeroSealedGenerationTarget,
   ZERO_SEALED_NODE_PROMPT_EXTENSION,
 } from "./zero-sealed-generation";
-import { checkZeroSealedFinalizeContract } from "./zero-sealed-finalize-check";
+import {
+  checkZeroSealedFinalizeContract,
+  formatZeroSealedFinalizeFailure,
+} from "./zero-sealed-finalize-check";
 import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
 import { applyZeroSteeringAtBoundary } from "./zero-queue-steering";
 import {
@@ -3295,20 +3298,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           break;
         }
         // Required checks failed → feed back and continue looping
-        const sealedFailure =
-          sealedFinalizeCheck?.passed === false
-            ? `\n- zero-sealed-source-contract: ${sealedFinalizeCheck.message}`
-            : "";
+        const checkFailures = verifyFailed.map((c) => {
+          const r = verifyRun.find((x) => x.id === c.id);
+          return `- ${c.id}: ${r?.message ?? "failed"}`;
+        });
         const failMsg =
-          `BLOCKED: cannot finalize — these required checks failed:\n` +
-          verifyFailed
-            .map((c) => {
-              const r = verifyRun.find((x) => x.id === c.id);
-              return `- ${c.id}: ${r?.message ?? "failed"}`;
-            })
-            .join("\n") +
-          sealedFailure +
-          `\nFix the failures and call finalize again.`;
+          sealedFinalizeCheck?.passed === false
+            ? formatZeroSealedFinalizeFailure(sealedFinalizeCheck, checkFailures)
+            : `BLOCKED: cannot finalize — these required checks failed:\n${checkFailures.join("\n")}\nFix the failures and call finalize again.`;
         messages[messages.length - 1] = {
           role: "tool",
           tool_call_id: call.id,
