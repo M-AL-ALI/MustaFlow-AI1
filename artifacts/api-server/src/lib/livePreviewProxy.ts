@@ -23,7 +23,6 @@ import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { and, eq, isNull } from "drizzle-orm";
 import { createProxyMiddleware, type RequestHandler } from "http-proxy-middleware";
-import { getAuth } from "@clerk/express";
 import { db, projectsTable, projectFilesTable, orgMembersTable } from "@workspace/db";
 import {
   isContainerLayerConfigured,
@@ -148,15 +147,14 @@ export function shouldRouteToLivePreview(
   return project.builderMode === "agentic" || project.containerStatus === "running";
 }
 
-/** Direct-container WebSocket upgrades use the same live-preview judgment as HTTP. */
+/** Private live sockets belong to the isolated Cloudflare gateway, never the API origin. */
 export function shouldProxyLivePreviewUpgrade(
-  project: Pick<PreviewProject, "builderMode" | "containerId" | "containerStatus" | "containerUrl">,
+  _project: Pick<
+    PreviewProject,
+    "builderMode" | "containerId" | "containerStatus" | "containerUrl"
+  >,
 ): boolean {
-  return (
-    shouldRouteToLivePreview(project) &&
-    project.containerStatus === "running" &&
-    Boolean(project.containerUrl)
-  );
+  return false;
 }
 
 export async function loadPreviewProject(projectId: number): Promise<PreviewProject | null> {
@@ -456,6 +454,23 @@ export async function handleLivePreviewHttp(
     return;
   }
 
+  // A running private runtime must have produced the signed Cloudflare handoff
+  // above. Never fall back to executing tenant HTML on the platform origin or
+  // revive a historical direct-container endpoint. Static DB previews retain
+  // their separately enforced document sandbox.
+  if (!options?.publicRequestUrl && project.containerStatus === "running") {
+    sendHtml(
+      res,
+      502,
+      ERROR_HTML(
+        project.id,
+        "The isolated Cloudflare preview is unavailable. Your files are saved. Start a test preview or inspect the runtime configuration, then retry.",
+      ),
+      "proxy-unavailable",
+    );
+    return;
+  }
+
   // No container provisioned yet — wake (best-effort) and show cold-start page.
   if (!project.containerId || !project.containerUrl) {
     wakeContainer(project.id, project.runtimePort);
@@ -507,85 +522,17 @@ export async function handleLivePreviewHttp(
 }
 
 /**
- * Confirm a WS upgrade originated from the same origin as the workspace
- * iframe. Vite/browsers always set Origin on a WS handshake. We accept
- * same-host requests and any host listed in REPLIT_DOMAINS. Missing
- * Origin is rejected to prevent off-site WS hijacking of an authed user's
- * cookie-bearing connection.
- */
-function isAllowedUpgradeOrigin(req: IncomingMessage): boolean {
-  const origin = req.headers.origin;
-  if (!origin) return false;
-  let originHost: string;
-  try {
-    originHost = new URL(origin).host;
-  } catch {
-    return false;
-  }
-  const reqHost = req.headers.host;
-  if (reqHost && originHost === reqHost) return true;
-  const allowed = (process.env.REPLIT_DOMAINS ?? "")
-    .split(",")
-    .map((d) => d.trim())
-    .filter(Boolean);
-  return allowed.includes(originHost);
-}
-
-/**
- * Handle a WebSocket upgrade against the preview path.
- *
- * Pre-condition: caller has already matched `matchPreviewPath`. We re-load
- * the project and apply the same runtime-truth predicate used by HTTP before
- * upgrading the direct-container path.
- *
- * Authorisation: published projects are public. For unpublished projects
- * we rely on (a) the Origin check below and (b) the fact that the iframe
- * that bootstrapped this socket already passed the HTTP auth gate in
- * `routes/files.ts`. The Origin check prevents an off-site page from
- * opening a cookie-bearing WS to another user's preview.
+ * Retired platform-origin private upgrade entry point. HTTP hands live
+ * previews to Cloudflare, where the signed project/runtime grant authorizes
+ * HMR and application sockets. A published project does not make its private
+ * editor socket public. Do not accept opaque origins or forward session
+ * cookies here to compensate for a sandboxed legacy direct preview.
  */
 export async function handleLivePreviewUpgrade(
-  projectId: number,
-  req: IncomingMessage,
+  _projectId: number,
+  _req: IncomingMessage,
   socket: Socket,
-  head: Buffer,
+  _head: Buffer,
 ): Promise<void> {
-  const project = await loadPreviewProject(projectId);
-  if (!project || !shouldProxyLivePreviewUpgrade(project)) {
-    socket.destroy();
-    return;
-  }
-
-  if (project.status !== "published") {
-    // Defense-in-depth: same-origin check first.
-    if (!isAllowedUpgradeOrigin(req)) {
-      socket.destroy();
-      return;
-    }
-
-    // Authorisation: verify the Clerk session cookie on the upgrade request
-    // and confirm the user can preview this project. Mirrors the HTTP
-    // gate in `routes/files.ts` so a logged-in stranger cannot open a WS
-    // to someone else's private preview by guessing the project id.
-    // eslint-disable-next-line no-useless-assignment
-    let userId: string | null = null;
-    try {
-      const auth = getAuth(req as unknown as Parameters<typeof getAuth>[0]);
-      userId = auth?.userId ?? null;
-    } catch {
-      userId = null;
-    }
-    if (!userId) {
-      socket.destroy();
-      return;
-    }
-    const allowed = await userCanPreviewProject(project, userId);
-    if (!allowed) {
-      socket.destroy();
-      return;
-    }
-  }
-
-  // proxyMiddleware.upgrade re-runs `router` + `pathRewrite` for us using req.url.
-  proxyMiddleware.upgrade(req, socket, head);
+  socket.destroy();
 }

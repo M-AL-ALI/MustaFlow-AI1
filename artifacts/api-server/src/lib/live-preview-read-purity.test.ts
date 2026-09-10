@@ -11,6 +11,8 @@ const state = vi.hoisted(() => ({
   hasContainerLayerCredentials: vi.fn(() => false),
   isContainerLayerConfigured: vi.fn(async () => true),
   proxyUpgrade: vi.fn(),
+  proxyHttp: vi.fn(async () => undefined),
+  mintCloudflarePreviewGrant: vi.fn(),
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -43,10 +45,12 @@ vi.mock("@workspace/db", () => ({
 
 vi.mock("@clerk/express", () => ({ getAuth: vi.fn(() => ({ userId: null })) }));
 vi.mock("http-proxy-middleware", () => ({
-  createProxyMiddleware: vi.fn(() => Object.assign(vi.fn(), { upgrade: state.proxyUpgrade })),
+  createProxyMiddleware: vi.fn(() =>
+    Object.assign(state.proxyHttp, { upgrade: state.proxyUpgrade }),
+  ),
 }));
 vi.mock("./cloudflare-preview-grant", () => ({
-  mintCloudflarePreviewGrant: vi.fn(async () => null),
+  mintCloudflarePreviewGrant: state.mintCloudflarePreviewGrant,
 }));
 vi.mock("./container-secrets", () => ({ getContainerSecretMap: vi.fn(async () => ({})) }));
 vi.mock("./logger", () => ({ logger: { info: vi.fn(), warn: vi.fn() } }));
@@ -107,6 +111,9 @@ function responseRecorder() {
       record.body = value;
       return response;
     },
+    end() {
+      return response;
+    },
   } as unknown as Response;
   return { record, response };
 }
@@ -120,6 +127,7 @@ beforeEach(() => {
     })),
   }));
   state.isContainerLayerConfigured.mockResolvedValue(true);
+  state.mintCloudflarePreviewGrant.mockResolvedValue(null);
 });
 
 describe("preview reads never mutate runtime identity", () => {
@@ -181,7 +189,70 @@ describe("preview reads never mutate runtime identity", () => {
 
     await handleLivePreviewUpgrade(17, request, socket, Buffer.alloc(0));
 
-    expect(state.proxyUpgrade).toHaveBeenCalledTimes(1);
+    expect(state.proxyUpgrade).not.toHaveBeenCalled();
+    expect(socket.destroy).toHaveBeenCalledTimes(1);
+    expect(state.select).not.toHaveBeenCalled();
+    expect(state.update).not.toHaveBeenCalled();
+  });
+
+  it.each(["draft", "published"])(
+    "never proxies %s private HTML to a stale direct-container URL",
+    async (status) => {
+      const { record, response } = responseRecorder();
+      await handleLivePreviewHttp(
+        { originalUrl: "/api/projects/17/preview/" } as Request,
+        response,
+        vi.fn() as NextFunction,
+        { ...previewProject(), status },
+      );
+      expect(record.status).toBe(502);
+      expect(record.body).toContain("isolated Cloudflare preview");
+      expect(record.headers.get("X-MustaFlow-Preview-State")).toBe("proxy-unavailable");
+      expect(state.proxyHttp).not.toHaveBeenCalled();
+      expect(state.proxyUpgrade).not.toHaveBeenCalled();
+      expect(state.serveProjectFilesPreview).not.toHaveBeenCalled();
+      expect(state.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, "null", "https://www.mustaflow.com", "https://hostile.invalid"])(
+    "does not reopen private API sockets for Origin %s",
+    async (origin) => {
+      const socket = { destroy: vi.fn() } as unknown as Socket;
+      await handleLivePreviewUpgrade(
+        17,
+        {
+          url: "/api/projects/17/preview/socket",
+          headers: { origin, host: "www.mustaflow.com", cookie: "__session=fixture" },
+        } as IncomingMessage,
+        socket,
+        Buffer.alloc(0),
+      );
+      expect(socket.destroy).toHaveBeenCalledTimes(1);
+      expect(state.proxyUpgrade).not.toHaveBeenCalled();
+      expect(state.select).not.toHaveBeenCalled();
+    },
+  );
+
+  it("hands a private running runtime to isolated Cloudflare without same-origin HTML proxying", async () => {
+    state.mintCloudflarePreviewGrant.mockResolvedValue({
+      launchUrl:
+        "https://runtime.example.workers.dev/_nabuflow/preview/v1/runtime-17/?__nfg=fixture",
+    });
+    const { record, response } = responseRecorder();
+    await handleLivePreviewHttp(
+      { originalUrl: "/api/projects/17/preview/dashboard?view=live" } as Request,
+      response,
+      vi.fn() as NextFunction,
+      previewProject(),
+    );
+    expect(record.status).toBe(302);
+    expect(record.headers.get("Location")).toBe(
+      "https://runtime.example.workers.dev/_nabuflow/preview/v1/runtime-17/dashboard?__nfg=fixture&view=live",
+    );
+    expect(record.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(state.proxyHttp).not.toHaveBeenCalled();
+    expect(state.proxyUpgrade).not.toHaveBeenCalled();
     expect(state.update).not.toHaveBeenCalled();
   });
 

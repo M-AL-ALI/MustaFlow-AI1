@@ -17,6 +17,7 @@ import {
   userCanPreviewProject,
 } from "../lib/livePreviewProxy";
 import { serveProjectFilesPreview } from "../lib/project-files-preview";
+import { protectPreviewDocument } from "../lib/preview-document-policy";
 import { writeProjectFilesAtomically } from "../lib/project-file-writer";
 import { reconcileProjectFileAssetUsage } from "../lib/project-file-asset-usage";
 import { isBinaryMime } from "../lib/binary-mime";
@@ -685,6 +686,8 @@ router.get(
       content: row.content,
       mimeType: row.mimeType,
     });
+    // Keep directly navigated files isolated regardless of their stored MIME.
+    protectPreviewDocument(res);
     res.type(row.mimeType).setHeader("Cache-Control", "no-store").send(bytes);
   },
 );

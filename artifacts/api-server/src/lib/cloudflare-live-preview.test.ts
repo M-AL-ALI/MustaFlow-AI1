@@ -95,7 +95,7 @@ describe("Cloudflare live preview handoff", () => {
     ).toBe(false);
   });
 
-  it("uses the HTTP live-runtime judgment for direct-container WebSocket upgrades", () => {
+  it("never revives platform-origin private sockets from historical direct runtime URLs", () => {
     expect(
       shouldProxyLivePreviewUpgrade({
         builderMode: "static-legacy",
@@ -103,7 +103,7 @@ describe("Cloudflare live preview handoff", () => {
         containerStatus: "running",
         containerUrl: "https://direct-runtime.internal",
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldProxyLivePreviewUpgrade({
         builderMode: "static-legacy",
@@ -132,7 +132,7 @@ describe("Cloudflare live preview handoff", () => {
     ).toBe(true);
   });
 
-  it("leaves the established direct-container path unchanged outside Cloudflare", async () => {
+  it("does not mint a Cloudflare grant for the retired provider", async () => {
     await expect(
       resolveCloudflareLivePreviewLaunchUrl(
         {
