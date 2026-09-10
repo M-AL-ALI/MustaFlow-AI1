@@ -191,6 +191,13 @@ vi.mock("@/components/projects/project-composer", () => ({
 
 import ProjectsPage from "../projects";
 
+it("labels the selected workspace dashboard as a full collection, not a recent-only search", () => {
+  const page = render(<ProjectsPage />);
+  choose(page, "Studio");
+  expect(screen.getByRole("searchbox", { name: "Search all workspace projects" })).toBeTruthy();
+  expect(screen.queryByRole("article", { name: "Client project" })).toBeNull();
+});
+
 const workspace = (id: number, name: string, ownerUserId = "account-a"): WorkspaceFixture => ({
   id,
   name,

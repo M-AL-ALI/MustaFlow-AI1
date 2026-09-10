@@ -74,6 +74,7 @@ export function selectRecentProjects(
 
 type ProjectDashboardProps = {
   heading?: string;
+  collectionScope?: "recent" | "workspace";
   projects: readonly DashboardProject[];
   total: number;
   state: "loading" | "error" | "ready";
@@ -89,6 +90,7 @@ type ProjectDashboardProps = {
 
 export function ProjectDashboard({
   heading = "Recent projects",
+  collectionScope = "recent",
   projects,
   total,
   state,
@@ -101,15 +103,32 @@ export function ProjectDashboard({
   renderPreview,
 }: ProjectDashboardProps) {
   const searchId = useId();
+  const resultsId = useId();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
   const [sort, setSort] = useState("recent");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [previewId, setPreviewId] = useState<number | null>(null);
-  const visible = useMemo(
+  const matches = useMemo(
     () => selectRecentProjects(projects, query, filter, sort),
     [projects, query, filter, sort],
   );
+  // Search the entire supplied collection before bounding rendered cards.
+  // Query changes immediately return to the first page without an effect race.
+  const selectionKey = JSON.stringify([collectionScope, query, filter, sort]);
+  const [page, setPage] = useState({ key: selectionKey, limit: 12 });
+  if (page.key !== selectionKey) {
+    // Remember every transition, not only Show more. Returning to a previous
+    // query must not revive that query's old expanded batch.
+    setPage({ key: selectionKey, limit: 12 });
+  }
+  const limit = page.key === selectionKey ? page.limit : 12;
+  const visible = matches.slice(0, limit);
+  const completeWorkspace = collectionScope === "workspace" && total === projects.length;
+  const searchLabel = completeWorkspace
+    ? "Search all workspace projects"
+    : "Search recent projects";
+  const collectionLabel = completeWorkspace ? "workspace projects" : "recent projects";
 
   return (
     <section className="nf-projects" aria-labelledby="nf-projects-heading">
@@ -125,7 +144,9 @@ export function ProjectDashboard({
                   " recent projects of " +
                   total +
                   ". Filters apply to these projects."
-                : "Pick up where you left off."
+                : completeWorkspace
+                  ? "All projects in this workspace. Pick up where you left off."
+                  : "Pick up where you left off."
               : "Your work, in one place."}
           </p>
         </div>
@@ -168,14 +189,14 @@ export function ProjectDashboard({
             <div className="nf-search">
               <Search size={16} aria-hidden="true" />
               <label htmlFor={searchId} className="sr-only">
-                Search recent projects
+                {searchLabel}
               </label>
               <input
                 id={searchId}
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search recent projects"
+                placeholder={searchLabel}
               />
               {query && (
                 <button aria-label="Clear project search" onClick={() => setQuery("")}>
@@ -192,6 +213,8 @@ export function ProjectDashboard({
                 <option value="draft">Draft</option>
                 <option value="building">Building</option>
                 <option value="testing">Testing</option>
+                <option value="ready">Ready</option>
+                <option value="paused">Paused</option>
               </select>
             </label>
             <label className="nf-select-label">
@@ -219,7 +242,8 @@ export function ProjectDashboard({
             </div>
           </div>
           <p className="nf-result-count" role="status">
-            {visible.length + " of " + projects.length + " recent projects"}
+            {"Showing " + visible.length + " of " + matches.length + " matching " + collectionLabel}
+            {matches.length !== projects.length && " (" + projects.length + " in this collection)"}
           </p>
           {visible.length === 0 ? (
             <div className="nf-empty">
@@ -237,7 +261,7 @@ export function ProjectDashboard({
               </button>
             </div>
           ) : (
-            <div className="nf-project-grid" data-view={view}>
+            <div id={resultsId} className="nf-project-grid" data-view={view}>
               {visible.map((project) => {
                 const previewOpen = previewId === project.id;
                 const findings = securityCounts?.[String(project.id)];
@@ -349,6 +373,21 @@ export function ProjectDashboard({
                   </article>
                 );
               })}
+            </div>
+          )}
+          {matches.length > 12 && (
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                className="nf-secondary-button"
+                aria-controls={resultsId}
+                disabled={visible.length >= matches.length}
+                onClick={() => setPage({ key: selectionKey, limit: limit + 12 })}
+              >
+                {visible.length < matches.length
+                  ? "Show more projects"
+                  : "All matching projects shown"}
+              </button>
             </div>
           )}
         </>

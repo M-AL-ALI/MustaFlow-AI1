@@ -276,6 +276,7 @@ function WorkspaceProjectsHome({
         </div>
       )}
       <ProjectDashboard
+        collectionScope="workspace"
         projects={summaryQuery.data?.recent ?? []}
         heading="Projects"
         total={summaryQuery.data?.total ?? 0}
