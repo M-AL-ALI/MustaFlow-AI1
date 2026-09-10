@@ -71,3 +71,19 @@ describe("project-aware Builder brainstorm", () => {
     expect(builderSource).not.toContain("GUIDED_REFINEMENT_SYSTEM_PROMPT");
   });
 });
+
+describe("brainstorm language and requirement fidelity", () => {
+  it("uses the requested language without repetitive questions", () => {
+    const prompt = buildBrainstormChatSystemPrompt(null, true);
+    expect(prompt).toContain("user's requested language");
+    expect(prompt).toContain("including Arabic");
+    expect(prompt).toContain("Acknowledge requirements already supplied");
+    expect(prompt).not.toContain("Use plain English");
+  });
+  it("preserves explicit names when resolving a brief", () => {
+    const prompt = buildBrainstormResolveSystemPrompt(null, "build");
+    expect(prompt).toContain("preserve an explicitly requested project name");
+    expect(prompt).toContain("retaining the agreed requirements");
+    expect(prompt).not.toContain("no special characters");
+  });
+});

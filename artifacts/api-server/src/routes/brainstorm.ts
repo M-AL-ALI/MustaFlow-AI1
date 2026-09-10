@@ -5,39 +5,42 @@ import {
   buildBrainstormChatSystemPrompt,
   buildBrainstormResolveSystemPrompt,
   loadBrainstormProjectContext,
+  requestBrainstormJson,
   type BrainstormProjectContext,
 } from "../lib/brainstorm";
 import { logger } from "../lib/logger";
 
 const router = Router();
-
+const MAX_REPLY_CHARACTERS = 6000;
 const messagesSchema = z
   .array(
-    z.object({
-      role: z.enum(["user", "assistant"]),
-      content: z.string().max(2000),
-    }),
+    z.discriminatedUnion("role", [
+      z.object({ role: z.literal("user"), content: z.string().trim().min(1).max(2000) }),
+      z.object({
+        role: z.literal("assistant"),
+        content: z.string().trim().min(1).max(MAX_REPLY_CHARACTERS),
+      }),
+    ]),
   )
-  .max(30);
-
+  .min(1)
+  .max(30)
+  .refine((messages) => messages.some((message) => message.role === "user"));
 const baseBodySchema = z.object({
   messages: messagesSchema,
-  projectId: z.number().int().positive().optional(),
+  projectId: z.number().int().positive().max(2_147_483_647).optional(),
   beginnerMode: z.boolean().optional().default(false),
 });
-
-const resolveBodySchema = baseBodySchema.extend({
-  action: z.enum(["plan", "build"]),
+const chatBodySchema = baseBodySchema.extend({
+  messages: messagesSchema.refine((messages) => messages.length <= 29),
 });
-
+const resolveBodySchema = baseBodySchema.extend({ action: z.enum(["plan", "build"]) });
 const chatOutputSchema = z.object({
-  reply: z.string(),
+  reply: z.string().trim().min(1).max(MAX_REPLY_CHARACTERS),
   buildIntent: z.boolean(),
 });
-
 const resolveOutputSchema = z.object({
-  name: z.string().max(80),
-  prompt: z.string().max(500),
+  name: z.string().trim().min(1).max(80),
+  prompt: z.string().trim().min(1).max(2000),
   kind: z.enum(["web", "mobile-cross"]),
 });
 
@@ -48,7 +51,6 @@ function attachProjectUserWhenNeeded(req: Request, res: Response, next: NextFunc
   }
   attachUser(req, res, next);
 }
-
 async function resolveProjectContext(
   projectId: number | undefined,
   userId: string | undefined,
@@ -59,51 +61,30 @@ async function resolveProjectContext(
 }
 
 router.post("/brainstorm/chat", attachProjectUserWhenNeeded, async (req, res) => {
-  const parsed = baseBodySchema.safeParse(req.body);
+  const parsed = chatBodySchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Invalid request body" });
     return;
   }
-
   try {
-    const projectContext = await resolveProjectContext(parsed.data.projectId, req.userId);
-    if (projectContext === "missing") {
+    const context = await resolveProjectContext(parsed.data.projectId, req.userId);
+    if (context === "missing") {
       res.status(404).json({ error: "Project not found" });
       return;
     }
-
-    const { createChatCompletion } = await import("../lib/ai-providers");
-    const result = await createChatCompletion({
-      provider: "openai",
-      model: "gpt-5-mini",
-      messages: [
-        {
-          role: "system",
-          content: buildBrainstormChatSystemPrompt(projectContext, parsed.data.beginnerMode),
-        },
-        ...parsed.data.messages,
-      ],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 400,
-    });
-
-    const raw = result.choices[0]?.message?.content?.trim() ?? "{}";
-    let decoded: unknown;
-    try {
-      decoded = JSON.parse(raw);
-    } catch {
-      decoded = null;
-    }
-    const output = chatOutputSchema.safeParse(decoded);
-    if (!output.success) {
-      res.json({ reply: "Tell me more about what you'd like to build.", buildIntent: false });
-      return;
-    }
-
-    res.json(output.data);
+    res.json(
+      await requestBrainstormJson({
+        systemPrompt: buildBrainstormChatSystemPrompt(context, parsed.data.beginnerMode),
+        messages: parsed.data.messages,
+        schema: chatOutputSchema,
+      }),
+    );
   } catch (err) {
     logger.error({ err }, "brainstorm/chat AI call failed");
-    res.status(502).json({ error: "AI service unavailable" });
+    res.status(502).json({
+      error: "Brainstorming could not finish. Please try again.",
+      code: "brainstorm_response_unavailable",
+    });
   }
 });
 
@@ -113,63 +94,24 @@ router.post("/brainstorm/resolve", attachProjectUserWhenNeeded, async (req, res)
     res.status(400).json({ error: "Invalid request body" });
     return;
   }
-
-  const projectContext = await resolveProjectContext(parsed.data.projectId, req.userId);
-  if (projectContext === "missing") {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-
-  const callResolve = async (extraInstruction?: string) => {
-    const { createChatCompletion } = await import("../lib/ai-providers");
-    const basePrompt = buildBrainstormResolveSystemPrompt(projectContext, parsed.data.action);
-    const systemContent = extraInstruction ? `${basePrompt}\n\n${extraInstruction}` : basePrompt;
-    const result = await createChatCompletion({
-      provider: "openai",
-      model: "gpt-5-mini",
-      messages: [{ role: "system", content: systemContent }, ...parsed.data.messages],
-      response_format: { type: "json_object" },
-      max_completion_tokens: 300,
-    });
-    return result.choices[0]?.message?.content?.trim() ?? "{}";
-  };
-
-  const fallback = () => {
-    const lastUserContent =
-      parsed.data.messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
-    return {
-      name: projectContext?.projectName ?? "My New Project",
-      prompt: lastUserContent,
-      kind: (projectContext?.projectKind === "mobile-cross" ? "mobile-cross" : "web") as
-        | "web"
-        | "mobile-cross",
-    };
-  };
-
   try {
-    const raw = await callResolve();
-    let output = resolveOutputSchema.safeParse(JSON.parse(raw));
-    if (!output.success) {
-      const raw2 = await callResolve(
-        "You MUST respond with ONLY valid JSON matching the schema. No prose, no markdown.",
-      );
-      output = resolveOutputSchema.safeParse(JSON.parse(raw2));
+    const context = await resolveProjectContext(parsed.data.projectId, req.userId);
+    if (context === "missing") {
+      res.status(404).json({ error: "Project not found" });
+      return;
     }
-
-    const resolved = output.success ? output.data : fallback();
-    res.json({
-      ...resolved,
-      action: parsed.data.action,
-      brainstormContext: parsed.data.messages,
+    const output = await requestBrainstormJson({
+      systemPrompt: buildBrainstormResolveSystemPrompt(context, parsed.data.action),
+      messages: parsed.data.messages,
+      schema: resolveOutputSchema,
     });
+    res.json({ ...output, action: parsed.data.action, brainstormContext: parsed.data.messages });
   } catch (err) {
     logger.error({ err }, "brainstorm/resolve AI call failed");
-    res.json({
-      ...fallback(),
-      action: parsed.data.action,
-      brainstormContext: parsed.data.messages,
+    res.status(502).json({
+      error: "Your project brief could not be prepared. Please try again.",
+      code: "brainstorm_response_unavailable",
     });
   }
 });
-
 export default router;

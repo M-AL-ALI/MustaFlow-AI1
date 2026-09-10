@@ -104,7 +104,16 @@ function clearPersistedState(effectiveKey: string) {
   }
 }
 
-export function BrainstormPanel({
+/** A project or storage-scope change starts a separate state and mutation lifecycle. */
+export function BrainstormPanel(props: BrainstormPanelProps) {
+  const scope = JSON.stringify([
+    props.projectId ?? null,
+    resolveStorageKey(props.projectId, props.storageKey),
+  ]);
+  return <BrainstormPanelSession key={scope} {...props} />;
+}
+
+function BrainstormPanelSession({
   onClose,
   mode,
   onCreated,
@@ -123,6 +132,9 @@ export function BrainstormPanel({
   const [buildIntent, setBuildIntent] = useState(initialState.buildIntent);
   const [pulseIntent, setPulseIntent] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [failedChat, setFailedChat] = useState<Message[] | null>(null);
+  const requestEpoch = useRef(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -137,20 +149,14 @@ export function BrainstormPanel({
   const userTurns = messages.filter((m) => m.role === "user").length;
   const showBuildButton = userTurns >= 2 || buildIntent;
   const isFetching = chatMutation.isPending;
-  const brainstormActive = chatMutation.isPending || resolveMutation.isPending;
-  const brainstormWasActiveRef = useRef(false);
-
-  useEffect(() => {
-    if (brainstormActive) {
-      brainstormWasActiveRef.current = true;
-      onActivityChange?.({ status: "running", label: "Brainstorming" });
-      return;
-    }
-    if (brainstormWasActiveRef.current) {
-      brainstormWasActiveRef.current = false;
-      onActivityChange?.({ status: "completed", label: "Brainstormed the idea" });
-    }
-  }, [brainstormActive, onActivityChange]);
+  const isBusy = isFetching || resolveMutation.isPending || isCreating;
+  const inputTooLong = input.trim().length > 2000;
+  useEffect(
+    () => () => {
+      requestEpoch.current += 1;
+    },
+    [effectiveKey, projectId],
+  );
 
   const hasConversation =
     messages.length > 1 || (messages.length === 1 && !isOpeningMessage(messages[0]));
@@ -183,49 +189,66 @@ export function BrainstormPanel({
   }, [effectiveKey, messages, buildIntent]);
 
   const handleStartFresh = useCallback(() => {
+    requestEpoch.current += 1;
+    setRequestError(null);
+    setFailedChat(null);
     setMessages([OPENING_MESSAGE]);
     setBuildIntent(false);
     setInput("");
     if (effectiveKey) clearPersistedState(effectiveKey);
   }, [effectiveKey]);
 
+  const requestChat = useCallback(
+    (chatMessages: Message[]) => {
+      const epoch = ++requestEpoch.current;
+      setRequestError(null);
+      setFailedChat(null);
+      onActivityChange?.({ status: "running", label: "Brainstorming" });
+      chatMutation.mutate(
+        {
+          data: {
+            messages: chatMessages,
+            ...(projectId ? { projectId } : {}),
+            beginnerMode: mode !== "developer",
+          },
+        },
+        {
+          onSuccess: (data) => {
+            if (epoch !== requestEpoch.current) return;
+            setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+            if (data.buildIntent) setBuildIntent(true);
+            onActivityChange?.({ status: "completed", label: "Brainstormed the idea" });
+          },
+          onError: () => {
+            if (epoch !== requestEpoch.current) return;
+            setFailedChat(chatMessages);
+            setRequestError("Brainstorming could not finish. Your message is kept. Try again.");
+            onActivityChange?.({ status: "failed", label: "Brainstorming needs a retry" });
+          },
+        },
+      );
+    },
+    [chatMutation, projectId, mode, onActivityChange],
+  );
+
   const sendMessage = useCallback(() => {
     const text = input.trim();
-    if (!text || chatMutation.isPending) return;
+    if (!text || isBusy || inputTooLong) return;
+    const chatMessages = messages.filter((m) => !isOpeningMessage(m));
+    if (chatMessages.length + 2 > 30) {
+      setRequestError(
+        "This brainstorm has reached its message limit. Retry the last reply, turn it into a plan, or start fresh.",
+      );
+      return;
+    }
     setInput("");
     setTimeout(() => inputRef.current?.focus(), 0);
-
-    const chatMessages = messages.filter((m) => !isOpeningMessage(m));
-    const newMessages: Message[] = [...messages, { role: "user", content: text }];
-    setMessages(newMessages);
-
-    chatMutation.mutate(
-      {
-        data: {
-          messages: [...chatMessages, { role: "user", content: text }],
-          ...(projectId ? { projectId } : {}),
-          beginnerMode: mode !== "developer",
-        },
-      },
-      {
-        onSuccess: (data) => {
-          setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
-          if (data.buildIntent) setBuildIntent(true);
-        },
-        onError: () => {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content: "Sorry, I had trouble connecting. Please try again.",
-            },
-          ]);
-        },
-      },
-    );
-  }, [input, chatMutation, messages, projectId, mode]);
+    setMessages([...messages, { role: "user", content: text }]);
+    requestChat([...chatMessages, { role: "user", content: text }]);
+  }, [input, isBusy, inputTooLong, messages, requestChat]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -317,7 +340,11 @@ export function BrainstormPanel({
 
   const handleExit = useCallback(
     (action: "plan" | "build") => {
-      if (resolveMutation.isPending || chatMutation.isPending) return;
+      if (isBusy) return;
+      const epoch = ++requestEpoch.current;
+      setRequestError(null);
+      setFailedChat(null);
+      onActivityChange?.({ status: "running", label: "Preparing the project brief" });
       const chatMessages = messages.filter((m) => !isOpeningMessage(m));
       resolveMutation.mutate(
         {
@@ -330,9 +357,14 @@ export function BrainstormPanel({
         },
         {
           onSuccess: (data) => {
+            if (epoch !== requestEpoch.current) return;
+            onActivityChange?.({ status: "completed", label: "Prepared the project brief" });
             handoffResolvedSpec(data);
           },
           onError: () => {
+            if (epoch !== requestEpoch.current) return;
+            setRequestError("Your brief could not be prepared. Your conversation is kept.");
+            onActivityChange?.({ status: "failed", label: "Project brief needs a retry" });
             toast({
               title: "Something went wrong",
               description: "Could not resolve your project spec — try again.",
@@ -344,7 +376,8 @@ export function BrainstormPanel({
     },
     [
       resolveMutation,
-      chatMutation.isPending,
+      isBusy,
+      onActivityChange,
       messages,
       projectId,
       mode,
@@ -356,17 +389,23 @@ export function BrainstormPanel({
   return (
     <div
       className={cn(
-        "w-full overflow-hidden transition-all duration-200 ease-out",
-        visible ? "max-h-[460px] opacity-100" : "max-h-0 opacity-0",
+        "w-full transition-opacity duration-200 ease-out",
+        visible ? "opacity-100" : "opacity-0",
       )}
     >
-      <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden mt-2">
+      <div
+        role="region"
+        aria-label="Brainstorm panel"
+        className="flex max-h-[min(460px,80dvh)] flex-col rounded-2xl border border-border bg-card shadow-sm overflow-y-auto mt-2"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/30">
+        <div className="flex shrink-0 items-center justify-between px-4 py-2.5 border-b border-border bg-muted/30">
           <span className="text-xs font-semibold text-foreground">Brainstorm your idea</span>
           <div className="flex items-center gap-1">
             {hasConversation && (
               <button
+                type="button"
+                disabled={isBusy}
                 onClick={handleStartFresh}
                 title="Start fresh"
                 className="h-6 flex items-center gap-1 px-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors text-xs"
@@ -376,6 +415,8 @@ export function BrainstormPanel({
               </button>
             )}
             <button
+              type="button"
+              aria-label="Close brainstorm"
               onClick={onClose}
               className="h-6 w-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
@@ -387,7 +428,10 @@ export function BrainstormPanel({
         {/* Message thread */}
         <div
           ref={scrollRef}
-          className="overflow-y-auto px-4 py-3 space-y-3"
+          role="log"
+          aria-label="Brainstorm conversation"
+          aria-live="polite"
+          className="min-h-0 shrink overflow-y-auto px-4 py-3 space-y-3"
           style={{ maxHeight: "300px" }}
         >
           {messages.map((msg, i) => (
@@ -396,8 +440,9 @@ export function BrainstormPanel({
               className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
             >
               <div
+                dir="auto"
                 className={cn(
-                  "max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed",
+                  "max-w-[85%] whitespace-pre-wrap rounded-xl px-3 py-2 text-sm leading-relaxed",
                   msg.role === "user"
                     ? "bg-foreground text-background"
                     : "bg-muted text-foreground",
@@ -420,10 +465,36 @@ export function BrainstormPanel({
           )}
         </div>
 
+        {requestError && (
+          <div
+            role="alert"
+            className="shrink-0 mx-4 mb-3 rounded-lg border border-border p-3 text-sm"
+          >
+            <p>{requestError}</p>
+            {failedChat && (
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => {
+                  if (!isBusy) requestChat(failedChat);
+                }}
+                className="mt-2 rounded-md border border-border px-3 py-1.5 text-sm font-medium"
+              >
+                Try again
+              </button>
+            )}
+          </div>
+        )}
+        {inputTooLong && (
+          <p role="alert" className="shrink-0 px-4 pb-2 text-sm text-muted-foreground">
+            Brainstorm messages can contain up to 2,000 characters. Shorten this message to send it.
+          </p>
+        )}
         {/* Brainstorm exits — the following plan/build request is the billable handoff. */}
         {showBuildButton && (
-          <div className="grid grid-cols-2 gap-2 px-4 pb-2 pt-2 border-t border-border">
+          <div className="grid shrink-0 grid-cols-2 gap-2 px-4 pb-2 pt-2 border-t border-border">
             <button
+              type="button"
               onClick={() => handleExit("plan")}
               disabled={resolveMutation.isPending || isFetching || isCreating}
               className="flex items-center justify-center rounded-lg border border-border bg-background hover:bg-muted disabled:opacity-60 transition-colors px-3 py-2 text-sm font-medium"
@@ -431,6 +502,7 @@ export function BrainstormPanel({
               Turn into plan
             </button>
             <button
+              type="button"
               onClick={() => handleExit("build")}
               disabled={resolveMutation.isPending || isFetching || isCreating}
               className={cn(
@@ -451,20 +523,24 @@ export function BrainstormPanel({
         )}
 
         {/* Input bar */}
-        <div className="flex items-end gap-2 px-3 pb-3 pt-2 border-t border-border">
+        <div className="flex shrink-0 items-end gap-2 px-3 pb-3 pt-2 border-t border-border">
           <textarea
             ref={inputRef}
+            aria-label="Brainstorm message"
+            dir="auto"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Tell me more..."
             rows={1}
-            disabled={isFetching}
+            disabled={isBusy}
             className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none min-h-[28px] max-h-[72px] overflow-y-auto"
           />
           <button
+            type="button"
+            aria-label="Send brainstorm message"
             onClick={sendMessage}
-            disabled={isFetching || !input.trim()}
+            disabled={isBusy || inputTooLong || !input.trim()}
             className={cn(
               "h-8 w-8 flex items-center justify-center rounded-lg transition-colors shrink-0",
               input.trim()

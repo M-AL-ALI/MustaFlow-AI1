@@ -1,4 +1,5 @@
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { z } from "zod";
 import { chatMessagesTable, db, projectFilesTable, projectsTable } from "@workspace/db";
 import { createChatCompletion } from "./ai-providers";
 import { logger } from "./logger";
@@ -31,9 +32,63 @@ export type GuidedBrainstormResult = {
   clarificationReason: string;
 };
 
+/** Budgets include reasoning tokens. Never substitute fake success for invalid output. */
+export async function requestBrainstormJson<T>(args: {
+  systemPrompt: string;
+  messages: BrainstormMessage[];
+  schema: z.ZodType<T>;
+}): Promise<T> {
+  const signal = AbortSignal.timeout(45_000);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    signal.throwIfAborted();
+    const result = await createChatCompletion({
+      provider: "openai",
+      model: "gpt-5-mini",
+      messages: [
+        {
+          role: "system",
+          content:
+            args.systemPrompt +
+            (attempt === 0
+              ? ""
+              : "\nReturn only a complete JSON object matching the requested fields. Keep it concise."),
+        },
+        ...args.messages,
+      ],
+      response_format: { type: "json_object" },
+      reasoning_effort: "low",
+      max_completion_tokens: attempt === 0 ? 2048 : 4096,
+      signal,
+    });
+    const choice = result.choices[0];
+    if (choice?.message?.refusal) throw new Error("brainstorm_response_refused");
+    const raw = choice?.message?.content?.trim() ?? "";
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(raw);
+    } catch {
+      decoded = null;
+    }
+    const output = args.schema.safeParse(decoded);
+    if (choice?.finish_reason === "stop" && output.success) return output.data;
+    logger.warn(
+      {
+        attempt: attempt + 1,
+        finishReason: choice?.finish_reason ?? null,
+        contentLength: raw.length,
+        completionTokens: result.usage?.completion_tokens ?? null,
+        reasoningTokens: result.usage?.completion_tokens_details?.reasoning_tokens ?? null,
+      },
+      "Brainstorm response was incomplete or invalid",
+    );
+  }
+  throw new Error("brainstorm_response_invalid");
+}
+
 const BRAINSTORM_PERSONA = `You are a friendly, concise product ideation partner for NabuFlow.
 Help the user clarify what they want by asking one short, focused question at a time.
-Use plain English and avoid technical jargon. Focus on the product, its users, workflow, and desired outcome.
+Use the user's requested language, or otherwise the language of their latest message, including Arabic. Avoid technical jargon. Focus on the product, its users, workflow, and desired outcome.
+Acknowledge requirements already supplied. Ask only about a genuinely missing decision; never ask the user to repeat a complete brief. If enough is known, summarize the proposed pages and connections and offer the next step.
 For beginners, use a patient guided-refinement style: identify the single most important missing decision and offer a concrete example when helpful.
 Never write code, code snippets, implementation patches, or file contents. Brainstorming thinks and clarifies; it never builds.`;
 
@@ -117,7 +172,7 @@ Resolve the conversation as a ${action} request for this existing project. Prese
 
 ${contextInstruction}
 
-Given the conversation, respond with valid JSON containing exactly: name (3-5 word title-case project name, no special characters), prompt (one clear paragraph summarising what to plan or build), kind (either "web" or "mobile-cross" — use "mobile-cross" only if a native iOS/Android app was explicitly discussed).
+Given the conversation, respond with valid JSON containing exactly: name (preserve an explicitly requested project name, up to 80 characters; otherwise suggest a concise name in the user's language), prompt (one clear paragraph of at most 2000 characters summarising what to plan or build, retaining the agreed requirements), kind (either "web" or "mobile-cross" — use "mobile-cross" only if a native iOS/Android app was explicitly discussed).
 Do not write code.`;
 }
 
