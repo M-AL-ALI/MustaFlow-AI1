@@ -31,8 +31,14 @@ describe("Admin Page shell", () => {
     expect(gateSource).toContain("evidence?.userId === userId");
     for (const navigation of [sidebarSource, drawerSource]) {
       expect(navigation).toContain("useAdminAccess()");
-      expect(navigation).toContain("if (!isAdmin) return null");
     }
+
+    expect(sidebarSource).toContain("if (!isAdmin) return null");
+    // The active responsive shell passes the same server-gated value to one
+    // shared renderer. Behavior tests also cover denial, grant and revocation.
+    expect(drawerSource).toContain("const { isAdmin } = useAdminAccess();");
+    expect(drawerSource).toContain("isAdmin={isAdmin}");
+    expect(drawerSource).toContain("{isAdmin && (");
     expect(sidebarSource).toContain("canViewSupport");
     expect(sidebarSource).toContain("Admin Page");
     expect(appSource).toContain("useGetAdminMe()");

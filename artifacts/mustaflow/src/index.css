@@ -775,6 +775,89 @@
   margin-top: 5px;
   color: hsl(var(--muted-foreground));
 }
+/* Signed-in workspace navigation: labeled on desktop, compact in the editor. */
+.nf-workspace-main {
+  padding-top: 64px;
+}
+.nf-desktop-navigation {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: 80px;
+  background: hsl(var(--sidebar));
+  border-right: 1px solid hsl(var(--border));
+}
+.nf-desktop-navigation[data-expanded="true"] {
+  width: 248px;
+}
+.nf-navigation-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-height: 80px;
+  padding: 16px;
+  gap: 12px;
+}
+.nf-desktop-navigation[data-expanded="true"] .nf-navigation-heading {
+  justify-content: space-between;
+}
+.nf-navigation-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.nf-navigation-brand img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+.nf-navigation-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.nf-navigation-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.nf-navigation-links {
+  padding: 0 16px 16px;
+}
+.nf-navigation-links .nf-nav-link {
+  min-height: 44px;
+}
+.nf-navigation-links .nf-nav-link svg {
+  flex-shrink: 0;
+}
+.nf-navigation-new-icon,
+.nf-navigation-icons .nf-nav-link {
+  display: flex;
+  justify-content: center;
+  width: 46px;
+  min-height: 44px;
+  padding: 10px;
+}
+@media (min-width: 768px) {
+  .nf-workspace-main {
+    padding-top: 0;
+    padding-left: 80px;
+  }
+}
+@media (min-width: 1024px) {
+  .nf-workspace-shell[data-navigation="expanded"] .nf-workspace-main {
+    padding-left: 248px;
+  }
+}
+
 .nf-rail {
   position: fixed;
   inset: 0 auto 0 0;

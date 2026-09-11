@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-export function WorkspaceSwitcher() {
+export function WorkspaceSwitcher({ onNavigate }: { onNavigate?: () => void } = {}) {
   const [, setLocation] = useLocation();
   const {
     workspaces,
@@ -34,7 +34,10 @@ export function WorkspaceSwitcher() {
       <CreateWorkspaceModal
         open={createOpen}
         onOpenChange={setCreateOpen}
-        onCreated={() => setLocation("/projects")}
+        onCreated={() => {
+          setLocation("/projects");
+          onNavigate?.();
+        }}
       />
       <div className="px-3 pb-2">
         <DropdownMenu>
@@ -91,6 +94,7 @@ export function WorkspaceSwitcher() {
                   return;
                 setCurrentWorkspaceId(id);
                 setLocation("/projects");
+                onNavigate?.();
               }}
             >
               {!isLoading &&
