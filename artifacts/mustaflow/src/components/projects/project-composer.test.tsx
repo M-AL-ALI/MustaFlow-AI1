@@ -103,3 +103,123 @@ describe("Project composer", () => {
     ).toBe(true);
   });
 });
+
+describe("Project composer example protection", () => {
+  const booking =
+    "A booking app for my small business, with appointments, customers, and reminders.";
+
+  it("fills an empty draft immediately without starting a build", () => {
+    const input = props();
+    render(<ProjectComposer {...input} prompt="  " />);
+    fireEvent.click(screen.getByRole("button", { name: "A booking app" }));
+    expect(input.onPromptChange).toHaveBeenCalledExactlyOnceWith(booking);
+    expect(input.onContinue).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Replace your current idea?" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Describe your app" })).toHaveFocus();
+  });
+
+  it("preserves the original brief and focuses the safe choice before replacement", () => {
+    const input = props();
+    render(<ProjectComposer {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "A booking app" }));
+    expect(input.onPromptChange).not.toHaveBeenCalled();
+    expect(input.onContinue).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue(input.prompt);
+    expect(screen.getByRole("group", { name: "Replace your current idea?" })).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent("Use a booking app instead?");
+    expect(screen.getByRole("button", { name: "Keep my idea" })).toHaveFocus();
+    expect(screen.getByText(booking)).toBeVisible();
+  });
+
+  it("keeps the brief intact when the user declines the example", () => {
+    const input = props();
+    render(<ProjectComposer {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "A personal website" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep my idea" }));
+    expect(input.onPromptChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue(input.prompt);
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(screen.queryByRole("group", { name: "Replace your current idea?" })).toBeNull();
+    expect(screen.getByRole("button", { name: "A booking app" })).toBeVisible();
+  });
+
+  it("lets Escape cancel the proposal without accepting text or starting a build", () => {
+    const input = props();
+    render(<ProjectComposer {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "A team dashboard" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Keep my idea" }), { key: "Escape" });
+    expect(input.onPromptChange).not.toHaveBeenCalled();
+    expect(input.onContinue).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(screen.queryByRole("group", { name: "Replace your current idea?" })).toBeNull();
+  });
+
+  it("does not handle Escape during IME composition as a replacement decision", () => {
+    render(<ProjectComposer {...props()} />);
+    fireEvent.click(screen.getByRole("button", { name: "A booking app" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Keep my idea" }), {
+      key: "Escape",
+      isComposing: true,
+    });
+    expect(screen.getByRole("group", { name: "Replace your current idea?" })).toBeVisible();
+  });
+
+  it("replaces only after an explicit decision, without submitting an enclosing form", () => {
+    const input = props();
+    const onSubmit = vi.fn((event) => event.preventDefault());
+    const onPlatformChange = vi.fn();
+    render(
+      <form onSubmit={onSubmit}>
+        <ProjectComposer {...input} platform="mobile" onPlatformChange={onPlatformChange} />
+      </form>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "A booking app" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace with example" }));
+    expect(input.onPromptChange).toHaveBeenCalledExactlyOnceWith(booking);
+    expect(input.onContinue).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onPlatformChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Mobile" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+
+  it("discards a stale proposal when the owning draft changes, including A to B to A", () => {
+    const input = props();
+    const rendered = render(<ProjectComposer {...input} />);
+    fireEvent.click(screen.getByRole("button", { name: "A booking app" }));
+    rendered.rerender(<ProjectComposer {...input} prompt="A newer notebook brief" />);
+    expect(screen.queryByRole("button", { name: "Replace with example" })).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveValue("A newer notebook brief");
+    rendered.rerender(<ProjectComposer {...input} />);
+    expect(screen.queryByRole("button", { name: "Replace with example" })).toBeNull();
+    expect(input.onPromptChange).not.toHaveBeenCalled();
+  });
+
+  it("does not mix the proposed example into a keyboard continuation of the original brief", () => {
+    const input = props();
+    render(<ProjectComposer {...input} platform="mobile" />);
+    fireEvent.click(screen.getByRole("button", { name: "A booking app" }));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", ctrlKey: true });
+    expect(input.onContinue).toHaveBeenCalledExactlyOnceWith(input.prompt, "mobile");
+    expect(input.onPromptChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps Arabic and mixed-language drafts unchanged when offering an English example", () => {
+    const input = props();
+    const arabic = "\u0645\u0644\u0627\u062d\u0638\u0627\u062a English + Arabic";
+    render(<ProjectComposer {...input} prompt={arabic} />);
+    fireEvent.click(screen.getByRole("button", { name: "A team dashboard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep my idea" }));
+    expect(screen.getByRole("textbox")).toHaveValue(arabic);
+    expect(input.onPromptChange).not.toHaveBeenCalled();
+  });
+
+  it("does not request replacement when the draft already equals that example", () => {
+    const input = props();
+    render(<ProjectComposer {...input} prompt={booking} />);
+    fireEvent.click(screen.getByRole("button", { name: "A booking app" }));
+    expect(screen.queryByRole("group", { name: "Replace your current idea?" })).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveFocus();
+    expect(input.onContinue).not.toHaveBeenCalled();
+  });
+});

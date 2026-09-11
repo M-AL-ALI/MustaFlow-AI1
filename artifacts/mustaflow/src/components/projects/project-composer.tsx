@@ -32,6 +32,23 @@ export function ProjectComposer({
     setLocalPlatform(value);
     onPlatformChange?.(value);
   };
+  const [pendingExample, setPendingExample] = useState<{
+    label: string;
+    value: string;
+    originalPrompt: string;
+  } | null>(null);
+  // A suggestion cannot replace a newer draft or reappear when an old draft returns.
+  if (pendingExample && pendingExample.originalPrompt !== prompt) setPendingExample(null);
+  const example = pendingExample?.originalPrompt === prompt ? pendingExample : null;
+  const chooseExample = (label: string, value: string) => {
+    if (prompt.trim() && prompt !== value) {
+      setPendingExample({ label, value, originalPrompt: prompt });
+      return;
+    }
+    setPendingExample(null);
+    onPromptChange(value);
+    textarea.current?.focus();
+  };
   const briefTooLong = prompt.length > BRIEF_LIMIT;
   const submit = () => {
     if (prompt.trim() && !briefTooLong) onContinue(prompt.trim(), platform);
@@ -138,32 +155,77 @@ export function ProjectComposer({
         )}
       </div>
       <div className="nf-starter-ideas" aria-label="Example ideas">
-        <span>Need a starting point?</span>
-        {[
-          [
-            "A booking app",
-            "A booking app for my small business, with appointments, customers, and reminders.",
-          ],
-          [
-            "A personal website",
-            "A personal website to share my work, story, and contact information.",
-          ],
-          [
-            "A team dashboard",
-            "A team dashboard to track projects, responsibilities, and upcoming deadlines.",
-          ],
-        ].map(([label, value]) => (
-          <button
-            key={label}
-            type="button"
-            onClick={() => {
-              onPromptChange(value);
-              textarea.current?.focus();
+        {example ? (
+          <div
+            role="group"
+            aria-label="Replace your current idea?"
+            className="w-full rounded-lg border border-border bg-muted/20 p-4 text-left"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.stopPropagation();
+                setPendingExample(null);
+                textarea.current?.focus();
+              }
             }}
           >
-            {label}
-          </button>
-        ))}
+            <p role="status" className="text-sm font-medium text-foreground">
+              Use {example.label.toLowerCase()} instead?
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Your current idea stays unchanged unless you replace it.
+            </p>
+            <p dir="auto" className="mt-3 text-sm leading-relaxed text-foreground">
+              {example.value}
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                autoFocus
+                className="nf-secondary-button"
+                onClick={() => {
+                  setPendingExample(null);
+                  textarea.current?.focus();
+                }}
+              >
+                Keep my idea
+              </button>
+              <button
+                type="button"
+                className="nf-quiet-link"
+                onClick={() => {
+                  setPendingExample(null);
+                  onPromptChange(example.value);
+                  textarea.current?.focus();
+                }}
+              >
+                Replace with example
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <span>Need a starting point?</span>
+            {[
+              [
+                "A booking app",
+                "A booking app for my small business, with appointments, customers, and reminders.",
+              ],
+              [
+                "A personal website",
+                "A personal website to share my work, story, and contact information.",
+              ],
+              [
+                "A team dashboard",
+                "A team dashboard to track projects, responsibilities, and upcoming deadlines.",
+              ],
+            ].map(([label, value]) => (
+              <button key={label} type="button" onClick={() => chooseExample(label, value)}>
+                {label}
+              </button>
+            ))}
+          </>
+        )}
       </div>
     </section>
   );
