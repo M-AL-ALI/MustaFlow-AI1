@@ -64,7 +64,7 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import { formatWorkspaceToolsForAgent } from "@workspace/nabuflow-workspace-tools";
 import type { AgentMode } from "./ai";
 import { detectRequiredStack } from "./ai";
-import { generatePostBuildSuggestions } from "./post-build-suggestions";
+import { buildFailureFixSuggestions, generatePostBuildSuggestions } from "./post-build-suggestions";
 import { logger } from "./logger";
 import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } from "./knowledge";
 import { generateEmbedding } from "./embeddings";
@@ -1656,39 +1656,6 @@ async function loadLatestPlanSnapshot(projectId: number): Promise<{
   } catch {
     return null;
   }
-}
-
-async function generateFixSuggestions(userPrompt: string, errorMessage: string): Promise<string[]> {
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      max_completion_tokens: 600,
-      messages: [
-        {
-          role: "system",
-          content:
-            'You help debug AI-generated web app builds. Given a user request and a build error, return a JSON object with a "suggestions" array of exactly 3 short, specific, actionable fixes the user can try. Each suggestion must be 1 sentence and start with an action verb. Output ONLY valid JSON: {"suggestions":["...","...","..."]}',
-        },
-        {
-          role: "user",
-          content: `User request: "${userPrompt}"\n\nBuild error: ${errorMessage}`,
-        },
-      ],
-      response_format: { type: "json_object" },
-    });
-    const raw = response.choices[0]?.message?.content ?? "{}";
-    const parsed = JSON.parse(raw) as { suggestions?: string[] };
-    if (Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0) {
-      return parsed.suggestions.slice(0, 3);
-    }
-  } catch (err) {
-    logger.warn({ err }, "Failed to generate fix suggestions");
-  }
-  return [
-    "Simplify the request and try rebuilding with fewer features.",
-    "Use Plan Mode first to outline the approach before building.",
-    "Check that all required integrations and secrets are configured.",
-  ];
 }
 
 async function autoWriteFailureLesson(
@@ -7075,6 +7042,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           assistantSummary,
           filePaths: snapshot.map((f) => f.path),
           activeIntegrations: knowledgeContext ?? "",
+          buildOutcome: "completed",
         });
       });
 
@@ -7568,7 +7536,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       const [suggestions] = await Promise.all([
         modelFailureReport?.suggestions ??
           sealedProjectRecovery?.suggestions ??
-          generateFixSuggestions(userPrompt, message),
+          buildFailureFixSuggestions(),
         db
           .update(projectsTable)
           .set({ status: "failed", updatedAt: sql`now()` })
@@ -7647,7 +7615,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         logger.warn({ err, taskId }, "Failed to cancel remaining batch tasks"),
       );
 
-      // Generate post-build suggestions even on failure — gives the user recovery ideas
+      // Failed builds offer evidence-led repair rather than new feature ideas.
       setImmediate(() => {
         void generatePostBuildSuggestions({
           projectId,
@@ -7659,6 +7627,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           assistantSummary: `Build failed: ${message.slice(0, 200)}`,
           filePaths: [],
           activeIntegrations: "",
+          buildOutcome: "failed",
         });
       });
 
@@ -8946,6 +8915,7 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       assistantSummary,
       filePaths: snapshot.map((f) => f.path),
       activeIntegrations: "",
+      buildOutcome: "completed",
     });
   });
 

@@ -52,7 +52,7 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).toContain("...(modelFailureReport ?? {})");
     expect(jobs).toContain("warnings: modelFailureReport?.warnings ?? []");
     expect(jobs).toMatch(
-      /modelFailureReport\?\.suggestions\s*\?\?\s*sealedProjectRecovery\?\.suggestions\s*\?\?\s*generateFixSuggestions/,
+      /modelFailureReport\?\.suggestions\s*\?\?\s*sealedProjectRecovery\?\.suggestions\s*\?\?\s*buildFailureFixSuggestions\(\)/,
     );
   });
 

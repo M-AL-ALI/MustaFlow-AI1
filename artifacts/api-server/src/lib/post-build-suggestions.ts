@@ -29,6 +29,7 @@ export type PostBuildSuggestionInput = {
   assistantSummary: string;
   filePaths: string[];
   activeIntegrations: string;
+  buildOutcome?: "completed" | "failed";
 };
 
 export type PostBuildSuggestionContext = {
@@ -64,6 +65,25 @@ export type SuggestionGenerationDependencies = {
   ) => Promise<void>;
   logDiagnostic: (diagnostic: SuggestionDiagnostic) => void;
 };
+
+export function buildFailureFixSuggestions(): string[] {
+  return [
+    "Inspect the failed task's error and existing project files before identifying the cause.",
+    "Preserve the original requirements, languages, saved plan, and existing work while correcting only the evidenced blocker.",
+    "Rerun the failed check after the correction and report what passed, failed, or remains unverified.",
+  ];
+}
+
+function buildFailedTaskRecovery(input: PostBuildSuggestionInput): PostBuildSuggestion[] {
+  return [
+    {
+      title: "Diagnose the failed build",
+      description: "Find the evidenced blocker without changing the app's requirements.",
+      category: "fix",
+      prompt: `Review failed task ${input.taskId} in this project, its recorded error, and the current files before choosing a repair. Recover the full original brief, saved plan, and conversation requirements, including languages and explicit exclusions. Preserve existing work. Correct only a blocker supported by the evidence; do not guess a cause from the project name or add unrelated features, dependencies, or integrations. If evidence is missing, explain what is unknown instead of inventing a diagnosis. Rerun the failing check and the requested user flow, then report passed, failed, and unverified results.`,
+    },
+  ];
+}
 
 function platformHintFor(input: PostBuildSuggestionInput): string {
   const isMobile = ["mobile-ios", "mobile-android", "mobile-cross"].includes(input.projectKind);
@@ -372,6 +392,32 @@ export async function generatePostBuildSuggestions(
   input: PostBuildSuggestionInput,
   dependencies: SuggestionGenerationDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<SuggestionGenerationResult> {
+  // A failed build needs evidence-led repair, not speculative product ideas.
+  // Keep this path deterministic so another model request cannot delay recovery.
+  if (input.buildOutcome === "failed") {
+    const suggestions = buildFailedTaskRecovery(input);
+    try {
+      await dependencies.insertSuggestions(input, suggestions);
+      dependencies.logDiagnostic({
+        finish_reason: null,
+        reasoning_tokens: null,
+        output_tokens: null,
+        parsed_count: suggestions.length,
+        failure_category: "recovery_used",
+      });
+      return { count: suggestions.length, source: "fallback" };
+    } catch {
+      dependencies.logDiagnostic({
+        finish_reason: null,
+        reasoning_tokens: null,
+        output_tokens: null,
+        parsed_count: suggestions.length,
+        failure_category: "persistence_error",
+      });
+      return { count: 0, source: "none" };
+    }
+  }
+
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const result = await runModelAttempt(input, dependencies);
     dependencies.logDiagnostic(result.diagnostic);
