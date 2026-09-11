@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MOBILE_MODULES,
   missingModuleSecrets,
+  blockedModuleSecrets,
   moduleRequestText,
   moduleSecretNames,
   type ModuleSecret,
@@ -13,6 +14,7 @@ const key = (name: string, overrides: Partial<ModuleSecret> = {}): ModuleSecret 
   name,
   environment: "development",
   isPreviewSafe: true,
+  minRole: "viewer",
   ...overrides,
 });
 describe("module prerequisites and request contracts", () => {
@@ -39,12 +41,9 @@ describe("module prerequisites and request contracts", () => {
       ),
     ).toEqual([]);
   });
-  it.each(["production", "testing", "staging"] as const)(
-    "does not substitute a %s key",
-    (environment) => {
-      expect(moduleSecretNames(101, [key("SUPABASE_URL", { environment })]).size).toBe(0);
-    },
-  );
+  it.each(["production", "staging"] as const)("does not substitute a %s key", (environment) => {
+    expect(moduleSecretNames(101, [key("SUPABASE_URL", { environment })]).size).toBe(0);
+  });
   it.each([false, undefined])(
     "does not assume a key with preview safety %s is available",
     (isPreviewSafe) => {
@@ -80,5 +79,33 @@ describe("module prerequisites and request contracts", () => {
     expect(text).toContain("non-destructive");
     expect(text).toContain("Do not expose secret values, spend money, or send real notifications");
     expect(text).toContain("anything untested");
+  });
+});
+
+describe("module preview role and recovery contracts", () => {
+  it("accepts testing keys only when explicitly preview safe and viewer-level", () => {
+    expect(
+      moduleSecretNames(101, [key("SUPABASE_URL", { environment: "testing" })]).has("SUPABASE_URL"),
+    ).toBe(true);
+  });
+  it.each(["owner", "admin", "member", undefined] as const)(
+    "rejects restricted or unknown role %s",
+    (minRole) => {
+      expect(moduleSecretNames(101, [key("SUPABASE_URL", { minRole })]).size).toBe(0);
+    },
+  );
+  it("separates missing and stored-but-ineligible keys without cross-project leakage", () => {
+    expect(
+      blockedModuleSecrets(db, 101, [
+        key("SUPABASE_URL", { minRole: "owner" }),
+        key("SUPABASE_ANON_KEY", { projectId: 102 }),
+      ]),
+    ).toEqual(["SUPABASE_URL"]);
+    expect(
+      blockedModuleSecrets(db, 101, [
+        key("SUPABASE_URL", { environment: "production" }),
+        key("SUPABASE_URL", { environment: "testing" }),
+      ]),
+    ).toEqual([]);
   });
 });

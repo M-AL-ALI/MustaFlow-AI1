@@ -37,9 +37,9 @@ import { CheckpointsTab } from "./checkpoints-tab";
 import { WorkflowsPanel } from "./workflows-panel";
 import { QualityPanel } from "./quality-panel";
 import { ModuleLibrary } from "./module-library";
+import { ProjectSecretsPanel } from "./project-secrets-panel";
 import {
   useListSecrets,
-  useCreateSecret,
   getListSecretsQueryKey,
   useListProjectFiles,
   getListProjectFilesQueryKey,
@@ -877,17 +877,11 @@ export function ToolsTab({
     data: secrets,
     isLoading: secretsLoading,
     isError: secretsError,
+    isFetching: secretsRefreshing,
+    refetch: refetchSecrets,
   } = useListSecrets(projectId, {
     query: { enabled: !!projectId, queryKey: getListSecretsQueryKey(projectId) },
   });
-  const createSecret = useCreateSecret();
-
-  const [newSecretName, setNewSecretName] = useState(prefillSecretName ?? "");
-  const [newSecretValue, setNewSecretValue] = useState("");
-  const [secretEnv, setSecretEnv] = useState<"development" | "testing" | "staging" | "production">(
-    "development",
-  );
-
   // ── Secret SSE stream ──────────────────────────────────────────────────────
   // When a collaborator creates/updates/deletes a secret, we update the cache
   // directly (no full refetch) and briefly highlight the affected row.
@@ -985,30 +979,12 @@ export function ToolsTab({
   useEffect(() => {
     if (prefillSecretName) {
       setInnerTab("secrets");
-      setNewSecretName(prefillSecretName);
     }
   }, [prefillSecretName]);
 
   useEffect(() => {
     if (defaultTab) setInnerTab(defaultTab);
   }, [defaultTab]);
-
-  const handleCreateSecret = () => {
-    if (!newSecretName || !newSecretValue) return;
-    createSecret.mutate(
-      {
-        id: projectId,
-        data: { name: newSecretName, value: newSecretValue, environment: secretEnv },
-      },
-      {
-        onSuccess: () => {
-          setNewSecretName("");
-          setNewSecretValue("");
-          queryClient.invalidateQueries({ queryKey: getListSecretsQueryKey(projectId) });
-        },
-      },
-    );
-  };
 
   return (
     <div className="flex h-full flex-col">
@@ -1113,145 +1089,23 @@ export function ToolsTab({
               </div>
             </TabsContent>
 
-            <TabsContent value="secrets" className="h-full m-0 p-4 space-y-6">
-              {/* Secrets Guide — searchable catalogue of common key names */}
-              <SecretsGuide onSelect={(name) => setNewSecretName(name)} />
-
-              <div className="grid grid-cols-4 gap-3 border border-border rounded-lg p-4 bg-card">
-                <div className="col-span-4 font-semibold mb-1">Add new secret</div>
-                <Input
-                  placeholder="Key (e.g. STRIPE_API_KEY)"
-                  value={newSecretName}
-                  onChange={(e) => setNewSecretName(e.target.value)}
-                />
-                <Input
-                  placeholder="Value"
-                  type="password"
-                  value={newSecretValue}
-                  onChange={(e) => setNewSecretValue(e.target.value)}
-                />
-                <select
-                  className="bg-background border border-border rounded-md px-2 text-sm"
-                  value={secretEnv}
-                  onChange={(e) =>
-                    setSecretEnv(
-                      e.target.value as "development" | "testing" | "staging" | "production",
-                    )
-                  }
-                >
-                  <option value="development">Development</option>
-                  <option value="testing">Testing</option>
-                  <option value="staging">Staging</option>
-                  <option value="production">Production</option>
-                </select>
-                <Button
-                  onClick={handleCreateSecret}
-                  disabled={!newSecretName || !newSecretValue || createSecret.isPending}
-                >
-                  {createSecret.isPending ? "Adding..." : "Add secret"}
-                </Button>
-                <div className="col-span-4 text-xs text-muted-foreground">
-                  Values are never returned by the API — only a masked preview. Separate test and
-                  production secrets so NabuFlow can target the right environment.
-                </div>
-              </div>
-
-              {!secrets || secrets.length === 0 ? (
-                <div className="border border-border rounded-lg p-8 text-center text-muted-foreground bg-card">
-                  No secrets configured yet. Add your first key above.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {(["development", "testing", "staging", "production"] as const).map((env) => {
-                    const envSecrets = secrets.filter((s) => s.environment === env);
-                    if (envSecrets.length === 0) return null;
-                    const envConfig = {
-                      development: {
-                        label: "Development",
-                        color: "text-blue-400",
-                        bg: "bg-blue-500/10 border-blue-500/20",
-                      },
-                      testing: {
-                        label: "Testing",
-                        color: "text-yellow-400",
-                        bg: "bg-yellow-500/10 border-yellow-500/20",
-                      },
-                      staging: {
-                        label: "Staging",
-                        color: "text-orange-400",
-                        bg: "bg-orange-500/10 border-orange-500/20",
-                      },
-                      production: {
-                        label: "Production",
-                        color: "text-green-400",
-                        bg: "bg-green-500/10 border-green-500/20",
-                      },
-                    }[env];
-                    return (
-                      <div
-                        key={env}
-                        className="border border-border rounded-lg overflow-hidden bg-card"
-                      >
-                        <div
-                          className={`px-4 py-2 border-b border-border flex items-center gap-2 ${envConfig.bg}`}
-                        >
-                          <span
-                            className={`text-xs font-semibold uppercase tracking-wider ${envConfig.color}`}
-                          >
-                            {envConfig.label} Keys
-                          </span>
-                          <span className="text-xs text-muted-foreground ml-auto">
-                            {envSecrets.length} secret{envSecrets.length !== 1 ? "s" : ""}
-                          </span>
-                        </div>
-                        <div className="divide-y divide-border">
-                          {envSecrets.map((s) => (
-                            <SecretRowWithAudit
-                              key={s.id}
-                              secret={s}
-                              projectId={projectId}
-                              isFlashing={flashedSecretIds.has(s.id)}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {/* Container environment display */}
-              {secrets && secrets.length > 0 && (
-                <div className="border border-border rounded-lg overflow-hidden bg-card">
-                  <div className="px-4 py-2.5 border-b border-border bg-muted/50 flex items-center gap-2">
-                    <TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold">Dev Server Environment</span>
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      {secrets.length} var{secrets.length !== 1 ? "s" : ""} injected on start
-                    </span>
-                  </div>
-                  <div className="p-3 bg-[#0d1117]">
-                    <div className="font-mono text-xs space-y-0.5">
-                      {secrets.map((s) => (
-                        <div key={s.id} className="flex items-center gap-2">
-                          <span className="text-[#79c0ff]">{s.name}</span>
-                          <span className="text-[#8b949e]">=</span>
-                          <span className="text-[#a5d6ff] opacity-60">••••••••</span>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground/50 mt-2">
-                      All secrets are injected as environment variables when the container starts.
-                      Changing a secret restarts a running container automatically.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-start gap-2 text-xs text-muted-foreground mt-2">
-                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                Secret values are never returned by the API. Use Development keys for local testing,
-                Test keys for staging, and Production keys for your live app.
-              </div>
+            <TabsContent value="secrets" className="h-full m-0 p-4">
+              <ProjectSecretsPanel
+                projectId={projectId}
+                secrets={secrets}
+                phase={secretsLoading ? "loading" : secretsError ? "error" : "ready"}
+                refreshing={secretsRefreshing}
+                prefillSecretName={prefillSecretName}
+                onRefresh={() => refetchSecrets({ throwOnError: true })}
+                renderGuide={(onSelect) => <SecretsGuide onSelect={onSelect} />}
+                renderSecret={(secret) => (
+                  <SecretRowWithAudit
+                    secret={secret}
+                    projectId={projectId}
+                    isFlashing={flashedSecretIds.has(secret.id)}
+                  />
+                )}
+              />
             </TabsContent>
 
             <TabsContent value="integrations" className="h-full m-0">
@@ -1300,6 +1154,7 @@ export function ToolsTab({
                   secretState={secretsLoading ? "loading" : secretsError ? "error" : "ready"}
                   wiredModuleIds={wiredModuleIds}
                   onSendMessage={onSendMessage}
+                  onOpenSecrets={() => setInnerTab("secrets")}
                 />
               </TabsContent>
             )}

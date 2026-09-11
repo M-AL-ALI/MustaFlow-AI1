@@ -8,6 +8,7 @@ if (!import.meta.env.DEV || !["localhost", "127.0.0.1", "[::1]"].includes(window
 function Review() {
   const [projectId, setProjectId] = useState(101);
   const [secrets, setSecrets] = useState<Record<number, ModuleSecret[]>>({});
+  const [reviews, setReviews] = useState(0);
   const [requests, setRequests] = useState<string[]>([]);
   const [fail, setFail] = useState(false);
   const [reported, setReported] = useState(false);
@@ -56,6 +57,26 @@ function Review() {
               <option value="error">Error</option>
             </select>
           </label>
+          <button
+            onClick={() =>
+              setSecrets((previous) => ({
+                ...previous,
+                [projectId]: [
+                  {
+                    id: 1,
+                    projectId,
+                    name: "SUPABASE_URL",
+                    environment: "development",
+                    isPreviewSafe: true,
+                    minRole: "owner",
+                  },
+                ],
+              }))
+            }
+          >
+            Seed restricted key
+          </button>
+          <output aria-label="Review count">Reviews: {reviews}</output>
           <output aria-label="Request count">Requests: {requests.length}</output>
         </div>
       </header>
@@ -64,6 +85,7 @@ function Review() {
           projectId={projectId}
           secrets={secrets[projectId] ?? []}
           secretState={queryState}
+          onOpenSecrets={() => setReviews((count) => count + 1)}
           wiredModuleIds={reported ? ["realtime-db"] : []}
           onSendMessage={
             agent ? (text) => setRequests((previous) => [...previous, text]) : undefined
@@ -79,6 +101,7 @@ function Review() {
                 name: input.name,
                 environment: input.environment,
                 isPreviewSafe: input.isPreviewSafe,
+                minRole: "viewer" as const,
               },
             ];
             setSecrets((previous) => ({ ...previous, [projectId]: next }));

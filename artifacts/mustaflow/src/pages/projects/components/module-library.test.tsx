@@ -18,6 +18,7 @@ const key = (name: string, overrides: Partial<ModuleSecret> = {}): ModuleSecret 
   name,
   environment: "development",
   isPreviewSafe: true,
+  minRole: "viewer",
   ...overrides,
 });
 const keys = [key("SUPABASE_URL"), key("SUPABASE_ANON_KEY", { id: 2 })];
@@ -381,5 +382,80 @@ describe("server-confirmed secret adapter", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("No setup request was sent");
     expect(defaults.onSendMessage).not.toHaveBeenCalled();
     client.clear();
+  });
+});
+
+describe("module policy recovery", () => {
+  it.each([
+    { minRole: "owner" as const },
+    { minRole: "admin" as const },
+    { minRole: "member" as const },
+    { minRole: undefined },
+    { isPreviewSafe: false },
+    { environment: "production" as const },
+  ])("offers review instead of duplicate creation for %j", async (overrides) => {
+    const user = userEvent.setup();
+    const review = vi.fn();
+    render(
+      <ModuleLibraryView
+        {...defaults}
+        secrets={[key("SUPABASE_URL", overrides)]}
+        onOpenSecrets={review}
+      />,
+    );
+    expect(card().getByText("Keys need review")).toBeInTheDocument();
+    await user.click(card().getByRole("button", { name: "Review keys" }));
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(defaults.onSaveSecret).not.toHaveBeenCalled();
+    expect(defaults.onSendMessage).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/Value for/)).not.toBeInTheDocument();
+  });
+  it("can review blocked keys even when the agent is unavailable", async () => {
+    const user = userEvent.setup();
+    const review = vi.fn();
+    render(
+      <ModuleLibraryView
+        {...defaults}
+        onSendMessage={undefined}
+        secrets={[key("SUPABASE_URL", { minRole: "owner" })]}
+        onOpenSecrets={review}
+      />,
+    );
+    await user.click(card().getByRole("button", { name: "Review keys" }));
+    expect(review).toHaveBeenCalledTimes(1);
+  });
+  it("uses eligible testing metadata without re-saving keys", async () => {
+    const user = userEvent.setup();
+    render(
+      <ModuleLibraryView
+        {...defaults}
+        secrets={keys.map((k) => ({ ...k, environment: "testing" }))}
+      />,
+    );
+    await user.click(card().getByRole("button", { name: "Set up with agent" }));
+    expect(defaults.onSendMessage).toHaveBeenCalledTimes(1);
+    expect(defaults.onSaveSecret).not.toHaveBeenCalled();
+  });
+  it("rechecks an open form when restricted metadata arrives", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<ModuleLibraryView {...defaults} />);
+    await user.click(card().getByRole("button", { name: "Add development keys" }));
+    await user.type(screen.getByLabelText("Value for SUPABASE_URL"), "synthetic-only");
+    rerender(
+      <ModuleLibraryView {...defaults} secrets={[key("SUPABASE_URL", { minRole: "owner" })]} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Save and continue" }));
+    expect(defaults.onSaveSecret).not.toHaveBeenCalled();
+    expect(defaults.onSendMessage).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText(/Value for/)).not.toBeInTheDocument();
+  });
+  it("marks module credentials as new project secrets, not account login fields", async () => {
+    const user = userEvent.setup();
+    render(<ModuleLibraryView {...defaults} />);
+    await user.click(card().getByRole("button", { name: "Add development keys" }));
+    const field = screen.getByLabelText("Value for SUPABASE_URL");
+    expect(field).toHaveAttribute("autocomplete", "new-password");
+    expect(field).toHaveAttribute("name", "project-api-secret-101-realtime-db");
+    expect(field).toHaveAttribute("type", "password");
   });
 });

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import {
   MOBILE_MODULES,
   missingModuleSecrets,
+  blockedModuleSecrets,
   moduleRequestText,
   moduleSecretNames,
   type MobileModule,
@@ -25,6 +26,7 @@ interface ModuleLibraryProps {
   secretState: SecretState;
   wiredModuleIds?: readonly string[];
   onSendMessage?: (text: string) => void | Promise<void>;
+  onOpenSecrets?: () => void;
 }
 interface ModuleLibraryViewProps extends ModuleLibraryProps {
   onSaveSecret: (input: SecretInput) => Promise<readonly ModuleSecret[]>;
@@ -57,6 +59,7 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
     wiredModuleIds = [],
     onSendMessage,
     onSaveSecret,
+    onOpenSecrets,
   } = props;
   const [form, setForm] = useState<{ moduleId: string; keyName: string } | null>(null);
   const [value, setValue] = useState("");
@@ -94,7 +97,7 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
       (intent === "setup" && missingModuleSecrets(mod, projectId, confirmed).length > 0)
     ) {
       setIssue(
-        "Required development keys are not confirmed yet. Review the keys before requesting setup.",
+        "Required preview-eligible development or testing keys are not confirmed yet. Review the keys before requesting setup.",
       );
       return;
     }
@@ -125,7 +128,12 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
     setIssue("");
     setNotice("");
     setValue("");
-    if (missing.length) setForm({ moduleId: mod.id, keyName: missing[0] });
+    if (blockedModuleSecrets(mod, projectId, latest.current.secrets).length) {
+      setForm(null);
+      setIssue(
+        "Existing keys are not eligible for preview. Review their environment, preview access, and role in Secrets; no keys were changed.",
+      );
+    } else if (missing.length) setForm({ moduleId: mod.id, keyName: missing[0] });
     else {
       setForm(null);
       void request(mod, "setup");
@@ -135,6 +143,12 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
     if (!form || !value.trim() || saving.current || busy || unavailable) return;
     const mod = MOBILE_MODULES.find((item) => item.id === form.moduleId);
     if (!mod || !mod.requiredSecrets.includes(form.keyName)) return;
+    if (blockedModuleSecrets(mod, projectId, latest.current.secrets).length) {
+      setForm(null);
+      setValue("");
+      setIssue("Existing keys need review in Secrets before setup. No duplicate key was saved.");
+      return;
+    }
     const keyName = form.keyName;
     saving.current = true;
     setBusy(true);
@@ -156,7 +170,12 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
         return;
       }
       const missing = missingModuleSecrets(mod, projectId, confirmed);
-      if (missing.length) {
+      if (blockedModuleSecrets(mod, projectId, confirmed).length) {
+        setForm(null);
+        setIssue(
+          "A remaining key is stored but not eligible for preview. Review Secrets; no setup request was sent.",
+        );
+      } else if (missing.length) {
         setForm({ moduleId: mod.id, keyName: missing[0] });
         setNotice("Key saved. Add the remaining development key before setup can begin.");
       } else {
@@ -184,13 +203,28 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
         <h2 className="text-base font-semibold tracking-tight">Connect your mobile app</h2>
         <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
           Choose a module, add its development keys, then let the project agent build and check the
-          integration. A request or an earlier report does not prove a live connection.
+          integration. Preview-eligible testing keys can also be used. A request or an earlier
+          report does not prove a live connection.
         </p>
         <p className="text-xs text-muted-foreground">
           These modules belong to this generated app, not your MustaFlow sign-in or NabuFlow's
           platform services.
         </p>
       </div>
+      {onOpenSecrets && (
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => {
+            setValue("");
+            setForm(null);
+            onOpenSecrets();
+          }}
+        >
+          Review project keys
+        </Button>
+      )}
       {secretState === "loading" && (
         <p role="status" className="text-sm text-muted-foreground">
           Checking project keys...
@@ -219,6 +253,7 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
       <div className="grid gap-3 lg:grid-cols-2">
         {MOBILE_MODULES.map((mod) => {
           const missing = missingModuleSecrets(mod, projectId, secrets);
+          const blocked = blockedModuleSecrets(mod, projectId, secrets);
           const reported = wiredModuleIds.includes(mod.id);
           const intent = requested[mod.id];
           const label =
@@ -230,11 +265,13 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
                   : intent === "check"
                     ? "Check requested"
                     : "Setup requested"
-                : missing.length
-                  ? "Keys needed"
-                  : reported
-                    ? "Added in last report"
-                    : "Ready for setup";
+                : blocked.length
+                  ? "Keys need review"
+                  : missing.length
+                    ? "Keys needed"
+                    : reported
+                      ? "Added in last report"
+                      : "Ready for setup";
           const disabled = busy || unavailable || !onSendMessage || Boolean(intent);
           const expanded = form?.moduleId === mod.id;
           return (
@@ -260,23 +297,30 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
                   ? (secretState === "ready" ? mod.requiredSecrets.length - missing.length : "?") +
                     " of " +
                     mod.requiredSecrets.length +
-                    " development keys saved for preview"
+                    " development/testing keys eligible for preview"
                   : "No development key required"}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={disabled}
-                  onClick={() =>
-                    reported && !missing.length ? void request(mod, "check") : openSetup(mod)
-                  }
+                  disabled={blocked.length ? busy || unavailable || !onOpenSecrets : disabled}
+                  onClick={() => {
+                    if (blocked.length) {
+                      setValue("");
+                      setForm(null);
+                      onOpenSecrets?.();
+                    } else if (reported && !missing.length) void request(mod, "check");
+                    else openSetup(mod);
+                  }}
                 >
-                  {missing.length
-                    ? "Add development keys"
-                    : reported
-                      ? "Check with agent"
-                      : "Set up with agent"}
+                  {blocked.length
+                    ? "Review keys"
+                    : missing.length
+                      ? "Add development keys"
+                      : reported
+                        ? "Check with agent"
+                        : "Set up with agent"}
                 </Button>
                 {reported && (
                   <Button
@@ -305,8 +349,10 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
                         {secretState !== "ready"
                           ? "(not confirmed)"
                           : names.has(name)
-                            ? "(saved for development preview)"
-                            : "(needed for development preview)"}
+                            ? "(eligible for build and preview)"
+                            : blocked.includes(name)
+                              ? "(stored; review environment, preview access, and role)"
+                              : "(needed for build and preview)"}
                       </span>
                     </li>
                   ))}
@@ -333,7 +379,8 @@ function ModuleLibrarySession(props: ModuleLibraryViewProps) {
                     <Input
                       id={"module-secret-" + projectId + "-" + mod.id}
                       type="password"
-                      autoComplete="off"
+                      name={"project-api-secret-" + projectId + "-" + mod.id}
+                      autoComplete="new-password"
                       spellCheck={false}
                       value={value}
                       disabled={busy || unavailable}

@@ -1,3 +1,4 @@
+import { previewSecretDisposition } from "./project-secret-display-model";
 import type { SecretEntry } from "@workspace/api-client-react";
 
 export interface MobileModule {
@@ -10,7 +11,7 @@ export interface MobileModule {
 }
 export type ModuleSecret = Pick<
   SecretEntry,
-  "id" | "projectId" | "name" | "environment" | "isPreviewSafe"
+  "id" | "projectId" | "name" | "environment" | "isPreviewSafe" | "minRole"
 >;
 export type ModuleRequest = "setup" | "check" | "remove";
 export const MOBILE_MODULES: readonly MobileModule[] = [
@@ -84,12 +85,7 @@ export const MOBILE_MODULES: readonly MobileModule[] = [
 export function moduleSecretNames(projectId: number, secrets: readonly ModuleSecret[]) {
   return new Set(
     secrets
-      .filter(
-        (secret) =>
-          secret.projectId === projectId &&
-          secret.environment === "development" &&
-          secret.isPreviewSafe === true,
-      )
+      .filter((secret) => previewSecretDisposition(secret, projectId).eligible)
       .map((secret) => secret.name),
   );
 }
@@ -100,6 +96,17 @@ export function missingModuleSecrets(
 ) {
   const names = moduleSecretNames(projectId, secrets);
   return mod.requiredSecrets.filter((name) => !names.has(name));
+}
+// An existing but ineligible key needs review, not a duplicate write or a role downgrade.
+export function blockedModuleSecrets(
+  mod: MobileModule,
+  projectId: number,
+  secrets: readonly ModuleSecret[],
+) {
+  const missing = missingModuleSecrets(mod, projectId, secrets);
+  return missing.filter((name) =>
+    secrets.some((secret) => secret.projectId === projectId && secret.name === name),
+  );
 }
 export function moduleRequestText(mod: MobileModule, intent: ModuleRequest) {
   if (intent === "remove")
@@ -119,7 +126,7 @@ export function moduleRequestText(mod: MobileModule, intent: ModuleRequest) {
       ") integration in this app. Inspect its wiring and run appropriate non-destructive checks in the development environment. Do not expose secret values, spend money, or send real notifications. Report the evidence, failures, and anything untested; a prior build report is not proof it works."
     );
   const keys = mod.requiredSecrets.length
-    ? " Read the development keys named " +
+    ? " Read the preview-eligible development or testing keys named " +
       mod.requiredSecrets.join(", ") +
       " from this project's secret store; never print their values or substitute production keys."
     : "";
