@@ -78,3 +78,54 @@ describe("editor registry navigation", () => {
     expect(new Set(tabs.map((tab) => tab.value)).size).toBe(tabs.length);
   });
 });
+
+describe("retained editor tools", () => {
+  it("keeps prior tools and updates shared-panel subviews", () => {
+    let tabs = getEditorWorkspaceTabs({ activeTab: "database", isPublished: false });
+    tabs = getEditorWorkspaceTabs({
+      activeTab: "tools-files",
+      subview: "files",
+      isPublished: false,
+      openTabs: tabs,
+    });
+    tabs = getEditorWorkspaceTabs({
+      activeTab: "tools-files",
+      subview: "shell",
+      isPublished: false,
+      openTabs: tabs,
+    });
+    expect(tabs.map((tab) => tab.label)).toEqual([
+      "Preview",
+      "Page map",
+      "Plan",
+      "Database",
+      "Workflows",
+    ]);
+  });
+  it("bounds secondary views to four without evicting the current view", () => {
+    let tabs = getEditorWorkspaceTabs({ activeTab: "preview", isPublished: true });
+    for (const activeTab of ["database", "terminal", "publishing", "images", "integrations"]) {
+      tabs = getEditorWorkspaceTabs({ activeTab, isPublished: true, openTabs: tabs });
+    }
+    expect(tabs).toHaveLength(7);
+    expect(tabs.some((tab) => tab.value === "database")).toBe(false);
+    expect(tabs.at(-1)?.value).toBe("integrations");
+  });
+  it("re-resolves retained tabs from the registry and removes unavailable destinations", () => {
+    const old = getEditorWorkspaceTabs({ activeTab: "analytics", isPublished: true });
+    const tabs = getEditorWorkspaceTabs({
+      activeTab: "preview",
+      isPublished: false,
+      openTabs: [
+        ...old,
+        {
+          toolId: "database",
+          label: "Forged label",
+          value: "unknown",
+          open: { kind: "workspace-tab", tabId: "unknown" },
+        },
+      ],
+    });
+    expect(tabs.map((tab) => tab.value)).toEqual(["preview", "page-map", "plan"]);
+  });
+});

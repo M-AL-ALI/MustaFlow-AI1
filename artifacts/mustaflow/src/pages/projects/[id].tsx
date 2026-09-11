@@ -181,7 +181,8 @@ import { QATapeInline } from "./components/qa-tape-inline";
 import { InlineBuildResults } from "./components/inline-build-results";
 import { workspaceReadinessSubjectFromTerminal } from "@/lib/workspace-readiness";
 import { useCheckpointHistoryNavigation } from "./components/use-checkpoint-history-navigation";
-import { getEditorWorkspaceTabs } from "./components/editor-workspace-navigation";
+import { EditorToolStrip } from "./components/editor-tool-strip";
+import { WORKSPACE_TOOL_ICONS } from "./components/workspace-tool-icons";
 import {
   appendNarrationEntry,
   InlineNarrationStream,
@@ -672,36 +673,6 @@ function ApplyEditButton({
     </div>
   );
 }
-
-const WORKSPACE_TOOL_ICONS = {
-  preview: Monitor,
-  "page-map": Globe,
-  plan: ListOrdered,
-  images: ImagePlus,
-  code: FileCode2,
-  recipes: Puzzle,
-  workflows: Workflow,
-  publishing: Rocket,
-  manage: Settings,
-  terminal: TerminalSquare,
-  canvas: Paintbrush2,
-  secrets: KeyRound,
-  "tools-files": Blocks,
-  integrations: Plug,
-  checks: ScanSearch,
-  security: ShieldCheck,
-  knowledge: BrainCircuit,
-  database: DatabaseZap,
-  runtime: Cpu,
-  git: Github,
-  logs: Wrench,
-  resources: BookOpen,
-  analytics: Activity,
-  health: HeartPulse,
-  comments: MessageSquare,
-  "activity-log": Activity,
-  checkpoints: RotateCcw,
-} satisfies Record<WorkspaceToolId, typeof Monitor>;
 
 const workspaceTabsForPlacement = (placement: "primary" | "tools") =>
   WORKSPACE_TOOLS.filter((tool) => tool.placement === placement).map((tool) => ({
@@ -1326,11 +1297,6 @@ export default function ProjectWorkspacePage() {
   const [scrollManageToMobileSettings, setScrollManageToMobileSettings] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const [projectSetupSubview, setProjectSetupSubview] = useState<string>();
-  const visibleWorkspaceTabs = getEditorWorkspaceTabs({
-    activeTab,
-    subview: projectSetupSubview,
-    isPublished: project?.status === "published",
-  });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   // Optimistic local state — seeded from localStorage so there's no flicker while the API loads.
@@ -3987,20 +3953,6 @@ export default function ProjectWorkspacePage() {
         <div className="flex items-center gap-1.5 shrink-0">
           <ProjectCollaboration projectId={projectId} />
           <button
-            type="button"
-            onClick={() => setCommandPaletteOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-            aria-label="Open project tools"
-          >
-            <Blocks className="h-3.5 w-3.5 text-muted-foreground" />
-            Tools
-            <kbd className="hidden rounded border border-border bg-muted/60 px-1 py-0.5 text-[9px] font-normal text-muted-foreground lg:inline">
-              {typeof navigator !== "undefined" && navigator.platform.includes("Mac")
-                ? "⌘K"
-                : "Ctrl K"}
-            </kbd>
-          </button>
-          <button
             onClick={() =>
               setMoreTabsExpanded((value) => {
                 const next = !value;
@@ -5487,80 +5439,18 @@ export default function ProjectWorkspacePage() {
 
         {/* ── RIGHT: Preview / Tab Content ── */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0 bg-background relative">
-          <div
-            data-testid="workspace-core-tabs"
-            className="hidden md:flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card/40 px-3 py-2"
-          >
-            {visibleWorkspaceTabs.map((tab) => {
-              const Icon = WORKSPACE_TOOL_ICONS[tab.toolId];
-              return (
-                <button
-                  key={tab.value}
-                  type="button"
-                  onClick={() => navigateWorkspaceTool(tab.open)}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
-                    activeTab === tab.value
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                  aria-current={activeTab === tab.value ? "page" : undefined}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {tab.label}
-                  {tab.value === "page-map" && pageMapSyncing && (
-                    <span className="relative flex h-1.5 w-1.5" aria-label="Page map updating">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Mobile bottom tab bar */}
-          {isMobileLayout && (
-            <div
-              data-testid="workspace-mobile-tabs"
-              className="fixed bottom-0 left-0 right-0 z-30 flex items-stretch overflow-x-auto border-t border-border bg-card/95 backdrop-blur-sm"
-              style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
-            >
-              {visibleWorkspaceTabs.map((tab) => {
-                const Icon = WORKSPACE_TOOL_ICONS[tab.toolId];
-                return (
-                  <button
-                    key={tab.value}
-                    type="button"
-                    onClick={() => navigateWorkspaceTool(tab.open)}
-                    aria-current={activeTab === tab.value && !chatDrawerOpen ? "page" : undefined}
-                    aria-label={tab.label}
-                    className={cn(
-                      "min-w-16 flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-2.5 text-[10px] font-medium transition-colors",
-                      activeTab === tab.value && !chatDrawerOpen
-                        ? "text-primary"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="max-w-full truncate">{tab.label}</span>
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setChatDrawerOpen((o) => !o)}
-                aria-pressed={chatDrawerOpen}
-                className={cn(
-                  "min-w-16 flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors",
-                  chatDrawerOpen ? "text-primary" : "text-muted-foreground",
-                )}
-              >
-                <MessageSquare className="h-4 w-4" />
-                Chat
-              </button>
-            </div>
-          )}
+          <EditorToolStrip
+            projectId={projectId}
+            activeTab={activeTab}
+            subview={projectSetupSubview}
+            isPublished={project.status === "published"}
+            isMobile={isMobileLayout}
+            chatOpen={chatDrawerOpen}
+            pageMapSyncing={pageMapSyncing}
+            onNavigate={navigateWorkspaceTool}
+            onOpenTools={() => setCommandPaletteOpen(true)}
+            onToggleChat={() => setChatDrawerOpen((value) => !value)}
+          />
 
           <div className={cn("flex-1 min-h-0 overflow-hidden", isMobileLayout && "pb-14")}>
             <Suspense fallback={<WorkspaceSurfaceFallback />}>

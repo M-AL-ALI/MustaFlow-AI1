@@ -30,7 +30,14 @@ describe("workspace tool registry", () => {
 
   it("uses Tools as the canonical launcher without the legacy horizontal tool strip", () => {
     const pageSource = readFileSync(resolve(process.cwd(), "src/pages/projects/[id].tsx"), "utf8");
-    expect(pageSource).toContain('aria-label="Open project tools"');
+    const stripSource = readFileSync(
+      resolve(process.cwd(), "src/pages/projects/components/editor-tool-strip.tsx"),
+      "utf8",
+    );
+    expect(pageSource).toContain("<EditorToolStrip");
+    expect(pageSource).toContain("onNavigate={navigateWorkspaceTool}");
+    expect(pageSource).toContain("onOpenTools={() => setCommandPaletteOpen(true)}");
+    expect(stripSource).toContain('aria-label="Open project tools"');
     expect(pageSource).not.toContain("data-tab={tab.value}");
     expect(pageSource).not.toContain("ADVANCED_TABS.filter(");
   });

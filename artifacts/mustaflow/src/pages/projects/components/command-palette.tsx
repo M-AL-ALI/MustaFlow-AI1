@@ -1,36 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Activity,
-  Blocks,
-  BookOpen,
-  BrainCircuit,
-  CheckCircle2,
-  Code2,
-  Cpu,
-  Database,
-  Github,
-  Globe,
-  HeartPulse,
-  Image,
-  KeyRound,
-  ListChecks,
-  Map,
-  MessageSquare,
-  Monitor,
-  Paintbrush,
-  Plug,
-  Puzzle,
-  Rocket,
-  RotateCcw,
-  Settings,
-  ShieldCheck,
-  TerminalSquare,
-  Workflow,
-  Wrench,
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   WORKSPACE_TOOL_CATEGORIES,
-  type WorkspaceToolId,
   type WorkspaceToolOpen,
 } from "@workspace/nabuflow-workspace-tools";
 import {
@@ -40,11 +10,11 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandShortcut,
 } from "@/components/ui/command";
 import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { findProjectTools, projectToolSearchText } from "./project-tool-search";
+import { WORKSPACE_TOOL_ICONS } from "./workspace-tool-icons";
 
 type CommandCenterProps = {
   open: boolean;
@@ -52,110 +22,96 @@ type CommandCenterProps = {
   onNavigate: (target: WorkspaceToolOpen) => void;
   isPublished: boolean;
 };
-
-const TOOL_ICONS = {
-  preview: Monitor,
-  "page-map": Globe,
-  plan: ListChecks,
-  images: Image,
-  code: Code2,
-  recipes: Puzzle,
-  workflows: Workflow,
-  publishing: Rocket,
-  terminal: TerminalSquare,
-  logs: Wrench,
-  canvas: Paintbrush,
-  "activity-log": Activity,
-  integrations: Plug,
-  git: Github,
-  database: Database,
-  comments: MessageSquare,
-  manage: Settings,
-  secrets: KeyRound,
-  "tools-files": Blocks,
-  knowledge: BrainCircuit,
-  runtime: Cpu,
-  resources: BookOpen,
-  checkpoints: RotateCcw,
-  checks: CheckCircle2,
-  security: ShieldCheck,
-  health: HeartPulse,
-  analytics: Map,
-} satisfies Record<WorkspaceToolId, typeof Monitor>;
-
-const CATEGORY_GRID_CLASSES = {
-  Build: "sm:col-start-1 sm:row-start-1",
-  Connect: "sm:col-start-2 sm:row-start-1",
-  Configure: "sm:col-start-1 sm:row-start-2",
-  Protect: "sm:col-start-2 sm:row-start-2",
-} satisfies Record<(typeof WORKSPACE_TOOL_CATEGORIES)[number], string>;
+type CategoryFilter = "All" | (typeof WORKSPACE_TOOL_CATEGORIES)[number];
 
 export function CommandPalette({ open, onClose, onNavigate, isPublished }: CommandCenterProps) {
   const [query, setQuery] = useState("");
-  const isFiltering = query.trim().length > 0;
-  const visibleTools = useMemo(() => findProjectTools(query, isPublished), [isPublished, query]);
-
+  const [category, setCategory] = useState<CategoryFilter>("All");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const visibleTools = useMemo(
+    () =>
+      findProjectTools(query, isPublished).filter(
+        (tool) => category === "All" || tool.category === category,
+      ),
+    [isPublished, query, category],
+  );
   useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
-
+    if (open) {
+      setQuery("");
+      setCategory("All");
+    }
+  }, [open]);
   return (
     <CommandDialog
       open={open}
+      onOpenAutoFocus={() => {
+        const active = document.activeElement;
+        openerRef.current = active instanceof HTMLElement ? active : null;
+      }}
+      onCloseAutoFocus={(event) => {
+        if (openerRef.current?.isConnected) {
+          event.preventDefault();
+          openerRef.current.focus({ preventScroll: true });
+        }
+      }}
       onOpenChange={(nextOpen) => !nextOpen && onClose()}
-      contentClassName="w-[calc(100vw-2rem)] sm:max-w-4xl"
+      contentClassName="flex max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] flex-col sm:max-w-2xl [&_[cmdk-root]]:min-h-0 [&_[cmdk-root]]:flex-1"
     >
-      <div className="border-b border-border px-4 pb-3 pt-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <DialogTitle className="text-sm font-semibold text-foreground">
-              Command Center
-            </DialogTitle>
-            <DialogDescription className="mt-0.5 text-xs text-muted-foreground">
-              Find everything you can use in this project.
-            </DialogDescription>
-          </div>
-          <kbd className="rounded border border-border bg-muted px-2 py-1 text-[10px] text-muted-foreground">
-            Ctrl K
-          </kbd>
-        </div>
+      <div className="shrink-0 border-b border-border px-4 pb-3 pr-12 pt-4">
+        <DialogTitle className="text-sm font-semibold text-foreground">Project tools</DialogTitle>
+        <DialogDescription className="mt-1 text-xs leading-5 text-muted-foreground">
+          Find a tool and open it beside your conversation.
+        </DialogDescription>
       </div>
       <CommandInput
+        ref={inputRef}
         aria-label="Search project tools"
-        placeholder="Search tools..."
+        placeholder="Search tools: database, shell, images..."
         value={query}
         onValueChange={setQuery}
       />
-      <CommandList
-        className={cn(
-          "max-h-[min(68vh,560px)] p-3",
-          !isFiltering &&
-            "sm:[&_[cmdk-list-sizer]]:grid sm:[&_[cmdk-list-sizer]]:grid-cols-2 sm:[&_[cmdk-list-sizer]]:items-start sm:[&_[cmdk-list-sizer]]:gap-3",
-        )}
+      <div
+        role="group"
+        aria-label="Filter tools by category"
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 py-2"
       >
-        <CommandEmpty>No matching tools. Try database, shell, images, or publishing.</CommandEmpty>
-        {WORKSPACE_TOOL_CATEGORIES.map((category) => {
-          const categoryTools = visibleTools.filter((tool) => tool.category === category);
-          if (categoryTools.length === 0) return null;
+        {(["All", ...WORKSPACE_TOOL_CATEGORIES] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={category === value}
+            onClick={() => {
+              setCategory(value);
+              inputRef.current?.focus();
+            }}
+            className={cn(
+              "min-h-9 shrink-0 rounded-md px-3 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring",
+              category === value
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:bg-muted/60",
+            )}
+          >
+            {value}
+          </button>
+        ))}
+      </div>
+      <CommandList className="min-h-0 max-h-[min(60dvh,520px)] flex-1 p-2">
+        <CommandEmpty>
+          <span className="block px-4 text-sm">
+            No matching tools{category !== "All" ? ` in ${category}` : ""}.
+          </span>
+          <span className="mt-1 block px-4 text-xs text-muted-foreground">
+            Try another category, database, shell, images, or publishing.
+          </span>
+        </CommandEmpty>
+        {WORKSPACE_TOOL_CATEGORIES.map((group) => {
+          const items = visibleTools.filter((tool) => tool.category === group);
+          if (!items.length) return null;
           return (
-            <CommandGroup
-              key={category}
-              heading={category}
-              className={cn(
-                "rounded-lg border border-border/70 bg-muted/10 !p-1",
-                !isFiltering && [
-                  CATEGORY_GRID_CLASSES[category],
-                  "sm:[&_[cmdk-group-items]]:grid sm:[&_[cmdk-group-items]]:grid-cols-1 sm:[&_[cmdk-group-items]]:gap-0.5",
-                ],
-              )}
-            >
-              {categoryTools.map((tool) => {
-                const Icon = TOOL_ICONS[tool.id];
+            <CommandGroup key={group} heading={group} className="!p-1">
+              {items.map((tool) => {
+                const Icon = WORKSPACE_TOOL_ICONS[tool.id];
                 return (
                   <CommandItem
                     key={tool.id}
@@ -164,10 +120,10 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
                       onNavigate(tool.open);
                       onClose();
                     }}
-                    className="min-h-12 items-center gap-3 px-3 !py-2"
+                    className="min-h-14 items-center gap-3 rounded-lg px-3 !py-2"
                   >
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground">
-                      <Icon className="!h-3.5 !w-3.5" />
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/30 text-muted-foreground">
+                      <Icon aria-hidden="true" className="!h-4 !w-4" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-foreground">{tool.name}</span>
@@ -175,11 +131,6 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
                         {tool.description}
                       </span>
                     </span>
-                    {tool.placement === "primary" && (
-                      <CommandShortcut className="hidden normal-case tracking-normal 2xl:inline">
-                        Always visible
-                      </CommandShortcut>
-                    )}
                   </CommandItem>
                 );
               })}
@@ -187,6 +138,9 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
           );
         })}
       </CommandList>
+      <p className="shrink-0 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+        Arrow keys to browse. Enter to open. Escape to close.
+      </p>
     </CommandDialog>
   );
 }
