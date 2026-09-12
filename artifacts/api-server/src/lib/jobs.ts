@@ -60,7 +60,6 @@ import {
   type BuilderModelAdapter,
   type ConversationTurn,
 } from "./builder";
-import { openai } from "@workspace/integrations-openai-ai-server";
 import { formatWorkspaceToolsForAgent } from "@workspace/nabuflow-workspace-tools";
 import type { AgentMode } from "./ai";
 import { detectRequiredStack } from "./ai";

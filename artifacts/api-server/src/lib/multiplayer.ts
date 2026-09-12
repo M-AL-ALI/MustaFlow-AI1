@@ -173,7 +173,7 @@ export function createMultiplayerServer(): MultiplayerServer {
     const { userId, projectId } = admissionIdentity;
 
     let admissionCancelled = false;
-    let releasePeer: (() => void) | undefined;
+    let releasePeer: (() => void) | undefined = undefined;
     const cleanup = () => {
       admissionCancelled = true;
       releasePeer?.();
