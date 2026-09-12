@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import type { SecretInput } from "@workspace/api-client-react";
 import { ModuleLibrary, ModuleLibraryView } from "./module-library";
 import type { ModuleSecret } from "./module-library-model";
 const api = vi.hoisted(() => ({ save: vi.fn(), list: vi.fn() }));

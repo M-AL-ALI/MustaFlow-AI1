@@ -296,9 +296,7 @@ describe("project Secrets states and recovery", () => {
     unmount();
     await act(async () => {
       pending.reject(new Error("not-visible"));
-      try {
-        await pending.promise;
-      } catch {}
+      await expect(pending.promise).rejects.toThrow("not-visible");
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });

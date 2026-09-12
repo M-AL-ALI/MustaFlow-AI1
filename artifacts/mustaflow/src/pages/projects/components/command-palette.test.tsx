@@ -97,6 +97,25 @@ describe("project tool catalog", () => {
   });
 });
 
+describe("secondary search keyboard regression", () => {
+  it("opens Console output after ArrowDown from the exact Server match", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    render(<CommandPalette {...base} onNavigate={onNavigate} onClose={onClose} />);
+    await user.type(screen.getByLabelText("Search project tools"), "server");
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Server");
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /Console output/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await user.keyboard("{Enter}");
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith({ kind: "workspace-tab", tabId: "logs" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("ranked tool keyboard navigation", () => {
   it.each(WORKSPACE_TOOLS)(
     "opens exact name $name with Enter rather than a description match",

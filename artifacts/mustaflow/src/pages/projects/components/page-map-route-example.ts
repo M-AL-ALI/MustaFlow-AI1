@@ -27,7 +27,10 @@ export function resolvePageRouteExample(
     // A value represents exactly one path segment, not a URL or pre-encoded path.
     if (
       value.length > 256 ||
-      /[\\/:?#%*\[\]\x00-\x20\x7f-\x9f]/.test(value) ||
+      Array.from(value).some((character) => {
+        const code = character.charCodeAt(0);
+        return "\\/:?#%*[]".includes(character) || code <= 0x20 || (code >= 0x7f && code <= 0x9f);
+      }) ||
       value === "." ||
       value === ".."
     )

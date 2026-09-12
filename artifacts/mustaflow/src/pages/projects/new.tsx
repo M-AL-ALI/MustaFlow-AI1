@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -226,6 +234,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
     };
   });
   const draftWorkspace = ownedWorkspaces.find((workspace) => workspace.id === values.workspaceId);
+  const hasDraftWorkspace = Boolean(draftWorkspace);
   const [notice, setNotice] = useState(initial.notice);
   const [view, setView] = useState<"form" | "templates">("form");
   const [saved, setSaved] = useState(false);
@@ -243,7 +252,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
   const nameInput = useRef<HTMLInputElement>(null);
   const selectedTemplate = ALL_TEMPLATES.find((template) => template.id === values.templateId);
 
-  function hasCurrentAccount() {
+  const hasCurrentAccount = useCallback(() => {
     // A sidebar entry change fences late responses even before React commits its remount.
     const currentScope =
       typeof window === "undefined"
@@ -254,7 +263,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
       accountFence.current?.isCurrent() === true &&
       currentScope === requestedWorkspace(entryParams, "reviewWorkspaceId")
     );
-  }
+  }, [entryParams]);
 
   useLayoutEffect(() => {
     mounted.current = true;
@@ -339,6 +348,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
     isLoading,
     isError,
     principalReady,
+    hasCurrentAccount,
   ]);
 
   useEffect(() => {
@@ -348,7 +358,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
         ? { ...previous, workspaceId: selectableWorkspaceId }
         : previous,
     );
-  }, [selectableWorkspaceId, ownerId]);
+  }, [selectableWorkspaceId, ownerId, hasCurrentAccount]);
 
   useEffect(() => {
     if (
@@ -358,7 +368,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
       arrivalPending
     )
       return;
-    if (values.workspaceId !== undefined && (isLoading || isError || !draftWorkspace)) {
+    if (values.workspaceId !== undefined && (isLoading || isError || !hasDraftWorkspace)) {
       setSaved(false);
       return;
     }
@@ -385,7 +395,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
     arrivalPending,
     isLoading,
     isError,
-    draftWorkspace?.id,
+    hasDraftWorkspace,
   ]);
 
   function changePrompt(prompt: string) {

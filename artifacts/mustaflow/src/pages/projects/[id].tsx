@@ -30,49 +30,33 @@ import {
   builderModeLabel,
   normalizeBuilderAgentMode,
 } from "@/components/builder-mode-icon";
-import {
-  WORKSPACE_TOOLS,
-  type WorkspaceToolId,
-  type WorkspaceToolOpen,
-} from "@workspace/nabuflow-workspace-tools";
+import { WORKSPACE_TOOLS, type WorkspaceToolOpen } from "@workspace/nabuflow-workspace-tools";
 import { StreamingText, MarkdownMessage, TypingIndicator } from "./components/chat-history";
 import { Button } from "@/components/ui/button";
 import {
-  Settings,
   History,
   FileCode2,
-  Blocks,
   Globe,
   TerminalSquare,
-  BrainCircuit,
   AlertTriangle,
   KeyRound,
-  Paintbrush2,
-  Activity,
   Rocket,
   Sparkles,
   ChevronDown,
-  Monitor,
   Wrench,
-  Workflow,
   MessageSquare,
   ExternalLink,
-  BookOpen,
   ChevronRight,
   X,
   Puzzle,
   ListOrdered,
   ShieldCheck,
-  ScanSearch,
   Bookmark,
   Layers2,
   RotateCcw,
   DatabaseZap,
   Map,
   Square,
-  Github,
-  Plug,
-  HeartPulse,
   Cpu,
   Loader2,
   HelpCircle,
@@ -80,7 +64,6 @@ import {
   Search,
   WifiOff,
   RefreshCw,
-  ImagePlus,
 } from "lucide-react";
 import { SuggestionChips } from "./components/suggestion-chips";
 import { QueueComposer, type ComposerAttachment } from "./components/queue-composer";

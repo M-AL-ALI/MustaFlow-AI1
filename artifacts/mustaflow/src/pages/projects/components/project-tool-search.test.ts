@@ -201,3 +201,14 @@ describe("project tool relevance", () => {
     expect(findProjectTools("  ", true)).toEqual(WORKSPACE_TOOLS);
   });
 });
+
+describe("ID-only prefix ranking regression", () => {
+  it.each(["run", "  RUN  "])(
+    "ranks the runtime ID prefix %s ahead of descriptive matches",
+    (query) => {
+      const results = findProjectTools(query, false);
+      expect(results[0]).toBe(WORKSPACE_TOOLS.find((tool) => tool.id === "runtime"));
+      expect(results.some((tool) => tool.id === "workflows")).toBe(true);
+    },
+  );
+});

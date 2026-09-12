@@ -74,7 +74,7 @@ function normalizeToolSearch(value: string): string {
   return value
     .normalize("NFKC")
     .toLowerCase()
-    .replace(/[\u0610-\u061a\u0640\u064b-\u065f\u0670\u06d6-\u06ed]/gu, "")
+    .replace(/(?:[\u0610-\u061a]|\u0640|[\u064b-\u065f]|\u0670|[\u06d6-\u06ed])/gu, "")
     .replace(/[\u0622\u0623\u0625\u0671]/gu, "\u0627")
     .replace(/\u0649/gu, "\u064a")
     .trim();
