@@ -162,6 +162,7 @@ import {
 import { BuilderImageThreadGallery } from "./components/builder-image-thread-gallery";
 import { QATapeInline } from "./components/qa-tape-inline";
 import { InlineBuildResults } from "./components/inline-build-results";
+import { useInPlaceBuilderUpgrade } from "./components/use-in-place-builder-upgrade";
 import { workspaceReadinessSubjectFromTerminal } from "@/lib/workspace-readiness";
 import { useCheckpointHistoryNavigation } from "./components/use-checkpoint-history-navigation";
 import { EditorToolStrip } from "./components/editor-tool-strip";
@@ -436,11 +437,15 @@ type ChatPlanPayload =
 
 export function ReportCard({
   report,
+  taskId,
+  tasks = [],
   onViewFile,
   onOpenCheckpoint,
   onSendMessage,
 }: {
   report: TaskReport;
+  taskId?: number;
+  tasks?: ReadonlyArray<{ id: number; terminal?: unknown }>;
   onViewFile?: (path: string, line?: number) => void;
   onOpenCheckpoint?: (checkpointId: number) => void;
   onSendMessage?: (text: string) => void;
@@ -449,6 +454,9 @@ export function ReportCard({
     <div className="mt-2 space-y-1 text-xs">
       <InlineBuildResults
         report={report}
+        terminal={
+          taskId === undefined ? undefined : tasks.find((task) => task.id === taskId)?.terminal
+        }
         onViewFile={onViewFile}
         onOpenCheckpoint={onOpenCheckpoint}
         onSendMessage={onSendMessage}
@@ -2003,7 +2011,6 @@ export default function ProjectWorkspacePage() {
     }
   });
   const [upgradeNudgeVisible, setUpgradeNudgeVisible] = useState(false);
-  const [isUpgradingToAgentic, setIsUpgradingToAgentic] = useState(false);
   const updateProject = useUpdateProject();
 
   const persistAgentModeSelection = useCallback(
@@ -2057,20 +2064,6 @@ export default function ProjectWorkspacePage() {
     }
   }, [projectId]);
 
-  const upgradeToAgentic = useCallback(async () => {
-    if (!project || isUpgradingToAgentic) return;
-    setIsUpgradingToAgentic(true);
-    dismissUpgradeNudge();
-    try {
-      await updateProject.mutateAsync({
-        id: project.id,
-        data: { builderMode: "agentic" },
-      });
-      queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(project.id) });
-    } finally {
-      setIsUpgradingToAgentic(false);
-    }
-  }, [project, isUpgradingToAgentic, updateProject, queryClient, dismissUpgradeNudge]);
   // ── End upgrade nudge state ─────────────────────────────────────────────────
 
   const [focusMode, setFocusMode] = useState(false);
@@ -2147,6 +2140,22 @@ export default function ProjectWorkspacePage() {
     liveRunTerminalEvent === null &&
     isRehydratableTaskStatus(activeTaskStatus);
   const isBusy = sendMessage.isPending || isStreaming || hasRehydratedActiveRun;
+  const upgradeBlockedByRun =
+    isBusy || tasksForFeed.some((task) => isRehydratableTaskStatus(task.status));
+  const {
+    start: upgradeToAgentic,
+    pending: isUpgradingToAgentic,
+    error: upgradeError,
+  } = useInPlaceBuilderUpgrade({
+    projectId: project?.id,
+    busy: upgradeBlockedByRun,
+    apply: async (id) => {
+      const updated = await updateProject.mutateAsync({ id, data: { builderMode: "agentic" } });
+      queryClient.setQueryData(getGetProjectQueryKey(id), updated);
+      void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(id) });
+    },
+    onSuccess: dismissUpgradeNudge,
+  });
   const activeThreadDensity = threadDensityForMode(agentMode);
   const recoveryTasksForFeed = tasksForFeed as unknown as RecoveryTask[];
   const activeRecoverySourceTask = recoveryTasksForFeed.find((task) => task.id === activeTaskId);
@@ -4654,6 +4663,8 @@ export default function ProjectWorkspacePage() {
                                           )}
                                           <ReportCard
                                             report={rp.report}
+                                            taskId={rp.taskId}
+                                            tasks={tasksForFeed}
                                             onViewFile={(path, line) => {
                                               const f = files.find((x) => x.path === path);
                                               if (f) {
@@ -5033,13 +5044,23 @@ export default function ProjectWorkspacePage() {
                           This looks like a full-stack app
                         </p>
                         <p className="text-[11px] text-muted-foreground leading-snug">
-                          Your prompt mentions a database or backend. For a real server and Postgres
-                          database, start a full-stack project instead.
+                          Enable full-stack building here. Your project, files, and conversation
+                          stay in this workspace; you do not need to start again.
                         </p>
+                        {upgradeBlockedByRun && (
+                          <p className="text-[11px] text-muted-foreground">
+                            Available after the current run finishes.
+                          </p>
+                        )}
+                        {upgradeError && (
+                          <p role="alert" className="text-[11px] text-destructive">
+                            {upgradeError}
+                          </p>
+                        )}
                         <div className="flex items-center gap-2 pt-0.5">
                           <button
                             onClick={upgradeToAgentic}
-                            disabled={isUpgradingToAgentic}
+                            disabled={isUpgradingToAgentic || upgradeBlockedByRun}
                             className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-[11px] font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors"
                           >
                             {isUpgradingToAgentic ? (
@@ -5051,6 +5072,7 @@ export default function ProjectWorkspacePage() {
                           </button>
                           <button
                             onClick={dismissUpgradeNudge}
+                            disabled={isUpgradingToAgentic}
                             className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                           >
                             Dismiss
@@ -5061,6 +5083,7 @@ export default function ProjectWorkspacePage() {
                         onClick={dismissUpgradeNudge}
                         className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
                         aria-label="Dismiss upgrade nudge"
+                        disabled={isUpgradingToAgentic}
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>

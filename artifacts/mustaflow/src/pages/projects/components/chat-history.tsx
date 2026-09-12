@@ -1093,11 +1093,12 @@ function InlineReportCard({
     !!projectId &&
     taskAgeMs < TESTS_PENDING_WINDOW_MS;
 
-  // Poll the tasks list while we might still be waiting on test results.
+  // Terminal truth is required even after the short test-results polling window.
   const { data: liveTasks } = useListTasks(projectId ?? 0, {
     query: {
-      enabled: couldHaveTests,
+      enabled: !!projectId && !!taskId,
       queryKey: getListTasksQueryKey(projectId ?? 0),
+      refetchOnMount: "always",
       refetchInterval: couldHaveTests ? 3000 : false,
     },
   });

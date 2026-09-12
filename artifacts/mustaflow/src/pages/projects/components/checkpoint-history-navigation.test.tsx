@@ -12,6 +12,7 @@ import { useCheckpointHistoryNavigation } from "./use-checkpoint-history-navigat
 const restoreCheckpoint = vi.fn();
 const taskEventsApi = vi.hoisted(() => ({
   useListTaskEvents: vi.fn(() => ({ data: [] })),
+  useListTasks: vi.fn(() => ({ data: [] as Array<{ id: number; terminal?: unknown }> })),
 }));
 
 vi.mock("@workspace/api-client-react", () => ({
@@ -55,7 +56,7 @@ vi.mock("@workspace/api-client-react", () => ({
   useListProjectFiles: () => ({ data: [] }),
   useListNabuflowUsage: () => ({ data: { events: [] } }),
   useListTaskEvents: taskEventsApi.useListTaskEvents,
-  useListTasks: () => ({ data: [] }),
+  useListTasks: taskEventsApi.useListTasks,
   useListTestRuns: () => ({ data: [] }),
   useRerunTaskTests: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -177,6 +178,7 @@ describe("inline checkpoint history navigation", () => {
   beforeEach(() => {
     restoreCheckpoint.mockClear();
     taskEventsApi.useListTaskEvents.mockClear();
+    taskEventsApi.useListTasks.mockReset().mockReturnValue({ data: [] });
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn().mockReturnValue({
@@ -212,6 +214,62 @@ describe("inline checkpoint history navigation", () => {
       behavior: "smooth",
       block: "center",
     });
+  });
+
+  it("passes the matching run's failure through the real report wrapper, never an unrelated run", () => {
+    const failure = {
+      schema: "zero-terminal-v1",
+      outcome: "failed",
+      runStatus: "failed",
+      taskId: 317,
+      intent: "mutate",
+      intentReceiptId: 77,
+      completedAt: "2026-09-12T03:00:00.000Z",
+      cause: { code: "agent_model_request_timeout", stage: "mutation" },
+      evidence: { summary: "The selected run timed out; its app is not complete." },
+    };
+    const report = {
+      userRequest: "Build notes",
+      filesCreated: [],
+      filesChanged: [],
+      filesRemoved: [],
+      previewUpdated: false,
+      warnings: [],
+    };
+    const tasks = [
+      { id: 318, terminal: { ...failure, taskId: 318, evidence: { summary: "UNRELATED_RUN" } } },
+      { id: 317, terminal: failure },
+    ];
+    const { rerender } = render(<ReportCard report={report} taskId={317} tasks={tasks} />);
+    expect(screen.getByTestId("inline-build-summary")).toHaveTextContent(failure.evidence.summary);
+    expect(screen.getByTestId("inline-build-summary")).not.toHaveTextContent("older run");
+    expect(screen.getByTestId("inline-build-summary")).not.toHaveTextContent("UNRELATED_RUN");
+    rerender(<ReportCard report={report} taskId={999} tasks={tasks} />);
+    expect(screen.getByTestId("inline-build-summary")).toHaveTextContent("Outcome unavailable");
+    rerender(
+      <ReportCard
+        report={report}
+        taskId={317}
+        tasks={[{ id: 317, terminal: { outcome: "failed" } }]}
+      />,
+    );
+    expect(screen.getByTestId("inline-build-summary")).toHaveTextContent("Outcome unavailable");
+  });
+
+  it("loads terminal evidence in full history even after the test-results polling window", async () => {
+    const user = userEvent.setup();
+    render(<FullHistoryNavigationHarness />);
+    await user.click(screen.getByRole("button", { name: "Build details" }));
+    expect(taskEventsApi.useListTasks).toHaveBeenCalledWith(
+      44,
+      expect.objectContaining({
+        query: expect.objectContaining({
+          enabled: true,
+          refetchOnMount: "always",
+          refetchInterval: false,
+        }),
+      }),
+    );
   });
 
   it("does not lose the live checkpoint action when the completed report is replaced by a refetch", async () => {

@@ -5,7 +5,7 @@ const CLEANUP_RESERVE_MS = 5_000;
 const MIN_RECOVERY_REQUEST_MS = 1_000;
 
 export const AGENT_MODEL_RECOVERY_HINT =
-  "[MODEL REQUEST TIMEOUT RECOVERY] The previous model request exceeded its deadline. " +
+  "[MODEL RESPONSE RECOVERY] The previous response was incomplete or exceeded its deadline. " +
   "Continue from the existing conversation and workspace without dropping any user requirement. " +
   "Return exactly ONE small tool call next: one focused read, write, or patch. " +
   "Split large implementations into small modules and continue incrementally. " +
@@ -15,6 +15,7 @@ export const AGENT_MODEL_RECOVERY_HINT =
 
 type FailureCode =
   | "agent_model_request_timeout"
+  | "agent_model_response_incomplete"
   | "agent_model_run_budget_exhausted"
   | "agent_model_request_aborted"
   | "agent_model_request_rejected";
@@ -33,15 +34,20 @@ export type AgentModelRequestDiagnostic = {
   remainingMs: number;
   classification:
     | "request-timeout"
+    | "response-incomplete"
     | "run-budget-exhausted"
     | "unattributed-abort"
     | "access-rejected";
   recoveryAttempted: boolean;
   recoveryScheduled: boolean;
   httpStatus?: number;
+  provider?: string;
+  model?: string;
 };
 
 const FAILURE_MESSAGES: Record<FailureCode, string> = {
+  agent_model_response_incomplete:
+    "The model returned incomplete tool instructions. They were not executed, and this run could not finish.",
   agent_model_request_timeout:
     "The model request timed out and this run could not finish. Earlier file edits may still be present. Review them before continuing with a smaller step.",
   agent_model_run_budget_exhausted:
@@ -81,6 +87,8 @@ export class AgentModelRequestError extends Error {
         recoveryAttempted: diagnostic.recoveryAttempted,
         recoveryScheduled: diagnostic.recoveryScheduled,
         ...(diagnostic.httpStatus === undefined ? {} : { httpStatus: diagnostic.httpStatus }),
+        ...(diagnostic.provider === undefined ? {} : { provider: diagnostic.provider }),
+        ...(diagnostic.model === undefined ? {} : { model: diagnostic.model }),
       },
     };
   }
@@ -129,6 +137,17 @@ export class AgentModelRequestError extends Error {
       ...(report.creativeCalls === undefined ? {} : { creativeCalls: { ...report.creativeCalls } }),
     };
   }
+
+  attachUncommittedWorkspace(summary: {
+    changedFileCount: number;
+    removedFileCount: number;
+    unchangedFileCount: number;
+  }): void {
+    this.failureEvidence.evidence = {
+      ...this.failureEvidence.evidence,
+      workspace: { state: "not_committed", ...summary },
+    };
+  }
 }
 
 export function buildAgentModelFailureReport(
@@ -144,6 +163,11 @@ export function buildAgentModelFailureReport(
     previewUpdated: false,
     warnings: [
       "Run incomplete. Earlier file edits may still be present and have not been accepted as a completed build.",
+      ...(failure.failureEvidence.evidence?.workspace
+        ? [
+            "Candidate workspace edits were not committed to a saved project version by this run. Runtime side effects, if any, are not verified by this report.",
+          ]
+        : []),
     ],
     integrationsNeeded: [],
     summary: failure.message,
@@ -163,11 +187,15 @@ export type AgentModelRequestOptions<T> = {
   signal: AbortSignal;
   startedAt: number;
   deadlineAt: number;
-  context: Pick<AgentModelRequestDiagnostic, "taskId" | "projectId" | "stage" | "step">;
+  context: Pick<
+    AgentModelRequestDiagnostic,
+    "taskId" | "projectId" | "stage" | "step" | "provider" | "model"
+  >;
   /** Shared across every model turn in one run, including successful recovery. */
   recovery: { used: boolean };
   request: (signal: AbortSignal) => Promise<T>;
-  onRecovery: (hint: string) => void;
+  isResponseComplete?: (response: T) => boolean;
+  onRecovery: (hint: string, reason: "request-timeout" | "response-incomplete") => void;
   onDiagnostic?: (diagnostic: AgentModelRequestDiagnostic) => void;
 };
 
@@ -203,6 +231,8 @@ function emitDiagnostic(
     // Telemetry must not replace the primary failure or trigger another request.
   }
 }
+
+class IncompleteAgentModelResponseError extends Error {}
 
 /** Stop awaiting even if a provider adapter ignores abort; consume any late rejection. */
 function requestWithinSignal<T>(
@@ -262,6 +292,9 @@ export async function runAgentModelRequest<T>(input: AgentModelRequestOptions<T>
     try {
       const response = await requestWithinSignal(input.request, signal);
       signal.throwIfAborted();
+      if (input.isResponseComplete && !input.isResponseComplete(response)) {
+        throw new IncompleteAgentModelResponseError();
+      }
       return response;
     } catch (error) {
       requestError = error;
@@ -278,7 +311,8 @@ export async function runAgentModelRequest<T>(input: AgentModelRequestOptions<T>
       errorName === "TimeoutError" ||
       errorName === "APIConnectionTimeoutError" ||
       constructorName === "APIConnectionTimeoutError";
-    if (timedOut) {
+    const incomplete = requestError instanceof IncompleteAgentModelResponseError;
+    if (timedOut || incomplete) {
       const enoughTime =
         input.deadlineAt - Date.now() - CLEANUP_RESERVE_MS >= MIN_RECOVERY_REQUEST_MS;
       const recover = !input.recovery.used && enoughTime;
@@ -286,17 +320,28 @@ export async function runAgentModelRequest<T>(input: AgentModelRequestOptions<T>
         input,
         attempt,
         requestTimeoutMs,
-        enoughTime ? "request-timeout" : "run-budget-exhausted",
+        enoughTime
+          ? incomplete
+            ? "response-incomplete"
+            : "request-timeout"
+          : "run-budget-exhausted",
         recover,
       );
       emitDiagnostic(input, evidence);
       if (recover) {
         input.recovery.used = true;
-        input.onRecovery(AGENT_MODEL_RECOVERY_HINT);
+        input.onRecovery(
+          AGENT_MODEL_RECOVERY_HINT,
+          incomplete ? "response-incomplete" : "request-timeout",
+        );
         continue;
       }
       throw new AgentModelRequestError(
-        enoughTime ? "agent_model_request_timeout" : "agent_model_run_budget_exhausted",
+        enoughTime
+          ? incomplete
+            ? "agent_model_response_incomplete"
+            : "agent_model_request_timeout"
+          : "agent_model_run_budget_exhausted",
         evidence,
       );
     }

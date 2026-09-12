@@ -277,6 +277,27 @@ describe("agent model failure report handoff", () => {
     expect(store.notifyPreview).not.toHaveBeenCalled();
   });
 
+  it("distinguishes candidate file edits from accepted project output without storing source", () => {
+    const failure = failureWithPartialLoop();
+    failure.attachUncommittedWorkspace({
+      changedFileCount: 6,
+      removedFileCount: 0,
+      unchangedFileCount: 3,
+    });
+    const report = buildAgentModelFailureReport(failure, "Build persistent notes.");
+    expect(report.failureEvidence?.evidence?.workspace).toEqual({
+      state: "not_committed",
+      changedFileCount: 6,
+      removedFileCount: 0,
+      unchangedFileCount: 3,
+    });
+    expect(report.filesCreated).toEqual([]);
+    expect(report.filesChanged).toEqual([]);
+    expect(report.previewUpdated).toBe(false);
+    expect(report.warnings.join(" ")).toContain("not committed to a saved project version");
+    expect(JSON.stringify(report)).not.toContain("PRIVATE_PAYLOAD_MUST_NOT_LEAK");
+  });
+
   it.each(["existing-terminal", "status-changed"])(
     "respects the existing terminal/status gate (%s)",
     async (condition) => {

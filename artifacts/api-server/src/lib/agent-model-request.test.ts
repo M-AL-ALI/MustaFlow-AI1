@@ -141,6 +141,66 @@ describe("bounded agent model-request recovery", () => {
     expect(input.request).not.toHaveBeenCalled();
   });
 
+  it("recovers an incomplete response without returning its partial tool instructions", async () => {
+    const input = options(
+      vi.fn().mockResolvedValueOnce("partial").mockResolvedValueOnce("complete"),
+      {
+        isResponseComplete: (response) => response === "complete",
+      },
+    );
+    await expect(runAgentModelRequest(input)).resolves.toBe("complete");
+    expect(input.request).toHaveBeenCalledTimes(2);
+    expect(input.onRecovery).toHaveBeenCalledWith(AGENT_MODEL_RECOVERY_HINT, "response-incomplete");
+    expect(input.onDiagnostic).toHaveBeenCalledWith(
+      expect.objectContaining({ classification: "response-incomplete", recoveryScheduled: true }),
+    );
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("shares one recovery allowance between truncated responses and timeouts", async () => {
+    const input = options(
+      vi
+        .fn()
+        .mockResolvedValueOnce("partial")
+        .mockImplementation(() => new Promise<string>(() => {})),
+      {
+        isResponseComplete: () => false,
+      },
+    );
+    const result = runAgentModelRequest(input).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(AGENT_MODEL_REQUEST_TIMEOUT_MS);
+    expect(await result).toMatchObject({ code: "agent_model_request_timeout" });
+    expect(input.request).toHaveBeenCalledTimes(2);
+    expect(input.onRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed after a second incomplete response and keeps routed diagnostics", async () => {
+    const input = options(vi.fn().mockResolvedValue("partial"), {
+      isResponseComplete: () => false,
+      context: {
+        projectId: 61,
+        taskId: 317,
+        stage: "refine",
+        step: 13,
+        provider: "openai",
+        model: "selected-model",
+      },
+    });
+    await expect(runAgentModelRequest(input)).rejects.toMatchObject({
+      code: "agent_model_response_incomplete",
+      failureEvidence: {
+        evidence: {
+          classification: "response-incomplete",
+          provider: "openai",
+          model: "selected-model",
+          recoveryScheduled: false,
+        },
+      },
+    });
+    expect(input.request).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("preserves an in-flight caller abort without retry or timeout attribution", async () => {
     const controller = new AbortController();
     const reason = new DOMException("User stopped the run", "AbortError");

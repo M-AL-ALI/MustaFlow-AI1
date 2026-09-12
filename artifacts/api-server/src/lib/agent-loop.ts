@@ -48,6 +48,7 @@ import {
 } from "./checks/e2e-runner";
 import { logger } from "./logger";
 import { AgentModelRequestError, runAgentModelRequest } from "./agent-model-request";
+import { boundedAgentModelTurn, isCompleteAgentModelResponse } from "./agent-model-response-policy";
 import {
   CHECK_PROFILES,
   checkProfileForServicePort,
@@ -2561,14 +2562,19 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           projectId: input.projectId,
           stage: input.mode === "refine" ? "refine" : "build",
           step,
+          provider: effectiveProvider,
+          model: effectiveModel,
         },
         recovery: modelRequestRecovery,
-        onRecovery: (hint) => {
+        isResponseComplete: isCompleteAgentModelResponse,
+        onRecovery: (hint, reason) => {
           messages.push({ role: "system", content: hint });
           void safeEvent(
             input.onEvent,
             "narration",
-            "The model request timed out. Trying one smaller response within this run's remaining time; your requirements are unchanged.",
+            reason === "request-timeout"
+              ? "The model request timed out. Trying one smaller response within this run's remaining time; your requirements are unchanged."
+              : "The model response was incomplete. Its tool instructions were not executed. Continuing with a smaller response and the same requirements.",
           );
         },
         onDiagnostic: (diagnostic) => {
@@ -2578,18 +2584,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         // Keep the same routed provider/model, tools, conversation, and token telemetry.
         request: (requestSignal) =>
           createChatCompletion({
-            provider: effectiveProvider,
-            model: effectiveModel,
-            messages,
-            tools: toolsForLoop,
-            tool_choice: "required",
-            signal: requestSignal,
-            taskId: input.taskId ?? undefined,
-            taskMode: input.agentMode,
-            zeroCall: {
-              tier: input.agentMode,
-              stage: input.mode === "refine" ? "refine" : "build",
-            },
+            ...boundedAgentModelTurn(
+              {
+                provider: effectiveProvider,
+                model: effectiveModel,
+                messages,
+                tools: toolsForLoop,
+                tool_choice: "required",
+                signal: requestSignal,
+                taskId: input.taskId ?? undefined,
+                taskMode: input.agentMode,
+                zeroCall: {
+                  tier: input.agentMode,
+                  stage: input.mode === "refine" ? "refine" : "build",
+                },
+              },
+              modelRequestRecovery.used,
+            ),
           }),
       });
     } catch (err) {
@@ -3482,6 +3493,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // Preserve the primary request failure before checks or sealed preparation can mask it.
   // This is a failed run, not an exemption from any validation or persistence gate.
   if (modelRequestFailure && !input.signal.aborted) {
+    const uncommitted = workspace.diff();
+    modelRequestFailure.attachUncommittedWorkspace({
+      changedFileCount: uncommitted.changed.length,
+      removedFileCount: uncommitted.removed.length,
+      unchangedFileCount: uncommitted.unchanged.length,
+    });
     modelRequestFailure.attachLoopReport({
       stack,
       steps: Math.min(toolCalls.length, stepCap),

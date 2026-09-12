@@ -1123,7 +1123,12 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
     model: res.model ?? params.model,
     content: text,
     toolCalls: outToolCalls,
-    finishReason: res.stop_reason === "tool_use" ? "tool_calls" : "stop",
+    finishReason:
+      res.stop_reason === "max_tokens"
+        ? "length"
+        : res.stop_reason === "tool_use"
+          ? "tool_calls"
+          : "stop",
     promptTokens: res.usage?.input_tokens ?? 0,
     completionTokens: res.usage?.output_tokens ?? 0,
   });
@@ -1413,7 +1418,12 @@ async function callGemini(params: CreateChatCompletionParams): Promise<ChatCompl
     model: params.model,
     content: text,
     toolCalls: outToolCalls,
-    finishReason: outToolCalls.length > 0 ? "tool_calls" : "stop",
+    finishReason:
+      candidate?.finishReason === "MAX_TOKENS"
+        ? "length"
+        : outToolCalls.length > 0
+          ? "tool_calls"
+          : "stop",
     promptTokens: usage.promptTokenCount ?? 0,
     completionTokens: usage.candidatesTokenCount ?? 0,
   });
