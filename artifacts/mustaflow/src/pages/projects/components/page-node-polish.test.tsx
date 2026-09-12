@@ -29,6 +29,7 @@ function nodeProps(overrides: Partial<PageNodeData> = {}) {
       filePath: "src/pages/Account.tsx",
       notes: "Route: /account/profile",
       projectId: 901,
+      previewEnabled: true,
       isNew: false,
       hasError: false,
       aiGenerated: true,
@@ -40,6 +41,24 @@ function nodeProps(overrides: Partial<PageNodeData> = {}) {
 }
 
 describe("Page Map card accessibility and evidence", () => {
+  it.each([false, undefined])(
+    "does not load a frame without positive readiness (%s)",
+    (previewEnabled) => {
+      const props = nodeProps({ previewEnabled });
+      render(<PageNode {...props} />);
+      expect(screen.queryByTitle("Preview of Account")).toBeNull();
+      expect(screen.getByText("Open Preview to view this page")).toBeVisible();
+      fireEvent.keyDown(screen.getByRole("button", { name: "Open preview: Account" }), {
+        key: "Enter",
+      });
+      expect(props.data.onPreviewClick).toHaveBeenCalledExactlyOnceWith(
+        "src/pages/Account.tsx",
+        "/account/profile",
+      );
+      expect(props.data.onNodeClick).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([false, true])("opens details from the keyboard (planned: %s)", async (planned) => {
     const user = userEvent.setup();
     const props = nodeProps({ planned });

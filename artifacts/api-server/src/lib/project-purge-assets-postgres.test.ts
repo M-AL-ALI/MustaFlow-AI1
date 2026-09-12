@@ -59,6 +59,7 @@ vi.mock("./asset-r2", () => ({
   headAssetObject: provider.headAssetObject,
   putAssetStream: provider.putAssetStream,
   openAsset: provider.openAsset,
+  readAssetBuffer: provider.forbidden,
 }));
 vi.mock("./snapshot-storage", () => ({
   deleteSnapshotBlob: provider.forbidden,
@@ -1290,11 +1291,476 @@ describe.skipIf(!config)("final purge alias isolation with real PostgreSQL", () 
           )
         ).rows,
       ).toEqual([]);
+
+      // Reuse the supervisor's validated fixture owners/projects, not its raw
+      // pre-migration seeder. These new rows have no alias/usage retention pins.
+      const { parseProjectFileAssetReference } = await import("./project-file-asset-reference");
+      const functionNames = [
+        "extract_typed_durable_asset_ids",
+        "extract_durable_asset_ids",
+        "resolve_durable_asset_ids",
+        "resolve_durable_storage_keys",
+        "durable_asset_reference_exists_excluding_upload",
+        "durable_asset_reference_exists",
+        "require_attachable_assets_in_durable_reference",
+      ];
+      const installed = await client.query<{ name: string }>(
+        "SELECT p.proname::text AS name FROM pg_proc p " +
+          "JOIN pg_namespace n ON n.oid=p.pronamespace " +
+          "WHERE n.nspname='public' AND p.proname=ANY($1::text[])",
+        [functionNames],
+      );
+      expect(installed.rows.map((row) => row.name).sort()).toEqual([...functionNames].sort());
+      const taskGuard = await client.query<{ definition: string }>(
+        "SELECT pg_get_triggerdef(t.oid) AS definition FROM pg_trigger t " +
+          "WHERE t.tgrelid='public.agent_tasks'::regclass " +
+          "AND t.tgname='durable_asset_reference_guard_agent_tasks' " +
+          "AND t.tgenabled IN ('O','A') AND NOT t.tgisinternal " +
+          "AND t.tgtype=23 AND t.tgqual IS NULL " +
+          "AND t.tgfoid='public.require_attachable_assets_in_durable_reference()'::regprocedure",
+      );
+      expect(taskGuard.rows).toHaveLength(1);
+      expect(taskGuard.rows[0]!.definition).toContain(
+        "project_id, attachments, report, staging_snapshot",
+      );
+      expect((await client.query("SHOW session_replication_role")).rows).toEqual([
+        { session_replication_role: "origin" },
+      ]);
+
+      const fields = ["staging_snapshot", "report"] as const;
+      type CarrierField = (typeof fields)[number];
+      const encodings = ["canonical", "numeric", "typed"] as const;
+      type CarrierEncoding = (typeof encodings)[number];
+      const operations = ["INSERT", "UPDATE"] as const;
+      type CarrierOperation = (typeof operations)[number];
+      const categories = [
+        "ready_same_project",
+        "explicit_grant",
+        "foreign_no_grant",
+        "ora",
+        "missing",
+        "deleting",
+        "deleted",
+      ] as const;
+      const digest = sha256("x");
+      const typed = (assetId: string | number, size: string | number = 1, hash = digest) =>
+        "@nabuflow/asset-ref:v1:" + assetId + ":" + size + ":" + hash;
+      const carrier = (
+        field: CarrierField,
+        encoding: CarrierEncoding,
+        assetId: number,
+        reference?: string,
+      ): unknown => {
+        const content =
+          reference ??
+          (encoding === "canonical"
+            ? "/api/assets/" + assetId + "/content"
+            : encoding === "typed"
+              ? typed(assetId)
+              : "numeric metadata control");
+        return field === "staging_snapshot"
+          ? [
+              {
+                path: "public/g1.bin",
+                content,
+                mimeType: "application/octet-stream",
+                // Numeric metadata is an SQL control, not a BuilderFile claim.
+                ...(encoding === "numeric" ? { assetId } : {}),
+              },
+            ]
+          : {
+              userRequest: "synthetic failed-task carrier",
+              evidence: encoding === "numeric" ? { assetId } : { content },
+            };
+      };
+      const retained = async (assetId: number): Promise<boolean> => {
+        const result = await client.query<{ retained: boolean }>(
+          "SELECT public.durable_asset_reference_exists($1,NULL,NULL) AS retained",
+          [assetId],
+        );
+        return result.rows[0]!.retained;
+      };
+      const seedAsset = async (category: string) => {
+        const projectId =
+          category === "ora"
+            ? null
+            : ["explicit_grant", "foreign_no_grant"].includes(category)
+              ? f.sourceId
+              : f.targetId;
+        const state = ["deleting", "deleted"].includes(category) ? category : "ready";
+        const storageKey =
+          "assets/" +
+          sha256(f.owner).slice(0, 24) +
+          "/" +
+          (projectId === null ? "account" : "project-" + projectId) +
+          "/" +
+          randomUUID() +
+          "/g1.bin";
+        const asset = await client.query<{ id: number }>(
+          "INSERT INTO assets (owner_user_id,actor_user_id,project_id,scope,product_scope,kind,source," +
+            "filename,mime_type,size_bytes,sha256,storage_backend,storage_key,state,scan_state,ready_at,deleted_at) " +
+            "VALUES ($1,$1,$2,$3,$4,'file','isolation-proof','g1.bin','application/octet-stream',1,$5," +
+            "'r2',$6,$7,'not-required',NOW(),CASE WHEN $7='deleted' THEN NOW() ELSE NULL END) RETURNING id",
+          [
+            f.owner,
+            projectId,
+            category === "ora" ? "account" : "project",
+            category === "ora" ? "ora" : "nabuflow",
+            digest,
+            storageKey,
+            state,
+          ],
+        );
+        const id = asset.rows[0]!.id;
+        await client.query(
+          "INSERT INTO asset_storage_objects " +
+            "(asset_id,storage_backend,storage_key,role,state,size_bytes,ready_at,deleted_at) " +
+            "VALUES ($1,'r2',$2,'primary',$3,1,NOW(),CASE WHEN $3='deleted' THEN NOW() ELSE NULL END)",
+          [id, storageKey, state],
+        );
+        return { id, storageKey };
+      };
+      const insertTask = async (field: CarrierField, payload: unknown, title: string) => {
+        const result = await client.query<{ id: number }>(
+          "INSERT INTO agent_tasks " +
+            "(project_id,title,kind,status,agent_identity,origin,provenance_actor_user_id,prompt," +
+            field +
+            ") " +
+            "VALUES ($1,$2,'main','failed','main','builder',$3,'synthetic source',$4::jsonb) RETURNING id",
+          [f.targetId, title, f.owner, payload === null ? null : JSON.stringify(payload)],
+        );
+        return result.rows[0]!.id;
+      };
+      const grant = async (assetId: number) => {
+        const result = await client.query<{ id: number }>(
+          "INSERT INTO asset_usage (asset_id,project_id,artifact_id,version_id,file_path,consumer) " +
+            "VALUES ($1,$2,NULL,NULL,NULL,'explicit-project-use:v1') RETURNING id",
+          [assetId, f.targetId],
+        );
+        return result.rows[0]!.id;
+      };
+      const removeGrant = async (grantId: number, assetId: number) => {
+        const result = await client.query(
+          "DELETE FROM asset_usage WHERE id=$1 AND asset_id=$2 AND project_id=$3 " +
+            "AND consumer='explicit-project-use:v1' RETURNING id",
+          [grantId, assetId, f.targetId],
+        );
+        expect(result.rows).toEqual([{ id: grantId }]);
+      };
+      const removeTask = async (taskId: number) => {
+        const result = await client.query(
+          "DELETE FROM agent_tasks WHERE id=$1 AND project_id=$2 RETURNING id",
+          [taskId, f.targetId],
+        );
+        expect(result.rows).toEqual([{ id: taskId }]);
+      };
+      const attempt = async (
+        field: CarrierField,
+        payload: unknown,
+        operation: CarrierOperation,
+        rejection?: { code: string; message?: string },
+      ) => {
+        const title = f.tag + ":g1:" + randomUUID();
+        let taskId = operation === "UPDATE" ? await insertTask(field, null, title) : undefined;
+        await client.query("SAVEPOINT g1_attempt");
+        const write = async () => {
+          if (operation === "INSERT") {
+            taskId = await insertTask(field, payload, title);
+          } else {
+            const result = await client.query(
+              "UPDATE agent_tasks SET " +
+                field +
+                "=$1::jsonb WHERE id=$2 AND project_id=$3 RETURNING id",
+              [JSON.stringify(payload), taskId, f.targetId],
+            );
+            expect(result.rows).toEqual([{ id: taskId }]);
+          }
+        };
+        if (rejection) {
+          await expect(write()).rejects.toMatchObject(rejection);
+          await client.query("ROLLBACK TO SAVEPOINT g1_attempt");
+        } else {
+          await write();
+        }
+        await client.query("RELEASE SAVEPOINT g1_attempt");
+        const rows = (
+          await client.query(
+            "SELECT project_id,status,staging_snapshot,report FROM agent_tasks WHERE project_id=$1 AND title=$2",
+            [f.targetId, title],
+          )
+        ).rows;
+        if (rejection && operation === "INSERT") {
+          expect(rows).toHaveLength(0);
+        } else {
+          expect(rows).toHaveLength(1);
+          expect(rows[0]).toMatchObject({
+            project_id: f.targetId,
+            status: "failed",
+            ...(rejection ? { staging_snapshot: null, report: null } : { [field]: payload }),
+          });
+        }
+        return taskId;
+      };
+
+      const assets = {} as Record<(typeof categories)[number], { id: number; storageKey: string }>;
+      for (const category of categories) {
+        if (category !== "missing") assets[category] = await seedAsset(category);
+      }
+      const missing = await client.query<{ id: number }>(
+        "SELECT nextval(pg_get_serial_sequence('public.assets','id'))::integer AS id",
+      );
+      assets.missing = { id: missing.rows[0]!.id, storageKey: "" };
+      expect(
+        (await client.query("SELECT id FROM assets WHERE id=$1", [assets.missing.id])).rows,
+      ).toEqual([]);
+
+      let matrixCases = 0;
+      for (const category of categories) {
+        const assetId = assets[category].id;
+        for (const field of fields) {
+          for (const encoding of encodings) {
+            for (const operation of operations) {
+              await client.query("SAVEPOINT g1_case");
+              try {
+                const label = [category, field, encoding, operation].join("/");
+                expect(await retained(assetId), label + ": baseline").toBe(false);
+                const grantId = category === "explicit_grant" ? await grant(assetId) : undefined;
+                if (grantId !== undefined)
+                  expect(await retained(assetId), label + ": grant pin").toBe(true);
+                const allowed = category === "ready_same_project" || category === "explicit_grant";
+                const taskId = await attempt(
+                  field,
+                  carrier(field, encoding, assetId),
+                  operation,
+                  allowed
+                    ? undefined
+                    : category === "foreign_no_grant" || category === "ora"
+                      ? { code: "42501", message: "asset_reference_forbidden" }
+                      : { code: "55000", message: "asset_not_ready" },
+                );
+                if (grantId !== undefined) await removeGrant(grantId, assetId);
+                expect(await retained(assetId), label + ": sole carrier").toBe(allowed);
+                if (taskId !== undefined) await removeTask(taskId);
+                expect(await retained(assetId), label + ": carrier removed").toBe(false);
+                matrixCases += 1;
+              } finally {
+                await client.query("ROLLBACK TO SAVEPOINT g1_case");
+                await client.query("RELEASE SAVEPOINT g1_case");
+              }
+            }
+          }
+        }
+      }
+      expect(matrixCases).toBe(84);
+
+      // Compare decoded whole-string SQL recognition with the actual TS parser,
+      // including BIGINT IDs that cannot be silently dropped by the resolver.
+      const liveId = assets.ready_same_project.id;
+      const basic = typed(liveId);
+      const atLimit = typed("0".repeat(160 - basic.length) + liveId);
+      const parserCases = [
+        basic,
+        typed("000" + liveId, "0001"),
+        atLimit,
+        "0" + atLimit,
+        typed("0".repeat(161 - basic.length) + liveId),
+        typed(1, 26214400),
+        typed(2147483647),
+        typed(2147483648),
+        typed("9007199254740991"),
+        typed("9007199254740992"),
+        typed(0),
+        typed("-1"),
+        typed("+1"),
+        typed("1.0"),
+        typed("1e1"),
+        typed(liveId, 0),
+        typed(liveId, 26214401),
+        typed(liveId, "-1"),
+        typed(liveId, "+1"),
+        typed(liveId, "1.0"),
+        typed(liveId, "1e1"),
+        typed(liveId, 1, digest.toUpperCase()),
+        typed(liveId, 1, digest.slice(1)),
+        typed(liveId, 1, digest + "a"),
+        basic + " ",
+        basic + "\n",
+        "prefix " + basic,
+        JSON.stringify({ content: basic }),
+      ];
+      for (const reference of parserCases) {
+        const parsed = parseProjectFileAssetReference(reference);
+        const expected = parsed ? [{ id: String(parsed.assetId) }] : [];
+        for (const wire of [
+          JSON.stringify(reference),
+          JSON.stringify({ nested: [{ content: reference }] }),
+        ]) {
+          const typedIds = await client.query(
+            "SELECT resolved.id::text AS id FROM public.extract_typed_durable_asset_ids($1::jsonb) resolved(id)",
+            [wire],
+          );
+          expect(typedIds.rows, reference).toEqual(expected);
+          const integerIds = await client.query(
+            "SELECT resolved.id::text AS id FROM public.extract_durable_asset_ids($1::jsonb) resolved(id)",
+            [wire],
+          );
+          expect(integerIds.rows, reference).toEqual(
+            parsed && parsed.assetId <= 2147483647 ? expected : [],
+          );
+        }
+        if (parsed && parsed.assetId > 2147483647) {
+          await client.query("SAVEPOINT g1_parser");
+          await expect(
+            client.query("SELECT public.resolve_durable_asset_ids($1::jsonb)", [
+              JSON.stringify({ content: reference }),
+            ]),
+          ).rejects.toMatchObject({ code: "55000" });
+          await client.query("ROLLBACK TO SAVEPOINT g1_parser");
+          await client.query("RELEASE SAVEPOINT g1_parser");
+          for (const field of fields) {
+            for (const operation of operations) {
+              await client.query("SAVEPOINT g1_wide_id");
+              await attempt(field, carrier(field, "typed", liveId, reference), operation, {
+                code: "55000",
+              });
+              await client.query("ROLLBACK TO SAVEPOINT g1_wide_id");
+              await client.query("RELEASE SAVEPOINT g1_wide_id");
+            }
+          }
+        }
+      }
+      const escaped = JSON.stringify({ nested: [basic] }).replace("@", "\\u0040");
+      expect(
+        (
+          await client.query(
+            "SELECT resolved.id::text AS id FROM public.extract_typed_durable_asset_ids($1::jsonb) resolved(id)",
+            [escaped],
+          )
+        ).rows,
+      ).toEqual([{ id: String(liveId) }]);
+      expect(
+        (
+          await client.query("SELECT public.extract_typed_durable_asset_ids($1::jsonb)", [
+            JSON.stringify({ [basic]: "ordinary object key, not a reference value" }),
+          ])
+        ).rows,
+      ).toEqual([]);
+
+      // OLD may already resolve the same ID. NEW typed references still need
+      // a current grant, including when OLD itself was a typed reference.
+      for (const field of fields) {
+        for (const oldEncoding of encodings) {
+          await client.query("SAVEPOINT g1_grandfather");
+          try {
+            const assetId = assets.explicit_grant.id;
+            expect(await retained(assetId)).toBe(false);
+            const grantId = await grant(assetId);
+            const oldPayload = carrier(field, oldEncoding, assetId);
+            const taskId = await insertTask(field, oldPayload, f.tag + ":g1-old:" + randomUUID());
+            await removeGrant(grantId, assetId);
+            expect(await retained(assetId)).toBe(true);
+            await client.query("SAVEPOINT g1_promote");
+            await expect(
+              client.query(
+                "UPDATE agent_tasks SET " + field + "=$1::jsonb WHERE id=$2 AND project_id=$3",
+                [JSON.stringify(carrier(field, "typed", assetId)), taskId, f.targetId],
+              ),
+            ).rejects.toMatchObject({ code: "42501", message: "asset_reference_forbidden" });
+            await client.query("ROLLBACK TO SAVEPOINT g1_promote");
+            await client.query("RELEASE SAVEPOINT g1_promote");
+            expect(
+              (
+                await client.query(
+                  "SELECT " + field + " AS payload FROM agent_tasks WHERE id=$1 AND project_id=$2",
+                  [taskId, f.targetId],
+                )
+              ).rows,
+            ).toEqual([{ payload: oldPayload }]);
+            await removeTask(taskId);
+            expect(await retained(assetId)).toBe(false);
+          } finally {
+            await client.query("ROLLBACK TO SAVEPOINT g1_grandfather");
+            await client.query("RELEASE SAVEPOINT g1_grandfather");
+          }
+        }
+      }
+
+      const keyAsset = assets.ready_same_project;
+      const ledgerKey = keyAsset.storageKey + ".history";
+      // One additional ledger slot: storage_key and (asset_id, role) are UNIQUE.
+      // Test live/deleted states under rollback, never duplicate registrations.
+      const ledger = await client.query<{ id: number }>(
+        "INSERT INTO asset_storage_objects " +
+          "(asset_id,storage_backend,storage_key,role,state,size_bytes) " +
+          "VALUES ($1,'r2',$2,'historical-upload-alias','ready',1) RETURNING id",
+        [keyAsset.id, ledgerKey],
+      );
+      const ledgerId = ledger.rows[0]!.id;
+      for (const ledgerState of ["ready", "deleted"] as const) {
+        await client.query("SAVEPOINT g1_ledger_state");
+        try {
+          if (ledgerState === "deleted") {
+            const changed = await client.query(
+              "UPDATE asset_storage_objects SET state='deleted',deleted_at=NOW() " +
+                "WHERE id=$1 AND asset_id=$2 AND storage_key=$3 " +
+                "AND role='historical-upload-alias' AND state='ready' RETURNING id",
+              [ledgerId, keyAsset.id, ledgerKey],
+            );
+            expect(changed.rows).toEqual([{ id: ledgerId }]);
+          }
+          for (const field of fields) {
+            for (const encoding of encodings) {
+              const keys = await client.query<{ storage_key: string }>(
+                "SELECT public.resolve_durable_storage_keys($1::jsonb) AS storage_key",
+                [JSON.stringify(carrier(field, encoding, keyAsset.id))],
+              );
+              const expected =
+                ledgerState === "ready" ? [keyAsset.storageKey, ledgerKey] : [keyAsset.storageKey];
+              expect(
+                keys.rows.map((row) => row.storage_key).sort(),
+                [ledgerState, field, encoding].join("/"),
+              ).toEqual(expected.sort());
+            }
+          }
+        } finally {
+          // Restore the live row by rollback, not a deleted-to-ready UPDATE.
+          await client.query("ROLLBACK TO SAVEPOINT g1_ledger_state");
+          await client.query("RELEASE SAVEPOINT g1_ledger_state");
+        }
+      }
+      for (const storageKey of [keyAsset.storageKey, ledgerKey]) {
+        await client.query("SAVEPOINT g1_key_claim");
+        try {
+          await client.query(
+            "INSERT INTO durable_asset_deletion_claims (storage_key,claim_kind,retired_project_id,retired_asset_id) " +
+              "VALUES ($1,'project-purge-asset',$2,$3)",
+            [storageKey, f.sourceId, keyAsset.id],
+          );
+          for (const field of fields) {
+            for (const operation of operations) {
+              await attempt(field, carrier(field, "typed", keyAsset.id), operation, {
+                code: "55000",
+                message: "asset_reference_unavailable",
+              });
+              expect(await retained(keyAsset.id)).toBe(false);
+            }
+          }
+        } finally {
+          await client.query("ROLLBACK TO SAVEPOINT g1_key_claim");
+          await client.query("RELEASE SAVEPOINT g1_key_claim");
+        }
+      }
+
+      // Six proposed cross-asset overlap cases are OMITTED, not passing.
+      // They duplicated assets.storage_key or ledger storage_key, violating
+      // real UNIQUE constraints. Do not substitute missing/mismatched primary
+      // registrations. The 84-case sole-carrier checks remain, but cross-asset
+      // physical-key retention is not established by this fixture.
     } finally {
       await client.query("ROLLBACK").catch(() => undefined);
       client.release();
     }
-  });
+  }, 120_000);
 
   it("rejects URL-only upload references while their physical key is durably claimed", async () => {
     const f = await fixture("admission-upload");

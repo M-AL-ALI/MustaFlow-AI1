@@ -24,6 +24,7 @@ const props = () => ({
     filePath: "src/pages/Account.tsx",
     notes: "Route: /account/profile",
     projectId: 901,
+    previewEnabled: true,
     isNew: false,
     hasError: false,
     aiGenerated: true,

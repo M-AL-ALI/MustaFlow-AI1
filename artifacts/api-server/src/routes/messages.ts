@@ -359,6 +359,22 @@ router.post(
       return;
     }
 
+    // Generated numeric schemas may omit integer validation. Reject invalid ids
+    // before project/task lookup, draft recovery, or a durable retry claim.
+    const requestedRetryTaskId = parsed.data.retryTaskId;
+    if (
+      requestedRetryTaskId !== undefined &&
+      (!Number.isInteger(requestedRetryTaskId) ||
+        requestedRetryTaskId < 1 ||
+        requestedRetryTaskId > 2_147_483_647)
+    ) {
+      res.status(400).json({
+        error: "retryTaskId must be a positive 32-bit integer.",
+        code: "invalid_retry_task_id",
+      });
+      return;
+    }
+
     const [project] = await db
       .select()
       .from(projectsTable)

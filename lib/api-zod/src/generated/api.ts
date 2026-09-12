@@ -1639,6 +1639,7 @@ export const SendMessageParams = zod.object({
 export const sendMessageBodyDeepReasoningDefault = false;
 export const sendMessageBodyAttachmentsItemSizeMin = 0;
 
+export const sendMessageBodyRetryTaskIdMax = 2147483647;
 
 
 
@@ -1666,7 +1667,7 @@ export const SendMessageBody = zod.object({
 })).optional().describe('Optional project assets from the governed account-quota registry. Images are sent to vision; files are available to Zero through project asset tools.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
   "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
-  "retryTaskId": zod.number().min(1).optional().describe('Explicit owner retry of a failed task in this project. Restores the full request and an unchanged-base source draft when available; never applies or publishes unchecked files. Requires idempotencyKey and the regular message endpoint.'),
+  "retryTaskId": zod.number().min(1).max(sendMessageBodyRetryTaskIdMax).optional().describe('Explicit owner retry of a failed task in this project. Restores the full request and an unchanged-base source draft when available; never applies or publishes unchecked files. Requires idempotencyKey and the regular message endpoint.'),
   "supportSessionId": zod.number().min(1).optional().describe('User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.'),
   "brainstormContext": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
@@ -1791,6 +1792,7 @@ export const StreamMessageParams = zod.object({
 export const streamMessageBodyDeepReasoningDefault = false;
 export const streamMessageBodyAttachmentsItemSizeMin = 0;
 
+export const streamMessageBodyRetryTaskIdMax = 2147483647;
 
 
 
@@ -1818,7 +1820,7 @@ export const StreamMessageBody = zod.object({
 })).optional().describe('Optional project assets from the governed account-quota registry. Images are sent to vision; files are available to Zero through project asset tools.'),
   "origin": zod.string().optional().describe('Surface sending this message. Pass \'zero\' when sending from the Zero agent panel so the message is tagged for its filtered thread view.'),
   "idempotencyKey": zod.string().optional().describe('Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call.'),
-  "retryTaskId": zod.number().min(1).optional().describe('Explicit owner retry of a failed task in this project. Restores the full request and an unchanged-base source draft when available; never applies or publishes unchecked files. Requires idempotencyKey and the regular message endpoint.'),
+  "retryTaskId": zod.number().min(1).max(streamMessageBodyRetryTaskIdMax).optional().describe('Explicit owner retry of a failed task in this project. Restores the full request and an unchanged-base source draft when available; never applies or publishes unchecked files. Requires idempotencyKey and the regular message endpoint.'),
   "supportSessionId": zod.number().min(1).optional().describe('User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.'),
   "brainstormContext": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),

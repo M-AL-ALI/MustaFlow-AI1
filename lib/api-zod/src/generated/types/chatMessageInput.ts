@@ -32,6 +32,7 @@ export interface ChatMessageInput {
   /**
      * Explicit owner retry of a failed task in this project. Restores the full request and an unchanged-base source draft when available; never applies or publishes unchecked files. Requires idempotencyKey and the regular message endpoint.
      * @minimum 1
+     * @maximum 2147483647
      */
   retryTaskId?: number;
   /**

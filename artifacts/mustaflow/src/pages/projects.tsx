@@ -22,6 +22,7 @@ import { ProjectTrashDialog, type TrashProject } from "@/components/project-tras
 import { ProjectComposer } from "@/components/projects/project-composer";
 import { projectReviewDestination } from "@/components/projects/project-creation-state";
 import { WorkspaceHomeLayout } from "@/components/projects/workspace-home-layout";
+import { useWorkspaceScrollReset } from "@/components/layout/workspace-shell";
 import { ProjectDashboard, projectDate } from "@/components/projects/project-dashboard";
 import { useClerkUser } from "@/lib/clerk-safe";
 import { useToast } from "@/hooks/use-toast";
@@ -52,6 +53,10 @@ function WorkspaceProjectsEntry({ accountId }: { accountId: string }) {
     !workspace.isError &&
     workspace.hasChosenWorkspace &&
     selected !== null;
+
+  useWorkspaceScrollReset(
+    accountId + ":" + (ready && selectedId !== null ? "workspace:" + selectedId : "chooser"),
+  );
 
   useLayoutEffect(() => {
     if (accountId) claimCreationDraft({ accountId, workspaceId: null });

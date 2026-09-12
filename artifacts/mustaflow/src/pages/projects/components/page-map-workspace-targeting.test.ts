@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import * as React from "react";
-import { getPreviewIframeSandbox } from "@/lib/preview-access-ui";
+import { getPreviewIframeSandbox, hasServerPreviewAccess } from "@/lib/preview-access-ui";
 import { webContainerPageUrl } from "./page-map-card-model";
 import { describe, expect, it, vi } from "vitest";
 
@@ -49,6 +49,57 @@ function callback(name: string, context: Record<string, unknown>): (value?: stri
     ...Object.values(context),
   );
 }
+
+describe("Page Map workspace embedding eligibility", () => {
+  function available(overrides: Record<string, unknown> = {}) {
+    const lifecycle = { projectId: 901 };
+    const context = {
+      project: { id: 901 },
+      projectId: 901,
+      containerLifecycle: lifecycle,
+      containerSeededLifecycleRef: { current: lifecycle },
+      hasServerPreviewAccess,
+      previewAccess: "gateway",
+      containerStatus: "running",
+      containerStarting: false,
+      containerActionPending: null,
+      previewRecoveryError: null,
+      containerAuthorizationStatus: null,
+      ...overrides,
+    };
+    return new Function(
+      ...Object.keys(context),
+      "return (" + callbackSource("previewAvailable") + ");",
+    )(...Object.values(context));
+  }
+
+  it.each(["direct", "gateway"])(
+    "permits the current project's ready server access: %s",
+    (previewAccess) => {
+      expect(available({ previewAccess })).toBe(true);
+    },
+  );
+
+  it.each([
+    ["unknown access", { previewAccess: undefined }],
+    ["unavailable access", { previewAccess: "unavailable" }],
+    ["stopped runtime", { containerStatus: "stopped" }],
+    ["starting runtime", { containerStatus: "starting" }],
+    ["hibernated runtime", { containerStatus: "hibernated" }],
+    ["failed runtime", { containerStatus: "error" }],
+    ["startup pending", { containerStarting: true }],
+    ["start mutation", { containerActionPending: "start" }],
+    ["stop mutation", { containerActionPending: "stop" }],
+    ["recovery issue", { previewRecoveryError: { code: "preview_rebuild_failed" } }],
+    ["authentication failure", { containerAuthorizationStatus: 401 }],
+    ["authorization failure", { containerAuthorizationStatus: 403 }],
+    ["different project", { project: { id: 902 } }],
+    ["unseeded lifecycle", { containerSeededLifecycleRef: { current: null } }],
+    ["different lifecycle", { containerSeededLifecycleRef: { current: { projectId: 901 } } }],
+  ])("does not embed when %s", (_name, overrides) => {
+    expect(available(overrides as Record<string, unknown>)).toBe(false);
+  });
+});
 
 describe("Page Map workspace targeting", () => {
   it("selects the exact project file rather than retaining the previous editor target", () => {

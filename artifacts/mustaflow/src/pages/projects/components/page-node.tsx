@@ -128,7 +128,7 @@ export function PageMapLivePreview({
   projectId,
   route,
   label,
-  enabled = true,
+  enabled = false,
   revision,
   className,
 }: {
@@ -162,7 +162,7 @@ export function PageMapLivePreview({
             title={`Preview of ${label}`}
           />
           <span className="absolute bottom-1 right-1 rounded border border-border bg-background/95 px-1.5 py-0.5 text-[9px] text-muted-foreground">
-            Live iframe
+            Preview frame
           </span>
         </>
       ) : (
@@ -340,7 +340,7 @@ export const PageNode = memo(function PageNode({
             projectId={data.projectId}
             route={route}
             label={data.label}
-            enabled={data.previewEnabled !== false}
+            enabled={data.previewEnabled === true}
             revision={data.previewRevision}
           />
         ) : (

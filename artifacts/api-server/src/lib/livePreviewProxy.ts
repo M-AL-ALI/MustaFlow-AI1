@@ -35,7 +35,11 @@ import { logger } from "./logger";
 import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import { withActiveProjectLifecycle } from "./project-lifecycle";
-import { previewDocumentCsp, previewDocumentEmbedderPolicy } from "./preview-document-policy";
+import {
+  protectPreviewDocument,
+  previewDocumentCsp,
+  previewDocumentEmbedderPolicy,
+} from "./preview-document-policy";
 import {
   filterPreviewResponseCookies,
   stripPreviewUpstreamCredentials,
@@ -303,6 +307,9 @@ function sendHtml(
   html: string,
   previewState?: PreviewProxyState,
 ): void {
+  // Loading and failure documents are embedded too. Keep the same enforced
+  // sandbox and COEP as successful private preview documents.
+  protectPreviewDocument(res);
   if (previewState) {
     res.setHeader("X-MustaFlow-Preview-State", previewState);
   }

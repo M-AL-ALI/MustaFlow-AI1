@@ -79,6 +79,40 @@ beforeEach(() => {
     })),
   );
 });
+
+describe("workspace scroll ownership", () => {
+  it("resets route-entry scroll without replacing the shell, draft, or focused control", () => {
+    const page = render(<Shell />);
+    const main = screen.getByRole("main");
+    const draft = screen.getByRole("textbox", { name: "Uninterrupted project draft" });
+    fireEvent.change(draft, { target: { value: "Unsent work" } });
+    draft.focus();
+    main.scrollTop = 163;
+    main.scrollLeft = 12;
+    page.rerender(<Shell location="/settings" />);
+    expect(screen.getByRole("main")).toBe(main);
+    expect(main.scrollTop).toBe(0);
+    expect(main.scrollLeft).toBe(0);
+    expect(screen.getByRole("textbox")).toBe(draft);
+    expect(draft).toHaveValue("Unsent work");
+    expect(document.activeElement).toBe(draft);
+    main.scrollTop = 200;
+    page.rerender(<Shell location="/projects" />);
+    expect(main.scrollTop).toBe(0);
+  });
+
+  it("does not reset scroll on same-route updates or a viewport change", () => {
+    const page = render(<Shell />);
+    const main = screen.getByRole("main");
+    main.scrollTop = 163;
+    page.rerender(<Shell />);
+    expect(main.scrollTop).toBe(163);
+    resize(true);
+    expect(main.scrollTop).toBe(163);
+    resize(false);
+    expect(main.scrollTop).toBe(163);
+  });
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

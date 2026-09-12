@@ -18,7 +18,7 @@ const requireRoot = createRequire(new URL("package.json", root));
 const requireApi = createRequire(new URL("artifacts/api-server/package.json", root));
 const tenantContracts = requireApi("@workspace/tenant-runtime-contracts");
 const ts = requireRoot("typescript");
-const { Pool } = requireDb("pg");
+const { Pool, Client } = requireDb("pg");
 const orm = requireDb("drizzle-orm");
 const { drizzle } = requireDb("drizzle-orm/node-postgres");
 const { pgTable, integer, serial, text, timestamp, boolean, jsonb, getTableConfig } =
@@ -68,32 +68,101 @@ const q = (name) => {
   return '"' + name + '"';
 };
 
+function disposableConnectionOptions(value) {
+  const url = new URL(value);
+  assert.equal(url.protocol, "postgresql:");
+  assert.equal(url.hostname, "127.0.0.1");
+  assert.equal(url.port, "59103");
+  assert.equal(url.pathname, "/ora_gate_disposable_c84abf01fb72451b");
+  assert.equal(url.username, "nabuflow_lab");
+  assert.equal(url.search, "", "Connection query overrides are forbidden");
+  assert.equal(url.hash, "", "Connection fragments are forbidden");
+  return {
+    host: "127.0.0.1",
+    port: 59103,
+    database: "ora_gate_disposable_c84abf01fb72451b",
+    user: "nabuflow_lab",
+    // A callback prevents implicit PGPASSWORD/pgpass fallback for this opt-in fixture.
+    password: () => decodeURIComponent(url.password),
+    ssl: false,
+    options: "-c search_path=pg_catalog",
+    application_name: "jrn77-disposable-lifecycle",
+  };
+}
+
+async function assertDisposableSession(client, schema) {
+  const identity = await client.query(
+    "SELECT current_database() AS name, host(inet_server_addr()) AS host, " +
+      "inet_server_port() AS port, current_user AS role, current_schema() AS schema, " +
+      "current_setting('search_path') AS search_path",
+  );
+  assert.deepEqual(identity.rows[0], {
+    name: "ora_gate_disposable_c84abf01fb72451b",
+    host: "127.0.0.1",
+    port: 59103,
+    role: "nabuflow_lab",
+    schema,
+    search_path: schema,
+  });
+}
+
+const disposableUrl =
+  "postgresql://nabuflow_lab@127.0.0.1:59103/ora_gate_disposable_c84abf01fb72451b";
+for (const [label, value] of [
+  ["host query override", disposableUrl + "?host=elsewhere.invalid"],
+  ["database query override", disposableUrl + "?database=other"],
+  ["schema query override", disposableUrl + "?options=-c%20search_path%3Dpublic"],
+  ["encoded query override", disposableUrl + "?%68ost=elsewhere.invalid"],
+  ["fragment", disposableUrl + "#ignored"],
+  ["remote host", disposableUrl.replace("127.0.0.1", "elsewhere.invalid")],
+  ["hostname alias", disposableUrl.replace("127.0.0.1", "localhost")],
+  ["different port", disposableUrl.replace(":59103/", ":5432/")],
+  ["implicit port", disposableUrl.replace(":59103/", "/")],
+  ["different database", disposableUrl.replace("ora_gate_disposable_c84abf01fb72451b", "other")],
+  ["different role", disposableUrl.replace("nabuflow_lab@", "other@")],
+]) {
+  test("disposable lifecycle harness rejects " + label + " before connection", () => {
+    assert.throws(() => disposableConnectionOptions(value));
+  });
+}
+
+test("disposable lifecycle harness supplies explicit effective driver target and schema options", () => {
+  const options = disposableConnectionOptions(disposableUrl);
+  assert.equal(Object.hasOwn(options, "connectionString"), false);
+  const parameters = new Client({ ...options, options: "-c search_path=jrn77_lock_fixture" })
+    .connectionParameters;
+  assert.equal(parameters.host, "127.0.0.1");
+  assert.equal(parameters.port, 59103);
+  assert.equal(parameters.database, "ora_gate_disposable_c84abf01fb72451b");
+  assert.equal(parameters.user, "nabuflow_lab");
+  assert.equal(parameters.options, "-c search_path=jrn77_lock_fixture");
+  assert.equal(parameters.ssl, false);
+  assert.equal(options.password(), "");
+});
+
 test(
   "failed-draft retry and file-save transactions use genuine lifecycle ownership",
   { skip: !connectionString, timeout: 45000 },
   async (t) => {
-    const url = new URL(connectionString);
-    assert.equal(url.protocol, "postgresql:");
-    assert.equal(url.hostname, "127.0.0.1");
-    assert.equal(url.pathname, "/ora_gate_disposable_c84abf01fb72451b");
+    const connection = disposableConnectionOptions(connectionString);
     const schema = "jrn77_lock_" + randomUUID().replaceAll("-", "");
-    const admin = new Pool({ connectionString, max: 2, connectionTimeoutMillis: 2000 });
+    const admin = new Pool({ ...connection, max: 2, connectionTimeoutMillis: 2000 });
     let pool;
     let probe;
     let schemaCreated = false;
     const responses = [];
     try {
-      const identity = await admin.query("select current_database() as name");
-      assert.equal(identity.rows[0].name, "ora_gate_disposable_c84abf01fb72451b");
+      await assertDisposableSession(admin, "pg_catalog");
       await admin.query("CREATE SCHEMA " + q(schema));
       schemaCreated = true;
       pool = new Pool({
-        connectionString,
+        ...connection,
         max: 6,
         options: "-c search_path=" + schema,
         connectionTimeoutMillis: 2000,
         statement_timeout: 6000,
       });
+      await assertDisposableSession(pool, schema);
       probe = await admin.connect();
       const projectsTable = pgTable("projects", {
         id: integer("id").primaryKey(),
@@ -206,13 +275,11 @@ test(
         },
         "./project-file-asset-usage": {
           async reconcileProjectFileAssetUsage(tx, input) {
-            await tx
-              .insert(usages)
-              .values({
-                projectId: input.projectId,
-                filePath: input.filePath,
-                content: input.nextContent,
-              });
+            await tx.insert(usages).values({
+              projectId: input.projectId,
+              filePath: input.filePath,
+              content: input.nextContent,
+            });
             if (failReconciliation) throw new Error("synthetic reference failure");
           },
         },
@@ -276,15 +343,13 @@ test(
         await db
           .insert(projectFilesTable)
           .values(baseFiles.map((file) => ({ ...file, projectId, artifactId: 7 })));
-        await db
-          .insert(agentTasksTable)
-          .values({
-            id: 320,
-            projectId,
-            status: "failed",
-            prompt: originalRequest,
-            provenanceActorUserId: owner,
-          });
+        await db.insert(agentTasksTable).values({
+          id: 320,
+          projectId,
+          status: "failed",
+          prompt: originalRequest,
+          provenanceActorUserId: owner,
+        });
       }
       async function admit() {
         const res = Object.assign(new EventEmitter(), {

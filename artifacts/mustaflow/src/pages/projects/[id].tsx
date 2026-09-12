@@ -88,6 +88,7 @@ import {
 } from "@/lib/preview-reconciliation";
 import { useQueryClient } from "@tanstack/react-query";
 import { PreviewTab } from "./components/preview-tab";
+import { hasServerPreviewAccess } from "@/lib/preview-access-ui";
 import {
   isPreviewAuthorizationStatus,
   isTerminalPreviewRecoveryError,
@@ -5890,6 +5891,16 @@ export default function ProjectWorkspacePage() {
               {activeTab === "page-map" && (
                 <PageMapTab
                   projectId={projectId}
+                  previewAvailable={
+                    project.id === projectId &&
+                    containerSeededLifecycleRef.current === containerLifecycle &&
+                    hasServerPreviewAccess(previewAccess) &&
+                    containerStatus === "running" &&
+                    !containerStarting &&
+                    containerActionPending === null &&
+                    !previewRecoveryError &&
+                    containerAuthorizationStatus == null
+                  }
                   isBuilding={project.status === "building"}
                   isSyncingAfterEdit={pageMapSyncing}
                   onSyncCleared={handlePageMapSyncCleared}

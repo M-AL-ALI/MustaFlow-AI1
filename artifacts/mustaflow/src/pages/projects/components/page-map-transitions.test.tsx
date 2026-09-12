@@ -687,9 +687,7 @@ describe("Page Map workspace metadata integration", () => {
     expect(screen.getByText(/Page presence reflects source or manual mapping/)).toHaveTextContent(
       "not a verified running page or recorded thumbnail",
     );
-    expect(
-      screen.getByText(/Source-discovered pages are not verified running pages/),
-    ).toBeVisible();
+    expect(screen.getByText(/A mapped page is not a verified running page/)).toBeVisible();
   });
 });
 

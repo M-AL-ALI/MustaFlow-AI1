@@ -537,6 +537,7 @@ export function platformMapToFlow(
 type PageMapTabProps = {
   projectId: number;
   isBuilding: boolean;
+  previewAvailable?: boolean;
   isSyncingAfterEdit?: boolean;
   onSyncCleared?: () => void;
   onSwitchToPreview: (filePath?: string) => void;
@@ -552,6 +553,7 @@ export function PageMapTab(props: PageMapTabProps) {
 function PageMapWorkspace({
   projectId,
   isBuilding,
+  previewAvailable = false,
   isSyncingAfterEdit = false,
   onSyncCleared,
   onSwitchToPreview,
@@ -1284,7 +1286,8 @@ function PageMapWorkspace({
         !dimmed &&
         !!d.filePath &&
         pageRouteIsNavigable(pageRouteFromFilePath(d.filePath, d.notes), d.planned);
-      const previewEnabled = previewEligible && livePreviewCount++ < PAGE_MAP_LIVE_PREVIEW_LIMIT;
+      const previewEnabled =
+        previewAvailable && previewEligible && livePreviewCount++ < PAGE_MAP_LIVE_PREVIEW_LIMIT;
       return {
         ...n,
         data: {
@@ -1299,7 +1302,7 @@ function PageMapWorkspace({
         } satisfies PageNodeData,
       };
     });
-  }, [nodes, connectivity, filter, dataUpdatedAt, persistence.revision]);
+  }, [nodes, connectivity, filter, dataUpdatedAt, persistence.revision, previewAvailable]);
 
   const displayEdges = useMemo(
     () =>
@@ -1914,6 +1917,7 @@ function PageMapWorkspace({
           <PageContentsView
             nodes={nodes}
             freshNodeIds={freshNodeIds}
+            previewAvailable={previewAvailable}
             previewRevision={dataUpdatedAt ?? persistence.revision ?? undefined}
             onOpenFile={handleFileOpen}
             onPrepareRedesign={(node) =>
@@ -2033,6 +2037,7 @@ function PageMapWorkspace({
 function PageContentsView({
   nodes,
   freshNodeIds,
+  previewAvailable,
   previewRevision,
   onOpenPreview,
   onOpenDetails,
@@ -2041,6 +2046,7 @@ function PageContentsView({
 }: {
   nodes: Node[];
   freshNodeIds: Set<string>;
+  previewAvailable: boolean;
   previewRevision?: string | number;
   onOpenPreview: (route: string) => void;
   onOpenDetails: (nodeId: string) => void;
@@ -2077,9 +2083,11 @@ function PageContentsView({
           <div>
             <h3 className="text-base font-semibold text-foreground">Your app at a glance</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              Up to {PAGE_MAP_LIVE_PREVIEW_LIMIT} pages load lazy live iframes, not recorded
-              thumbnails. Source-discovered pages are not verified running pages. Open Preview to
-              inspect a page, or prepare a targeted redesign in the composer.
+              {previewAvailable
+                ? `Up to ${PAGE_MAP_LIVE_PREVIEW_LIMIT} pages can show preview frames, not recorded thumbnails.`
+                : "Page previews are unavailable right now. Your map and editing tools are still available."}{" "}
+              A mapped page is not a verified running page. Open Preview to inspect a page, or
+              prepare a targeted redesign in the composer.
             </p>
           </div>
           <span className="text-[11px] text-muted-foreground">
@@ -2140,7 +2148,7 @@ function PageContentsView({
                         projectId={data.projectId}
                         route={route}
                         label={data.label}
-                        enabled={livePreviewIds.has(node.id)}
+                        enabled={previewAvailable && livePreviewIds.has(node.id)}
                         revision={previewRevision}
                       />
                     ) : (

@@ -1123,9 +1123,41 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     // /objects/ references are refused: legacy objects must first cross the
     // governed asset-adoption boundary.
     await client.query(`
+      CREATE OR REPLACE FUNCTION extract_typed_durable_asset_ids(row_json JSONB)
+      RETURNS SETOF BIGINT AS $$
+        -- Match parseProjectFileAssetReference on decoded, whole JSON strings.
+        -- Numeric parsing follows the 160-character bound, so malformed input
+        -- cannot overflow a cast or become a partial asset reference.
+        WITH typed_strings AS MATERIALIZED (
+          SELECT value #>> '{}' AS content
+            FROM jsonb_path_query(row_json, 'strict $.**') value
+           WHERE jsonb_typeof(value) = 'string'
+             AND char_length(value #>> '{}') <= 160
+        ),
+        matched AS (
+          SELECT content, regexp_match(content,
+            '^@nabuflow/asset-ref:v1:([0-9]+):([0-9]+):([a-f0-9]{64})$') AS parts
+            FROM typed_strings
+        ),
+        candidate AS (
+          SELECT (parts)[1]::numeric AS asset_id,
+                 (parts)[2]::numeric AS size_bytes
+            FROM matched
+           WHERE parts IS NOT NULL
+             AND content = '@nabuflow/asset-ref:v1:' || (parts)[1] || ':' ||
+                           (parts)[2] || ':' || (parts)[3]
+        )
+        SELECT DISTINCT asset_id::bigint
+          FROM candidate
+         WHERE asset_id BETWEEN 1 AND 9007199254740991
+           AND size_bytes BETWEEN 1 AND 26214400
+      $$ LANGUAGE SQL IMMUTABLE STRICT
+         SET search_path = pg_catalog, public;
       CREATE OR REPLACE FUNCTION extract_durable_asset_ids(row_json JSONB)
       RETURNS SETOF INTEGER AS $$
         WITH candidate AS (
+          SELECT public.extract_typed_durable_asset_ids(row_json) AS asset_id
+          UNION
           SELECT (match)[1]::bigint AS asset_id
             FROM regexp_matches(
               row_json::text,
@@ -1194,6 +1226,14 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         route_upload_id BIGINT;
         ora_asset_id BIGINT;
       BEGIN
+        -- A valid application reference beyond the catalog integer range is
+        -- unavailable, not an ignored reference and not a numeric cast error.
+        IF EXISTS (
+          SELECT 1 FROM public.extract_typed_durable_asset_ids(row_json) typed(asset_id)
+           WHERE typed.asset_id > 2147483647
+        ) THEN
+          RAISE EXCEPTION 'asset_reference_unavailable' USING ERRCODE = '55000';
+        END IF;
         FOR candidate_id IN SELECT public.extract_durable_asset_ids(row_json)
         LOOP
           RETURN NEXT candidate_id;
@@ -1333,7 +1373,18 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
     await client.query(`
       CREATE OR REPLACE FUNCTION resolve_durable_storage_keys(row_json JSONB)
       RETURNS SETOF TEXT AS $$
-        WITH raw_keys AS (
+        WITH asset_keys AS (
+          SELECT asset.storage_key
+            FROM public.extract_durable_asset_ids(row_json) reference(asset_id)
+            JOIN public.assets asset ON asset.id = reference.asset_id
+          UNION
+          SELECT storage_row.storage_key
+            FROM public.extract_durable_asset_ids(row_json) reference(asset_id)
+            JOIN public.asset_storage_objects storage_row
+              ON storage_row.asset_id = reference.asset_id
+             AND storage_row.state <> 'deleted'
+        ),
+        raw_keys AS (
           SELECT (match)[1] AS storage_key
             FROM regexp_matches(
               row_json::text,
@@ -1422,6 +1473,8 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
         )
         SELECT DISTINCT candidate.storage_key
           FROM (
+            SELECT storage_key FROM asset_keys
+            UNION
             SELECT storage_key FROM raw_keys
             UNION
             SELECT storage_key FROM image_keys
@@ -1615,6 +1668,12 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
                  )
                  OR EXISTS (
                    SELECT 1
+                     FROM public.resolve_durable_storage_keys(durable.row_json) resolved(storage_key)
+                     JOIN candidate_keys candidate_key
+                       ON candidate_key.storage_key = resolved.storage_key
+                 )
+                 OR EXISTS (
+                   SELECT 1
                      FROM candidate_keys candidate_key
                     WHERE position(candidate_key.storage_key in durable.row_json::text) > 0
                  )
@@ -1777,7 +1836,12 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
               AND (row_json ->> 'source_project_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'source_project_id')
               AND (row_json ->> 'task_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'task_id')
               AND (row_json ->> 'user_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'user_id')
-              AND (row_json ->> 'author_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'author_id');
+              AND (row_json ->> 'author_id') IS NOT DISTINCT FROM (to_jsonb(OLD) ->> 'author_id')
+              -- Typed file references must pass current scope checks even if
+              -- an older representation of the same ID was grandfathered.
+              AND candidate_id NOT IN (
+                SELECT public.extract_typed_durable_asset_ids(row_json)
+              );
           END IF;
           IF TG_TABLE_NAME = 'support_tickets' THEN
             existing_reference := FALSE;
@@ -1994,6 +2058,33 @@ export async function applyUnifiedAssetRegistryMigration(client: MigrationClient
            AND trigger_row.tgname = 'durable_asset_reference_guard_' || relation.relname
            AND trigger_row.tgfoid =
                to_regprocedure('public.require_attachable_assets_in_durable_reference()'))
+        AND to_regprocedure('public.extract_typed_durable_asset_ids(jsonb)') IS NOT NULL
+        AND pg_get_function_result(to_regprocedure(
+              'public.extract_typed_durable_asset_ids(jsonb)')) = 'SETOF bigint'
+        AND pg_get_functiondef(to_regprocedure(
+              'public.extract_typed_durable_asset_ids(jsonb)')) LIKE '%strict $.**%'
+        AND pg_get_functiondef(to_regprocedure(
+              'public.extract_typed_durable_asset_ids(jsonb)')) LIKE '%<= 160%'
+        AND pg_get_functiondef(to_regprocedure(
+              'public.extract_typed_durable_asset_ids(jsonb)')) LIKE '%BETWEEN 1 AND 9007199254740991%'
+        AND pg_get_functiondef(to_regprocedure(
+              'public.extract_typed_durable_asset_ids(jsonb)')) LIKE '%BETWEEN 1 AND 26214400%'
+        AND pg_get_functiondef(to_regprocedure(
+              'public.extract_durable_asset_ids(jsonb)')) LIKE '%public.extract_typed_durable_asset_ids(row_json)%'
+        AND pg_get_functiondef(to_regprocedure(
+              'public.resolve_durable_asset_ids(jsonb)')) LIKE '%typed.asset_id > 2147483647%'
+        AND regexp_replace(lower(pg_get_functiondef(to_regprocedure(
+              'public.require_attachable_assets_in_durable_reference()'))),
+              '[[:space:]]+', ' ', 'g') LIKE '%candidate_id not in ( select public.extract_typed_durable_asset_ids(row_json) )%'
+        AND regexp_replace(lower(pg_get_functiondef(to_regprocedure(
+              'public.resolve_durable_storage_keys(jsonb)'))),
+              '[[:space:]]+', ' ', 'g') LIKE '%join public.assets asset on asset.id = reference.asset_id%'
+        AND regexp_replace(lower(pg_get_functiondef(to_regprocedure(
+              'public.resolve_durable_storage_keys(jsonb)'))),
+              '[[:space:]]+', ' ', 'g') LIKE '%storage_row.asset_id = reference.asset_id and storage_row.state <> ''deleted''%'
+        AND pg_get_functiondef(to_regprocedure(
+              'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'))
+              LIKE '%public.resolve_durable_storage_keys(durable.row_json)%'
         AND to_regprocedure('public.extract_durable_asset_ids(jsonb)') IS NOT NULL
         AND to_regprocedure('public.resolve_durable_asset_ids(jsonb)') IS NOT NULL
         AND regexp_replace(

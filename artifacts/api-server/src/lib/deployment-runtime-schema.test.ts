@@ -45,7 +45,7 @@ describe("deployment runtime schema boundary", () => {
     });
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-ready",
       violations: [],
     });
@@ -63,7 +63,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: ["support_delivery_constraints_missing", "prompt_queue_missing"],
     });
@@ -81,7 +81,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "mutable",
       violations: [],
     });
@@ -95,7 +95,7 @@ describe("deployment runtime schema boundary", () => {
     );
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-ready",
       violations: [],
     });
@@ -109,7 +109,7 @@ describe("deployment runtime schema boundary", () => {
     );
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: ["durable_asset_reference_guards_missing"],
     });
@@ -128,7 +128,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toMatchObject({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: [
         "project_retirement_operations_columns_missing",
@@ -151,7 +151,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: [
         "project_purge_operations_columns_missing",
@@ -180,14 +180,14 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: ["asset_usage_attachment_guard_missing"],
     });
 
     const source = readFileSync(new URL("./deployment-runtime-schema.ts", import.meta.url), "utf8");
     expect(source).toContain("update of asset_id, project_id");
-    expect(source).toContain("if current_state is distinct from ''ready'' then");
+    expect(source).toContain("IF current_state IS DISTINCT FROM ''ready'' AND NOT (");
     expect(source).toContain("for share");
     expect(source).toContain("trigger_row.tgenabled = ANY");
   });
@@ -198,7 +198,7 @@ describe("deployment runtime schema boundary", () => {
     }));
 
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: ["durable_asset_reference_guards_missing"],
     });
@@ -252,7 +252,7 @@ describe("deployment runtime schema boundary", () => {
       rows: [observation({ previewDatabaseAllocationReady: false })],
     }));
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: ["preview_database_allocation_missing"],
     });
@@ -270,7 +270,7 @@ describe("deployment runtime schema boundary", () => {
   ])("fails closed when admission schema evidence is missing: %s", async (flag, violation) => {
     const query = vi.fn(async () => ({ rows: [observation({ [flag]: false })] }));
     await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
-      contractId: "deployment_runtime_schema_v10",
+      contractId: "deployment_runtime_schema_v11",
       mode: "read-only-incomplete",
       violations: [violation],
     });
@@ -300,5 +300,199 @@ describe("deployment runtime schema boundary", () => {
     expect(migrationLoop).toBeGreaterThan(assessment);
     expect(source).toContain('mode === "read-only-ready"');
     expect(source).toContain('name: "verify-deployment-runtime-schema"');
+  });
+});
+
+describe("typed durable-reference read-only catalog contract", () => {
+  async function catalogSql() {
+    const query = vi.fn(async (sql: string) => {
+      expect(sql.trimStart().startsWith("SELECT")).toBe(true);
+      return sql.includes('AS "oraAssetReferenceRowsReady"')
+        ? { rows: [{ oraAssetReferenceRowsReady: true }] }
+        : { rows: [observation()] };
+    });
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toMatchObject({
+      contractId: "deployment_runtime_schema_v11",
+      mode: "read-only-ready",
+    });
+    expect(query).toHaveBeenCalledTimes(2);
+    return query.mock.calls[0]![0];
+  }
+
+  it("keeps the retirement column count aligned with its typed and nullable field list", async () => {
+    const sql = await catalogSql();
+    const columns = sql.slice(
+      sql.indexOf('AS "projectRetirementOperationsReady"'),
+      sql.indexOf('AS "projectRetirementOperationsColumnsReady"'),
+    );
+    const fields = [...columns.matchAll(/\('([^']+)', '([^']+)', '(YES|NO)'\)/g)];
+    expect(fields.map((field) => field[1])).toEqual([
+      "id",
+      "project_id",
+      "requested_by",
+      "state",
+      "attempt_count",
+      "lease_version",
+      "lease_expires_at",
+      "progress",
+      "failure_code",
+      "failure_target",
+      "created_at",
+      "started_at",
+      "completed_at",
+      "updated_at",
+    ]);
+    expect(columns).toContain(
+      "(column_row.column_name, column_row.data_type, column_row.is_nullable) IN (",
+    );
+    const count = columns.match(/SELECT COUNT\(\*\) = (\d+)/);
+    expect(Number(count?.[1])).toBe(fields.length);
+  });
+
+  it("fails closed when the retirement column evidence is missing", async () => {
+    const query = vi.fn(async () => ({
+      rows: [observation({ projectRetirementOperationsColumnsReady: false })],
+    }));
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toMatchObject({
+      mode: "read-only-incomplete",
+      violations: ["project_retirement_operations_columns_missing"],
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires the strict immutable invoker BIGINT helper and decoded whole-string bounds", async () => {
+    const sql = await catalogSql();
+    for (const fragment of [
+      "to_regprocedure('public.extract_typed_durable_asset_ids(jsonb)')",
+      "typed_function.proretset",
+      "typed_function.prorettype = 'pg_catalog.int8'::regtype",
+      "typed_function.proisstrict",
+      "typed_function.provolatile = 'i'",
+      "NOT typed_function.prosecdef",
+      "typed_function.proconfig",
+      "search_path=pg_catalog,public",
+      "with typed_strings as materialized (",
+      "select value #>> ''{}'' as content",
+      "jsonb_path_query(row_json, ''strict $.**'') value",
+      "jsonb_typeof(value) = ''string''",
+      "char_length(value #>> ''{}'') <= 160",
+      "where parts is not null",
+      "content = ''@nabuflow/asset-ref:v1:'' || (parts)[1] || '':'' || (parts)[2] || '':'' || (parts)[3]",
+      "select distinct asset_id::bigint",
+      "asset_id between 1 and 9007199254740991",
+      "size_bytes between 1 and 26214400",
+    ]) {
+      expect(sql).toContain(fragment);
+    }
+  });
+
+  it("pins the anchored lowercase-only matcher without lowercasing its definition", async () => {
+    const sql = await catalogSql();
+    expect(sql).toContain(
+      "regexp_replace(typed_function.prosrc, '[[:space:]]+', ' ', 'g') AS typed_raw",
+    );
+    expect(sql).not.toContain(
+      "regexp_replace(lower(typed_function.prosrc), '[[:space:]]+', ' ', 'g') AS typed_raw",
+    );
+    expect(sql).toContain(
+      "bodies.typed_raw LIKE '%regexp_match(content, ''^@nabuflow/asset-ref:v1:([0-9]+):([0-9]+):([a-f0-9]{64})$'')%'",
+    );
+  });
+
+  it("pins shared extraction, ordered overflow rejection, key expansion and NEW-row scope checks", async () => {
+    const sql = await catalogSql();
+    for (const fragment of [
+      "select public.extract_typed_durable_asset_ids(row_json) as asset_id",
+      "asset_id between 1 and 2147483647",
+      "if exists ( select 1 from public.extract_typed_durable_asset_ids(row_json) typed(asset_id) where typed.asset_id > 2147483647 ) then raise exception ''asset_reference_unavailable'' using errcode = ''55000''; end if; for candidate_id in select public.extract_durable_asset_ids(row_json)",
+      "from public.extract_durable_asset_ids(row_json) reference(asset_id) join public.assets asset on asset.id = reference.asset_id",
+      "from public.extract_durable_asset_ids(row_json) reference(asset_id) join public.asset_storage_objects storage_row on storage_row.asset_id = reference.asset_id and storage_row.state <> ''deleted''",
+      "select storage_key from asset_keys union",
+      "row_json := to_jsonb(new)",
+      "existing_reference := false; if tg_op = ''update'' then",
+      "and candidate_id not in ( select public.extract_typed_durable_asset_ids(row_json) )",
+      "from public.resolve_durable_storage_keys(durable.row_json) resolved(storage_key) join candidate_keys candidate_key on candidate_key.storage_key = resolved.storage_key",
+    ]) {
+      expect(sql).toContain(fragment);
+    }
+  });
+
+  it("pins the exact guarded image transitions instead of the obsolete ready-only predicate", async () => {
+    const sql = await catalogSql();
+    for (const fragment of [
+      "position(",
+      "IF current_state IS DISTINCT FROM ''ready'' AND NOT (",
+      "TG_TABLE_NAME = ''generated_images'' AND TG_OP = ''UPDATE''",
+      "asset_kind = ''generated''",
+      "asset_owner_user_id IS NOT DISTINCT FROM reference_user_id",
+      "asset_project_id IS NOT DISTINCT FROM reference_project_id",
+      "asset_context ->> ''generatedImageId'' = row_json ->> ''id''",
+      "current_state = ''reserved''",
+      "current_state = ''uploading''",
+      "row_json - ''asset_id'' - ''updated_at''",
+      "row_json - ''status'' - ''updated_at''",
+      "RAISE EXCEPTION ''asset_not_ready'' USING ERRCODE = ''55000'';",
+      "regexp_replace(pg_get_functiondef(procedure_row.oid), '[[:space:]]+', ' ', 'g')",
+    ]) {
+      expect(sql).toContain(fragment);
+    }
+    expect(sql).not.toContain("LIKE '%if current_state is distinct from ''ready'' then%'");
+  });
+
+  it("preserves all sixteen guards and follows the non-excluding retention wrapper", async () => {
+    const sql = await catalogSql();
+    const guard = sql.slice(
+      sql.indexOf('AS "assetUsageAttachmentGuardReady"'),
+      sql.indexOf('AS "durableAssetReferenceGuardsReady"'),
+    );
+    expect(guard).toContain("SELECT COUNT(*) = 16");
+    expect(guard).not.toContain("SELECT COUNT(*) = 15");
+    expect(guard).toContain("('support_tickets', 'user_id, project_id, transcript, attachments')");
+    expect(guard).toContain("/api/(?:assets|ora/canonical-assets)/([1-9][0-9]{0,9})/content");
+    expect(guard).toContain(
+      "public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)",
+    );
+    expect(guard).toContain("public.durable_asset_reference_exists(integer,integer,integer)");
+    expect(guard).toContain(
+      "select public.durable_asset_reference_exists_excluding_upload( candidate_asset_id, excluded_project_id, excluded_generated_image_id, null )",
+    );
+    expect(guard).toContain("from public.canvas_variant_library");
+    expect(guard).toContain("from public.gallery_templates");
+    expect(guard).toContain("project-purge-preserved-direct:");
+    expect(guard).toContain("NOT retention_wrapper.prosecdef");
+    expect(guard).toContain("retention_wrapper.proconfig");
+  });
+
+  it.each([false, null, undefined])(
+    "fails closed without historical reads when typed/legacy catalog evidence is %s",
+    async (evidence) => {
+      const query = vi.fn(async () => ({
+        rows: [{ ...observation(), durableAssetReferenceGuardsReady: evidence }],
+      }));
+      await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
+        contractId: "deployment_runtime_schema_v11",
+        mode: "read-only-incomplete",
+        violations: ["durable_asset_reference_guards_missing"],
+      });
+      expect(query).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("still delegates stale-schema repair to the mutable migration path", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        observation({
+          canCreateSchemaObjects: true,
+          canMutateExistingObjects: true,
+          durableAssetReferenceGuardsReady: false,
+        }),
+      ],
+    }));
+    await expect(assessDeploymentRuntimeSchema({ query } as never)).resolves.toEqual({
+      contractId: "deployment_runtime_schema_v11",
+      mode: "mutable",
+      violations: [],
+    });
+    expect(query).toHaveBeenCalledTimes(1);
   });
 });

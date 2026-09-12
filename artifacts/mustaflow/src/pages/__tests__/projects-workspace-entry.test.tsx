@@ -190,6 +190,7 @@ vi.mock("@/components/projects/project-composer", () => ({
 }));
 
 import ProjectsPage from "../projects";
+import { WorkspaceShell } from "@/components/layout/workspace-shell";
 
 it("labels the selected workspace dashboard as a full collection, not a recent-only search", () => {
   const page = render(<ProjectsPage />);
@@ -718,5 +719,43 @@ it("starts project details in the selected empty workspace rather than account-w
   expect(create).toHaveAttribute("href", "/projects/new?reviewWorkspaceId=2");
   fireEvent.click(create);
   expect(state.navigate).toHaveBeenCalledWith("/projects/new?reviewWorkspaceId=2");
+  expect(state.createProject).not.toHaveBeenCalled();
+});
+
+it("resets same-URL workspace-entry scroll while preserving workspace-owned drafts", () => {
+  const subject = () => (
+    <WorkspaceShell location="/projects" renderNavigation={() => null}>
+      <ProjectsPage />
+    </WorkspaceShell>
+  );
+  const page = render(subject());
+  const main = screen.getByRole("main");
+  main.scrollTop = 163;
+  fireEvent.click(screen.getByRole("button", { name: "Open workspace Studio" }));
+  page.rerender(subject());
+  expect(main.scrollTop).toBe(0);
+  const draft = screen.getByLabelText("Project brief");
+  editBrief("Studio draft stays in Studio");
+  main.scrollTop = 211;
+  page.rerender(subject());
+  expect(main.scrollTop).toBe(211);
+  expect(screen.getByLabelText("Project brief")).toBe(draft);
+
+  fireEvent.click(screen.getByRole("button", { name: "Switch workspace" }));
+  page.rerender(subject());
+  expect(main.scrollTop).toBe(0);
+  main.scrollTop = 140;
+  fireEvent.click(screen.getByRole("button", { name: "Open workspace Client" }));
+  page.rerender(subject());
+  expect(screen.getByRole("main")).toBe(main);
+  expect(main.scrollTop).toBe(0);
+  expect(screen.getByLabelText("Project brief")).toHaveValue("");
+  expect(screen.queryByRole("article", { name: "Studio project" })).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Switch workspace" }));
+  page.rerender(subject());
+  fireEvent.click(screen.getByRole("button", { name: "Open workspace Studio" }));
+  page.rerender(subject());
+  expect(screen.getByLabelText("Project brief")).toHaveValue("Studio draft stays in Studio");
   expect(state.createProject).not.toHaveBeenCalled();
 });

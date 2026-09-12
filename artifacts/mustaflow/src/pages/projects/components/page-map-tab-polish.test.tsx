@@ -78,6 +78,7 @@ vi.mock("@xyflow/react", async () => {
             key={node.id}
             data-testid={`flow-${node.id}`}
             data-dimmed={String(node.data.dimmed)}
+            data-preview-enabled={String(node.data.previewEnabled)}
             onClick={() => (node.data.onNodeClick as (id: string) => void)(node.id)}
           >
             {node.data.label as string}
@@ -101,17 +102,36 @@ const page = (id = "account", planned = false) => ({
   position: { x: 100, y: 100 },
 });
 
-function renderMap(sync?: { isSyncingAfterEdit: boolean; onSyncCleared: () => void }) {
+function renderMap(
+  sync?: { isSyncingAfterEdit: boolean; onSyncCleared: () => void },
+  previewAvailable = false,
+) {
   const callbacks = {
     onSwitchToPreview: vi.fn(),
     onSwitchToCode: vi.fn(),
     onSwitchToChat: vi.fn(),
   };
-  const result = render(<PageMapTab projectId={901} isBuilding={false} {...callbacks} {...sync} />);
+  const result = render(
+    <PageMapTab
+      projectId={901}
+      isBuilding={false}
+      previewAvailable={previewAvailable}
+      {...callbacks}
+      {...sync}
+    />,
+  );
   return {
     ...callbacks,
-    rerender: () =>
-      result.rerender(<PageMapTab projectId={901} isBuilding={false} {...callbacks} {...sync} />),
+    rerender: (nextPreviewAvailable = previewAvailable) =>
+      result.rerender(
+        <PageMapTab
+          projectId={901}
+          isBuilding={false}
+          previewAvailable={nextPreviewAvailable}
+          {...callbacks}
+          {...sync}
+        />,
+      ),
   };
 }
 
@@ -146,6 +166,36 @@ afterEach(() => {
 });
 
 describe("Page Map truthful states and toolbar", () => {
+  it("keeps unavailable previews inert while retaining targeted actions", () => {
+    const callbacks = renderMap();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(screen.getByText(/Page previews are unavailable right now/)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Account at /account/profile in Preview" }),
+    );
+    expect(callbacks.onSwitchToPreview).toHaveBeenCalledExactlyOnceWith("/account/profile");
+    fireEvent.click(screen.getByRole("button", { name: "Open file: Account" }));
+    expect(callbacks.onSwitchToCode).toHaveBeenCalledExactlyOnceWith("src/pages/Account.tsx");
+    fireEvent.click(screen.getByRole("button", { name: "Prepare redesign: Account" }));
+    expect(callbacks.onSwitchToChat).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Connections" }));
+    expect(screen.getByTestId("flow-account")).toHaveAttribute("data-preview-enabled", "false");
+    expect(mocks.save.mutate).not.toHaveBeenCalled();
+    expect(mocks.analyze.mutate).not.toHaveBeenCalled();
+  });
+
+  it("mounts and removes Contents frames when preview availability changes without saving the map", () => {
+    const result = renderMap();
+    expect(document.querySelector("iframe")).toBeNull();
+    result.rerender(true);
+    expect(screen.getByTitle("Preview of Account")).toHaveAttribute("sandbox", "allow-scripts");
+    result.rerender(false);
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(screen.getByText(/Page previews are unavailable right now/)).toBeVisible();
+    expect(mocks.save.mutate).not.toHaveBeenCalled();
+    expect(mocks.analyze.mutate).not.toHaveBeenCalled();
+  });
+
   it("opens a dynamic gallery page through details using an explicit example without a map write", () => {
     mocks.query.data = {
       revision: "a".repeat(64),
@@ -184,7 +234,7 @@ describe("Page Map truthful states and toolbar", () => {
         },
       },
     };
-    renderMap();
+    const result = renderMap(undefined, true);
     const frames = document.querySelectorAll("iframe");
     expect(frames).toHaveLength(4);
     for (const frame of frames) {
@@ -192,9 +242,14 @@ describe("Page Map truthful states and toolbar", () => {
       expect(frame).toHaveAttribute("sandbox", "allow-scripts");
       expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
     }
-    expect(screen.getAllByText("Live iframe")).toHaveLength(4);
+    expect(screen.getAllByText("Preview frame")).toHaveLength(4);
+    expect(screen.queryByText("Live iframe")).toBeNull();
     expect(screen.getByText(/not recorded thumbnails/)).toBeVisible();
     expect(screen.getByRole("button", { name: "Open Page 6 at /page-6 in Preview" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Connections" }));
+    expect(document.querySelectorAll('[data-preview-enabled="true"]')).toHaveLength(4);
+    result.rerender(false);
+    expect(document.querySelectorAll('[data-preview-enabled="true"]')).toHaveLength(0);
   });
 
   it("prepares an explicit target and opens the exact source file from Contents", () => {

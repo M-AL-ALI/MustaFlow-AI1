@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 
-export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v10" as const;
+export const DEPLOYMENT_RUNTIME_SCHEMA_CONTRACT_ID = "deployment_runtime_schema_v11" as const;
 
 export const DEPLOYMENT_RUNTIME_SCHEMA_VIOLATIONS = [
   "admin_authority_missing",
@@ -142,7 +142,7 @@ export async function assessDeploymentRuntimeSchema(
       to_regclass('public.project_retirement_operations') IS NOT NULL
         AS "projectRetirementOperationsReady",
       (
-        SELECT COUNT(*) = 16
+        SELECT COUNT(*) = 14
           FROM information_schema.columns column_row
          WHERE column_row.table_schema = 'public'
            AND column_row.table_name = 'project_retirement_operations'
@@ -391,7 +391,7 @@ export async function assessDeploymentRuntimeSchema(
                ) LIKE '%for share%'
       ) AS "assetUsageAttachmentGuardReady",
       (
-        SELECT COUNT(*) = 15
+        SELECT COUNT(*) = 16
            AND bool_and(NOT trigger_row.tgisinternal)
            AND bool_and(trigger_row.tgenabled = ANY(ARRAY['O', 'A']::"char"[]))
            AND bool_and(trigger_row.tgtype = 23)
@@ -409,8 +409,10 @@ export async function assessDeploymentRuntimeSchema(
                  AND attribute.attnum=trigger_column.attnum) = expected.column_list
            )
            AND bool_and(
-             regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
-               LIKE '%if current_state is distinct from ''ready'' then%'
+             position(
+               'IF current_state IS DISTINCT FROM ''ready'' AND NOT ( TG_TABLE_NAME = ''generated_images'' AND TG_OP = ''UPDATE'' AND candidate_id = NULLIF(row_json ->> ''asset_id'', '''')::integer AND asset_kind = ''generated'' AND asset_owner_user_id IS NOT DISTINCT FROM reference_user_id AND asset_project_id IS NOT DISTINCT FROM reference_project_id AND asset_context ->> ''generatedImageId'' = row_json ->> ''id'' AND NULLIF(row_json ->> ''storage_key'', '''') IS NULL AND NULLIF(row_json ->> ''file_url'', '''') IS NULL AND NULLIF(row_json ->> ''thumbnail_url'', '''') IS NULL AND ( ( current_state = ''reserved'' AND NULLIF(to_jsonb(OLD) ->> ''asset_id'', '''') IS NULL AND row_json ->> ''status'' = ''pending'' AND (row_json - ''asset_id'' - ''updated_at'') = (to_jsonb(OLD) - ''asset_id'' - ''updated_at'') ) OR ( current_state = ''uploading'' AND NULLIF(to_jsonb(OLD) ->> ''asset_id'', '''')::integer = candidate_id AND to_jsonb(OLD) ->> ''status'' = ''pending'' AND row_json ->> ''status'' = ''generating'' AND (row_json - ''status'' - ''updated_at'') = (to_jsonb(OLD) - ''status'' - ''updated_at'') ) ) ) THEN RAISE EXCEPTION ''asset_not_ready'' USING ERRCODE = ''55000''; END IF;'
+               in regexp_replace(pg_get_functiondef(procedure_row.oid), '[[:space:]]+', ' ', 'g')
+             ) > 0
            )
            AND bool_and(
              regexp_replace(lower(pg_get_functiondef(procedure_row.oid)), '[[:space:]]+', ' ', 'g')
@@ -474,6 +476,76 @@ export async function assessDeploymentRuntimeSchema(
            AND trigger_row.tgfoid =
                to_regprocedure('public.require_attachable_assets_in_durable_reference()')
            AND to_regprocedure('public.extract_durable_asset_ids(jsonb)') IS NOT NULL
+           -- A read-only runtime must reject pre-typed-reference definitions,
+           -- not merely accept familiar function names from an older release.
+           AND EXISTS (
+             SELECT 1
+               FROM pg_catalog.pg_proc typed_function
+               JOIN pg_catalog.pg_proc extractor
+                 ON extractor.oid = to_regprocedure('public.extract_durable_asset_ids(jsonb)')
+               JOIN pg_catalog.pg_proc resolver
+                 ON resolver.oid = to_regprocedure('public.resolve_durable_asset_ids(jsonb)')
+               JOIN pg_catalog.pg_proc key_resolver
+                 ON key_resolver.oid = to_regprocedure('public.resolve_durable_storage_keys(jsonb)')
+               JOIN pg_catalog.pg_proc retention
+                 ON retention.oid = to_regprocedure(
+                   'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)')
+               JOIN pg_catalog.pg_proc retention_wrapper
+                 ON retention_wrapper.oid = to_regprocedure(
+                   'public.durable_asset_reference_exists(integer,integer,integer)')
+               CROSS JOIN LATERAL (
+                 SELECT
+                   regexp_replace(typed_function.prosrc, '[[:space:]]+', ' ', 'g') AS typed_raw,
+                   regexp_replace(lower(typed_function.prosrc), '[[:space:]]+', ' ', 'g') AS typed_body,
+                   regexp_replace(lower(extractor.prosrc), '[[:space:]]+', ' ', 'g') AS extractor_body,
+                   regexp_replace(lower(resolver.prosrc), '[[:space:]]+', ' ', 'g') AS resolver_body,
+                   regexp_replace(lower(key_resolver.prosrc), '[[:space:]]+', ' ', 'g') AS key_body,
+                   regexp_replace(lower(procedure_row.prosrc), '[[:space:]]+', ' ', 'g') AS guard_body,
+                   regexp_replace(lower(retention.prosrc), '[[:space:]]+', ' ', 'g') AS retention_body,
+                   regexp_replace(lower(retention_wrapper.prosrc), '[[:space:]]+', ' ', 'g') AS wrapper_body
+               ) bodies
+              WHERE typed_function.oid = to_regprocedure('public.extract_typed_durable_asset_ids(jsonb)')
+                AND typed_function.proretset
+                AND typed_function.prorettype = 'pg_catalog.int8'::regtype
+                AND typed_function.proisstrict
+                AND typed_function.provolatile = 'i'
+                AND NOT typed_function.prosecdef
+                AND EXISTS (
+                  SELECT 1 FROM unnest(COALESCE(typed_function.proconfig, ARRAY[]::text[])) setting
+                   WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
+                         'search_path=pg_catalog,public'
+                )
+                AND bodies.typed_body LIKE '%with typed_strings as materialized (%'
+                AND bodies.typed_body LIKE '%select value #>> ''{}'' as content%'
+                AND bodies.typed_body LIKE '%jsonb_path_query(row_json, ''strict $.**'') value%'
+                AND bodies.typed_body LIKE '%jsonb_typeof(value) = ''string''%'
+                AND bodies.typed_body LIKE '%char_length(value #>> ''{}'') <= 160%'
+                -- Do not lowercase the matcher: [A-F0-9] must not pass this gate.
+                AND bodies.typed_raw LIKE '%regexp_match(content, ''^@nabuflow/asset-ref:v1:([0-9]+):([0-9]+):([a-f0-9]{64})$'')%'
+                AND bodies.typed_body LIKE '%where parts is not null%'
+                AND bodies.typed_body LIKE '%content = ''@nabuflow/asset-ref:v1:'' || (parts)[1] || '':'' || (parts)[2] || '':'' || (parts)[3]%'
+                AND bodies.typed_body LIKE '%select distinct asset_id::bigint%'
+                AND bodies.typed_body LIKE '%asset_id between 1 and 9007199254740991%'
+                AND bodies.typed_body LIKE '%size_bytes between 1 and 26214400%'
+                AND bodies.extractor_body LIKE '%select public.extract_typed_durable_asset_ids(row_json) as asset_id%'
+                AND bodies.extractor_body LIKE '%asset_id between 1 and 2147483647%'
+                AND bodies.resolver_body LIKE '%if exists ( select 1 from public.extract_typed_durable_asset_ids(row_json) typed(asset_id) where typed.asset_id > 2147483647 ) then raise exception ''asset_reference_unavailable'' using errcode = ''55000''; end if; for candidate_id in select public.extract_durable_asset_ids(row_json)%'
+                AND bodies.key_body LIKE '%with asset_keys as (%'
+                AND bodies.key_body LIKE '%from public.extract_durable_asset_ids(row_json) reference(asset_id) join public.assets asset on asset.id = reference.asset_id%'
+                AND bodies.key_body LIKE '%from public.extract_durable_asset_ids(row_json) reference(asset_id) join public.asset_storage_objects storage_row on storage_row.asset_id = reference.asset_id and storage_row.state <> ''deleted''%'
+                AND bodies.key_body LIKE '%select storage_key from asset_keys union%'
+                AND bodies.guard_body LIKE '%row_json := to_jsonb(new)%'
+                AND bodies.guard_body LIKE '%existing_reference := false; if tg_op = ''update'' then%'
+                AND bodies.guard_body LIKE '%and candidate_id not in ( select public.extract_typed_durable_asset_ids(row_json) )%'
+                AND bodies.retention_body LIKE '%from public.resolve_durable_storage_keys(durable.row_json) resolved(storage_key) join candidate_keys candidate_key on candidate_key.storage_key = resolved.storage_key%'
+                AND bodies.wrapper_body LIKE '%select public.durable_asset_reference_exists_excluding_upload( candidate_asset_id, excluded_project_id, excluded_generated_image_id, null )%'
+                AND NOT retention_wrapper.prosecdef
+                AND EXISTS (
+                  SELECT 1 FROM unnest(COALESCE(retention_wrapper.proconfig, ARRAY[]::text[])) setting
+                   WHERE regexp_replace(lower(setting), '[[:space:]]+', '', 'g') =
+                         'search_path=pg_catalog,public'
+                )
+           )
            AND to_regclass('public.durable_asset_deletion_claims') IS NOT NULL
            AND to_regprocedure('public.resolve_durable_storage_keys(jsonb)') IS NOT NULL
            AND regexp_replace(
@@ -489,7 +561,7 @@ export async function assessDeploymentRuntimeSchema(
                    to_regprocedure('public.extract_durable_asset_ids(jsonb)')
                  )),
                  '[[:space:]]+', ' ', 'g'
-               ) LIKE '%/api/assets/([1-9][0-9]{0,9})/content%'
+               ) LIKE '%/api/(?:assets|ora/canonical-assets)/([1-9][0-9]{0,9})/content%'
            AND EXISTS (
              SELECT 1
               WHERE to_regprocedure('public.resolve_durable_asset_ids(jsonb)') IS NOT NULL
@@ -531,41 +603,41 @@ export async function assessDeploymentRuntimeSchema(
            AND EXISTS (
              SELECT 1
               WHERE to_regprocedure(
-                      'public.durable_asset_reference_exists(integer,integer,integer)'
+                      'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                     ) IS NOT NULL
                 AND regexp_replace(
                       lower(pg_get_functiondef(to_regprocedure(
-                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                        'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                       ))),
                       '[[:space:]]+', ' ', 'g'
                     ) LIKE '%from public.canvas_variant_library%'
                 AND regexp_replace(
                       lower(pg_get_functiondef(to_regprocedure(
-                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                        'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                       ))),
                       '[[:space:]]+', ' ', 'g'
                     ) LIKE '%from public.gallery_templates%'
                 AND regexp_replace(
                       lower(pg_get_functiondef(to_regprocedure(
-                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                        'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                       ))),
                       '[[:space:]]+', ' ', 'g'
                     ) LIKE '%select tool_call.project_id, null::integer, to_jsonb(tool_call)%'
                 AND regexp_replace(
                       lower(pg_get_functiondef(to_regprocedure(
-                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                        'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                       ))),
                       '[[:space:]]+', ' ', 'g'
                     ) LIKE '%select image.project_id, image.id, to_jsonb(image)%'
                 AND regexp_replace(
                       lower(pg_get_functiondef(to_regprocedure(
-                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                        'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                       ))),
                       '[[:space:]]+', ' ', 'g'
                     ) LIKE '%from public.asset_storage_objects storage_row%'
                 AND regexp_replace(
                       lower(pg_get_functiondef(to_regprocedure(
-                        'public.durable_asset_reference_exists(integer,integer,integer)'
+                        'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                       ))),
                       '[[:space:]]+', ' ', 'g'
                     ) LIKE '%project-purge-preserved-direct:%'
@@ -580,7 +652,7 @@ export async function assessDeploymentRuntimeSchema(
                     FROM unnest(COALESCE(
                       (SELECT proconfig FROM pg_catalog.pg_proc
                         WHERE oid=to_regprocedure(
-                          'public.durable_asset_reference_exists(integer,integer,integer)'
+                          'public.durable_asset_reference_exists_excluding_upload(integer,integer,integer,integer)'
                         )),
                       ARRAY[]::text[]
                     )) setting
