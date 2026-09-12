@@ -1160,3 +1160,127 @@
     }
   }
 }
+
+/* Workspace home uses one composer and one project collection, never duplicate cards. */
+.nf-workspace-home-shell {
+  max-width: 1660px;
+  padding-top: 32px;
+}
+.nf-workspace-home-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+  border-bottom: 1px solid hsl(var(--border));
+}
+.nf-workspace-home-identity {
+  min-width: 0;
+}
+.nf-workspace-home-identity .nf-eyebrow {
+  margin-bottom: 6px;
+}
+.nf-workspace-home-name {
+  font-size: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.nf-workspace-home-actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-shrink: 0;
+}
+.nf-workspace-home {
+  display: grid;
+  gap: 32px;
+  align-items: start;
+}
+.nf-workspace-create,
+.nf-workspace-projects {
+  min-width: 0;
+}
+.nf-workspace-projects {
+  scroll-margin-top: 24px;
+}
+.nf-workspace-home .nf-composer-section {
+  max-width: none;
+  margin: 0;
+}
+.nf-workspace-home .nf-composer-intro h1 {
+  font-size: clamp(27px, 2.6vw, 36px);
+  text-wrap: balance;
+}
+.nf-workspace-home .nf-section-heading {
+  border-top: 0;
+  padding-top: 0;
+  margin-bottom: 20px;
+}
+.nf-workspace-home .nf-starter-ideas {
+  margin-top: 18px;
+}
+.nf-workspace-home .nf-search {
+  max-width: none;
+}
+@media (min-width: 1280px) {
+  .nf-workspace-home {
+    grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.15fr);
+    gap: clamp(28px, 3vw, 48px);
+  }
+  .nf-workspace-projects {
+    border-inline-start: 1px solid hsl(var(--border));
+    padding-inline-start: clamp(24px, 2.5vw, 40px);
+  }
+  .nf-workspace-home .nf-project-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .nf-workspace-home .nf-project-grid[data-view="list"] {
+    grid-template-columns: 1fr;
+  }
+  .nf-workspace-home .nf-project-grid[data-view="list"] .nf-project-card {
+    grid-template-columns: minmax(150px, 0.7fr) minmax(0, 1fr);
+  }
+  .nf-workspace-home .nf-composer-footer {
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 1279px) {
+  .nf-workspace-home .nf-composer-section {
+    max-width: 760px;
+    margin-inline: auto;
+  }
+  .nf-workspace-projects {
+    padding-top: 28px;
+    border-top: 1px solid hsl(var(--border));
+  }
+}
+@media (max-width: 767px) {
+  .nf-workspace-home-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .nf-workspace-home-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .nf-workspace-home-actions > a {
+    min-height: 40px;
+  }
+  .nf-workspace-home {
+    gap: 24px;
+  }
+  .nf-workspace-home .nf-composer-intro {
+    margin-bottom: 18px;
+  }
+  .nf-workspace-home .nf-starter-ideas {
+    margin-top: 16px;
+  }
+  .nf-workspace-projects {
+    scroll-margin-top: 80px;
+  }
+}

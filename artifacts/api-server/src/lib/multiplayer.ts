@@ -29,8 +29,10 @@ import * as decoding from "lib0/decoding";
 import { db, projectsTable } from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { authenticateMultiplayerUpgrade } from "./multiplayer-upgrade-auth";
+import { parseMultiplayerProjectId, runMultiplayerAdmission } from "./multiplayer-admission";
 import { logger } from "./logger";
 import { checkProjectAccess } from "./auth";
+import { createMultiplayerWriteGate, multiplayerSyncAccess } from "./multiplayer-write-access";
 import { getSharedAccountProfile } from "./clerk-users";
 import { findLiveSupportGrant } from "./support-access";
 import { formatSupportTicketNumber } from "./support-ticket-workflow";
@@ -149,24 +151,26 @@ export interface MultiplayerServer {
 
 export function createMultiplayerServer(): MultiplayerServer {
   const wss = new WebSocketServer({ noServer: true });
-  const authenticatedUpgrades = new WeakMap<IncomingMessage, string>();
+  const authenticatedUpgrades = new WeakMap<
+    IncomingMessage,
+    { userId: string; projectId: number }
+  >();
 
-  wss.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
+  const admitConnection = async (
+    ws: WebSocket,
+    req: IncomingMessage,
+    bindCancellation: (cancel: () => void, isCancelled: () => boolean) => void,
+  ) => {
     const url = req.url ?? "";
-    const match = url.match(/\/api\/projects\/(\d+)\/multiplayer/);
-    if (!match) {
-      ws.close(4000, "Invalid path");
-      return;
-    }
-    const projectId = parseInt(match[1]!, 10);
-
-    const userId = authenticatedUpgrades.get(req) ?? null;
+    const admissionIdentity = authenticatedUpgrades.get(req);
     authenticatedUpgrades.delete(req);
-    if (!userId) {
+    if (!admissionIdentity) {
       sendJson(ws, { type: "error", message: "Unauthorized" });
       ws.close(4401, "Unauthorized");
       return;
     }
+    // Both identity and numeric project scope come from the verified upgrade.
+    const { userId, projectId } = admissionIdentity;
 
     let admissionCancelled = false;
     let releasePeer: (() => void) | undefined;
@@ -174,6 +178,7 @@ export function createMultiplayerServer(): MultiplayerServer {
       admissionCancelled = true;
       releasePeer?.();
     };
+    bindCancellation(cleanup, () => admissionCancelled);
     const admissionIsOpen = () => {
       if (!admissionCancelled && ws.readyState === WebSocket.OPEN) return true;
       cleanup();
@@ -342,11 +347,33 @@ export function createMultiplayerServer(): MultiplayerServer {
     room.awareness.on("change", awarenessChangeHandler);
     retainCleanup(() => room.awareness.off("change", awarenessChangeHandler));
 
+    const authorizeEdit = createMultiplayerWriteGate({
+      userId: peer.userId,
+      projectId,
+      isActive: admissionIsOpen,
+    });
+    const applyEdit = async (apply: () => void) => {
+      const result = await authorizeEdit(apply);
+      if (result === "read_only" || result === "unavailable") {
+        sendJson(ws, {
+          type: "error",
+          code:
+            result === "read_only"
+              ? "multiplayer_editing_read_only"
+              : "multiplayer_editing_unavailable",
+          message:
+            result === "read_only"
+              ? "Editing requires editor access. Your viewing connection remains open."
+              : "Editing access could not be verified. Try again shortly.",
+        });
+      }
+    };
+
     let lastSeenAt = Date.now();
     ws.on("pong", () => {
       lastSeenAt = Date.now();
     });
-    ws.on("message", (raw: Buffer | ArrayBuffer | Buffer[], isBinary?: boolean) => {
+    ws.on("message", async (raw: Buffer | ArrayBuffer | Buffer[], isBinary?: boolean) => {
       if (!admissionIsOpen()) return;
       lastSeenAt = Date.now();
       // Binary frames → Yjs protocol.
@@ -373,8 +400,18 @@ export function createMultiplayerServer(): MultiplayerServer {
           const messageType = decoding.readVarUint(dec);
           const enc = encoding.createEncoder();
           if (messageType === MESSAGE_SYNC) {
+            const syncType = decoding.readVarUint(dec);
+            const access = multiplayerSyncAccess(syncType);
+            if (access === "invalid") return;
             encoding.writeVarUint(enc, MESSAGE_SYNC);
-            syncProtocol.readSyncMessage(dec, enc, room.doc, peer);
+            if (access === "read") {
+              // State-vector requests only read the document; viewers retain sync.
+              syncProtocol.readSyncStep1(dec, enc, room.doc);
+            } else {
+              // Both SyncStep2 and Update apply document changes in y-protocols.
+              // Apply inside the guard, with no extra await after its live check.
+              await applyEdit(() => syncProtocol.readSyncStep2(dec, room.doc, peer));
+            }
             if (encoding.length(enc) > 1) {
               sendBinary(ws, encoding.toUint8Array(enc));
             }
@@ -424,7 +461,13 @@ export function createMultiplayerServer(): MultiplayerServer {
         return;
       }
       if (msg.type === "edit" && peer.multiplayerEnabled) {
-        broadcastJson(room, peer, { type: "peer", subtype: "edit", peer: publicPeer(peer) });
+        try {
+          await applyEdit(() =>
+            broadcastJson(room, peer, { type: "peer", subtype: "edit", peer: publicPeer(peer) }),
+          );
+        } catch (err) {
+          logger.warn({ err, projectId }, "multiplayer: failed to handle edit intent");
+        }
       }
     });
 
@@ -475,25 +518,81 @@ export function createMultiplayerServer(): MultiplayerServer {
     retainCleanup(() => clearInterval(livenessWatch));
 
     if (!admissionIsOpen()) return;
+  };
+
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    let cancelAdmission = () => {};
+    let isCancelled = () => false;
+    return runMultiplayerAdmission(
+      () =>
+        admitConnection(ws, req, (cancel, cancelled) => {
+          cancelAdmission = cancel;
+          isCancelled = cancelled;
+        }),
+      () => {
+        const alreadyCancelled = isCancelled() || ws.readyState !== WebSocket.OPEN;
+        try {
+          // Do not log credentials or raw verifier/database exception details.
+          logger.warn("multiplayer: connection admission failed");
+        } finally {
+          try {
+            cancelAdmission();
+          } finally {
+            if (!alreadyCancelled && ws.readyState === WebSocket.OPEN) {
+              try {
+                sendJson(ws, {
+                  type: "error",
+                  code: "presence_temporarily_unavailable",
+                  message: "Collaboration could not connect. Retrying shortly.",
+                });
+              } finally {
+                try {
+                  ws.close(4413, "Collaboration temporarily unavailable");
+                } catch {
+                  ws.terminate();
+                }
+              }
+            }
+          }
+        }
+      },
+    );
   });
 
   const handleUpgrade = (req: IncomingMessage, socket: import("node:net").Socket, head: Buffer) => {
     const url = req.url ?? "";
-    if (!/^\/api\/projects\/\d+\/multiplayer(?:\?|$)/u.test(url)) return;
-    const onPendingError = () => socket.destroy();
+    const match = url.match(/^\/api\/projects\/(\d+)\/multiplayer(?:\?|$)/u);
+    if (!match) return;
+    const projectId = parseMultiplayerProjectId(match[1]);
+    const destroyTransport = () => {
+      try {
+        socket.destroy();
+      } catch {
+        /* already unusable */
+      }
+    };
+    const onPendingError = destroyTransport;
     const clearPendingListeners = () => {
       socket.removeListener("error", onPendingError);
       socket.removeListener("close", clearPendingListeners);
     };
     socket.on("error", onPendingError);
     socket.once("close", clearPendingListeners);
-    const denyUpgrade = () => {
+    const denyUpgrade = (status = "401 Unauthorized") => {
       if (socket.destroyed || !socket.writable) return;
-      socket.end(
-        "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
-        () => socket.destroy(),
-      );
+      try {
+        socket.end(
+          "HTTP/1.1 " + status + "\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+          destroyTransport,
+        );
+      } catch {
+        destroyTransport();
+      }
     };
+    if (projectId === null) {
+      denyUpgrade("400 Bad Request");
+      return;
+    }
     void authenticateMultiplayerUpgrade(req)
       .then((userId) => {
         if (socket.destroyed || !socket.writable) return;
@@ -501,7 +600,7 @@ export function createMultiplayerServer(): MultiplayerServer {
           denyUpgrade();
           return;
         }
-        authenticatedUpgrades.set(req, userId);
+        authenticatedUpgrades.set(req, { userId, projectId });
         clearPendingListeners();
         try {
           wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
@@ -509,10 +608,10 @@ export function createMultiplayerServer(): MultiplayerServer {
           });
         } catch {
           authenticatedUpgrades.delete(req);
-          socket.destroy();
+          destroyTransport();
         }
       })
-      .catch(denyUpgrade);
+      .catch(() => denyUpgrade());
   };
 
   return { wss, handleUpgrade };

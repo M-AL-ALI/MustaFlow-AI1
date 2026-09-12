@@ -22,6 +22,8 @@ import { cn } from "@/lib/utils";
 import { useClerkUser, useClerkActions } from "@/lib/clerk-safe";
 import { useAdminAccess } from "@/hooks/use-admin-access";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import { useWorkspace } from "@/contexts/workspace-context";
+import { projectReviewDestination } from "@/components/projects/project-creation-state";
 import {
   Sheet,
   SheetContent,
@@ -82,12 +84,14 @@ export function WorkspaceNavigation({
   isAdmin,
   renderWorkspace,
   account,
+  newProjectHref = "/projects/new",
 }: {
   layout?: WorkspaceNavigationLayout;
   location: string;
   isAdmin: boolean;
   renderWorkspace: (onNavigate: () => void) => ReactNode;
   account: ReactNode;
+  newProjectHref?: string;
 }) {
   const [open, setOpen] = useState(false);
   const desktopToggle = useRef<HTMLButtonElement>(null);
@@ -151,7 +155,7 @@ export function WorkspaceNavigation({
         {!compact && renderWorkspace(close)}
         <div className={compact ? "px-4 pb-3" : "px-4 pb-4"}>
           <Link
-            href="/projects/new"
+            href={newProjectHref}
             onClick={close}
             className={cn("nf-primary-button", compact ? "nf-navigation-new-icon" : "w-full")}
             aria-label={compact ? "New project" : undefined}
@@ -296,11 +300,28 @@ export function WorkspaceNavigation({
 export function SlideOutNav({ layout }: { layout?: WorkspaceNavigationLayout }) {
   const [location] = useLocation();
   const { isAdmin } = useAdminAccess();
+  const { user, isLoaded, isSignedIn } = useClerkUser();
+  const workspace = useWorkspace();
+  const selected = workspace.workspaces.find(
+    (item) =>
+      item.id === workspace.currentWorkspace?.id &&
+      item.ownerUserId === user?.id &&
+      !item.deletedAt,
+  );
+  const newProjectHref =
+    isLoaded &&
+    isSignedIn &&
+    workspace.hasChosenWorkspace &&
+    !workspace.isLoading &&
+    !workspace.isError
+      ? projectReviewDestination(selected?.id)
+      : "/projects";
   return (
     <WorkspaceNavigation
       layout={layout}
       location={location}
       isAdmin={isAdmin}
+      newProjectHref={newProjectHref}
       renderWorkspace={(onNavigate) => <WorkspaceSwitcher onNavigate={onNavigate} />}
       account={<UserSection />}
     />

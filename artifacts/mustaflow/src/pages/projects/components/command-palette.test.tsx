@@ -97,6 +97,33 @@ describe("project tool catalog", () => {
   });
 });
 
+describe("ranked tool keyboard navigation", () => {
+  it.each(WORKSPACE_TOOLS)(
+    "opens exact name $name with Enter rather than a description match",
+    async (tool) => {
+      const user = userEvent.setup();
+      const onNavigate = vi.fn();
+      const onClose = vi.fn();
+      render(<CommandPalette {...base} isPublished onNavigate={onNavigate} onClose={onClose} />);
+      await user.type(screen.getByLabelText("Search project tools"), tool.name);
+      await waitFor(() => expect(screen.getAllByRole("option")[0]).toHaveTextContent(tool.name));
+      await user.keyboard("{Enter}");
+      expect(onNavigate).toHaveBeenCalledExactlyOnceWith(tool.open);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("retains relevance across category groups and supports deliberate secondary selection", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<CommandPalette {...base} onNavigate={onNavigate} />);
+    await user.type(screen.getByLabelText("Search project tools"), "server");
+    await waitFor(() => expect(screen.getAllByRole("option")[0]).toHaveTextContent("Server"));
+    expect(screen.getByText("Search results", { exact: true })).toBeInTheDocument();
+    await user.click(screen.getByText("Console output", { exact: true }));
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith({ kind: "workspace-tab", tabId: "logs" });
+  });
+});
+
 function CatalogFocusHarness({
   onNavigate,
 }: {
@@ -149,7 +176,65 @@ describe("catalog focus lifecycle", () => {
     render(<CommandPalette {...base} />);
     expect(screen.getByLabelText("Search project tools")).toHaveAttribute(
       "placeholder",
-      "Search tools: database, shell, images...",
+      "Search tools in English or Arabic...",
     );
+  });
+});
+
+describe("bilingual tool catalog interactions", () => {
+  it.each([
+    [
+      "\u0642\u064e\u0627\u0639\u0650\u062f\u064e\u0629 \u0627\u0644\u0628\u064e\u064a\u064e\u0627\u0646\u064e\u0627\u062a",
+      "Database",
+      "database",
+    ],
+    [
+      "\u062e\u0631\u064a\u0637\u0629 \u0627\u0644\u0635\u0641\u062d\u0627\u062a",
+      "Page map",
+      "page-map",
+    ],
+    ["\u0645\u0641\u0627\u062a\u064a\u062d \u0623\u0633\u0631\u0627\u0631", "Secrets", "secrets"],
+    ["\u0628\u064a\u0627\u0646\u0627\u062a database", "Database", "database"],
+    ["tables SQL", "Database", "database"],
+    ["\uff33\uff28\uff25\uff2c\uff2c", "Terminal", "terminal"],
+  ])("opens %s through the same registered tool", async (query, label, tabId) => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    render(<CommandPalette {...base} onNavigate={onNavigate} />);
+    const input = screen.getByLabelText("Search project tools");
+    expect(input).toHaveAttribute("dir", "auto");
+    await user.type(input, query);
+    await user.click(screen.getByText(label, { exact: true }));
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith({ kind: "workspace-tab", tabId });
+  });
+  it("supports keyboard selection after normalized Arabic filtering", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const onClose = vi.fn();
+    render(<CommandPalette {...base} onNavigate={onNavigate} onClose={onClose} />);
+    await user.type(
+      screen.getByLabelText("Search project tools"),
+      "\u0642\u064e\u0627\u0639\u0650\u062f\u064e\u0629 \u0627\u0644\u0628\u064e\u064a\u064e\u0627\u0646\u064e\u0627\u062a",
+    );
+    await user.keyboard("{Enter}");
+    expect(onNavigate).toHaveBeenCalledExactlyOnceWith({
+      kind: "workspace-tab",
+      tabId: "database",
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it("keeps category and publishing restrictions on Arabic results", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette {...base} />);
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    const input = screen.getByLabelText("Search project tools");
+    await user.type(input, "\u0637\u0631\u0641\u064a\u0629");
+    expect(screen.getByText("No matching tools in Connect.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText("Terminal", { exact: true })).toBeInTheDocument();
+    await user.clear(input);
+    await user.type(input, "\u062a\u062d\u0644\u064a\u0644\u0627\u062a");
+    expect(screen.queryByText("Analytics", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("No matching tools.")).toBeInTheDocument();
   });
 });

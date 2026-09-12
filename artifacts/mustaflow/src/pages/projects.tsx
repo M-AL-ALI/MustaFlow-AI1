@@ -20,6 +20,8 @@ import {
 import { BrainstormPanel } from "@/components/brainstorm-panel";
 import { ProjectTrashDialog, type TrashProject } from "@/components/project-trash-dialog";
 import { ProjectComposer } from "@/components/projects/project-composer";
+import { projectReviewDestination } from "@/components/projects/project-creation-state";
+import { WorkspaceHomeLayout } from "@/components/projects/workspace-home-layout";
 import { ProjectDashboard, projectDate } from "@/components/projects/project-dashboard";
 import { useClerkUser } from "@/lib/clerk-safe";
 import { useToast } from "@/hooks/use-toast";
@@ -210,107 +212,113 @@ function WorkspaceProjectsHome({
   }
 
   return (
-    <div className="nf-dashboard">
-      <header className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-5">
-        <div>
-          <p className="nf-eyebrow">Workspace</p>
-          <p className="mt-1 text-lg font-semibold">{workspaceName}</p>
-        </div>
-        <button type="button" className="nf-secondary-button" onClick={onChooseWorkspace}>
-          Switch workspace
-        </button>
-      </header>
-      <ProjectComposer
-        firstName={user?.firstName ?? user?.fullName?.split(" ")[0]}
-        prompt={prompt}
-        platform={platform}
-        onPlatformChange={(value) => {
-          updatePlatform(value);
-          rememberCurrentIdea({
-            id: null,
-            prompt,
-            platform: value,
-            intent: showDiscuss ? "brainstorm" : "build",
-          });
-        }}
-        onPromptChange={setPrompt}
-        onContinue={(text, platform) => {
-          const scope = { accountId, workspaceId };
-          if (!saveCreationDraft({ intent: "build", prompt: text, platform }, scope)) {
-            toast({
-              title: "Your idea is still here",
-              description: "Browser storage is unavailable. Please try again.",
-              variant: "destructive",
-            });
-            return;
-          }
-          setLocation(creationDraftDestination(scope));
-        }}
-        onBrainstorm={() => {
-          rememberCurrentIdea({ id: null, prompt, platform, intent: "brainstorm" });
-          setShowDiscuss(true);
-        }}
-        voice={{
-          supported: voice.isSupported,
-          recording: voice.isRecording,
-          language: voiceLanguage,
-          toggle: () => {
-            if (!voice.isRecording) voiceBase.current = prompt ? prompt.trimEnd() + " " : "";
-            voice.toggle();
-          },
-        }}
+    <>
+      <WorkspaceHomeLayout
+        workspaceName={workspaceName}
+        onChooseWorkspace={onChooseWorkspace}
+        composer={
+          <>
+            <ProjectComposer
+              firstName={user?.firstName ?? user?.fullName?.split(" ")[0]}
+              prompt={prompt}
+              platform={platform}
+              onPlatformChange={(value) => {
+                updatePlatform(value);
+                rememberCurrentIdea({
+                  id: null,
+                  prompt,
+                  platform: value,
+                  intent: showDiscuss ? "brainstorm" : "build",
+                });
+              }}
+              onPromptChange={setPrompt}
+              onContinue={(text, platform) => {
+                const scope = { accountId, workspaceId };
+                if (!saveCreationDraft({ intent: "build", prompt: text, platform }, scope)) {
+                  toast({
+                    title: "Your idea is still here",
+                    description: "Browser storage is unavailable. Please try again.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setLocation(creationDraftDestination(scope));
+              }}
+              onBrainstorm={() => {
+                rememberCurrentIdea({ id: null, prompt, platform, intent: "brainstorm" });
+                setShowDiscuss(true);
+              }}
+              voice={{
+                supported: voice.isSupported,
+                recording: voice.isRecording,
+                language: voiceLanguage,
+                toggle: () => {
+                  if (!voice.isRecording) voiceBase.current = prompt ? prompt.trimEnd() + " " : "";
+                  voice.toggle();
+                },
+              }}
+            />
+            {showDiscuss && (
+              <div className="mb-10">
+                <BrainstormPanel
+                  initialInput={prompt}
+                  onClose={() => {
+                    const closed: WorkspaceIdea = { id: null, prompt, platform, intent: "build" };
+                    const expectedId = currentReceiptId.current;
+                    currentReceiptId.current = expectedId
+                      ? rememberIdea(closed, true, expectedId)
+                      : rememberIdea(closed, false);
+                    setShowDiscuss(false);
+                  }}
+                />
+              </div>
+            )}
+          </>
+        }
+        projects={
+          <>
+            <ProjectDashboard
+              collectionScope="workspace"
+              newProjectHref={projectReviewDestination(workspaceId)}
+              projects={summaryQuery.data?.recent ?? []}
+              heading="Projects"
+              total={summaryQuery.data?.total ?? 0}
+              state={summaryQuery.isLoading ? "loading" : summaryQuery.isError ? "error" : "ready"}
+              onRetry={() => {
+                void summaryQuery.refetch();
+              }}
+              retrying={summaryQuery.isFetching}
+              onTrash={setTrashProject}
+              removingId={removingId}
+              securityCounts={securityCounts?.counts}
+              snapshotIdentity={user?.id}
+            />
+            <details className="nf-activity">
+              <summary>Recent activity</summary>
+              {activityQuery.isLoading ? (
+                <p role="status">Loading activity</p>
+              ) : activityQuery.isError ? (
+                <p role="status">
+                  Activity is unavailable right now. Your project list is separate.
+                </p>
+              ) : activityQuery.data?.length ? (
+                <ol>
+                  {activityQuery.data.map((item) => (
+                    <li key={item.id}>
+                      <p>{item.summary}</p>
+                      <small>
+                        {item.projectName} / {projectDate(item.createdAt)}
+                      </small>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="nf-supporting">Project updates will appear here as you work.</p>
+              )}
+            </details>
+          </>
+        }
       />
-      {showDiscuss && (
-        <div className="mb-10">
-          <BrainstormPanel
-            initialInput={prompt}
-            onClose={() => {
-              const closed: WorkspaceIdea = { id: null, prompt, platform, intent: "build" };
-              const expectedId = currentReceiptId.current;
-              currentReceiptId.current = expectedId
-                ? rememberIdea(closed, true, expectedId)
-                : rememberIdea(closed, false);
-              setShowDiscuss(false);
-            }}
-          />
-        </div>
-      )}
-      <ProjectDashboard
-        collectionScope="workspace"
-        projects={summaryQuery.data?.recent ?? []}
-        heading="Projects"
-        total={summaryQuery.data?.total ?? 0}
-        state={summaryQuery.isLoading ? "loading" : summaryQuery.isError ? "error" : "ready"}
-        onRetry={() => {
-          void summaryQuery.refetch();
-        }}
-        retrying={summaryQuery.isFetching}
-        onTrash={setTrashProject}
-        removingId={removingId}
-        securityCounts={securityCounts?.counts}
-        snapshotIdentity={user?.id}
-      />
-      <details className="nf-activity">
-        <summary>Recent activity</summary>
-        {activityQuery.isLoading ? (
-          <p role="status">Loading activity</p>
-        ) : activityQuery.isError ? (
-          <p role="status">Activity is unavailable right now. Your project list is separate.</p>
-        ) : activityQuery.data?.length ? (
-          <ol>
-            {activityQuery.data.map((item) => (
-              <li key={item.id}>
-                <p>{item.summary}</p>
-                <small>
-                  {item.projectName} / {projectDate(item.createdAt)}
-                </small>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="nf-supporting">Project updates will appear here as you work.</p>
-        )}
-      </details>
       {trashProject && (
         <ProjectTrashDialog
           project={trashProject}
@@ -318,6 +326,6 @@ function WorkspaceProjectsHome({
           onClose={() => setTrashProject(null)}
         />
       )}
-    </div>
+    </>
   );
 }

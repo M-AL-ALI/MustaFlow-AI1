@@ -89,7 +89,9 @@ export function useMultiplayerPresence(
       if (cancelled || permanentDenial || reconnectTimer !== null) return;
       reconnectAttempt += 1;
       if (reconnectAttempt > MULTIPLAYER_MAX_RECONNECT_ATTEMPTS) {
-        setMessage((current) => current ?? "Connection interrupted. Reconnect to try again.");
+        // A prior transient server message may promise another retry. Once the
+        // local budget is exhausted, replace that promise with the actual state.
+        setMessage("Connection interrupted. Reconnect to try again.");
         return;
       }
       const delay = Math.min(10_000, 500 * 2 ** Math.min(reconnectAttempt, 5));

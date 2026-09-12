@@ -74,6 +74,7 @@ export function selectRecentProjects(
 
 type ProjectDashboardProps = {
   heading?: string;
+  newProjectHref?: string;
   collectionScope?: "recent" | "workspace";
   projects: readonly DashboardProject[];
   total: number;
@@ -86,10 +87,13 @@ type ProjectDashboardProps = {
   snapshotIdentity?: string | null;
   /** Only the local design harness overrides this. Production uses the isolated preview URL. */
   renderPreview?: (project: DashboardProject) => ReactNode;
+  /** Local component reviews supply synthetic snapshots without account reads. */
+  renderSnapshot?: (project: DashboardProject) => ReactNode;
 };
 
 export function ProjectDashboard({
   heading = "Recent projects",
+  newProjectHref = "/projects/new",
   collectionScope = "recent",
   projects,
   total,
@@ -101,6 +105,7 @@ export function ProjectDashboard({
   securityCounts,
   snapshotIdentity,
   renderPreview,
+  renderSnapshot,
 }: ProjectDashboardProps) {
   const searchId = useId();
   const resultsId = useId();
@@ -176,10 +181,8 @@ export function ProjectDashboard({
         <div className="nf-empty">
           <FolderOpen aria-hidden="true" size={28} />
           <h3>A place for your next idea</h3>
-          <p>
-            Describe an app above, or start with project details. Projects in Trash stay separate.
-          </p>
-          <Link href="/projects/new" className="nf-primary-button">
+          <p>Describe your app, or start with project details. Projects in Trash stay separate.</p>
+          <Link href={newProjectHref} className="nf-primary-button">
             Create a project <ArrowUpRight size={15} />
           </Link>
         </div>
@@ -296,12 +299,16 @@ export function ProjectDashboard({
                           onClick={() => setPreviewId(project.id)}
                           aria-label={"Preview " + project.name}
                         >
-                          <ProjectCardSnapshot
-                            projectId={project.id}
-                            projectName={project.name}
-                            identity={snapshotIdentity}
-                            revision={project.updatedAt}
-                          />
+                          {renderSnapshot ? (
+                            renderSnapshot(project)
+                          ) : (
+                            <ProjectCardSnapshot
+                              projectId={project.id}
+                              projectName={project.name}
+                              identity={snapshotIdentity}
+                              revision={project.updatedAt}
+                            />
+                          )}
                         </button>
                       )}
                     </div>

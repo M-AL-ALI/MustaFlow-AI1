@@ -40,6 +40,18 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("verified collaboration upgrades", () => {
+  it.each(["0", "2147483648", "9007199254740992", "9".repeat(400)])(
+    "does not invoke the credential verifier for out-of-domain project %s",
+    async (id) => {
+      expect(
+        await authenticateMultiplayerUpgrade(
+          request({ url: "/api/projects/" + id + "/multiplayer" }),
+        ),
+      ).toBeNull();
+      expect(verifyRequest).not.toHaveBeenCalled();
+    },
+  );
+
   it("verifies the existing cookie with the configured Clerk client and session-token policy", async () => {
     const req = request();
     expect(await authenticateMultiplayerUpgrade(req)).toBe("verified-owner");

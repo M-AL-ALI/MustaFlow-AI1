@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { clerkClient } from "@clerk/express";
+import { parseMultiplayerProjectId } from "./multiplayer-admission";
 
 export const MULTIPLAYER_AUTH_TIMEOUT_MS = 5_000;
 
@@ -19,7 +20,8 @@ function collaborationRequest(req: IncomingMessage): Request | null {
   const origin = new URL(rawOrigin);
   if (rawOrigin !== origin.origin || origin.origin !== base.origin) return null;
   const rawPath = req.url ?? "";
-  if (!/^\/api\/projects\/\d+\/multiplayer(?:\?|$)/u.test(rawPath)) return null;
+  const pathMatch = rawPath.match(/^\/api\/projects\/(\d+)\/multiplayer(?:\?|$)/u);
+  if (!pathMatch || parseMultiplayerProjectId(pathMatch[1]) === null) return null;
   const url = new URL(rawPath, base);
   if (!/^\/api\/projects\/\d+\/multiplayer$/u.test(url.pathname)) return null;
   // No identity or credential query parameter participates in authentication.

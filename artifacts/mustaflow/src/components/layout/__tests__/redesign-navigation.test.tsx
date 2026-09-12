@@ -1,6 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-const state = vi.hoisted(() => ({ isAdmin: false, signedIn: true, userId: "owner-a" }));
+const state = vi.hoisted(() => ({
+  isAdmin: false,
+  signedIn: true,
+  userId: "owner-a",
+  workspaceId: 7,
+  workspaceOwnerId: "owner-a",
+  workspaceChosen: true,
+  workspaceLoading: false,
+  workspaceError: false,
+}));
+vi.mock("@/contexts/workspace-context", () => ({
+  useWorkspace: () => {
+    const selected = {
+      id: state.workspaceId,
+      name: "Test workspace",
+      ownerUserId: state.workspaceOwnerId,
+      deletedAt: null,
+    };
+    return {
+      currentWorkspace: selected,
+      workspaces: [selected],
+      hasChosenWorkspace: state.workspaceChosen,
+      isLoading: state.workspaceLoading,
+      isError: state.workspaceError,
+    };
+  },
+}));
 vi.mock("../public-header", () => ({
   PublicHeader: () => <header>Unchanged public header</header>,
 }));
@@ -35,6 +61,11 @@ beforeEach(() => {
   state.isAdmin = false;
   state.signedIn = true;
   state.userId = "owner-a";
+  state.workspaceId = 7;
+  state.workspaceOwnerId = "owner-a";
+  state.workspaceChosen = true;
+  state.workspaceLoading = false;
+  state.workspaceError = false;
   desktop = false;
   listeners = new Set();
   vi.stubGlobal(
@@ -86,7 +117,7 @@ describe("Redesigned workspace navigation", () => {
     const dialog = screen.getByRole("dialog", { name: "NabuFlow" });
     expect(within(dialog).getByRole("link", { name: "Trash" }).getAttribute("href")).toBe("/trash");
     expect(within(dialog).getByRole("link", { name: "New project" }).getAttribute("href")).toBe(
-      "/projects/new",
+      "/projects/new?reviewWorkspaceId=7",
     );
     expect(within(dialog).queryByRole("link", { name: "Admin Page" })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
@@ -107,7 +138,7 @@ describe("Responsive workspace shell", () => {
       );
       expect(screen.getByRole("button", { name: "Test workspace" })).toBeTruthy();
       expect(screen.getByRole("link", { name: "New project" }).getAttribute("href")).toBe(
-        "/projects/new",
+        "/projects/new?reviewWorkspaceId=7",
       );
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.queryByRole("navigation", { name: "Quick navigation" })).toBeNull();
@@ -283,4 +314,37 @@ describe("Responsive workspace shell", () => {
     );
     expect(screen.getByRole("button", { name: "Collapse workspace navigation" })).toBeTruthy();
   });
+});
+
+describe("workspace-scoped sidebar project entry", () => {
+  it("updates New project after selecting a different owned workspace", () => {
+    desktop = true;
+    const view = render(<Shell />);
+    expect(screen.getByRole("link", { name: "New project" })).toHaveAttribute(
+      "href",
+      "/projects/new?reviewWorkspaceId=7",
+    );
+    state.workspaceId = 9;
+    view.rerender(<Shell />);
+    expect(screen.getByRole("link", { name: "New project" })).toHaveAttribute(
+      "href",
+      "/projects/new?reviewWorkspaceId=9",
+    );
+  });
+  it.each(["unselected", "loading", "error", "foreign", "invalid"] as const)(
+    "requires workspace selection instead of reviving an account draft when %s",
+    (condition) => {
+      desktop = true;
+      if (condition === "unselected") state.workspaceChosen = false;
+      if (condition === "loading") state.workspaceLoading = true;
+      if (condition === "error") state.workspaceError = true;
+      if (condition === "foreign") state.workspaceOwnerId = "another-owner";
+      if (condition === "invalid") state.workspaceId = 0;
+      render(<Shell />);
+      expect(screen.getByRole("link", { name: "New project" })).toHaveAttribute(
+        "href",
+        "/projects",
+      );
+    },
+  );
 });

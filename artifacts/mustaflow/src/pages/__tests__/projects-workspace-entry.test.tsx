@@ -707,3 +707,16 @@ describe("Brainstorm closure receipt identity", () => {
     }
   });
 });
+
+it("starts project details in the selected empty workspace rather than account-wide recovery", () => {
+  const empty = resultFor("account-a", 2);
+  empty.summaryQuery.data = { total: 0, recent: [] };
+  empty.activityQuery.data = [];
+  const page = render(<ProjectsPage />);
+  choose(page, "Client");
+  const create = screen.getByRole("link", { name: "Create a project" });
+  expect(create).toHaveAttribute("href", "/projects/new?reviewWorkspaceId=2");
+  fireEvent.click(create);
+  expect(state.navigate).toHaveBeenCalledWith("/projects/new?reviewWorkspaceId=2");
+  expect(state.createProject).not.toHaveBeenCalled();
+});

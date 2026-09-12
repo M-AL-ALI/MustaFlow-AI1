@@ -55,7 +55,10 @@ const mocks = vi.hoisted(() => ({
     icon: "Presentation",
   },
 }));
-vi.mock("wouter", () => ({ useLocation: () => ["/projects/new", mocks.setLocation] }));
+vi.mock("wouter", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("wouter")>();
+  return { useLocation: () => ["/projects/new", mocks.setLocation], useSearch: actual.useSearch };
+});
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     setQueryData: mocks.setQueryData,
@@ -181,6 +184,7 @@ afterEach(() => {
   if (originalClerk) Object.defineProperty(window, "Clerk", originalClerk);
   else Reflect.deleteProperty(window, "Clerk");
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function notifyClerk(ownerId: string | null, isLoaded = true) {
@@ -617,17 +621,26 @@ describe("project review workspace binding", () => {
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 
-  it("does not silently replace a malformed persisted workspace identifier", () => {
+  it("requires explicit recovery for a malformed legacy workspace identifier", () => {
     const page = render(<NewProjectPage />);
     setField("Project name", "Saved draft");
     page.unmount();
-    const malformedValues = { ...readProjectReviewDraft()!.values, workspaceId: "7" };
-    saveProjectReviewDraft(malformedValues, null);
+    const legacy = readProjectReviewDraft()!;
+    const malformed = JSON.stringify({ ...legacy, values: { ...legacy.values, workspaceId: "7" } });
+    const key = "nabuflow.project-review.v2." + encodeURIComponent("account-a");
+    // Recreate a pre-upgrade browser with only the malformed old-format record.
+    sessionStorage.removeItem("nabuflow.project-review.v3." + encodeURIComponent("account-a"));
+    sessionStorage.setItem(key, malformed);
     render(<NewProjectPage />);
     expect(screen.getByRole("button", { name: "Create project" })).toBeDisabled();
+    expect(sessionStorage.getItem(key)).toBe(malformed);
     submit();
     expect(mocks.mutate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Use Studio for this draft" }));
+    expect(readAccountReviewDraft("account-a", 7)?.values).toMatchObject({
+      workspaceId: 7,
+      name: "Saved draft",
+    });
     submit();
     expect(mocks.mutate.mock.calls[0][0].data.workspaceId).toBe(7);
   });
@@ -677,6 +690,14 @@ describe("scoped creation handoff admission", () => {
     expect(readCreationDraft(studioDraftScope)).toEqual(foreign);
     setField("Project name", "B project");
     submit();
+    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(readCreationDraft(studioDraftScope)).toEqual(foreign);
+    fireEvent.click(screen.getByRole("button", { name: "Use B workspace for this draft" }));
+    submit();
+    expect(mocks.mutate.mock.calls[0][0].data).toMatchObject({
+      workspaceId: 8,
+      name: "B project",
+    });
     act(() => callbacks().onSuccess({ id: 111, name: "B project" }));
     expect(readCreationDraft(studioDraftScope)).toEqual(foreign);
   });
@@ -1081,6 +1102,323 @@ describe("Scoped handoff rejection and pre-admission recovery", () => {
     fireEvent.click(retry);
     expect(mocks.retryWorkspaces).toHaveBeenCalledOnce();
     expect(readCreationDraft(studioDraftScope)).toEqual(handoff);
+    expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+});
+
+describe("explicit workspace project-review entry", () => {
+  function enter(workspaceId: number) {
+    window.history.replaceState({}, "", "/projects/new?reviewWorkspaceId=" + workspaceId);
+  }
+  it("retains separate names and briefs when sidebar targets change on the same page", () => {
+    enter(7);
+    const view = render(<NewProjectPage />);
+    setField("Project brief", "Studio appointment app");
+    setField("Project name", "My edited studio name");
+    const studioReview = readAccountReviewDraft("account-a", 7)!;
+    selectOtherWorkspace();
+    act(() => enter(9));
+    view.rerender(<NewProjectPage />);
+    expect(screen.getByLabelText("Project brief")).toHaveValue("");
+    expect(screen.getByLabelText("Project name")).toHaveValue("");
+    expect(readAccountReviewDraft("account-a", 7)).toEqual(studioReview);
+    setField("Project brief", "Client delivery portal");
+    setField("Project name", "My edited client name");
+    const clientReview = readAccountReviewDraft("account-a", 9)!;
+    act(() => enter(7));
+    view.rerender(<NewProjectPage />);
+    expect(screen.getByLabelText("Project brief")).toHaveValue("Studio appointment app");
+    expect(screen.getByLabelText("Project name")).toHaveValue("My edited studio name");
+    expect(readAccountReviewDraft("account-a", 9)).toEqual(clientReview);
+    submit();
+    expect(mocks.mutate.mock.calls[0][0].data.workspaceId).toBe(7);
+  });
+
+  it.each(["0", "-1", "7e0", "9007199254740992", "7&reviewWorkspaceId=9", "8"])(
+    "does not fall back to another saved workspace for invalid or unavailable entry %s",
+    (raw) => {
+      const retainedValues = {
+        name: "Retained studio review",
+        nameEdited: true,
+        prompt: "Private studio idea",
+        platform: "web" as const,
+        kind: "web" as const,
+        stack: "react-vite" as const,
+        appMode: "simple" as const,
+        templateId: null,
+        workspaceId: 7,
+      };
+      const retained = saveAccountReviewDraft("account-a", retainedValues, null)!;
+      window.history.replaceState({}, "", "/projects/new?reviewWorkspaceId=" + raw);
+      render(<NewProjectPage />);
+      expect(screen.getByLabelText("Project brief")).toHaveValue("");
+      expect(screen.getByLabelText("Project name")).toHaveValue("");
+      submit();
+      expect(mocks.mutate).not.toHaveBeenCalled();
+      expect(readAccountReviewDraft("account-a", 7)).toEqual(retained);
+    },
+  );
+
+  it("keeps both reviews when an explicit move targets an occupied workspace", () => {
+    enter(7);
+    const view = render(<NewProjectPage />);
+    setField("Project brief", "Keep the studio brief");
+    setField("Project name", "Studio review");
+    const studioReview = readAccountReviewDraft("account-a", 7)!;
+    const clientValues = {
+      ...studioReview.values,
+      workspaceId: 9,
+      name: "Client review",
+      prompt: "Keep the client brief",
+    };
+    const clientReview = saveAccountReviewDraft("account-a", clientValues, null)!;
+    selectOtherWorkspace();
+    view.rerender(<NewProjectPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Use Client for this draft" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Both reviews are unchanged");
+    expect(readAccountReviewDraft("account-a", 7)).toEqual(studioReview);
+    expect(readAccountReviewDraft("account-a", 9)).toEqual(clientReview);
+    expect(screen.getByLabelText("Project brief")).toHaveValue("Keep the studio brief");
+    fireEvent.click(screen.getByRole("button", { name: "Open saved review in Client" }));
+    expect(mocks.setLocation).toHaveBeenCalledWith("/projects/new?reviewWorkspaceId=9");
+    expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+
+  it("does not change the destination or durable receipt when storing a move fails", () => {
+    enter(7);
+    const view = render(<NewProjectPage />);
+    setField("Project name", "Studio review");
+    const retained = readAccountReviewDraft("account-a", 7)!;
+    selectOtherWorkspace();
+    view.rerender(<NewProjectPage />);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Use Client for this draft" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Your draft and its workspace are unchanged",
+    );
+    expect(readAccountReviewDraft("account-a", 7)).toEqual(retained);
+    expect(readAccountReviewDraft("account-a", 9)).toBeNull();
+    expect(mocks.setLocation).not.toHaveBeenCalled();
+  });
+
+  it("moves an unoccupied review atomically and updates its explicit route without losing edits", () => {
+    enter(7);
+    const view = render(<NewProjectPage />);
+    setField("Project brief", "Keep this edited brief");
+    setField("Project name", "Keep this edited name");
+    selectOtherWorkspace();
+    view.rerender(<NewProjectPage />);
+    mocks.setLocation.mockImplementation((to: string) => window.history.replaceState({}, "", to));
+    fireEvent.click(screen.getByRole("button", { name: "Use Client for this draft" }));
+    expect(window.location.search).toBe("?reviewWorkspaceId=9");
+    expect(screen.getByLabelText("Project brief")).toHaveValue("Keep this edited brief");
+    expect(screen.getByLabelText("Project name")).toHaveValue("Keep this edited name");
+    expect(readAccountReviewDraft("account-a", 7)).toBeNull();
+    expect(readAccountReviewDraft("account-a", 9)?.values).toMatchObject({ workspaceId: 9 });
+    submit();
+    expect(mocks.mutate.mock.calls[0][0].data.workspaceId).toBe(9);
+  });
+
+  it("keeps the explicit workspace selector when consuming other entry hints", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/projects/new?reviewWorkspaceId=7&prompt=URL%20idea&keep=1#brief",
+    );
+    render(<NewProjectPage />);
+    expect(window.location.search).toBe("?reviewWorkspaceId=7&keep=1");
+    expect(window.location.hash).toBe("#brief");
+    setField("Project name", "Edited after handoff");
+    expect(screen.getByLabelText("Project brief")).toHaveValue("URL idea");
+    expect(readAccountReviewDraft("account-a", 7)?.values.name).toBe("Edited after handoff");
+  });
+
+  it.each(["success", "error"] as const)(
+    "fences a late %s when the explicit route changes before React commits",
+    (outcome) => {
+      enter(7);
+      render(<NewProjectPage />);
+      setField("Project name", "Original studio submission");
+      submit();
+      const pending = callbacks();
+      const retained = readAccountReviewDraft("account-a", 7)!;
+      selectOtherWorkspace();
+      act(() => {
+        enter(9);
+        if (outcome === "success")
+          pending.onSuccess({ id: 701, name: "Original studio submission" });
+        else pending.onError(new Error("Old workspace failure"));
+      });
+      expect(mocks.setLocation).not.toHaveBeenCalled();
+      expect(mocks.setQueryData).not.toHaveBeenCalled();
+      expect(mocks.invalidateQueries).not.toHaveBeenCalled();
+      expect(screen.queryByText("Old workspace failure")).toBeNull();
+      expect(readAccountReviewDraft("account-a", 7)).toEqual(retained);
+      expect(screen.getByLabelText("Project name")).toHaveValue("");
+    },
+  );
+});
+
+it("keeps a successfully moved review recoverable if navigation throws", () => {
+  window.history.replaceState({}, "", "/projects/new?reviewWorkspaceId=7");
+  const view = render(<NewProjectPage />);
+  setField("Project name", "Recoverable moved review");
+  selectOtherWorkspace();
+  view.rerender(<NewProjectPage />);
+  mocks.setLocation.mockImplementation(() => {
+    throw new Error("navigation unavailable");
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Use Client for this draft" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Your saved reviews are still available");
+  expect(readAccountReviewDraft("account-a", 9)?.values.name).toBe("Recoverable moved review");
+  expect(readAccountReviewDraft("account-a", 7)).toBeNull();
+  expect(mocks.mutate).not.toHaveBeenCalled();
+});
+
+describe("multi-digit workspace admission", () => {
+  const reviewValues = (workspaceId: number, name: string) => ({
+    name,
+    nameEdited: true,
+    prompt: "Retained workspace brief",
+    platform: "web" as const,
+    kind: "web" as const,
+    stack: "react-vite" as const,
+    appMode: "fullstack" as const,
+    templateId: null,
+    workspaceId,
+  });
+
+  function admitWorkspace(id: number) {
+    const existing = workspaceState();
+    const bound = { ...existing.currentWorkspace, id, name: "Workspace " + id };
+    mocks.useWorkspace.mockReturnValue({
+      ...existing,
+      workspaces: [...existing.workspaces, bound],
+    });
+  }
+
+  it.each([10, 17, 99, 100])("restores and submits the explicitly requested workspace %s", (id) => {
+    admitWorkspace(id);
+    const sibling = saveAccountReviewDraft(
+      "account-a",
+      reviewValues(7, "Other workspace draft"),
+      null,
+    )!;
+    saveAccountReviewDraft("account-a", reviewValues(id, "Preserved " + id), null);
+    window.history.replaceState({}, "", "/projects/new?reviewWorkspaceId=" + id);
+    render(<NewProjectPage />);
+    expect(screen.getByLabelText("Project name")).toHaveValue("Preserved " + id);
+    expect(screen.getByLabelText("Project brief")).toHaveValue("Retained workspace brief");
+    expect(screen.getByRole("button", { name: "Create project" })).toBeEnabled();
+    submit();
+    expect(mocks.mutate).toHaveBeenCalledOnce();
+    expect(mocks.mutate.mock.calls[0][0].data).toMatchObject({
+      workspaceId: id,
+      name: "Preserved " + id,
+      initialPrompt: "Retained workspace brief",
+    });
+    expect(readAccountReviewDraft("account-a", 7)).toEqual(sibling);
+  });
+
+  it.each([10, 17, 99, 100])("starts a fresh review in explicitly requested workspace %s", (id) => {
+    admitWorkspace(id);
+    window.history.replaceState({}, "", "/projects/new?reviewWorkspaceId=" + id);
+    render(<NewProjectPage />);
+    setField("Project name", "Fresh " + id);
+    submit();
+    expect(mocks.mutate).toHaveBeenCalledOnce();
+    expect(mocks.mutate.mock.calls[0][0].data).toMatchObject({
+      workspaceId: id,
+      name: "Fresh " + id,
+    });
+  });
+
+  it.each([10, 17, 99, 100])("admits and consumes a build handoff for workspace %s", (id) => {
+    admitWorkspace(id);
+    const scope = { accountId: "account-a", workspaceId: id };
+    const prompt = "Build workspace " + id + " notebook";
+    const handoff = saveCreationDraft({ intent: "build", prompt, platform: "web" }, scope)!;
+    window.history.replaceState({}, "", creationDraftDestination(scope));
+    render(<NewProjectPage />);
+    expect(screen.getByLabelText("Project brief")).toHaveValue(prompt);
+    expect(readAccountReviewDraft("account-a", id)?.sourceDraftId).toBe(handoff.id);
+    submit();
+    expect(mocks.mutate).toHaveBeenCalledOnce();
+    expect(mocks.mutate.mock.calls[0][0].data).toMatchObject({
+      workspaceId: id,
+      initialPrompt: prompt,
+    });
+    act(() => callbacks().onSuccess({ id: 1000 + id, name: "Workspace notebook" }));
+    expect(readCreationDraft(scope)).toBeNull();
+    expect(readAccountReviewDraft("account-a", id)).toBeNull();
+  });
+
+  it.each(["010", "1e1", "+10", "10.0", "10x", " 10", "0", "-10", "9007199254740992"])(
+    "still rejects a noncanonical or unsafe explicit workspace: %s",
+    (raw) => {
+      admitWorkspace(17);
+      const saved = saveAccountReviewDraft(
+        "account-a",
+        reviewValues(17, "Keep this review"),
+        null,
+      )!;
+      window.history.replaceState(
+        {},
+        "",
+        "/projects/new?reviewWorkspaceId=" + encodeURIComponent(raw),
+      );
+      render(<NewProjectPage />);
+      setField("Project name", "Rejected destination");
+      submit();
+      expect(mocks.mutate).not.toHaveBeenCalled();
+      expect(readAccountReviewDraft("account-a", 17)).toEqual(saved);
+    },
+  );
+});
+
+describe("editing a mounted review after a long pause", () => {
+  it("saves the next edit after expiry and restores it when the page is reopened", () => {
+    vi.useFakeTimers();
+    const page = render(<NewProjectPage />);
+    setField("Project name", "Before pause");
+    setField("Project brief", "Keep these notebook requirements");
+    const first = readAccountReviewDraft("account-a", 7)!;
+    expect(first).not.toBeNull();
+    vi.setSystemTime(Date.now() + 31 * 60 * 1000);
+    expect(readAccountReviewDraft("account-a", 7)).toBeNull();
+    setField("Project name", "After pause");
+    const renewed = readAccountReviewDraft("account-a", 7)!;
+    expect(renewed).not.toBeNull();
+    expect(renewed.id).not.toBe(first.id);
+    expect(renewed.values).toMatchObject({
+      name: "After pause",
+      prompt: "Keep these notebook requirements",
+      workspaceId: 7,
+    });
+    page.unmount();
+    render(<NewProjectPage />);
+    expect(screen.getByLabelText("Project name")).toHaveValue("After pause");
+    expect(screen.getByLabelText("Project brief")).toHaveValue("Keep these notebook requirements");
+    expect(mocks.mutate).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newer saved review when an older mounted form resumes editing", () => {
+    vi.useFakeTimers();
+    render(<NewProjectPage />);
+    setField("Project name", "Older mounted form");
+    const first = readAccountReviewDraft("account-a", 7)!;
+    vi.setSystemTime(Date.now() + 31 * 60 * 1000);
+    const replacement = saveAccountReviewDraft(
+      "account-a",
+      { ...first.values, name: "Newer saved review" },
+      null,
+    )!;
+    expect(replacement).not.toBeNull();
+    setField("Project name", "Stale resumed edits");
+    expect(readAccountReviewDraft("account-a", 7)).toEqual(replacement);
+    expect(screen.getByLabelText("Project name")).toHaveValue("Stale resumed edits");
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 });

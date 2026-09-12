@@ -59,6 +59,28 @@ afterEach(() => {
 });
 
 describe("bounded collaboration reconnects", () => {
+  it("recovers a transient admission failure through the existing retry path", () => {
+    const { result } = renderHook(() => useMultiplayerPresence(61, true));
+    act(() => {
+      latest().open();
+      latest().frame({
+        type: "error",
+        code: "presence_temporarily_unavailable",
+        message: "Collaboration could not connect. Retrying shortly.",
+      });
+      latest().remoteClose(4413);
+    });
+    expect(result.current.status).toBe("closed");
+    advance(1000);
+    expect(TestWebSocket.instances).toHaveLength(2);
+    act(() => {
+      latest().open();
+      latest().frame({ type: "hello", you: peer });
+    });
+    expect(result.current.status).toBe("open");
+    expect(result.current.message).toBeNull();
+  });
+
   it("does not claim live collaboration from the transport opening alone", () => {
     const { result } = renderHook(() => useMultiplayerPresence(61, true, "Preview"));
     act(() => latest().open());
@@ -233,20 +255,28 @@ describe("bounded collaboration reconnects", () => {
     expect(result.current.status).toBe("open");
   });
 
-  it("keeps a non-auth editing restriction separate from connection denial", () => {
+  it.each([
+    ["multiplayer_editing_disabled", "Live editing is turned off for this project."],
+    [
+      "multiplayer_editing_read_only",
+      "Editing requires editor access. Your viewing connection remains open.",
+    ],
+    ["multiplayer_editing_unavailable", "Editing access could not be verified. Try again shortly."],
+    ["support_presence_read_only", "Support access is read-only."],
+  ])("keeps %s separate from connection denial", (code, message) => {
     const { result } = renderHook(() => useMultiplayerPresence(61, true));
     act(() => {
       latest().open();
       latest().frame({ type: "hello", you: peer });
       latest().frame({
         type: "error",
-        code: "multiplayer_editing_disabled",
-        message: "Live editing is turned off for this project.",
+        code,
+        message,
       });
     });
     expect(result.current.status).toBe("open");
     expect(latest().close).not.toHaveBeenCalled();
-    expect(result.current.message).toBe("Live editing is turned off for this project.");
+    expect(result.current.message).toBe(message);
   });
 
   it("clears reconnect work on unmount", () => {
@@ -256,5 +286,42 @@ describe("bounded collaboration reconnects", () => {
     advance(60_000);
     expect(TestWebSocket.instances).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("exhausted transient admission feedback", () => {
+  it("replaces a retry promise at exhaustion without restarting on online events", () => {
+    const { result } = renderHook(() => useMultiplayerPresence(61, true));
+    for (let attempt = 0; attempt <= MULTIPLAYER_MAX_RECONNECT_ATTEMPTS; attempt += 1) {
+      act(() => {
+        latest().open();
+        latest().frame({
+          type: "error",
+          code: "presence_temporarily_unavailable",
+          message: "Collaboration could not connect. Retrying shortly.",
+        });
+        latest().remoteClose(4413);
+      });
+      if (attempt < MULTIPLAYER_MAX_RECONNECT_ATTEMPTS) {
+        expect(result.current.message).toBe("Collaboration could not connect. Retrying shortly.");
+      }
+      advance(10_000);
+    }
+    const exhaustedCount = MULTIPLAYER_MAX_RECONNECT_ATTEMPTS + 1;
+    expect(TestWebSocket.instances).toHaveLength(exhaustedCount);
+    expect(result.current.status).toBe("closed");
+    expect(result.current.message).toBe("Connection interrupted. Reconnect to try again.");
+    act(() => window.dispatchEvent(new Event("online")));
+    advance(60_000);
+    expect(TestWebSocket.instances).toHaveLength(exhaustedCount);
+    act(() => result.current.reconnect?.());
+    expect(TestWebSocket.instances).toHaveLength(exhaustedCount + 1);
+    expect(result.current.message).toBeNull();
+    act(() => {
+      latest().open();
+      latest().frame({ type: "hello", you: peer });
+    });
+    expect(result.current.status).toBe("open");
+    expect(result.current.message).toBeNull();
   });
 });

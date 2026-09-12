@@ -36,6 +36,12 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
       ),
     [isPublished, query, category],
   );
+  const resultGroups = query.trim()
+    ? [{ heading: "Search results", items: visibleTools }]
+    : WORKSPACE_TOOL_CATEGORIES.map((heading) => ({
+        heading,
+        items: visibleTools.filter((tool) => tool.category === heading),
+      }));
   useEffect(() => {
     if (open) {
       setQuery("");
@@ -45,6 +51,7 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
   return (
     <CommandDialog
       open={open}
+      shouldFilter={false}
       onOpenAutoFocus={() => {
         const active = document.activeElement;
         openerRef.current = active instanceof HTMLElement ? active : null;
@@ -67,7 +74,8 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
       <CommandInput
         ref={inputRef}
         aria-label="Search project tools"
-        placeholder="Search tools: database, shell, images..."
+        dir="auto"
+        placeholder="Search tools in English or Arabic..."
         value={query}
         onValueChange={setQuery}
       />
@@ -105,11 +113,10 @@ export function CommandPalette({ open, onClose, onNavigate, isPublished }: Comma
             Try another category, database, shell, images, or publishing.
           </span>
         </CommandEmpty>
-        {WORKSPACE_TOOL_CATEGORIES.map((group) => {
-          const items = visibleTools.filter((tool) => tool.category === group);
+        {resultGroups.map(({ heading, items }) => {
           if (!items.length) return null;
           return (
-            <CommandGroup key={group} heading={group} className="!p-1">
+            <CommandGroup key={heading} heading={heading} className="!p-1">
               {items.map((tool) => {
                 const Icon = WORKSPACE_TOOL_ICONS[tool.id];
                 return (

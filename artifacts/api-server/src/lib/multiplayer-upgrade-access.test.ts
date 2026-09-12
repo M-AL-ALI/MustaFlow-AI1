@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   checkAccess: vi.fn(),
   supportGrant: vi.fn(),
   profile: vi.fn(),
+  warn: vi.fn(),
   on: vi.fn(),
   emit: vi.fn(),
   upgrade: vi.fn(),
@@ -27,7 +28,7 @@ vi.mock("./auth", () => ({ checkProjectAccess: mocks.checkAccess }));
 vi.mock("./clerk-users", () => ({ getSharedAccountProfile: mocks.profile }));
 vi.mock("./support-access", () => ({ findLiveSupportGrant: mocks.supportGrant }));
 vi.mock("./support-ticket-workflow", () => ({ formatSupportTicketNumber: () => "NF-000001" }));
-vi.mock("./logger", () => ({ logger: { warn: vi.fn() } }));
+vi.mock("./logger", () => ({ logger: { warn: mocks.warn } }));
 vi.mock("ws", () => ({
   WebSocket: { OPEN: 1 },
   WebSocketServer: class {
@@ -145,6 +146,124 @@ afterEach(() => {
 });
 
 describe("collaboration upgrade authorization", () => {
+  it.each(["0", "2147483648", "9007199254740992", "9".repeat(400)])(
+    "rejects project identity %s before authentication, upgrade, or lookup",
+    async (id) => {
+      const req = request();
+      req.url = "/api/projects/" + id + "/multiplayer";
+      const { transport } = await upgrade(req);
+      expect(mocks.verifyRequest).not.toHaveBeenCalled();
+      expect(mocks.upgrade).not.toHaveBeenCalled();
+      expect(mocks.selectProject).not.toHaveBeenCalled();
+      expect(mocks.checkAccess).not.toHaveBeenCalled();
+      expect(transport.end).toHaveBeenCalledWith(
+        "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+        expect.any(Function),
+      );
+    },
+  );
+
+  it("retains leading-zero project IDs and binds the validated scope before async verification", async () => {
+    const req = request();
+    req.url = "/api/projects/00061/multiplayer?location=Preview";
+    let finish!: (value: ReturnType<typeof verified>) => void;
+    mocks.verifyRequest.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await upgrade(req, false);
+    req.url = "/api/projects/62/multiplayer?location=Preview";
+    finish(verified("owner-61"));
+    await vi.advanceTimersByTimeAsync(0);
+    await connectionResult;
+    expect(mocks.checkAccess).toHaveBeenCalledWith("owner-61", 61, "viewer");
+    expect(mocks.checkAccess).not.toHaveBeenCalledWith("owner-61", 62, "viewer");
+  });
+
+  it.each(["project", "access", "support", "profile"])(
+    "contains a rejected %s lookup in the actual registered admission listener",
+    async (phase) => {
+      const lookup =
+        phase === "project"
+          ? mocks.selectProject
+          : phase === "access"
+            ? mocks.checkAccess
+            : phase === "support"
+              ? mocks.supportGrant
+              : mocks.profile;
+      lookup.mockRejectedValueOnce(new Error("private dependency detail"));
+      const timersBefore = vi.getTimerCount();
+      await upgrade();
+      await expect(connectionResult).resolves.toBeUndefined();
+      expect(frames()).toEqual([
+        {
+          type: "error",
+          code: "presence_temporarily_unavailable",
+          message: "Collaboration could not connect. Retrying shortly.",
+        },
+      ]);
+      expect(currentWs.close).toHaveBeenCalledWith(4413, "Collaboration temporarily unavailable");
+      expect(vi.getTimerCount()).toBe(timersBefore);
+      expect(mocks.warn).toHaveBeenCalledWith("multiplayer: connection admission failed");
+    },
+  );
+
+  it.each(["close", "error"] as const)(
+    "settles a later lookup rejection after %s without new sends or timers",
+    async (signal) => {
+      let reject!: (error: Error) => void;
+      mocks.profile.mockReturnValue(
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+      );
+      const timersBefore = vi.getTimerCount();
+      await upgrade(request(), false);
+      if (signal === "close") currentWs.close();
+      else currentWs.fail();
+      const sends = currentWs.send.mock.calls.length;
+      const closes = currentWs.close.mock.calls.length;
+      reject(new Error("private dependency detail"));
+      await expect(connectionResult).resolves.toBeUndefined();
+      expect(currentWs.send).toHaveBeenCalledTimes(sends);
+      expect(currentWs.close).toHaveBeenCalledTimes(closes);
+      expect(vi.getTimerCount()).toBe(timersBefore);
+    },
+  );
+
+  it("releases a partially registered peer when later listener registration fails", async () => {
+    const originalOn = currentWs.on.getMockImplementation()!;
+    currentWs.on.mockImplementation((event, handler) => {
+      if (event === "message") throw new Error("listener unavailable");
+      return originalOn(event, handler);
+    });
+    const timersBefore = vi.getTimerCount();
+    await upgrade();
+    await expect(connectionResult).resolves.toBeUndefined();
+    expect(currentWs.close).toHaveBeenCalledWith(4413, "Collaboration temporarily unavailable");
+    expect(vi.getTimerCount()).toBe(timersBefore);
+    currentWs = webSocket();
+    await upgrade();
+    expect(frames().find((frame) => frame.type === "roster")?.peers).toHaveLength(1);
+  });
+
+  it.each(["logger", "close"])("settles the failure even when %s throws", async (component) => {
+    mocks.selectProject.mockRejectedValueOnce(new Error("unavailable"));
+    if (component === "logger")
+      mocks.warn.mockImplementationOnce(() => {
+        throw new Error("logger unavailable");
+      });
+    else
+      currentWs.close.mockImplementationOnce(() => {
+        throw new Error("close unavailable");
+      });
+    await upgrade();
+    await expect(connectionResult).resolves.toBeUndefined();
+    expect(currentWs.readyState).toBe(3);
+    if (component === "close") expect(currentWs.terminate).toHaveBeenCalledOnce();
+  });
+
   it("admits the verified owner, including presence with live editing disabled", async () => {
     await upgrade();
     expect(mocks.upgrade).toHaveBeenCalledOnce();

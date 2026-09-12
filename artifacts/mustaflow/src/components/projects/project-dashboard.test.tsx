@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import * as snapshotModule from "./project-card-snapshot";
 import {
   ProjectDashboard,
   projectDate,
@@ -35,6 +36,39 @@ const props = () => ({
 });
 
 describe("Project dashboard interactions", () => {
+  it("keeps synthetic snapshots and explicit previews isolated from production snapshot rendering", () => {
+    const productionSnapshot = vi.spyOn(snapshotModule, "ProjectCardSnapshot");
+    const renderSnapshot = vi.fn((project: DashboardProject) => (
+      <span>{project.name}: synthetic snapshot only.</span>
+    ));
+    const renderPreview = vi.fn((project: DashboardProject) => (
+      <span>{project.name}: synthetic preview only.</span>
+    ));
+    try {
+      const { container } = render(
+        <ProjectDashboard
+          {...props()}
+          renderSnapshot={renderSnapshot}
+          renderPreview={renderPreview}
+        />,
+      );
+      expect(screen.getByText("Cedar bookings: synthetic snapshot only.")).toBeTruthy();
+      expect(productionSnapshot).not.toHaveBeenCalled();
+      expect(renderPreview).not.toHaveBeenCalled();
+      expect(container.querySelectorAll("iframe")).toHaveLength(0);
+      fireEvent.click(screen.getByRole("button", { name: "Preview Cedar bookings" }));
+      expect(screen.getByText("Cedar bookings: synthetic preview only.")).toBeTruthy();
+      expect(renderPreview).toHaveBeenCalledWith(projects[0]);
+      expect(productionSnapshot).not.toHaveBeenCalled();
+      expect(container.querySelectorAll("iframe")).toHaveLength(0);
+      fireEvent.click(screen.getByRole("button", { name: "Close preview: Cedar bookings" }));
+      expect(screen.getByText("Cedar bookings: synthetic snapshot only.")).toBeTruthy();
+      expect(productionSnapshot).not.toHaveBeenCalled();
+    } finally {
+      productionSnapshot.mockRestore();
+    }
+  });
+
   it.each(["loading", "error", "ready"] as const)(
     "keeps owner Trash available in the %s state, including an empty account",
     (state) => {
@@ -117,4 +151,73 @@ describe("Project presentation contracts", () => {
     expect(projectStatusLabel("failed")).toBe("Needs attention");
     expect(projectDate("not-a-date")).toBe("Date unavailable");
   });
+});
+
+describe("Complete workspace project collections", () => {
+  it("labels and searches the complete collection, including older projects", () => {
+    const older = {
+      ...projects[0]!,
+      id: 990,
+      name: "Older notebook",
+      updatedAt: "2020-01-01T00:00:00Z",
+    };
+    render(
+      <ProjectDashboard
+        {...props()}
+        projects={[...projects, older]}
+        total={3}
+        collectionScope="workspace"
+      />,
+    );
+    expect(screen.getByText("Showing 3 of 3 matching workspace projects")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search all workspace projects" }), {
+      target: { value: "older" },
+    });
+    expect(screen.getByRole("article", { name: "Older notebook" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Showing 1 of 1 matching workspace projects (3 in this collection)"),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "Cedar bookings" })).toBeNull();
+  });
+  it.each(["ready", "paused"])("allows filtering the visible %s status", (status) => {
+    const extra = { ...projects[0]!, id: 990, name: "Filtered project", status };
+    render(<ProjectDashboard {...props()} projects={[...projects, extra]} total={3} />);
+    fireEvent.change(screen.getByLabelText("Filter projects by status"), {
+      target: { value: status },
+    });
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.getByRole("article", { name: "Filtered project" })).toHaveTextContent(
+      projectStatusLabel(status),
+    );
+  });
+  it("searches a non-English project name without changing its identity", () => {
+    const name = "\u0645\u0634\u0631\u0648\u0639 \u0627\u0644\u0641\u0631\u064a\u0642";
+    render(
+      <ProjectDashboard
+        {...props()}
+        projects={[{ ...projects[0]!, name }]}
+        total={1}
+        collectionScope="workspace"
+      />,
+    );
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search all workspace projects" }), {
+      target: { value: "\u0627\u0644\u0641\u0631\u064a\u0642" },
+    });
+    expect(screen.getByRole("link", { name })).toHaveAttribute("href", "/projects/901");
+  });
+});
+
+it("keeps an empty collection's create link bound to its supplied workspace entry", () => {
+  render(
+    <ProjectDashboard
+      {...props()}
+      projects={[]}
+      total={0}
+      newProjectHref="/projects/new?reviewWorkspaceId=7"
+    />,
+  );
+  expect(screen.getByRole("link", { name: "Create a project" })).toHaveAttribute(
+    "href",
+    "/projects/new?reviewWorkspaceId=7",
+  );
 });

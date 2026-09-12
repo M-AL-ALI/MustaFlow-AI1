@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useCreateProject,
@@ -34,6 +34,7 @@ import {
   clearProjectReviewDraft,
   isCreationKind,
   projectCreationInput,
+  projectReviewDestination,
   readProjectReviewDraft,
   saveProjectReviewDraft,
   suggestProjectName,
@@ -74,16 +75,31 @@ const selectClass = "h-10 w-full rounded-md border border-input bg-background px
 const unsupportedTemplate =
   "This template's project type is not supported by project creation yet. Your brief is unchanged; choose another template.";
 
+function requestedWorkspace(params: URLSearchParams, key: string): number | null | undefined {
+  const values = params.getAll(key);
+  if (values.length === 0) return undefined;
+  if (values.length !== 1 || !/^[1-9][0-9]*$/.test(values[0]!)) return null;
+  const id = Number(values[0]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 function initialReview(ownerId: string, arrival: CreationDraft | null, params: URLSearchParams) {
+  const explicitScope = requestedWorkspace(params, "reviewWorkspaceId");
+  const scope =
+    explicitScope === undefined && params.get("draft") === "1"
+      ? requestedWorkspace(params, "workspaceId")
+      : explicitScope;
   const buildDraft =
     arrival?.intent === "build" &&
     arrival.accountId === ownerId &&
     typeof arrival.workspaceId === "number" &&
     Number.isSafeInteger(arrival.workspaceId) &&
-    arrival.workspaceId > 0
+    arrival.workspaceId > 0 &&
+    (scope === undefined || scope === arrival.workspaceId)
       ? arrival
       : null;
-  const saved = readProjectReviewDraft(ownerId);
+  const saved =
+    scope === null ? null : readProjectReviewDraft(ownerId, buildDraft?.workspaceId ?? scope);
   const hasEntry = ENTRY_PARAMS.some((key) => params.has(key));
   if (
     saved &&
@@ -97,6 +113,7 @@ function initialReview(ownerId: string, arrival: CreationDraft | null, params: U
     const sourceId = (saved.values as WorkspaceReviewValues).handoffWorkspaceId;
     return {
       values: saved.values,
+      reviewId: saved.id,
       sourceDraftId: saved.sourceDraftId,
       sourceWorkspaceId:
         typeof sourceId === "number" && Number.isSafeInteger(sourceId) && sourceId > 0
@@ -119,7 +136,7 @@ function initialReview(ownerId: string, arrival: CreationDraft | null, params: U
       : "web";
   const prompt = buildDraft?.prompt ?? params.get("prompt") ?? template?.seedPrompt ?? "";
   const values: WorkspaceReviewValues = {
-    workspaceId: buildDraft?.workspaceId ?? undefined,
+    workspaceId: buildDraft?.workspaceId ?? scope,
     handoffWorkspaceId: buildDraft?.workspaceId ?? undefined,
     prompt,
     name: template && prompt === template.seedPrompt ? template.title : suggestProjectName(prompt),
@@ -145,6 +162,7 @@ function initialReview(ownerId: string, arrival: CreationDraft | null, params: U
           : "";
   return {
     values,
+    reviewId: null,
     sourceDraftId: buildDraft?.id ?? null,
     sourceWorkspaceId: buildDraft?.workspaceId ?? null,
     notice,
@@ -153,6 +171,9 @@ function initialReview(ownerId: string, arrival: CreationDraft | null, params: U
 
 export default function NewProjectPage() {
   const { user, isLoaded, isSignedIn } = useClerkUser();
+  const search = useSearch();
+  const scope = requestedWorkspace(new URLSearchParams(search), "reviewWorkspaceId");
+  const entryKey = scope === undefined ? "legacy" : scope === null ? "invalid" : scope;
   if (!isLoaded) {
     return (
       <p role="status" className="px-4 py-8 text-sm text-muted-foreground">
@@ -167,7 +188,7 @@ export default function NewProjectPage() {
       </p>
     );
   }
-  return <AccountProjectReview key={user.id} ownerId={user.id} />;
+  return <AccountProjectReview key={JSON.stringify([user.id, entryKey])} ownerId={user.id} />;
 }
 
 function AccountProjectReview({ ownerId }: { ownerId: string }) {
@@ -178,7 +199,13 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
     useWorkspace();
   const ownedWorkspaces = useMemo(
     () =>
-      workspaces.filter((workspace) => workspace.ownerUserId === ownerId && !workspace.deletedAt),
+      workspaces.filter(
+        (workspace) =>
+          workspace.ownerUserId === ownerId &&
+          !workspace.deletedAt &&
+          Number.isSafeInteger(workspace.id) &&
+          workspace.id > 0,
+      ),
     [workspaces, ownerId],
   );
   const selectedWorkspace = ownedWorkspaces.find(
@@ -206,17 +233,27 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
   const [principalReady, setPrincipalReady] = useState(false);
   const [submittedWorkspace, setSubmittedWorkspace] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [reviewConflict, setReviewConflict] = useState<{ id: number; name: string } | null>(null);
   const [created, setCreated] = useState<{ id: number; name: string } | null>(null);
   const submitting = useRef(false);
   const mounted = useRef(false);
   const activeSubmission = useRef<object | null>(null);
   const accountFence = useRef<ProjectReviewAccountFence | null>(null);
-  const savedReviewId = useRef<string | null>(null);
+  const savedReviewId = useRef<string | null>(initial.reviewId);
   const nameInput = useRef<HTMLInputElement>(null);
   const selectedTemplate = ALL_TEMPLATES.find((template) => template.id === values.templateId);
 
   function hasCurrentAccount() {
-    return mounted.current && accountFence.current?.isCurrent() === true;
+    // A sidebar entry change fences late responses even before React commits its remount.
+    const currentScope =
+      typeof window === "undefined"
+        ? requestedWorkspace(entryParams, "reviewWorkspaceId")
+        : requestedWorkspace(new URLSearchParams(window.location.search), "reviewWorkspaceId");
+    return (
+      mounted.current &&
+      accountFence.current?.isCurrent() === true &&
+      currentScope === requestedWorkspace(entryParams, "reviewWorkspaceId")
+    );
   }
 
   useLayoutEffect(() => {
@@ -244,6 +281,7 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
       const restored = initialReview(ownerId, accepted, entryParams);
       const retainedId = retainedWorkspaceId(restored.values);
       setInitial(restored);
+      savedReviewId.current = restored.reviewId;
       setValues({
         ...restored.values,
         workspaceId: retainedId === undefined ? selectableWorkspaceId : retainedId,
@@ -320,8 +358,17 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
       arrivalPending
     )
       return;
-    const draft = saveProjectReviewDraft(ownerId, values, initial.sourceDraftId);
-    savedReviewId.current = draft?.id ?? null;
+    if (values.workspaceId !== undefined && (isLoading || isError || !draftWorkspace)) {
+      setSaved(false);
+      return;
+    }
+    const draft = saveProjectReviewDraft(
+      ownerId,
+      values,
+      initial.sourceDraftId,
+      savedReviewId.current ?? undefined,
+    );
+    if (draft) savedReviewId.current = draft.id;
     setSaved(Boolean(draft));
     // Remove only consumed hints, and only after their editable replacement is saved.
     if (draft && typeof window !== "undefined") {
@@ -331,7 +378,15 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
         window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
       }
     }
-  }, [values, initial.sourceDraftId, ownerId, arrivalPending]);
+  }, [
+    values,
+    initial.sourceDraftId,
+    ownerId,
+    arrivalPending,
+    isLoading,
+    isError,
+    draftWorkspace?.id,
+  ]);
 
   function changePrompt(prompt: string) {
     setValues((previous) => ({
@@ -376,6 +431,20 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
     });
     setNotice("");
     setView("form");
+  }
+
+  function openSavedReview(workspaceId: number, replace = false) {
+    if (!hasCurrentAccount()) return;
+    try {
+      if (replace) setLocation(projectReviewDestination(workspaceId), { replace: true });
+      else setLocation(projectReviewDestination(workspaceId));
+    } catch {
+      if (hasCurrentAccount()) {
+        setError(
+          "Your saved reviews are still available. Use New project in the selected workspace to reopen its review.",
+        );
+      }
+    }
   }
 
   function openWorkspace(id: number) {
@@ -604,15 +673,56 @@ function AccountProjectReview({ ownerId }: { ownerId: string }) {
                       onClick={() => {
                         if (!hasCurrentAccount() || submitting.current || createProject.isPending)
                           return;
-                        setValues((previous) => ({
-                          ...previous,
-                          workspaceId: selectedWorkspace.id,
-                        }));
+                        const target = readProjectReviewDraft(ownerId, selectedWorkspace.id);
+                        if (target && target.id !== savedReviewId.current) {
+                          setReviewConflict({
+                            id: selectedWorkspace.id,
+                            name: selectedWorkspace.name,
+                          });
+                          setError(
+                            "That workspace already has a saved project review. Open it instead, or finish it before moving this draft. Both reviews are unchanged.",
+                          );
+                          return;
+                        }
+                        const moved = { ...values, workspaceId: selectedWorkspace.id };
+                        const receipt = saveProjectReviewDraft(
+                          ownerId,
+                          moved,
+                          initial.sourceDraftId,
+                          savedReviewId.current ?? undefined,
+                        );
+                        if (!receipt) {
+                          setError(
+                            "Could not save this move. Your draft and its workspace are unchanged. Please try again.",
+                          );
+                          return;
+                        }
+                        savedReviewId.current = receipt.id;
+                        setValues(moved);
+                        setSaved(true);
+                        setReviewConflict(null);
                         setError("");
+                        if (entryParams.has("reviewWorkspaceId")) {
+                          openSavedReview(selectedWorkspace.id, true);
+                        }
                       }}
                     >
                       Use {selectedWorkspace.name} for this draft
                     </button>
+                    {reviewConflict?.id === selectedWorkspace.id && (
+                      <button
+                        type="button"
+                        className="nf-quiet-link"
+                        disabled={busy || !principalReady}
+                        onClick={() => {
+                          if (!hasCurrentAccount() || submitting.current || createProject.isPending)
+                            return;
+                          openSavedReview(reviewConflict.id);
+                        }}
+                      >
+                        Open saved review in {reviewConflict.name}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
