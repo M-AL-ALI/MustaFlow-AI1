@@ -28,7 +28,12 @@ interface StepDef {
 
 const STEPS: StepDef[] = [
   { key: "create_container", label: "Creating server", shortLabel: "Server", Icon: Server },
-  { key: "create_database", label: "Creating database", shortLabel: "Database", Icon: Database },
+  {
+    key: "create_database",
+    label: "Preparing project services",
+    shortLabel: "Services",
+    Icon: Database,
+  },
   { key: "connect_and_test", label: "Connecting and testing", shortLabel: "Testing", Icon: Plug },
 ];
 
@@ -170,8 +175,8 @@ export function ProvisioningProgress({
               >
                 <p className="font-semibold text-foreground mb-1">What is this?</p>
                 <p>
-                  Environment setup tracks this project's server and database. Build results and
-                  preview availability are tracked separately.
+                  Environment setup tracks this project's runtime. Database readiness, build
+                  results, and preview availability are checked separately.
                 </p>
               </div>
             )}
@@ -187,12 +192,12 @@ export function ProvisioningProgress({
           <div className="text-[11px] font-semibold text-foreground mb-1">Environment setup</div>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             {isReady
-              ? "Environment setup is ready. Build results and preview availability are tracked separately."
+              ? "Runtime setup is complete. Database readiness, build results, and preview availability are checked separately."
               : isHibernated
                 ? "The environment is hibernated. Use the preview controls to wake the runtime."
                 : isError
                   ? "Environment setup failed. Review the logs or retry setup."
-                  : "Preparing this project's server and database."}
+                  : "Preparing this project's runtime. Database readiness is checked separately."}
           </p>
           {(isProvisioning || isError) && (
             <div className="space-y-1.5">

@@ -118,6 +118,8 @@ import {
 import {
   checkZeroSealedFinalizeContract,
   formatZeroSealedFinalizeFailure,
+  withZeroSealedSourceCheck,
+  ZERO_SEALED_SOURCE_CHECK_ID,
 } from "./zero-sealed-finalize-check";
 import { emitZeroRunLoopPhase } from "./zero-runloop-phase-emission";
 import { applyZeroSteeringAtBoundary } from "./zero-queue-steering";
@@ -254,6 +256,8 @@ export type CommandRecord = {
 };
 
 export type CheckResultRecord = {
+  code?: string;
+  reasonCodes?: readonly string[];
   id: string;
   label: string;
   passed: boolean;
@@ -685,10 +689,37 @@ export function shouldAutoInstallBeforeRunCommand(
 // In-process validators (for static-html + mobile-cross)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function runInprocessValidator(
+/** Keep machine-readable diagnostics at every loop check boundary. */
+function formatCheckResultEvents(checks: readonly CheckResultRecord[]): string {
+  return JSON.stringify(
+    checks.map((check) => ({
+      id: check.id,
+      label: check.label,
+      passed: check.passed,
+      message: check.message.slice(0, 200),
+      ...(check.code === undefined ? {} : { code: check.code }),
+      ...(check.reasonCodes === undefined ? {} : { reasonCodes: check.reasonCodes }),
+    })),
+  );
+}
+
+async function runInprocessValidator(
   kind: string,
   files: BuilderFile[],
-): { exitCode: number; output: string } {
+  target?: ZeroGenerationTarget,
+): Promise<{ exitCode: number; output: string; code?: string; reasonCodes?: readonly string[] }> {
+  if (kind === ZERO_SEALED_SOURCE_CHECK_ID) {
+    if (!isZeroSealedGenerationTarget(target)) {
+      return { exitCode: 1, output: "sealed source check requires a sealed generation target" };
+    }
+    const result = await checkZeroSealedFinalizeContract({ files, target });
+    return {
+      exitCode: result.passed ? 0 : 1,
+      output: result.message,
+      code: result.code,
+      reasonCodes: result.reasonCodes,
+    };
+  }
   if (kind === "html-syntax") {
     const issues: string[] = [];
     let hasIndex = false;
@@ -2155,7 +2186,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     : input.liveServerAvailable !== false;
   const profile = {
     ...baseProfile,
-    checks: checksForLiveServerCapability(baseProfile.checks, liveServerAvailable),
+    checks: withZeroSealedSourceCheck(
+      checksForLiveServerCapability(baseProfile.checks, liveServerAvailable),
+      input.zeroGenerationTarget,
+    ),
   };
   const workspace = new FileWorkspace(input.existingFiles);
   workspace.primeInitial(input.existingFiles);
@@ -3288,41 +3322,11 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           containerState,
           profile.installCmd,
         );
-        await safeEvent(
-          input.onEvent,
-          "check_result",
-          JSON.stringify(
-            verifyRun.map((c) => ({
-              id: c.id,
-              label: c.label,
-              passed: c.passed,
-              message: (c.message ?? "").slice(0, 200),
-            })),
-          ),
-        );
+        await safeEvent(input.onEvent, "check_result", formatCheckResultEvents(verifyRun));
         const verifyFailed = profile.checks.filter(
           (c) => c.required && !verifyRun.find((r) => r.id === c.id)?.passed,
         );
-        const sealedFinalizeCheck = isZeroSealedGenerationTarget(input.zeroGenerationTarget)
-          ? await checkZeroSealedFinalizeContract({
-              files: workspace.all(),
-              target: input.zeroGenerationTarget,
-            })
-          : null;
-        if (sealedFinalizeCheck !== null) {
-          await safeEvent(
-            input.onEvent,
-            "check_result",
-            JSON.stringify({
-              id: "zero-sealed-source-contract",
-              label: "Sealed source contract",
-              passed: sealedFinalizeCheck.passed,
-              code: sealedFinalizeCheck.code,
-              reasonCodes: sealedFinalizeCheck.reasonCodes,
-            }),
-          );
-        }
-        if (verifyFailed.length === 0 && sealedFinalizeCheck?.passed !== false) {
+        if (verifyFailed.length === 0) {
           finalized = true;
           stepFinalized = true;
           finalSummary = String(parsed.summary ?? "").slice(0, 800);
@@ -3342,9 +3346,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           const r = verifyRun.find((x) => x.id === c.id);
           return `- ${c.id}: ${r?.message ?? "failed"}`;
         });
+        const sealedFailure = verifyRun.find(
+          (check) => check.id === ZERO_SEALED_SOURCE_CHECK_ID && !check.passed,
+        );
         const failMsg =
-          sealedFinalizeCheck?.passed === false
-            ? formatZeroSealedFinalizeFailure(sealedFinalizeCheck, checkFailures)
+          sealedFailure?.code && sealedFailure.reasonCodes
+            ? formatZeroSealedFinalizeFailure(
+                {
+                  passed: false,
+                  code: sealedFailure.code,
+                  reasonCodes: sealedFailure.reasonCodes,
+                  message: sealedFailure.message,
+                },
+                checkFailures.filter(
+                  (failure) => !failure.startsWith(`- ${ZERO_SEALED_SOURCE_CHECK_ID}:`),
+                ),
+              )
             : `BLOCKED: cannot finalize — these required checks failed:\n${checkFailures.join("\n")}\nFix the failures and call finalize again.`;
         messages[messages.length - 1] = {
           role: "tool",
@@ -3392,14 +3409,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         await safeEvent(
           input.onEvent,
           "check_result",
-          JSON.stringify(
-            completedTurnChecks.map((check) => ({
-              id: check.id,
-              label: check.label,
-              passed: check.passed,
-              message: (check.message ?? "").slice(0, 200),
-            })),
-          ),
+          formatCheckResultEvents(completedTurnChecks),
         );
       }
       const turnFailed = profile.checks.filter(
@@ -3463,7 +3473,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           turnFailed
             .map((c) => {
               const r = turnChecks.find((x) => x.id === c.id);
-              return `- ${c.id}: ${(r?.message ?? "failed").slice(0, 200)}`;
+              const limit = c.id === ZERO_SEALED_SOURCE_CHECK_ID ? MAX_OBSERVATION_CHARS : 200;
+              return `- ${c.id}: ${(r?.message ?? "failed").slice(0, limit)}`;
             })
             .join("\n") +
           `\nFix and continue, then call finalize.${strategyHint}${checkStrategyHints}`;
@@ -3645,18 +3656,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   );
   const completedCheckRun = checkRun.filter((check) => !isDeferredCheckResult(check));
   if (completedCheckRun.length > 0) {
-    await safeEvent(
-      input.onEvent,
-      "check_result",
-      JSON.stringify(
-        completedCheckRun.map((check) => ({
-          id: check.id,
-          label: check.label,
-          passed: check.passed,
-          message: (check.message ?? "").slice(0, 200),
-        })),
-      ),
-    );
+    await safeEvent(input.onEvent, "check_result", formatCheckResultEvents(completedCheckRun));
   }
   checkResults.push(...checkRun);
   const requiredFailed = profile.checks.some(
@@ -5862,7 +5862,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
         }
         const kind = argv[1] ?? "";
         const t = Date.now();
-        const r = runInprocessValidator(kind, workspace.all());
+        const r = await runInprocessValidator(kind, workspace.all(), input.zeroGenerationTarget);
         commandsRun.push({
           step,
           argv,
@@ -5933,7 +5933,7 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
       if (argv[0] === "__inprocess__") {
         const kind = argv[1] ?? "";
         const t = Date.now();
-        const r = runInprocessValidator(kind, workspace.all());
+        const r = await runInprocessValidator(kind, workspace.all(), input.zeroGenerationTarget);
         commandsRun.push({
           step,
           argv,
@@ -8593,7 +8593,7 @@ async function executeCreativeToolWithinLifecycle(
 // Post-loop check runner (always runs, populates CheckResultRecord[])
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function runCheckProfile(
+export async function runCheckProfile(
   checks: CheckSpec[],
   workspace: FileWorkspace,
   input: AgentLoopInput,
@@ -8718,13 +8718,18 @@ async function runCheckProfile(
     const t = Date.now();
     if (c.runner === "inprocess") {
       const kind = c.argv[1] ?? "";
-      const r = runInprocessValidator(kind, workspace.all());
+      const r = await runInprocessValidator(kind, workspace.all(), input.zeroGenerationTarget);
       out.push({
         id: c.id,
         label: c.label,
         passed: r.exitCode === 0,
+        ...(r.code === undefined ? {} : { code: r.code }),
+        ...(r.reasonCodes === undefined ? {} : { reasonCodes: r.reasonCodes }),
         durationMs: Date.now() - t,
-        message: r.output.slice(0, 400),
+        message: r.output.slice(
+          0,
+          c.id === ZERO_SEALED_SOURCE_CHECK_ID ? MAX_OBSERVATION_CHARS : 400,
+        ),
       });
       continue;
     }

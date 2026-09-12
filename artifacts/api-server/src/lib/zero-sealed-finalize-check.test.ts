@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  ZERO_SEALED_GENERATION_GATE_VALUE,
+  ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE,
+} from "@workspace/tenant-runtime-contracts";
+import { checksForLiveServerCapability, type CheckSpec } from "./check-profiles";
+import {
   checkZeroSealedFinalizeContract,
   describeZeroSealedSourceRepairs,
   formatZeroSealedFinalizeFailure,
+  withZeroSealedSourceCheck,
+  ZERO_SEALED_SOURCE_CHECK_ID,
 } from "./zero-sealed-finalize-check";
 
 function packageFile() {
@@ -244,5 +251,73 @@ app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
     ).slice(0, 4000);
     expect(observation).toContain(describeZeroSealedSourceRepairs(reasons));
     expect(observation).toContain("Fix the failures and call finalize again.");
+  });
+});
+
+describe("sealed source check profile", () => {
+  const runtimeCheck: CheckSpec = {
+    id: "server-start",
+    label: "Server",
+    runner: "container",
+    argv: ["node", "server.js"],
+    required: true,
+    timeoutMs: 1000,
+  };
+
+  it.each([ZERO_SEALED_GENERATION_GATE_VALUE, ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE])(
+    "keeps source validation required without a live container for %s",
+    (target) => {
+      const checks = withZeroSealedSourceCheck(
+        checksForLiveServerCapability([runtimeCheck], false),
+        target,
+      );
+      expect(checks[0]).toMatchObject({
+        id: ZERO_SEALED_SOURCE_CHECK_ID,
+        runner: "inprocess",
+        required: true,
+      });
+      expect(checks[1]).toMatchObject({ id: "server-start", required: false });
+      expect(runtimeCheck.required).toBe(true);
+      expect(withZeroSealedSourceCheck(checks, target)).toEqual(checks);
+    },
+  );
+
+  it("does not change a non-sealed project's checks", () => {
+    const checks = [runtimeCheck];
+    expect(withZeroSealedSourceCheck(checks, undefined)).toBe(checks);
+  });
+
+  it("identifies a retained browser starter before finalization without changing files", async () => {
+    const files = [
+      packageFile(),
+      {
+        ...tsconfigFile,
+        content: JSON.stringify({
+          compilerOptions: { rootDir: ".", outDir: "dist", module: "NodeNext" },
+        }),
+      },
+      {
+        path: "src/index.ts",
+        mimeType: "application/typescript",
+        content:
+          'import express from "express"; const app = express(); app.get("/healthz", (_q, r) => r.json({ok:true})); app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");',
+      },
+      {
+        path: "src/main.tsx",
+        mimeType: "application/typescript",
+        content: 'import "./index.css"; import App from "./App.tsx"; void App;',
+      },
+    ];
+    const before = JSON.stringify(files);
+    const result = await checkZeroSealedFinalizeContract({ files });
+    expect(result).toMatchObject({
+      passed: false,
+      code: "zero_sealed_source_contract_error",
+      reasonCodes: ["typescript_module_specifier"],
+    });
+    expect(result.message).toContain("(src/main.tsx)");
+    expect(result.message).toContain("retained starter files");
+    expect(result.message).toContain("do not just rename CSS imports");
+    expect(JSON.stringify(files)).toBe(before);
   });
 });

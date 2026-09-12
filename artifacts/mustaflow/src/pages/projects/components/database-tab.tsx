@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,6 +34,8 @@ import type { DbSnapshotListItem } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { selectDatabaseFailureError } from "@/lib/user-visible-errors";
 
+import { resolveDatabaseReadiness } from "./database-readiness";
+
 interface DatabaseTabProps {
   projectId: number;
 }
@@ -47,7 +49,7 @@ function StatusBadge({ status }: { status: string }) {
     );
   if (status === "error")
     return <Badge className="bg-red-500/20 text-red-400 border-red-500/30">Error</Badge>;
-  return <Badge variant="secondary">Not provisioned</Badge>;
+  return <Badge variant="secondary">{status === "none" ? "Not configured" : "Not verified"}</Badge>;
 }
 
 function SchemaTable({
@@ -206,6 +208,7 @@ function SnapshotRow({
 
 export function DatabaseTab({ projectId }: DatabaseTabProps) {
   const queryClient = useQueryClient();
+  const provisionInFlight = useRef(false);
   const [activeView, setActiveView] = useState<"schema" | "query" | "snapshots">("schema");
   const [sql, setSql] = useState("SELECT * FROM ");
   const [queryResult, setQueryResult] = useState<{
@@ -218,9 +221,23 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
 
-  const { data: project } = useGetProject(projectId);
-  const { data: dbStatus, isLoading: statusLoading } = useGetDatabaseStatus(projectId);
-  const { mutate: provision, isPending: provisioning } = useProvisionDatabase();
+  const {
+    data: project,
+    isLoading: projectLoading,
+    isError: projectQueryFailed,
+    isSuccess: projectQuerySucceeded,
+    refetch: retryProject,
+  } = useGetProject(projectId);
+  const {
+    data: dbStatus,
+    isLoading: statusLoading,
+    isError: statusQueryFailed,
+    isSuccess: statusQuerySucceeded,
+    refetch: retryDatabaseStatus,
+  } = useGetDatabaseStatus(projectId);
+  const { mutate: provision, isPending: provisioning } = useProvisionDatabase({
+    mutation: { retry: false },
+  });
   const { mutate: deleteDb, isPending: deleting } = useDeprovisionDatabase();
   const { mutate: runQuery, isPending: querying } = useQueryDatabase();
   const { data: schemaData, isLoading: schemaLoading } = useGetDatabaseSchema(projectId);
@@ -232,17 +249,37 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
   });
   const { mutate: createSnapshot, isPending: creatingSnapshot } = useCreateDbSnapshot();
 
-  const isProvisioned = dbStatus?.dbStatus === "connected";
-  const isProvisioning = dbStatus?.dbStatus === "provisioning" || provisioning;
+  const databaseReadiness = resolveDatabaseReadiness({
+    status: dbStatus?.dbStatus,
+    loading: statusLoading || projectLoading,
+    queryFailed: statusQueryFailed || projectQueryFailed,
+  });
+  const isProvisioned = databaseReadiness === "connected";
+  const isProvisioning = databaseReadiness === "provisioning" || provisioning;
   const dbProvider = (project as { dbProvider?: string })?.dbProvider ?? "none";
+  const canRetryExistingSetup =
+    projectQuerySucceeded &&
+    statusQuerySucceeded &&
+    databaseReadiness === "error" &&
+    dbProvider === "postgres";
 
   function handleProvision() {
+    if (
+      provisionInFlight.current ||
+      provisioning ||
+      (databaseReadiness !== "none" && !canRetryExistingSetup)
+    )
+      return;
+    provisionInFlight.current = true;
     provision(
       { id: projectId, data: { provider: "postgres" } },
       {
         onSuccess: () => {
           void queryClient.invalidateQueries({ queryKey: getGetDatabaseStatusQueryKey(projectId) });
           void queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+        },
+        onSettled: () => {
+          provisionInFlight.current = false;
         },
       },
     );
@@ -298,11 +335,54 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
     );
   }
 
-  if (statusLoading) {
+  if (databaseReadiness === "loading") {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
         <Loader2 className="h-5 w-5 animate-spin mr-2" />
         Loading database status…
+      </div>
+    );
+  }
+
+  if (
+    databaseReadiness === "unavailable" ||
+    databaseReadiness === "unknown" ||
+    databaseReadiness === "error"
+  ) {
+    const statusMessage = {
+      unavailable:
+        "We couldn't check this project's database connection. No absence or readiness has been confirmed.",
+      unknown:
+        "The database connection status has not been verified. Refresh the status before setting up or changing a database.",
+      error:
+        "The recorded database connection needs attention. This does not mean the database or its data is absent.",
+    }[databaseReadiness];
+    return (
+      <div role="status" className="flex h-full items-center justify-center p-6">
+        <div className="max-w-sm space-y-3 text-center">
+          <h3 className="text-sm font-medium">
+            {canRetryExistingSetup
+              ? "Database setup needs attention"
+              : "Database status not verified"}
+          </h3>
+          <p className="text-xs leading-relaxed text-muted-foreground">{statusMessage}</p>
+          {canRetryExistingSetup && (
+            <Button size="sm" onClick={handleProvision} disabled={provisioning}>
+              {provisioning && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Retry existing setup
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void retryProject();
+              void retryDatabaseStatus();
+            }}
+          >
+            Refresh database status
+          </Button>
+        </div>
       </div>
     );
   }
@@ -316,7 +396,7 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
           <div>
             <div className="font-semibold flex items-center gap-2">
               Project Database
-              <StatusBadge status={dbStatus?.dbStatus ?? "none"} />
+              <StatusBadge status={databaseReadiness} />
             </div>
             {isProvisioned && dbStatus?.maskedUrl && (
               <div className="text-xs text-muted-foreground font-mono mt-0.5">
@@ -325,7 +405,8 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
             )}
             {!isProvisioned && !isProvisioning && (
               <div className="text-xs text-muted-foreground mt-0.5">
-                No database provisioned for this project.
+                No direct database connection is recorded here. Runtime-managed storage is checked
+                separately.
               </div>
             )}
           </div>
@@ -342,9 +423,8 @@ export function DatabaseTab({ projectId }: DatabaseTabProps) {
         <div className="border border-border rounded-lg p-4 bg-card space-y-3">
           <div className="font-medium text-sm">Add a PostgreSQL database on Neon</div>
           <p className="text-xs text-muted-foreground">
-            Provision PostgreSQL on Neon and inject{" "}
-            <code className="bg-muted px-1 rounded">DATABASE_URL</code> as a project secret
-            automatically. The AI builder will then generate real database-backed code.
+            Set up a PostgreSQL database on Neon. Connection handling depends on this project's
+            runtime; this view does not verify the app's persistence behavior.
           </p>
           <div className="flex gap-2">
             <Button size="sm" onClick={handleProvision} disabled={provisioning}>

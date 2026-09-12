@@ -1,7 +1,12 @@
 import type { BuilderFile } from "./builder";
-import type { ZeroSealedGenerationTarget } from "@workspace/tenant-runtime-contracts";
+import type {
+  ZeroGenerationTarget,
+  ZeroSealedGenerationTarget,
+} from "@workspace/tenant-runtime-contracts";
+import type { CheckSpec } from "./check-profiles";
 import {
   ZeroSealedSourceContractError,
+  isZeroSealedGenerationTarget,
   prepareZeroSealedNodeSource,
   type ZeroSealedSourceContractReason,
 } from "./zero-sealed-generation";
@@ -18,6 +23,27 @@ export interface ZeroSealedFinalizeCheckResult {
   message: string;
 }
 
+export const ZERO_SEALED_SOURCE_CHECK_ID = "zero-sealed-source-contract";
+
+/** Keep the production source gate in every automatic and requested check pass. */
+export function withZeroSealedSourceCheck(
+  checks: CheckSpec[],
+  target: ZeroGenerationTarget | undefined,
+): CheckSpec[] {
+  if (!isZeroSealedGenerationTarget(target)) return checks;
+  return [
+    {
+      id: ZERO_SEALED_SOURCE_CHECK_ID,
+      label: "Sealed source contract",
+      argv: ["__inprocess__", ZERO_SEALED_SOURCE_CHECK_ID],
+      runner: "inprocess",
+      required: true,
+      timeoutMs: 30_000,
+    },
+    ...checks.filter((check) => check.id !== ZERO_SEALED_SOURCE_CHECK_ID),
+  ];
+}
+
 const SEALED_SOURCE_REPAIR_GUIDANCE: Readonly<Record<ZeroSealedSourceContractReason, string>> =
   Object.freeze({
     required_files: "create package.json, tsconfig.json, and src/index.ts before finalizing",
@@ -28,7 +54,7 @@ const SEALED_SOURCE_REPAIR_GUIDANCE: Readonly<Record<ZeroSealedSourceContractRea
     typescript_output_layout:
       'set tsconfig.json compilerOptions.rootDir to "." and compilerOptions.outDir to "dist"',
     typescript_module_specifier:
-      'when TypeScript uses NodeNext, add the emitted .js suffix to every relative import/export specifier (for example "../nabuflow/runtime/index.js")',
+      'when TypeScript uses NodeNext, use emitted .js module paths for relative imports/exports (for example "../nabuflow/runtime/index.js"). Check retained starter files as well as new files. Migrate browser/bundler-only imports to compiler-emitted modules; do not just rename CSS imports or discard requested screens and behavior',
     sdk_import:
       'use valid TypeScript with static named or namespace imports of createNabuFlowDatabase/createNabuFlowPayments from the canonical runtime index in the application module that uses them: "../nabuflow/runtime/index.js" in src/index.ts or src/db.ts, "../../nabuflow/runtime/index.js" in src/data/db.ts; do not use provider clients, hidden SDK paths, unresolved imports, or shadowed factory bindings',
     network_bind: 'bind the HTTP server explicitly with app.listen(port, "0.0.0.0", callback)',

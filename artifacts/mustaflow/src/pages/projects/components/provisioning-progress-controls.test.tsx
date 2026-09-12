@@ -25,11 +25,23 @@ describe("Environment setup controls", () => {
     trigger.focus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("dialog", { name: "Environment setup details" })).toHaveTextContent(
-      "Build results and preview availability are tracked separately.",
+      "Runtime setup is complete. Database readiness, build results, and preview availability are checked separately.",
     );
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(trigger).toHaveFocus();
+  });
+
+  it("does not describe runtime setup as proof of database readiness", async () => {
+    const user = userEvent.setup();
+    render(<ProvisioningProgress {...props()} />);
+    await user.click(screen.getByRole("button", { name: "What is provisioning?" }));
+    expect(
+      await screen.findByText(
+        "Environment setup tracks this project's runtime. Database readiness, build results, and preview availability are checked separately.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText(/tracks this project's server and database/)).toBeNull();
   });
 
   it("offers retry and logs even when a failed setup has no error payload", async () => {
