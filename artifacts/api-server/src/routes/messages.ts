@@ -10,6 +10,7 @@ import {
   knowledgeEntriesTable,
   supportZeroSessionsTable,
   assetUsageTable,
+  type TaskReport,
 } from "@workspace/db";
 import {
   ListMessagesParams,
@@ -29,6 +30,12 @@ import {
 import type { ConversationTurn, ConverseImageAttachment, IntentResult } from "../lib/builder";
 import { requireProjectOwnership } from "../lib/auth";
 import { loadPrimaryArtifactFiles } from "../lib/artifacts";
+import { PROJECT_LIFECYCLE_LOCK_NAMESPACE } from "../lib/project-retirement";
+import { FailedDraftRecoveryError, resolveFailedRetry } from "../lib/zero-sealed-failed-draft";
+import {
+  isZeroSealedGenerationTarget,
+  resolveZeroGenerationTarget,
+} from "../lib/zero-sealed-generation";
 import {
   enqueueJob,
   runJob,
@@ -104,6 +111,8 @@ import {
   registerProjectWorkController,
   requireActiveProjectLifecycleSession,
   responseProjectLifecycleSession,
+  transactionHoldsProjectLifecycleLock,
+  withResponseProjectLifecycleTransaction,
 } from "../lib/project-lifecycle";
 
 const router: IRouter = Router();
@@ -359,19 +368,98 @@ router.post(
       return;
     }
 
+    let { content, attachments: rawAttachments, idempotencyKey } = parsed.data;
     const {
-      content,
       agentMode,
       planMode,
       agentIdentity: explicitAgentIdentity,
       agentIntent: explicitAgentIntent,
-      attachments: rawAttachments,
       origin,
-      idempotencyKey,
       supportSessionId,
+      retryTaskId,
       brainstormContext,
       deepReasoning: requestedDeepReasoning,
     } = parsed.data;
+    // Planning and support proposals must see exactly the same primary-artifact
+    // overlay that trusted builds consume. Sibling artifacts are separate apps,
+    // not extra context for the active one.
+    const currentProjectFiles = await loadPrimaryArtifactFiles(project.id);
+
+    let requestedRetry: typeof agentTasksTable.$inferSelect | undefined;
+    let retryBinding: TaskReport["retrySource"];
+    if (retryTaskId !== undefined) {
+      if (
+        req.userId !== project.ownerId ||
+        supportSessionId ||
+        planMode ||
+        parsed.data.background ||
+        (explicitAgentIdentity && explicitAgentIdentity !== "main") ||
+        origin === "ora" ||
+        origin === "aura" ||
+        !idempotencyKey ||
+        !isZeroSealedGenerationTarget(resolveZeroGenerationTarget(process.env))
+      ) {
+        res.status(409).json({
+          error: "Use Retry Build as the project owner from the main chat. Nothing was started.",
+          code: "failed_draft_recovery_unavailable",
+        });
+        return;
+      }
+      [requestedRetry] = await db
+        .select()
+        .from(agentTasksTable)
+        .where(and(eq(agentTasksTable.id, retryTaskId), eq(agentTasksTable.projectId, project.id)))
+        .limit(1);
+      try {
+        const recovery = resolveFailedRetry({
+          source: requestedRetry,
+          projectId: project.id,
+          actorUserId: req.userId!,
+          ownerUserId: project.ownerId,
+          currentFiles: currentProjectFiles,
+          submittedContent: content,
+        });
+        content = recovery.content;
+        retryBinding = recovery.binding;
+        // The source row was already scoped to this owner/project. Recheck each
+        // retained attachment through the ordinary governed asset admission below.
+        if (!rawAttachments?.length && requestedRetry?.attachments?.length) {
+          let retained = SendMessageBody.safeParse({
+            ...parsed.data,
+            attachments: requestedRetry.attachments,
+          });
+          if (!retained.success && requestedRetry.intentReceiptId) {
+            const [sourceMessage] = await db
+              .select({ attachments: chatMessagesTable.attachments })
+              .from(chatMessagesTable)
+              .where(
+                and(
+                  eq(chatMessagesTable.projectId, project.id),
+                  eq(chatMessagesTable.role, "user"),
+                  eq(chatMessagesTable.intentReceiptId, requestedRetry.intentReceiptId),
+                ),
+              )
+              .limit(1);
+            if (Array.isArray(sourceMessage?.attachments) && sourceMessage.attachments.length > 0)
+              retained = SendMessageBody.safeParse({
+                ...parsed.data,
+                attachments: sourceMessage.attachments,
+              });
+          }
+          if (!retained.success)
+            throw new FailedDraftRecoveryError(
+              "The saved attachments could not be safely restored. Reattach them before retrying; nothing was started.",
+            );
+          rawAttachments = retained.data.attachments;
+        }
+      } catch (error) {
+        if (!(error instanceof FailedDraftRecoveryError)) throw error;
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
+      idempotencyKey =
+        "failed-retry:" + project.id + ":" + req.userId + ":" + retryTaskId + ":" + idempotencyKey;
+    }
     const supportLookup = supportSessionId
       ? { sessionId: supportSessionId, projectId: project.id, actorUserId: req.userId! }
       : null;
@@ -418,9 +506,11 @@ router.post(
       ? "plan"
       : supportMutation
         ? "mutate"
-        : isZeroProjectChoiceCaptureOnlyMessage(content)
-          ? "answer"
-          : explicitAgentIntent;
+        : retryTaskId !== undefined
+          ? "mutate"
+          : isZeroProjectChoiceCaptureOnlyMessage(content)
+            ? "answer"
+            : explicitAgentIntent;
     // Idempotency dedup — if this key was already processed, return the cached result
     if (idempotencyKey) {
       const existing = idempotencyStore.get(idempotencyKey);
@@ -503,11 +593,6 @@ router.post(
       background: runInBackground,
       planMode: Boolean(planMode),
     });
-
-    // Planning and support proposals must see exactly the same primary-artifact
-    // overlay that trusted builds consume. Sibling artifacts are separate apps,
-    // not extra context for the active one.
-    const currentProjectFiles = await loadPrimaryArtifactFiles(project.id);
 
     // Load recent conversation history for AI context (last 8 user/assistant turns)
     // Also load the most recent conversation summary for long-range context injection.
@@ -1292,31 +1377,119 @@ router.post(
         }
       }
 
-      const [task] = await db
-        .insert(agentTasksTable)
-        .values({
-          projectId: project.id,
-          title:
-            kind === "build" ? `Build: ${content.slice(0, 60)}` : `Change: ${content.slice(0, 60)}`,
-          kind: runInBackground ? "background" : "main",
-          status: hasActiveTask ? "queued" : "planning",
-          prompt: content,
-          attachments: persistedAttachments.length > 0 ? persistedAttachments : null,
-          agentIdentity: resolvedAgentIdentity,
-          origin: messageOrigin,
-          runMode: runInBackground ? "background" : "foreground",
-          wallClockCapMs,
-          creditsReserved: null,
-          taskAgentMode: mode,
-          deepReasoning,
-          hasBrainstormContext,
-          supportSessionId: supportMutation?.sessionId ?? null,
-          provenanceActorUserId: supportMutation?.staffUserId ?? null,
-          brainstormTurnCount: hasBrainstormContext
-            ? (brainstormContext as Array<{ role: string; content: string }>).length
-            : null,
-        })
-        .returning();
+      let task: typeof agentTasksTable.$inferSelect | undefined;
+      try {
+        const createTask = async (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => {
+          let lockedSource: typeof agentTasksTable.$inferSelect | undefined;
+          if (retryBinding) {
+            if (!transactionHoldsProjectLifecycleLock(tx, project.id)) {
+              await tx.execute(
+                sql`SELECT pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${project.id})`,
+              );
+            }
+            const [activeProject] = await tx
+              .select({ ownerId: projectsTable.ownerId })
+              .from(projectsTable)
+              .where(and(eq(projectsTable.id, project.id), isNull(projectsTable.deletedAt)))
+              .limit(1);
+            [lockedSource] = await tx
+              .select()
+              .from(agentTasksTable)
+              .where(
+                and(
+                  eq(agentTasksTable.id, retryBinding.taskId),
+                  eq(agentTasksTable.projectId, project.id),
+                ),
+              )
+              .limit(1)
+              .for("update");
+            resolveFailedRetry({
+              source: lockedSource,
+              projectId: project.id,
+              actorUserId: req.userId!,
+              ownerUserId: activeProject?.ownerId ?? null,
+              currentFiles: currentProjectFiles,
+              submittedContent: content,
+              expectedBaseFingerprint: retryBinding.baseFingerprint,
+            });
+          }
+          const [createdTask] = await tx
+            .insert(agentTasksTable)
+            .values({
+              projectId: project.id,
+              title:
+                kind === "build"
+                  ? `Build: ${content.slice(0, 60)}`
+                  : `Change: ${content.slice(0, 60)}`,
+              kind: runInBackground ? "background" : "main",
+              status: hasActiveTask ? "queued" : "planning",
+              prompt: content,
+              attachments: persistedAttachments.length > 0 ? persistedAttachments : null,
+              agentIdentity: resolvedAgentIdentity,
+              origin: messageOrigin,
+              runMode: runInBackground ? "background" : "foreground",
+              wallClockCapMs,
+              creditsReserved: null,
+              taskAgentMode: mode,
+              deepReasoning,
+              hasBrainstormContext,
+              supportSessionId: supportMutation?.sessionId ?? null,
+              provenanceActorUserId: supportMutation?.staffUserId ?? req.userId!,
+              ...(retryBinding
+                ? {
+                    report: {
+                      userRequest: content,
+                      filesCreated: [],
+                      filesChanged: [],
+                      filesRemoved: [],
+                      previewUpdated: false,
+                      warnings: [],
+                      integrationsNeeded: [],
+                      retrySource: retryBinding,
+                    },
+                  }
+                : {}),
+              brainstormTurnCount: hasBrainstormContext
+                ? (brainstormContext as Array<{ role: string; content: string }>).length
+                : null,
+            })
+            .returning();
+          if (retryBinding && createdTask && lockedSource) {
+            await tx
+              .update(agentTasksTable)
+              .set({
+                report: {
+                  ...(lockedSource.report ?? {
+                    userRequest: lockedSource.prompt ?? content,
+                    filesCreated: [],
+                    filesChanged: [],
+                    filesRemoved: [],
+                    previewUpdated: false,
+                    warnings: [],
+                    integrationsNeeded: [],
+                  }),
+                  retryChildTaskId: createdTask.id,
+                },
+              })
+              .where(
+                and(
+                  eq(agentTasksTable.id, lockedSource.id),
+                  eq(agentTasksTable.projectId, project.id),
+                  eq(agentTasksTable.status, "failed"),
+                ),
+              );
+          }
+          return createdTask;
+        };
+        task = retryBinding
+          ? await withResponseProjectLifecycleTransaction(res, project.id, createTask)
+          : await db.transaction(createTask);
+      } catch (error) {
+        if (idempotencyKey) idempotencyStore.delete(idempotencyKey);
+        if (!(error instanceof FailedDraftRecoveryError)) throw error;
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
       if (!task) {
         res.status(500).json({ error: "Failed to enqueue task" });
         return;
@@ -1438,7 +1611,7 @@ router.post(
           wallClockCapMs: wallClockCapMs ?? undefined,
           intentReceiptId: admission.receiptId,
           supportSessionId: supportMutation?.sessionId,
-          provenanceActorUserId: supportMutation?.staffUserId,
+          provenanceActorUserId: supportMutation?.staffUserId ?? req.userId!,
         });
         assistantContent = stagedBackgroundPlanStep
           ? backgroundPlanStepStatus(task.id, "queued")
@@ -1446,6 +1619,7 @@ router.post(
         plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
       } else {
         await runJob({
+          lifecycleResponse: res,
           taskId: task.id,
           projectId: project.id,
           kind,
@@ -1458,7 +1632,7 @@ router.post(
           imageAttachments: jobImageAttachments,
           intentReceiptId: admission.receiptId,
           supportSessionId: supportMutation?.sessionId,
-          provenanceActorUserId: supportMutation?.staffUserId,
+          provenanceActorUserId: supportMutation?.staffUserId ?? req.userId!,
         });
         const [refreshed] = await db
           .select()
@@ -1954,6 +2128,14 @@ router.post(
     const parsed = SendMessageBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+
+    if (parsed.data.retryTaskId !== undefined) {
+      res.status(409).json({
+        error: "Retry Build uses the regular project chat, not the streaming answer endpoint.",
+        code: "failed_draft_retry_requires_regular_message",
+      });
       return;
     }
 

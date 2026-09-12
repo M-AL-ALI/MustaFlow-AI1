@@ -108,7 +108,9 @@ describe("consented support operations", () => {
     expect(messages).toContain('code: "support_global_pause"');
     expect(messages).toContain("`support-session:${supportMutation.sessionId}`");
     expect(messages).toContain("provenanceActorUserId: supportRun?.staffUserId ?? null");
-    expect(messages).toContain("provenanceActorUserId: supportMutation?.staffUserId ?? null");
+    expect(messages).toContain(
+      "provenanceActorUserId: supportMutation?.staffUserId ?? req.userId!",
+    );
     expect(messages).toContain("provenanceActorUserId: supportMutation?.staffUserId");
     expect(messages).toContain("readSupportEvidenceImages(supportRun)");
     expect(messages).toContain("getOraAssetBytes(assetId, mutation.ownerUserId)");
@@ -133,6 +135,8 @@ describe("consented support operations", () => {
       actorAssignments.every(
         (assignment) =>
           assignment === "actorUserId: provenanceActorUserId" ||
+          // A missing retry actor is rejected, never promoted to a support operator.
+          assignment === 'actorUserId: provenanceActorUserId ?? ""' ||
           assignment === "actorUserId: session.staffUserId" ||
           assignment === "actorUserId: task.provenanceActorUserId ?? project.ownerId",
       ),

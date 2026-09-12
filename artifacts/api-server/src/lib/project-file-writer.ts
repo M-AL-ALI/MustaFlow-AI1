@@ -1,14 +1,22 @@
+import type { Response } from "express";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
-  db,
+  agentTasksTable,
+  projectArtifactsTable,
   projectFilesTable,
   projectsTable,
   projectVersionsTable,
   type FileSnapshotEntry,
 } from "@workspace/db";
 import type { BuilderFile } from "./builder";
+import { selectPrimaryArtifactFiles } from "./primary-artifact-files";
+import { FailedDraftRecoveryError, failedDraftFingerprint } from "./zero-sealed-failed-draft";
 import { resolveArtifactId } from "./artifacts";
-import { PROJECT_LIFECYCLE_LOCK_NAMESPACE } from "./project-retirement";
+import { PROJECT_LIFECYCLE_LOCK_NAMESPACE } from "./project-retirement-contract";
+import {
+  transactionHoldsProjectLifecycleLock,
+  withResponseProjectLifecycleTransaction,
+} from "./project-lifecycle";
 import { reconcileProjectFileAssetUsage } from "./project-file-asset-usage";
 
 export const PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS = 2_000;
@@ -61,11 +69,15 @@ export type ProjectFileWriteScope =
   | { kind: "project" };
 
 export interface ProjectFileMutation {
+  /** Internal foreground request only; expired responses must reacquire the lock. */
+  lifecycleResponse?: Response;
   projectId: number;
   files: BuilderFile[];
   replaceAll: boolean;
   scope: ProjectFileWriteScope;
   removedPaths?: string[];
+  /** Compare-and-write fence for sealed drafts, checked under the lifecycle lock. */
+  expectedBase?: { fingerprint: string; taskId: number; ownerUserId: string };
   authoritativeVersion?: {
     label: string;
     note: string;
@@ -117,94 +129,161 @@ export async function writeProjectFilesAtomically(
 
   let authoritativeVersion: { id: number; filesSnapshot: FileSnapshotEntry[] } | null;
   try {
-    authoritativeVersion = await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${input.projectId})`,
-      );
-      const [activeProject] = await tx
-        .select({ id: projectsTable.id })
-        .from(projectsTable)
-        .where(and(eq(projectsTable.id, input.projectId), isNull(projectsTable.deletedAt)))
-        .limit(1);
-      if (!activeProject) throw new ProjectInactiveWriteError();
-      await tx.execute(
-        sql`select set_config('lock_timeout', ${`${PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS}ms`}, true)`,
-      );
-      await tx.execute(
-        sql`select set_config('statement_timeout', ${`${PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS}ms`}, true)`,
-      );
+    const lifecycleResponse =
+      input.lifecycleResponse &&
+      !input.lifecycleResponse.destroyed &&
+      !input.lifecycleResponse.writableEnded
+        ? input.lifecycleResponse
+        : undefined;
+    authoritativeVersion = await withResponseProjectLifecycleTransaction(
+      lifecycleResponse,
+      input.projectId,
+      async (tx) => {
+        await tx.execute(
+          sql`select set_config('lock_timeout', ${`${PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS}ms`}, true)`,
+        );
+        await tx.execute(
+          sql`select set_config('statement_timeout', ${`${PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS}ms`}, true)`,
+        );
+        // Reuse only a private, authenticated witness for this exact transaction.
+        // A queued job has no response and must acquire its own lifecycle lock.
+        if (!transactionHoldsProjectLifecycleLock(tx, input.projectId)) {
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(${PROJECT_LIFECYCLE_LOCK_NAMESPACE}, ${input.projectId})`,
+          );
+        }
+        const [activeProject] = await tx
+          .select({ id: projectsTable.id, ownerId: projectsTable.ownerId })
+          .from(projectsTable)
+          .where(and(eq(projectsTable.id, input.projectId), isNull(projectsTable.deletedAt)))
+          .limit(1);
+        if (!activeProject) throw new ProjectInactiveWriteError();
 
-      const reconciliationPaths = new Set(affectedPaths);
-      if (input.replaceAll) {
-        const priorFiles = await tx
-          .select({ path: projectFilesTable.path })
-          .from(projectFilesTable)
-          .where(fileScope);
-        for (const file of priorFiles) reconciliationPaths.add(file.path);
-      }
+        if (input.expectedBase) {
+          const guard = input.expectedBase;
+          if (resolvedScope.kind !== "artifact" || activeProject.ownerId !== guard.ownerUserId)
+            throw new FailedDraftRecoveryError();
+          const [task] = await tx
+            .select({ status: agentTasksTable.status })
+            .from(agentTasksTable)
+            .where(
+              and(
+                eq(agentTasksTable.id, guard.taskId),
+                eq(agentTasksTable.projectId, input.projectId),
+              ),
+            )
+            .limit(1)
+            .for("update");
+          if (!task || task.status !== "building")
+            throw new FailedDraftRecoveryError(
+              "This run stopped before its files could be saved. Nothing was changed.",
+            );
+          const [primary] = await tx
+            .select({ id: projectArtifactsTable.id })
+            .from(projectArtifactsTable)
+            .where(
+              and(
+                eq(projectArtifactsTable.projectId, input.projectId),
+                eq(projectArtifactsTable.isPrimary, true),
+                isNull(projectArtifactsTable.deletedAt),
+              ),
+            )
+            .limit(1);
+          if (primary?.id !== resolvedScope.artifactId) throw new FailedDraftRecoveryError();
+          const rows = await tx
+            .select({
+              projectId: projectFilesTable.projectId,
+              artifactId: projectFilesTable.artifactId,
+              path: projectFilesTable.path,
+              content: projectFilesTable.content,
+              mimeType: projectFilesTable.mimeType,
+            })
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, input.projectId));
+          if (
+            failedDraftFingerprint(
+              selectPrimaryArtifactFiles(rows, input.projectId, resolvedScope.artifactId),
+            ) !== guard.fingerprint
+          ) {
+            throw new FailedDraftRecoveryError(
+              "The project changed while this build was running. Your newer files were kept; nothing was overwritten.",
+            );
+          }
+        }
 
-      if (input.replaceAll) {
-        await tx.delete(projectFilesTable).where(fileScope);
-      } else if (affectedPaths.length > 0) {
-        await tx
-          .delete(projectFilesTable)
-          .where(and(fileScope, inArray(projectFilesTable.path, affectedPaths)));
-      }
+        const reconciliationPaths = new Set(affectedPaths);
+        if (input.replaceAll) {
+          const priorFiles = await tx
+            .select({ path: projectFilesTable.path })
+            .from(projectFilesTable)
+            .where(fileScope);
+          for (const file of priorFiles) reconciliationPaths.add(file.path);
+        }
 
-      if (input.files.length > 0) {
-        await tx.insert(projectFilesTable).values(
-          input.files.map((file) => ({
+        if (input.replaceAll) {
+          await tx.delete(projectFilesTable).where(fileScope);
+        } else if (affectedPaths.length > 0) {
+          await tx
+            .delete(projectFilesTable)
+            .where(and(fileScope, inArray(projectFilesTable.path, affectedPaths)));
+        }
+
+        if (input.files.length > 0) {
+          await tx.insert(projectFilesTable).values(
+            input.files.map((file) => ({
+              projectId: input.projectId,
+              artifactId: resolvedScope.kind === "artifact" ? resolvedScope.artifactId : null,
+              path: file.path,
+              content: file.content,
+              mimeType: file.mimeType,
+            })),
+          );
+        }
+
+        const nextContentByPath = new Map(input.files.map((file) => [file.path, file.content]));
+        for (const filePath of reconciliationPaths) {
+          await reconcileProjectFileAssetUsage(tx, {
             projectId: input.projectId,
             artifactId: resolvedScope.kind === "artifact" ? resolvedScope.artifactId : null,
-            path: file.path,
-            content: file.content,
-            mimeType: file.mimeType,
-          })),
-        );
-      }
+            filePath,
+            nextContent: nextContentByPath.get(filePath) ?? null,
+          });
+        }
 
-      const nextContentByPath = new Map(input.files.map((file) => [file.path, file.content]));
-      for (const filePath of reconciliationPaths) {
-        await reconcileProjectFileAssetUsage(tx, {
-          projectId: input.projectId,
-          artifactId: resolvedScope.kind === "artifact" ? resolvedScope.artifactId : null,
-          filePath,
-          nextContent: nextContentByPath.get(filePath) ?? null,
-        });
-      }
+        if (!input.authoritativeVersion) return null;
 
-      if (!input.authoritativeVersion) return null;
-
-      try {
-        const snapshot = await tx
-          .select({
-            path: projectFilesTable.path,
-            content: projectFilesTable.content,
-            mimeType: projectFilesTable.mimeType,
-          })
-          .from(projectFilesTable)
-          .where(eq(projectFilesTable.projectId, input.projectId));
-        const [version] = await tx
-          .insert(projectVersionsTable)
-          .values({
-            projectId: input.projectId,
-            label: input.authoritativeVersion.label,
-            note: input.authoritativeVersion.note,
-            changelogEntry: input.authoritativeVersion.changelogEntry,
-            filesSnapshot: snapshot,
-            planSnapshot: input.authoritativeVersion.planSnapshot,
-            planSourceMessageId: input.authoritativeVersion.planSourceMessageId,
-          })
-          .returning({ id: projectVersionsTable.id });
-        if (!version) throw new ProjectFileVersionHandoffError();
-        return { id: version.id, filesSnapshot: snapshot };
-      } catch (error) {
-        if (error instanceof ProjectFileVersionHandoffError) throw error;
-        throw new ProjectFileVersionHandoffError({ cause: error });
-      }
-    });
+        try {
+          const snapshot = await tx
+            .select({
+              path: projectFilesTable.path,
+              content: projectFilesTable.content,
+              mimeType: projectFilesTable.mimeType,
+            })
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, input.projectId));
+          const [version] = await tx
+            .insert(projectVersionsTable)
+            .values({
+              projectId: input.projectId,
+              label: input.authoritativeVersion.label,
+              note: input.authoritativeVersion.note,
+              changelogEntry: input.authoritativeVersion.changelogEntry,
+              filesSnapshot: snapshot,
+              planSnapshot: input.authoritativeVersion.planSnapshot,
+              planSourceMessageId: input.authoritativeVersion.planSourceMessageId,
+            })
+            .returning({ id: projectVersionsTable.id });
+          if (!version) throw new ProjectFileVersionHandoffError();
+          return { id: version.id, filesSnapshot: snapshot };
+        } catch (error) {
+          if (error instanceof ProjectFileVersionHandoffError) throw error;
+          throw new ProjectFileVersionHandoffError({ cause: error });
+        }
+      },
+    );
   } catch (error) {
     if (error instanceof ProjectInactiveWriteError) throw error;
+    if (error instanceof FailedDraftRecoveryError) throw error;
     if (error instanceof ProjectFileVersionHandoffError) throw error;
     throw new ProjectFileWriteError({ cause: error });
   }

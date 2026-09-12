@@ -256,9 +256,9 @@ describe("atomic project file writes", () => {
       },
     ]);
     expect(harness.executeValues).toEqual([
-      [PROJECT_LIFECYCLE_LOCK_NAMESPACE, 51],
       [`${PROJECT_FILE_WRITE_LOCK_TIMEOUT_MS}ms`],
       [`${PROJECT_FILE_WRITE_STATEMENT_TIMEOUT_MS}ms`],
+      [PROJECT_LIFECYCLE_LOCK_NAMESPACE, 51],
     ]);
   });
 

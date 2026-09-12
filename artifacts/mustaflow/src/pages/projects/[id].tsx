@@ -966,6 +966,22 @@ export default function ProjectWorkspacePage() {
   }, [projectId]);
 
   const [prompt, setPrompt] = useState("");
+  const [historyRetry, setHistoryRetry] = useState<{
+    projectId: number;
+    taskId: number;
+    prompt: string;
+  } | null>(null);
+  // Only this reviewed draft can carry retry metadata. Replacing/removing its original
+  // request or navigating to another project immediately detaches the retry.
+  const activeHistoryRetry =
+    historyRetry?.projectId === projectId && prompt.includes(historyRetry.prompt)
+      ? historyRetry
+      : null;
+  const historyRetryRef = useRef(activeHistoryRetry);
+  historyRetryRef.current = activeHistoryRetry;
+  useEffect(() => {
+    if (historyRetry && !activeHistoryRetry) setHistoryRetry(null);
+  }, [historyRetry, activeHistoryRetry]);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [_batchTotalCount, setBatchTotalCount] = useState(0);
   const [chatPrefill, setChatPrefill] = useState<string | null>(null);
@@ -2878,8 +2894,20 @@ export default function ProjectWorkspacePage() {
         agentIdentity?: "planning" | "main";
         idempotencyKey?: string;
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
+        retryTaskId?: number;
+        onSuccess?: () => void;
       },
     ) => {
+      // Recovery is an ordinary foreground build, never a planning/task-agent handoff.
+      if (opts?.retryTaskId !== undefined) {
+        opts = {
+          ...opts,
+          planMode: false,
+          background: false,
+          agentIdentity: "main",
+          agentIntent: "build",
+        };
+      }
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectivePlanMode = opts?.planMode ?? planMode;
       const effectiveAgentIntent = opts?.agentIntent
@@ -2900,6 +2928,7 @@ export default function ProjectWorkspacePage() {
               ? { attachments: opts.attachments }
               : {}),
             ...(opts?.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+            ...(opts?.retryTaskId !== undefined ? { retryTaskId: opts.retryTaskId } : {}),
             ...(opts?.brainstormContext && opts.brainstormContext.length > 0
               ? { brainstormContext: opts.brainstormContext }
               : {}),
@@ -2936,7 +2965,9 @@ export default function ProjectWorkspacePage() {
             if (tid && !wasBackground) setActiveTaskId(tid);
             // Auto-enable plan mode when the server detected a plan intent so
             // subsequent messages continue planning without a manual toggle.
-            if (data?.assistantMessage?.planMode) setPlanMode(true);
+            if (opts?.retryTaskId === undefined && data?.assistantMessage?.planMode)
+              setPlanMode(true);
+            opts?.onSuccess?.();
           },
           onError: (err) => {
             setPendingBuildStartedAt(null);
@@ -2978,11 +3009,25 @@ export default function ProjectWorkspacePage() {
         attachments?: ComposerAttachment[];
         brainstormContext?: Array<{ role: "user" | "assistant"; content: string }>;
         onProceed?: () => void;
+        retryTaskId?: number;
+        onSuccess?: () => void;
       },
     ) => {
+      if (opts?.retryTaskId !== undefined) {
+        if (!Number.isSafeInteger(opts.retryTaskId) || opts.retryTaskId <= 0) return;
+        opts = {
+          ...opts,
+          planMode: false,
+          background: false,
+          agentIdentity: "main",
+          agentIntent: "build",
+        };
+      }
       // Any governed attachment can carry an attachment-only request.
       const hasAttachments = (opts?.attachments ?? []).length > 0;
       if (!content.trim() && !hasAttachments) return;
+      // Other entry points (suggestions, fix actions, etc.) never inherit a composer retry.
+      if (opts?.retryTaskId === undefined) setHistoryRetry(null);
       // A fresh attempt clears any previous billing block; the server re-gates.
       setBillingBlock(null);
 
@@ -3040,6 +3085,7 @@ export default function ProjectWorkspacePage() {
 
       // For plan/build or background tasks skip streaming and go straight to the regular path
       if (
+        opts?.retryTaskId !== undefined ||
         effectivePlanMode ||
         effectiveBackground ||
         effectiveAgentIntent === "plan" ||
@@ -5217,19 +5263,52 @@ export default function ProjectWorkspacePage() {
 
                   {/* Chat / Queue input */}
                   <div data-tour="chat-input">
+                    {activeHistoryRetry && (
+                      <div
+                        role="status"
+                        className="mx-3 mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs"
+                      >
+                        <span>
+                          Retrying Task #{activeHistoryRetry.taskId}. Review the request and add
+                          instructions before sending.
+                        </span>
+                        <button
+                          type="button"
+                          aria-label="Cancel task retry"
+                          onClick={() => setHistoryRetry(null)}
+                          className="shrink-0 text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
                     <QueueComposer
+                      key={
+                        activeHistoryRetry
+                          ? `retry-${projectId}-${activeHistoryRetry.taskId}`
+                          : `compose-${projectId}`
+                      }
                       projectId={projectId}
                       agentMode={agentMode}
                       onAgentModeChange={persistAgentModeSelection}
                       deepReasoning={deepReasoning}
                       onDeepReasoningChange={persistDeepReasoningSelection}
                       subscriptionTier={subscriptionTier}
-                      planMode={planMode}
-                      onPlanModeChange={setPlanMode}
-                      runInBackground={runInBackground}
-                      onRunInBackgroundChange={setRunInBackground}
-                      variantMode={variantMode}
-                      onVariantModeChange={setVariantMode}
+                      planMode={activeHistoryRetry ? false : planMode}
+                      onPlanModeChange={(enabled) => {
+                        if (enabled) setHistoryRetry(null);
+                        setPlanMode(enabled);
+                      }}
+                      runInBackground={activeHistoryRetry ? false : runInBackground}
+                      onRunInBackgroundChange={(enabled) => {
+                        if (enabled) setHistoryRetry(null);
+                        setRunInBackground(enabled);
+                      }}
+                      variantMode={activeHistoryRetry ? false : variantMode}
+                      onVariantModeChange={(enabled) => {
+                        if (enabled) setHistoryRetry(null);
+                        setVariantMode(enabled);
+                      }}
                       disabled={isBusy}
                       activeTaskId={activeTaskId}
                       onStopBuild={handleStopStream}
@@ -5250,7 +5329,11 @@ export default function ProjectWorkspacePage() {
                         brainstormContext,
                         clearComposer,
                       ) => {
-                        checkUpgradeNudge(content, intent);
+                        const retry =
+                          activeHistoryRetry && content.includes(activeHistoryRetry.prompt)
+                            ? activeHistoryRetry
+                            : null;
+                        if (!retry) checkUpgradeNudge(content, intent);
                         if (chatScrolledUp) {
                           setChatScrolledUp(false);
                           chatAtBottomRef.current = true;
@@ -5263,22 +5346,40 @@ export default function ProjectWorkspacePage() {
                           attachments?.some((attachment) => attachment.kind === "image") ?? false;
                         // Auto-activate plan mode when the client detected a plan intent
                         // so the user never has to manually toggle it.
-                        if (intent === "plan") setPlanMode(true);
+                        if (!retry && intent === "plan") setPlanMode(true);
                         send(content, {
                           ...(attachments && attachments.length > 0 ? { attachments } : {}),
                           // Images and explicit build/plan intents use the regular task-creating
                           // mutation. Conversational intents keep their existing streamed path.
                           ...mapIntentToSendOptions({ intent, hasImages }),
-                          onProceed: clearComposer,
+                          ...(retry ? { retryTaskId: retry.taskId } : {}),
+                          // Preserve the reviewed request and added instructions when submit fails.
+                          onProceed: retry ? undefined : clearComposer,
+                          ...(retry
+                            ? {
+                                onSuccess: () => {
+                                  if (historyRetryRef.current !== retry) return;
+                                  clearComposer?.();
+                                  setPrompt("");
+                                  setHistoryRetry(null);
+                                },
+                              }
+                            : {}),
                           ...(brainstormContext && brainstormContext.length > 0
                             ? { brainstormContext }
                             : {}),
                         });
                       }}
-                      onBatchStarted={handleBatchStarted}
+                      onBatchStarted={(batchId, totalCount) => {
+                        setHistoryRetry(null);
+                        handleBatchStarted(batchId, totalCount);
+                      }}
                       promptValue={prompt}
                       onPromptValueChange={setPrompt}
-                      onAgentIdentityChange={setAgentIdentity}
+                      onAgentIdentityChange={(identity) => {
+                        if (identity === "planning") setHistoryRetry(null);
+                        setAgentIdentity(identity);
+                      }}
                       onBrainstormActivity={handleBrainstormActivity}
                     />
                   </div>
@@ -5337,9 +5438,22 @@ export default function ProjectWorkspacePage() {
               <HistoryTab
                 key={projectId}
                 projectId={projectId}
-                onRetry={(text) => {
+                tasks={tasksForFeed}
+                onRetry={(text, taskId) => {
+                  setHistoryRetry({ projectId, taskId, prompt: text });
                   setPrompt(text);
+                  setPlanMode(false);
+                  setRunInBackground(false);
+                  setVariantMode(false);
+                  setAgentIdentity("main");
+                  setShowChatHistory(false);
                   switchLeftPanel("chat");
+                  if (isMobileLayout) setChatDrawerOpen(true);
+                  requestAnimationFrame(() => {
+                    document
+                      .querySelector<HTMLTextAreaElement>('[data-tour="chat-input"] textarea')
+                      ?.focus();
+                  });
                 }}
                 onViewInChat={(taskId) => {
                   setZeroScrollToTaskId(taskId);

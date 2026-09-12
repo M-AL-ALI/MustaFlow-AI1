@@ -1079,15 +1079,21 @@ export function CodeEditorTab({
     tool: string;
     diagnostics: ProjectFileDiagnostic[];
   } | null>(null);
-  const diagnoseFile = useGetProjectFileDiagnostics();
+  const { mutate: diagnoseFile } = useGetProjectFileDiagnostics();
+  const diagnosticsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Monotonic request token; only the latest token's response is honored so
   // a slow response for a previously-open file can't clobber markers for
   // the file the user has since switched to.
   const diagnosticsTokenRef = useRef(0);
   const runDiagnostics = useCallback(
     (fileId: number) => {
+      // An immediate saved-content refresh supersedes the debounced request.
+      if (diagnosticsTimerRef.current !== null) {
+        clearTimeout(diagnosticsTimerRef.current);
+        diagnosticsTimerRef.current = null;
+      }
       const token = ++diagnosticsTokenRef.current;
-      diagnoseFile.mutate(
+      diagnoseFile(
         { id: projectId, fileId },
         {
           onSuccess: (res) => {
@@ -1122,7 +1128,13 @@ export function CodeEditorTab({
       return;
     }
     const t = setTimeout(() => runDiagnostics(selectedFileId), 600);
-    return () => clearTimeout(t);
+    diagnosticsTimerRef.current = t;
+    return () => {
+      clearTimeout(t);
+      if (diagnosticsTimerRef.current === t) diagnosticsTimerRef.current = null;
+      // A file/revision change or unmount invalidates any older response too.
+      diagnosticsTokenRef.current += 1;
+    };
     // updatedAt changes after a save → re-run diagnostics with the new content.
   }, [selectedFileId, fileContent?.updatedAt, selectedFile?.path, runDiagnostics, fileContent]);
 

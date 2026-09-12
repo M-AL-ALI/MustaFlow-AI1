@@ -47,10 +47,14 @@ describe("Zero sealed generation product wiring", () => {
   it("persists the loop report with the terminal and retains it in the later report update", () => {
     expect(jobs).toContain("err instanceof AgentModelRequestError");
     expect(jobs).toContain("modelRequestFailure.failureEvidence");
-    expect(jobs).toContain("report: modelFailureReport");
+    expect(jobs).toContain("report: failedReport");
+    expect(jobs).toContain("...(draft ? { stagingSnapshot: sealedFailureFiles } : {})");
+    expect(jobs).toContain("...(modelFailureReport ?? {})");
     expect(jobs).toContain("completionKind: modelRequestFailure.completionKind");
     expect(jobs).toContain("...(modelFailureReport ?? {})");
-    expect(jobs).toContain("warnings: modelFailureReport?.warnings ?? []");
+    expect(jobs).toMatch(
+      /warnings:\s*modelFailureReport\?\.warnings\s*\?\?\s*sealedFailureReport\?\.warnings\s*\?\?\s*\[\]/,
+    );
     expect(jobs).toMatch(
       /modelFailureReport\?\.suggestions\s*\?\?\s*sealedProjectRecovery\?\.suggestions\s*\?\?\s*buildFailureFixSuggestions\(\)/,
     );

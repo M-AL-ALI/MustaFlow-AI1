@@ -43,6 +43,21 @@ export type TaskReport = {
     schema: typeof ZERO_TERMINAL_SEMANTICS;
     taskId: number;
   };
+  /** Inert source draft. Only an explicit, guarded retry may read stagingSnapshot. */
+  sealedFailedDraft?: {
+    schema: 1;
+    actorUserId: string;
+    baseFingerprint: string;
+    candidateFingerprint: string;
+    fileCount: number;
+  };
+  /** Durable single-child claim prevents duplicate retries across API replicas. */
+  retryChildTaskId?: number;
+  retrySource?: {
+    taskId: number;
+    actorUserId: string;
+    baseFingerprint: string;
+  };
   userRequest: string;
   blueprint?: Record<string, unknown> | null;
   filesCreated: string[];

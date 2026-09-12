@@ -1887,6 +1887,11 @@ export interface ChatMessageInput {
   /** Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call. */
   idempotencyKey?: string;
   /**
+     * Explicit owner retry of a failed task in this project. Restores the full request and an unchanged-base source draft when available; never applies or publishes unchecked files. Requires idempotencyKey and the regular message endpoint.
+     * @minimum 1
+     */
+  retryTaskId?: number;
+  /**
      * User-approved support proposal to apply. The server binds it to the signed-in owner, exact project, named staff actor and still-live consent grant.
      * @minimum 1
      */

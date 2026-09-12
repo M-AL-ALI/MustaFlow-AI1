@@ -135,15 +135,53 @@ const FILTER_OPTIONS = [
   { label: "Secrets", value: "secret_change" },
 ];
 
+export interface HistoryRetryTask {
+  id: number;
+  projectId?: number;
+  prompt?: string | null;
+  report?: unknown;
+}
+
+function fullRetryRequest(
+  tasks: readonly HistoryRetryTask[],
+  projectId: number,
+  taskId: number | null | undefined,
+): string | null {
+  if (typeof taskId !== "number" || !Number.isSafeInteger(taskId) || taskId <= 0) return null;
+  const task = tasks.find(
+    (candidate) =>
+      candidate.id === taskId &&
+      (candidate.projectId === undefined || candidate.projectId === projectId),
+  );
+  if (!task) return null;
+  const report = task.report;
+  const reportedRequest =
+    report && typeof report === "object" && "userRequest" in report
+      ? report.userRequest
+      : undefined;
+  for (const request of [task.prompt, reportedRequest]) {
+    if (typeof request === "string" && request.trim()) return request;
+  }
+  return null;
+}
+
 interface EntryCardProps {
   entry: KnowledgeEntry;
   projectId: number;
-  onRetry?: (prompt: string) => void;
+  retryPrompt: string | null;
+  onRetry?: (prompt: string, taskId: number) => void;
   onViewInChat?: (taskId: number) => void;
   onViewTrace?: (taskId: number) => void;
 }
 
-function EntryCard({ entry, projectId, onRetry, onViewInChat, onViewTrace }: EntryCardProps) {
+function EntryCard({
+  entry,
+  projectId,
+  retryPrompt,
+  onRetry,
+  onViewInChat,
+  onViewTrace,
+}: EntryCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showAnnotationInput, setShowAnnotationInput] = useState(false);
   const [annotationDraft, setAnnotationDraft] = useState(entry.annotation ?? "");
@@ -217,12 +255,6 @@ function EntryCard({ entry, projectId, onRetry, onViewInChat, onViewTrace }: Ent
       0;
 
   const isError = entry.severity === "error";
-
-  // Extract retry prompt from error entry title patterns
-  const retryPromptMatch =
-    entry.title.match(/^Build failed: "(.+)"$/) ??
-    entry.title.match(/^(?:Build|Refinement) error for: "(.+)"$/);
-  const retryPrompt = retryPromptMatch ? retryPromptMatch[1] : null;
 
   return (
     <div
@@ -308,6 +340,8 @@ function EntryCard({ entry, projectId, onRetry, onViewInChat, onViewTrace }: Ent
           {/* Expand/collapse */}
           <button
             onClick={() => setExpanded((v) => !v)}
+            aria-label={`${expanded ? "Collapse" : "Expand"} history entry: ${entry.title}`}
+            aria-expanded={expanded}
             className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
           >
             {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -333,6 +367,8 @@ function EntryCard({ entry, projectId, onRetry, onViewInChat, onViewTrace }: Ent
                 setShowContextMenu((v) => !v);
                 setShowAnnotationInput(false);
               }}
+              aria-label={`History entry actions: ${entry.title}`}
+              aria-expanded={showContextMenu}
               className="w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
             >
               <MoreHorizontal className="h-3 w-3" />
@@ -442,22 +478,45 @@ function EntryCard({ entry, projectId, onRetry, onViewInChat, onViewTrace }: Ent
               <pre className="text-[10px] text-destructive/80 bg-destructive/5 border border-destructive/20 rounded p-2 overflow-x-auto whitespace-pre-wrap font-mono leading-relaxed">
                 {entry.content}
               </pre>
-              {retryPrompt && onRetry && (
+              {onRetry && (
                 <div className="space-y-1">
                   <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
                     What was tried
                   </div>
-                  <div className="text-[10px] text-muted-foreground bg-muted/40 border border-border/60 rounded px-2 py-1 italic">
-                    "{retryPrompt}"
-                  </div>
+                  {retryPrompt ? (
+                    <div className="text-[10px] text-muted-foreground bg-muted/40 border border-border/60 rounded px-2 py-1 whitespace-pre-wrap">
+                      {retryPrompt}
+                    </div>
+                  ) : (
+                    <p role="alert" className="text-[10px] text-destructive">
+                      Unable to load the full request for this task. Refresh History or open the
+                      task in chat, then try again.
+                    </p>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
                     className="h-5 text-[10px] px-2 border-destructive/30 text-destructive hover:bg-destructive/5"
-                    onClick={() => onRetry(retryPrompt)}
+                    disabled={!retryPrompt}
+                    onClick={() => {
+                      const taskId = entry.relatedTaskId;
+                      if (
+                        retryPrompt &&
+                        typeof taskId === "number" &&
+                        Number.isSafeInteger(taskId) &&
+                        taskId > 0
+                      ) {
+                        onRetry(retryPrompt, taskId);
+                      }
+                    }}
                   >
                     <RefreshCw className="h-2.5 w-2.5 mr-1" /> Retry Build
                   </Button>
+                  {retryPrompt && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Review in the composer before sending. Nothing is sent yet.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -542,12 +601,19 @@ function EntryCard({ entry, projectId, onRetry, onViewInChat, onViewTrace }: Ent
 
 interface HistoryTabProps {
   projectId: number;
-  onRetry?: (prompt: string) => void;
+  tasks?: readonly HistoryRetryTask[];
+  onRetry?: (prompt: string, taskId: number) => void;
   focusVersionId?: number | null;
   onViewInChat?: (taskId: number) => void;
 }
 
-export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }: HistoryTabProps) {
+export function HistoryTab({
+  projectId,
+  tasks = [],
+  onRetry,
+  focusVersionId,
+  onViewInChat,
+}: HistoryTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -793,6 +859,7 @@ export function HistoryTab({ projectId, onRetry, focusVersionId, onViewInChat }:
                   key={entry.id}
                   entry={entry}
                   projectId={projectId}
+                  retryPrompt={fullRetryRequest(tasks, projectId, entry.relatedTaskId)}
                   onRetry={onRetry}
                   onViewInChat={onViewInChat}
                   onViewTrace={(taskId) => setTraceTaskId(taskId)}

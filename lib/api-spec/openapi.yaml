@@ -9563,6 +9563,10 @@ components:
         idempotencyKey:
           type: string
           description: "Optional client-generated UUID. The server uses it to detect retried requests caused by network blips and returns the cached response instead of running a duplicate AI call."
+        retryTaskId:
+          type: integer
+          minimum: 1
+          description: "Explicit owner retry of a failed task in this project. Restores the full request and an unchanged-base source draft when available; never applies or publishes unchecked files. Requires idempotencyKey and the regular message endpoint."
         supportSessionId:
           type: integer
           minimum: 1

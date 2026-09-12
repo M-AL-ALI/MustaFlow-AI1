@@ -108,6 +108,13 @@ import { autoCommitProjectFiles } from "./github";
 import { staleDraftCandidate } from "./testing-invalidation";
 import { ProjectFileVersionHandoffError, writeProjectFilesAtomically } from "./project-file-writer";
 import { restoreInterruptedProjectFiles } from "./interrupted-project-file-restore";
+import {
+  FailedDraftRecoveryError,
+  describeFailedDraft,
+  failedDraftFingerprint,
+  mergeFailedDraftFiles,
+  resolveFailedRetry,
+} from "./zero-sealed-failed-draft";
 import { emitTaskEventBounded } from "./task-event-emission";
 import { healthCheckPathForStack } from "./health-inject";
 import { fetchAttachmentAsDataUri } from "../routes/images.js";
@@ -989,6 +996,8 @@ export type JobKind = "build" | "refine";
 export type AgentIdentity = "planning" | "task" | "main";
 
 export interface JobInput {
+  /** Server-only request witness. Never persisted or sent to the durable queue. */
+  lifecycleResponse?: import("express").Response;
   taskId: number;
   projectId: number;
   /** Durable authoritative intent receipt required before mutation-capable execution. */
@@ -2956,7 +2965,72 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
     }
 
+    let sealedFailureFiles: BuilderFile[] | null = null;
+    let sealedFailureReport: TaskReport | null = null;
+    let retrySource: TaskReport["retrySource"];
+    let recoveredFiles: BuilderFile[] | null = null;
+    let recoveredBase: BuilderFile[] | null = null;
+    const sealedWriteGuard = () =>
+      isZeroSealedGenerationTarget(zeroGenerationTarget) &&
+      interruptedPreRunFiles &&
+      project.ownerId
+        ? {
+            fingerprint: failedDraftFingerprint(interruptedPreRunFiles),
+            taskId,
+            ownerUserId: project.ownerId,
+          }
+        : undefined;
     try {
+      const [runningTask] = await db
+        .select({ report: agentTasksTable.report })
+        .from(agentTasksTable)
+        .where(and(eq(agentTasksTable.id, taskId), eq(agentTasksTable.projectId, projectId)))
+        .limit(1);
+      retrySource = runningTask?.report?.retrySource;
+      if (retrySource) {
+        if (
+          !isZeroSealedGenerationTarget(zeroGenerationTarget) ||
+          input.supportSessionId ||
+          agentIdentity !== "main" ||
+          retrySource.actorUserId !== provenanceActorUserId
+        )
+          throw new FailedDraftRecoveryError();
+        const [sourceTask] = await db
+          .select()
+          .from(agentTasksTable)
+          .where(
+            and(
+              eq(agentTasksTable.id, retrySource.taskId),
+              eq(agentTasksTable.projectId, projectId),
+            ),
+          )
+          .limit(1);
+        recoveredBase = await loadFiles(projectId);
+        const recovery = resolveFailedRetry({
+          source: sourceTask,
+          projectId,
+          actorUserId: provenanceActorUserId ?? "",
+          ownerUserId: project.ownerId,
+          currentFiles: recoveredBase,
+          submittedContent: userPrompt,
+          childTaskId: taskId,
+          expectedBaseFingerprint: retrySource.baseFingerprint,
+        });
+        recoveredFiles = recovery.files;
+        userPrompt =
+          recovery.content +
+          "\n\nContinue this explicit retry. Preserve the full original requirements. Fix the required sealed-source checks before finalizing." +
+          (sourceTask?.report?.failureEvidence
+            ? "\nPrevious failure: " + JSON.stringify(sourceTask.report.failureEvidence)
+            : "");
+        await emitEvent(
+          taskId,
+          "narration",
+          recoveredFiles
+            ? "Recovered the previous draft for repair. Working project files stay unchanged until the source checks pass."
+            : "Retrying the full original request. This older run has no saved draft, so the current project files will be used.",
+        );
+      }
       let report: TaskReport;
       let assistantSummary: string;
       let nextVersionLabel: string;
@@ -3282,7 +3356,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       if (kind === "build") {
-        interruptedPreRunFiles = await loadFiles(projectId);
+        interruptedPreRunFiles = recoveredBase ?? (await loadFiles(projectId));
         interruptedRuntimeId =
           isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
             ? null
@@ -3442,7 +3516,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 const { runAgentLoop, loopResultToBuildResult } = await import("./agent-loop");
                 await emitEvent(taskId, "narration", "Agentic builder loop engaged.");
                 const loopRes = await runAgentLoop({
-                  mode: "build",
+                  mode: recoveredFiles ? "refine" : "build",
                   projectId,
                   ownerUserId: project.ownerId,
                   actorUserId: provenanceActorUserId,
@@ -3459,7 +3533,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   conversationHistory,
                   knowledgeContext: knowledgeContext || undefined,
                   planContext: effectivePlanContext,
-                  existingFiles: [],
+                  existingFiles: recoveredFiles ?? [],
                   containerId:
                     isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
                       ? null
@@ -3570,6 +3644,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                   });
 
         if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
+          sealedFailureFiles = scanForSecrets(result.files).files;
+          sealedFailureReport = result.report;
           zeroSealedGeneration = prepareZeroSealedNodeSource({
             files: result.files,
             target: zeroGenerationTarget,
@@ -3793,17 +3869,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           );
           await assertSupportGrantStillAuthorizesMutation();
           await writeProjectFilesAtomically({
+            lifecycleResponse: input.lifecycleResponse,
             projectId,
             scope: { kind: "artifact" },
             files: filesWithHealth,
             replaceAll: true,
+            expectedBase: sealedWriteGuard(),
           });
           interruptedMutationCommitted = true;
           void staleDraftCandidate(projectId, "build").catch(() => {});
         }
         diffSummary = computeBuildDiff(result.files);
 
-        report = result.report;
+        report = { ...result.report, ...(retrySource ? { retrySource } : {}) };
         assistantSummary = result.assistantSummary;
         nextVersionLabel = isMobileProject
           ? "Initial mobile build"
@@ -3834,8 +3912,9 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           "Let me read the current project files before making any changes.",
         );
         await emitEvent(taskId, "reading_files", "Reading current project files…");
-        const existingFiles = await loadFiles(projectId);
-        interruptedPreRunFiles = existingFiles.map((file) => ({ ...file }));
+        const currentFiles = recoveredBase ?? (await loadFiles(projectId));
+        const existingFiles = recoveredFiles ?? currentFiles;
+        interruptedPreRunFiles = currentFiles.map((file) => ({ ...file }));
         interruptedRuntimeId =
           isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
             ? null
@@ -4160,8 +4239,26 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                                   });
 
         if (isZeroSealedGenerationTarget(zeroGenerationTarget)) {
+          sealedFailureFiles = scanForSecrets(
+            mergeFailedDraftFiles(
+              existingFiles,
+              refineResult.changedFiles,
+              refineResult.removedPaths,
+            ),
+          ).files;
+          sealedFailureReport = refineResult.report;
+          if (recoveredFiles) {
+            const candidatePaths = new Set(sealedFailureFiles.map((file) => file.path));
+            refineResult = {
+              ...refineResult,
+              changedFiles: sealedFailureFiles,
+              removedPaths: currentFiles
+                .filter((file) => !candidatePaths.has(file.path))
+                .map((file) => file.path),
+            };
+          }
           const preparedRefinement = prepareZeroSealedNodeRefinement({
-            existingFiles,
+            existingFiles: currentFiles,
             changedFiles: refineResult.changedFiles,
             removedPaths: refineResult.removedPaths,
             target: zeroGenerationTarget,
@@ -4609,11 +4706,13 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         ) {
           await assertSupportGrantStillAuthorizesMutation();
           await writeProjectFilesAtomically({
+            lifecycleResponse: input.lifecycleResponse,
             projectId,
             scope: { kind: "artifact" },
             files: result.changedFiles,
             replaceAll: false,
             removedPaths: result.removedPaths,
+            expectedBase: sealedWriteGuard(),
           });
           interruptedMutationCommitted = true;
           for (const file of result.changedFiles) interruptedChangedPaths.add(file.path);
@@ -4636,7 +4735,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
         diffSummary = computeRefineDiff(existingFiles, result.changedFiles, result.removedPaths);
 
-        report = result.report;
+        report = { ...result.report, ...(retrySource ? { retrySource } : {}) };
 
         // Surface unchanged-files count in the task report so the report card can display it.
         // Also persists the list for the next refine turn's manifest pruning hint.
@@ -4772,6 +4871,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               );
               await assertSupportGrantStillAuthorizesMutation();
               await writeProjectFilesAtomically({
+                lifecycleResponse: input.lifecycleResponse,
                 projectId,
                 scope: { kind: "artifact" },
                 files: repairLoopResult.changedFiles,
@@ -5843,6 +5943,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               if (appliedChangedFiles.length > 0 || appliedRemovedPaths.length > 0) {
                 await assertSupportGrantStillAuthorizesMutation();
                 await writeProjectFilesAtomically({
+                  lifecycleResponse: input.lifecycleResponse,
                   projectId,
                   scope: { kind: "artifact" },
                   files: appliedChangedFiles,
@@ -7451,21 +7552,23 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           ? undefined
           : buildAgentModelFailureReport(modelRequestFailure, userPrompt);
       const failureEvidence =
-        modelRequestFailure !== undefined
-          ? modelRequestFailure.failureEvidence
-          : err instanceof ZeroGenerationKitchenError
-            ? { code: err.code, message: err.message, evidence: err.evidence }
-            : err instanceof ZeroSealedSourceContractError
-              ? {
-                  code: err.code,
-                  message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
-                  evidence: {
-                    stage: "source-contract",
-                    reasonCodes: [...err.reasons],
-                    ...(err.path === undefined ? {} : { path: err.path }),
-                  },
-                }
-              : undefined;
+        err instanceof FailedDraftRecoveryError
+          ? { code: err.code, message: err.message, evidence: null }
+          : modelRequestFailure !== undefined
+            ? modelRequestFailure.failureEvidence
+            : err instanceof ZeroGenerationKitchenError
+              ? { code: err.code, message: err.message, evidence: err.evidence }
+              : err instanceof ZeroSealedSourceContractError
+                ? {
+                    code: err.code,
+                    message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+                    evidence: {
+                      stage: "source-contract",
+                      reasonCodes: [...err.reasons],
+                      ...(err.path === undefined ? {} : { path: err.path }),
+                    },
+                  }
+                : undefined;
       const sealedProjectRecovery =
         failureEvidence?.code === ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE
           ? {
@@ -7480,7 +7583,54 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 action: { ...ZERO_SEALED_SOURCE_REPAIR_RECOVERY },
               }
             : undefined;
+      let draft: TaskReport["sealedFailedDraft"];
+      if (
+        err instanceof ZeroSealedSourceContractError &&
+        !interruptedMutationCommitted &&
+        sealedFailureFiles?.length &&
+        interruptedPreRunFiles &&
+        provenanceActorUserId
+      ) {
+        try {
+          draft = describeFailedDraft({
+            files: sealedFailureFiles,
+            base: interruptedPreRunFiles,
+            actorUserId: provenanceActorUserId,
+          });
+        } catch (draftError) {
+          logger.warn(
+            {
+              taskId,
+              projectId,
+              errorClass: draftError instanceof Error ? draftError.name : "UnknownError",
+            },
+            "Failed source draft could not be safely retained",
+          );
+        }
+      }
       const message = sealedProjectRecovery?.message ?? rawMessage;
+      const failedReport: TaskReport = {
+        ...(modelFailureReport ?? {}),
+        ...(modelFailureReport || !sealedFailureReport?.agentLoop
+          ? {}
+          : { agentLoop: sealedFailureReport.agentLoop }),
+        userRequest: userPrompt,
+        filesCreated: [],
+        filesChanged: [],
+        filesRemoved: [],
+        previewUpdated: false,
+        warnings: modelFailureReport?.warnings ?? sealedFailureReport?.warnings ?? [],
+        ...(failureEvidence ? { failureEvidence } : {}),
+        ...(retrySource ? { retrySource } : {}),
+        ...(draft
+          ? {
+              sealedFailedDraft: draft,
+              nextRecommendation:
+                "The draft is saved but has not been applied or published. Use Retry Build in Project history to repair it.",
+            }
+          : {}),
+        integrationsNeeded: [],
+      };
       if (failureEvidence !== undefined) analyticsErrorCategory = failureEvidence.code;
       const { flushBuildTokenTelemetry } = await import("./ai-providers");
       await flushBuildTokenTelemetry(taskId, "failed");
@@ -7495,10 +7645,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           allowedStatuses: ["building", "planning", "needs_review", "needs_fix"],
           taskUpdate: {
             tokenCount: finalTokenCount,
+            report: failedReport,
+            ...(draft ? { stagingSnapshot: sealedFailureFiles } : {}),
             ...(modelRequestFailure === undefined
               ? {}
               : {
-                  report: modelFailureReport,
                   failureReason: modelRequestFailure.message,
                   completionKind: modelRequestFailure.completionKind,
                 }),
@@ -7546,24 +7697,20 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       await db
         .update(agentTasksTable)
         .set({
-          report: {
-            ...(modelFailureReport ?? {}),
+          report: sql`COALESCE(${agentTasksTable.report}, '{}'::jsonb) || ${JSON.stringify({
+            ...failedReport,
             terminalRef: zeroTerminalRef(failureTerminal),
-            userRequest: userPrompt,
-            filesCreated: [],
-            filesChanged: [],
-            filesRemoved: [],
-            previewUpdated: false,
-            warnings: modelFailureReport?.warnings ?? [],
-            ...(failureEvidence === undefined ? {} : { failureEvidence }),
             suggestions,
-            ...(sealedProjectRecovery === undefined
-              ? {}
-              : { recoveryAction: sealedProjectRecovery.action }),
-            integrationsNeeded: [],
-          },
+            ...(sealedProjectRecovery ? { recoveryAction: sealedProjectRecovery.action } : {}),
+          })}::jsonb`,
         })
-        .where(eq(agentTasksTable.id, taskId));
+        .where(
+          and(
+            eq(agentTasksTable.id, taskId),
+            eq(agentTasksTable.projectId, projectId),
+            eq(agentTasksTable.status, "failed"),
+          ),
+        );
 
       // Record build analytics for the failed job (best-effort, non-fatal)
       void db
