@@ -861,7 +861,13 @@ export default function ProjectWorkspacePage() {
   });
   const queryClient = useQueryClient();
 
-  const { data: tasksForFeed = [] } = useListTasks(projectId, {
+  const {
+    data: tasksForFeed = [],
+    isPending: tasksForFeedLoading,
+    isError: tasksForFeedError,
+    isFetching: tasksForFeedRefreshing,
+    refetch: refreshTasksForFeed,
+  } = useListTasks(projectId, {
     query: {
       enabled: !!projectId,
       queryKey: getListTasksQueryKey(projectId),
@@ -5440,6 +5446,12 @@ export default function ProjectWorkspacePage() {
                 key={projectId}
                 projectId={projectId}
                 tasks={tasksForFeed}
+                tasksLoading={tasksForFeedLoading}
+                tasksError={tasksForFeedError}
+                tasksRefreshing={tasksForFeedRefreshing}
+                onRefreshTasks={() => {
+                  void refreshTasksForFeed();
+                }}
                 onRetry={(text, taskId) => {
                   setHistoryRetry({ projectId, taskId, prompt: text });
                   setPrompt(text);

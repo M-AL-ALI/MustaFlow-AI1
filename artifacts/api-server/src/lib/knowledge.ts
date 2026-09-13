@@ -269,6 +269,10 @@ export async function writeKnowledge(
         }
       }
 
+      // Failure history is a recovery record for one execution, not just a
+      // reusable lesson. Never let a similar failure replace its task identity.
+      const failureTaskId = opts.severity === "error" ? opts.relatedTaskId : undefined;
+
       // ── Step 2: Attempt semantic deduplication when embedding is available ──
       if (embedding !== null) {
         // Only consider non-promoted, non-global, non-archived entries of the same
@@ -283,6 +287,12 @@ export async function writeKnowledge(
                   and(
                     eq(knowledgeEntriesTable.projectId, opts.projectId),
                     eq(knowledgeEntriesTable.type, opts.type),
+                    failureTaskId == null
+                      ? undefined
+                      : and(
+                          eq(knowledgeEntriesTable.relatedTaskId, failureTaskId),
+                          eq(knowledgeEntriesTable.severity, "error"),
+                        ),
                     relatedVersionId === null
                       ? isNull(knowledgeEntriesTable.relatedVersionId)
                       : eq(knowledgeEntriesTable.relatedVersionId, relatedVersionId),
@@ -332,6 +342,12 @@ export async function writeKnowledge(
         let bestContent = "";
         let bestReinforcedCount = 0;
         for (const candidate of candidates) {
+          if (
+            failureTaskId != null &&
+            (candidate.relatedTaskId !== failureTaskId || candidate.severity !== "error")
+          ) {
+            continue;
+          }
           const candidateEmbedding = candidate.embedding;
           if (!Array.isArray(candidateEmbedding)) continue;
           const sim = cosineSimilarity(embedding, candidateEmbedding as number[]);

@@ -76,6 +76,39 @@ afterEach(() => {
 });
 
 describe("History retry review", () => {
+  it.each(["missing link", "empty history"])(
+    "shows task-backed recovery independently of %s",
+    async (kind) => {
+      mocks.entries =
+        kind === "empty history" ? [] : [{ ...mocks.entries[0], relatedTaskId: null }];
+      const onRetry = mountHistory([
+        {
+          id: 321,
+          projectId,
+          prompt: fullRequest,
+          status: "failed",
+          appliedAt: null,
+          discardedAt: null,
+          stagingSnapshot: Array.from({ length: 16 }, (_, i) => ({
+            path: "src/file" + i + ".ts",
+            content: "export {};",
+          })),
+        },
+      ]);
+      const review = await screen.findByRole("button", { name: "Review build #321 in composer" });
+      expect(screen.getByText("16 saved files")).toBeTruthy();
+      fireEvent.change(screen.getByPlaceholderText(/Search history/), {
+        target: { value: "not in history" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Publishes" }));
+      expect(onRetry).not.toHaveBeenCalled();
+      fireEvent.click(review);
+      expect(onRetry).toHaveBeenCalledTimes(1);
+      expect(onRetry).toHaveBeenCalledWith(fullRequest, 321);
+      expect(mocks.mutate).not.toHaveBeenCalled();
+    },
+  );
+
   it("only hands the full request and task ID to the composer after an explicit click", async () => {
     const onRetry = mountHistory([
       { id: taskId, projectId, prompt: fullRequest, report: { userRequest: "Older report text" } },

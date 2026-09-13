@@ -11,6 +11,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentTracePanel } from "./agent-trace-panel";
 import {
+  SavedFailedBuilds,
+  savedBuildRequest,
+  type SavedFailedBuildTask,
+} from "./saved-failed-builds";
+import {
   Hammer,
   RefreshCw,
   RotateCcw,
@@ -135,12 +140,7 @@ const FILTER_OPTIONS = [
   { label: "Secrets", value: "secret_change" },
 ];
 
-export interface HistoryRetryTask {
-  id: number;
-  projectId?: number;
-  prompt?: string | null;
-  report?: unknown;
-}
+export type HistoryRetryTask = SavedFailedBuildTask;
 
 function fullRetryRequest(
   tasks: readonly HistoryRetryTask[],
@@ -154,15 +154,7 @@ function fullRetryRequest(
       (candidate.projectId === undefined || candidate.projectId === projectId),
   );
   if (!task) return null;
-  const report = task.report;
-  const reportedRequest =
-    report && typeof report === "object" && "userRequest" in report
-      ? report.userRequest
-      : undefined;
-  for (const request of [task.prompt, reportedRequest]) {
-    if (typeof request === "string" && request.trim()) return request;
-  }
-  return null;
+  return savedBuildRequest(task);
 }
 
 interface EntryCardProps {
@@ -602,6 +594,10 @@ function EntryCard({
 interface HistoryTabProps {
   projectId: number;
   tasks?: readonly HistoryRetryTask[];
+  tasksLoading?: boolean;
+  tasksError?: boolean;
+  tasksRefreshing?: boolean;
+  onRefreshTasks?: () => void;
   onRetry?: (prompt: string, taskId: number) => void;
   focusVersionId?: number | null;
   onViewInChat?: (taskId: number) => void;
@@ -610,6 +606,10 @@ interface HistoryTabProps {
 export function HistoryTab({
   projectId,
   tasks = [],
+  tasksLoading,
+  tasksError,
+  tasksRefreshing,
+  onRefreshTasks,
   onRetry,
   focusVersionId,
   onViewInChat,
@@ -831,6 +831,16 @@ export function HistoryTab({
 
       {/* Timeline */}
       <div ref={historyScrollRef} className="flex-1 overflow-y-auto py-3 px-3 space-y-4">
+        <SavedFailedBuilds
+          key={projectId}
+          projectId={projectId}
+          tasks={tasks}
+          loading={tasksLoading}
+          error={tasksError}
+          refreshing={tasksRefreshing}
+          onRefresh={onRefreshTasks}
+          onReview={onRetry}
+        />
         {isLoading && accumulated.length === 0 && (
           <div className="flex items-center justify-center h-24 text-muted-foreground text-[11px]">
             Loading history…

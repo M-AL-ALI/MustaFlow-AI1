@@ -1670,6 +1670,7 @@ async function autoWriteFailureLesson(
   userPrompt: string,
   errorMessage: string,
   projectId: number,
+  taskId: number,
   userId?: string,
 ): Promise<void> {
   await writeKnowledge({
@@ -1679,6 +1680,7 @@ async function autoWriteFailureLesson(
     type: "build",
     severity: "error",
     projectId,
+    relatedTaskId: taskId,
     userId,
   });
 }
@@ -7754,7 +7756,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       }
 
       // Auto-write a diagnostic lesson to the Knowledge Vault
-      void autoWriteFailureLesson(userPrompt, message, projectId, project.ownerId);
+      void autoWriteFailureLesson(userPrompt, message, projectId, taskId, project.ownerId);
 
       // Cancel remaining queued tasks in the same batch
       void cancelRemainingBatchTasks(taskId).catch((err) =>
