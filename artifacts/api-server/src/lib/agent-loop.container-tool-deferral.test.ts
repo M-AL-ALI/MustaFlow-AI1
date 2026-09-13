@@ -59,6 +59,8 @@ import {
   FileWorkspace,
   applyToolResultToRepeatedErrorState,
   executeTool,
+  TOOLS,
+  toolsForGenerationTarget,
   type ToolCtx,
 } from "./agent-loop.js";
 
@@ -315,5 +317,92 @@ describe("Builder Wave 4.1 container-tool deferral", () => {
     expect(result).toMatchObject({ ok: false, exitCode: 126 });
     expect(result.observation).toContain("Pantry owns dependencies");
     expect(containerMocks.execInContainer).not.toHaveBeenCalled();
+  });
+
+  it("advertises only supported sealed tools without changing ordinary or MCP tools", () => {
+    const mcpTool = {
+      type: "function" as const,
+      function: { name: "mcp__docs__search", description: "Search docs", parameters: {} },
+    };
+    const catalog = [...TOOLS, mcpTool];
+    const before = JSON.stringify(catalog);
+    expect(toolsForGenerationTarget(undefined, catalog)).toBe(catalog);
+    const sealed = toolsForGenerationTarget("cloudflare-sealed-staging-v1", catalog);
+    const names = sealed.map((tool) => (tool.type === "function" ? tool.function.name : ""));
+    for (const name of ["run_workflow", "run_tests", "read_diagnostics", "install_package"]) {
+      expect(names).not.toContain(name);
+    }
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "run_command",
+        "pkg_install",
+        "write_files",
+        "finalize",
+        mcpTool.function.name,
+      ]),
+    );
+    expect(
+      sealed.find(
+        (tool) => tool.type === "function" && tool.function.name === mcpTool.function.name,
+      ),
+    ).toBe(mcpTool);
+    const command = sealed.find(
+      (tool) => tool.type === "function" && tool.function.name === "run_command",
+    );
+    expect(command?.type).toBe("function");
+    if (command?.type !== "function") throw new Error("Missing run_command");
+    expect(command.function.description).toContain("does not prove compilation");
+    expect(JSON.stringify(command.function.parameters)).toContain("Exact __inprocess__ argv");
+    expect(JSON.stringify(command.function.parameters)).not.toContain("npx");
+    const dependency = sealed.find(
+      (tool) => tool.type === "function" && tool.function.name === "pkg_install",
+    );
+    if (dependency?.type !== "function") throw new Error("Missing pkg_install");
+    expect(dependency.function.description).toContain("does not install a package");
+    expect(JSON.stringify(catalog)).toBe(before);
+  });
+
+  it.each([
+    ["run_workflow", { name: "build" }],
+    ["run_tests", {}],
+    ["read_diagnostics", { path: "src/server.ts", tool: "tsc" }],
+    ["install_package", { runtime: "node", name: "express" }],
+  ])("defers stale sealed %s calls even with an attached container", async (name, args) => {
+    for (const containerId of [null, "existing-sealed-runtime"]) {
+      vi.clearAllMocks();
+      containerMocks.isContainerLayerConfigured.mockResolvedValue(true);
+      const ctx = makeToolCtx(name, args);
+      ctx.stack = "node-api";
+      ctx.input.stack = "node-api";
+      ctx.input.zeroGenerationTarget = "cloudflare-sealed-staging-v1";
+      ctx.containerState.id = containerId;
+      const result = await executeTool(ctx);
+      expect(result).toMatchObject({ ok: true, deferred: true });
+      expect(result.exitCode).toBeUndefined();
+      expect(result.observation).toContain("No command ran; this is not a passed check");
+      expect(result.observation).toContain("Pantry/Kitchen build and staging must complete");
+      expect(ctx.commandsRun).toEqual([]);
+      expect(ctx.containerState).toEqual({ id: containerId, installed: false });
+      expect(containerMocks.isContainerLayerConfigured).not.toHaveBeenCalled();
+      expect(containerMocks.provisionContainer).not.toHaveBeenCalled();
+      expect(containerMocks.execInContainer).not.toHaveBeenCalled();
+      expect(promptMocks.createPrompt).not.toHaveBeenCalled();
+      expect(containerMocks.dbInsertValues).not.toHaveBeenCalled();
+      const errors = { lastError: "a real prior failure", consecutiveErrors: 1 };
+      expect(applyToolResultToRepeatedErrorState(errors, result, result.observation)).toEqual(
+        errors,
+      );
+    }
+  });
+
+  it("honors cancellation before deferring a sealed tool", async () => {
+    const ctx = makeToolCtx("run_tests", {});
+    ctx.input.zeroGenerationTarget = "cloudflare-sealed-staging-v1";
+    const controller = new AbortController();
+    controller.abort();
+    ctx.input.signal = controller.signal;
+    expect(await executeTool(ctx)).toEqual({ ok: false, observation: "ERROR: aborted by user" });
+    expect(containerMocks.isContainerLayerConfigured).not.toHaveBeenCalled();
+    expect(containerMocks.provisionContainer).not.toHaveBeenCalled();
   });
 });

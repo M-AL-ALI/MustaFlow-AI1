@@ -1762,6 +1762,62 @@ export const TOOLS: ChatCompletionTool[] = [
 // System prompt
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Sealed generation hands executable builds to Pantry/Kitchen. Keep the model's
+// catalog and stale-call dispatch aligned with that boundary.
+const SEALED_MUTABLE_CONTAINER_TOOLS = new Set([
+  "run_workflow",
+  "run_tests",
+  "read_diagnostics",
+  "install_package",
+]);
+
+export function toolsForGenerationTarget(
+  target: ZeroGenerationTarget | undefined,
+  catalog: ChatCompletionTool[] = TOOLS,
+): ChatCompletionTool[] {
+  if (!isZeroSealedGenerationTarget(target)) return catalog;
+  return catalog
+    .filter(
+      (tool) => tool.type !== "function" || !SEALED_MUTABLE_CONTAINER_TOOLS.has(tool.function.name),
+    )
+    .map((tool) => {
+      if (tool.type !== "function") return tool;
+      if (tool.function.name === "run_command") {
+        return {
+          ...tool,
+          function: {
+            ...tool.function,
+            description:
+              "Run only an exact declared __inprocess__ source-check argv in sealed generation. Shell commands, node/npx, workflow execution, and executable tests are unavailable here. A passing source check does not prove compilation or a running app. Pantry/Kitchen owns the subsequent build and staging; report those checks as unverified until actual results exist.",
+            parameters: {
+              ...tool.function.parameters,
+              properties: {
+                argv: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Exact __inprocess__ argv from this task's declared check list; no executable commands.",
+                },
+                timeout_ms: { type: "integer" },
+              },
+            },
+          },
+        };
+      }
+      if (tool.function.name === "pkg_install") {
+        return {
+          ...tool,
+          function: {
+            ...tool.function,
+            description:
+              "Record a validated npm dependency intent for the subsequent Pantry build. This does not install a package or start a container. Only manager npm is supported for sealed Node generation. Retain the dependency in the project manifest and do not claim installation succeeded before Pantry returns its build result.",
+          },
+        };
+      }
+      return tool;
+    });
+}
+
 function buildSystemPrompt(
   input: AgentLoopInput,
   stack: StackId,
@@ -2422,6 +2478,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   } catch (err) {
     logger.warn({ err }, "agent-loop: MCP tool discovery failed");
   }
+  toolsForLoop = toolsForGenerationTarget(input.zeroGenerationTarget, toolsForLoop);
   // Task #533: when a take_screenshot tool call returns an image, the next
   // LLM turn switches to the provider's VISION_MODEL so the screenshot is
   // actually inspected by a vision-capable model.
@@ -5455,6 +5512,19 @@ export async function executeTool(ctx: ToolCtx): Promise<ToolExecutionResult> {
   const { name, args, workspace, stack, input, commandsRun, step, containerState } = ctx;
   if (input.signal.aborted) {
     return { ok: false, observation: "ERROR: aborted by user" };
+  }
+  if (
+    isZeroSealedGenerationTarget(input.zeroGenerationTarget) &&
+    SEALED_MUTABLE_CONTAINER_TOOLS.has(name)
+  ) {
+    return {
+      ok: true,
+      deferred: true,
+      observation:
+        "DEFERRED: " +
+        name +
+        " requires a mutable development container and is unavailable during sealed generation. No command ran; this is not a passed check. Use only declared __inprocess__ run_command checks for source validation, and pkg_install for npm dependency intents. Pantry/Kitchen build and staging must complete before runtime behavior can be verified.",
+    };
   }
   // Task #542: MCP tool dispatch. Names take the form `mcp__<server>__<tool>`
   // and are looked up in the per-loop catalog so we can proxy the call via
