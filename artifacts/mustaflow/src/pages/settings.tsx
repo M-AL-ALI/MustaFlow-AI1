@@ -627,7 +627,8 @@ function ModeSection() {
         <h2 className="text-base font-semibold">Workspace</h2>
       </div>
       <p className="text-sm text-muted-foreground">
-        NabuFlow uses a single workspace for all projects.
+        Organize your projects in separate workspaces. Use the workspace switcher in the navigation
+        to choose a workspace or create a new one. Each workspace shows its own projects.
       </p>
       <div className="flex items-center gap-3 px-4 py-4 rounded-lg border border-primary/40 bg-primary/5">
         <Sparkles className="h-4 w-4 text-primary shrink-0" />

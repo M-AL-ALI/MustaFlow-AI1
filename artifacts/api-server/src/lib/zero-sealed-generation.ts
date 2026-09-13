@@ -22,6 +22,7 @@ import {
   type ZeroSealedGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
+import { inspectSealedEnvironmentSyntax } from "./zero-sealed-environment";
 import {
   VENDORED_FLY_POSTGRES_TYPES_VERSION,
   VENDORED_FLY_POSTGRES_VERSION,
@@ -259,8 +260,12 @@ function hasImportedBinding(
 }
 
 /** Inspect syntax and resolved local bindings, never comments or literal prose. */
-function inspectSealedRuntimeImports(files: Iterable<BuilderFile>, nodeNext: boolean): boolean {
+function inspectSealedRuntimeImports(
+  files: Iterable<BuilderFile>,
+  nodeNext: boolean,
+): { usesRuntimeCapability: boolean; runtimePortRead: boolean } {
   let usesRuntimeCapability = false;
+  let runtimePortRead = false;
   let sdkFailure: string | undefined;
   let moduleFailure: string | undefined;
   for (const file of files) {
@@ -279,6 +284,9 @@ function inspectSealedRuntimeImports(files: Iterable<BuilderFile>, nodeNext: boo
       throw new ZeroSealedSourceContractError(["sdk_import"], file.path);
     }
     const applicationFile = !file.path.startsWith("nabuflow/runtime/");
+    if (file.path === "src/index.ts") {
+      runtimePortRead = inspectSealedEnvironmentSyntax(parsed).runtimePortRead;
+    }
     const factoryBindings = new Set<object>();
     const namespaceBindings = new Set<object>();
     const references = new Map<object, SourceReference>();
@@ -390,7 +398,7 @@ function inspectSealedRuntimeImports(files: Iterable<BuilderFile>, nodeNext: boo
     throw new ZeroSealedSourceContractError(["typescript_module_specifier"], moduleFailure);
   }
   if (sdkFailure !== undefined) throw new ZeroSealedSourceContractError(["sdk_import"], sdkFailure);
-  return usesRuntimeCapability;
+  return { usesRuntimeCapability, runtimePortRead };
 }
 
 function dependencyPlan(
@@ -529,7 +537,7 @@ export function prepareZeroSealedNodeSource(input: {
       }
     }
   }
-  const usesRuntimeCapability = inspectSealedRuntimeImports(
+  const { usesRuntimeCapability, runtimePortRead } = inspectSealedRuntimeImports(
     byPath.values(),
     typeScriptConfig.compilerOptions?.module === "NodeNext" ||
       typeScriptConfig.compilerOptions?.moduleResolution === "NodeNext",
@@ -543,7 +551,7 @@ export function prepareZeroSealedNodeSource(input: {
   });
   const entryReasons: ZeroSealedSourceContractReason[] = [];
   if (!SEALED_NETWORK_BIND_PATTERN.test(entry.content)) entryReasons.push("network_bind");
-  if (!entry.content.includes("process.env.PORT")) entryReasons.push("runtime_port");
+  if (!runtimePortRead) entryReasons.push("runtime_port");
   if (!entry.content.includes(ZERO_SEALED_HEALTH_PATH)) entryReasons.push("health_route");
   if (entryReasons.length > 0) {
     throw new ZeroSealedSourceContractError(entryReasons, "src/index.ts");

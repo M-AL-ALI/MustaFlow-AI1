@@ -16,6 +16,7 @@ import {
   type ZeroGeneratedDependencyPlan,
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
+import { hasUnsupportedSealedEnvironmentAccess } from "./zero-sealed-environment";
 import {
   VENDORED_FLY_POSTGRES_TYPES_VERSION,
   VENDORED_FLY_POSTGRES_VERSION,
@@ -408,6 +409,9 @@ export async function evaluateZeroGeneratedEligibility(
     ENV_READ_PATTERN.lastIndex = 0;
     for (const match of file.content.matchAll(ENV_READ_PATTERN)) {
       if (match[1] !== "PORT") addReason(reasons, "credential_assumption", file.path);
+    }
+    if (hasUnsupportedSealedEnvironmentAccess(file)) {
+      addReason(reasons, "credential_assumption", file.path);
     }
     if (containsArbitraryRuntimeFetch(file)) {
       addReason(reasons, "arbitrary_runtime_fetch", file.path);

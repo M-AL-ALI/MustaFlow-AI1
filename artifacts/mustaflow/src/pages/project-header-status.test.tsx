@@ -12,8 +12,10 @@ describe("project header status truth", () => {
     expect(source).toContain("receipt: editorRunReceipt,");
     expect(source).toContain("{editorWorkStatus.label}");
     expect(source).toContain("editorWorkStatus.previousBuildFailed");
-    expect(source).toMatch(/containerHealthStatus === "awake"\s*\?\s*"Runtime running"/);
-    expect(source).toMatch(/containerHealthStatus === "hibernated"\s*\?\s*"Runtime hibernated"/);
+    expect(source).toContain("const data = await getContainerStatus(projectId);");
+    expect(source).toContain("containerStatus={containerStatus}");
+    expect(source).toContain("previewAccess={previewAccess}");
+    expect(source).not.toContain("containerHealthStatus");
     expect(source).not.toMatch(/>\s*\{project\.status\}\s*<\/span>/);
   });
 
