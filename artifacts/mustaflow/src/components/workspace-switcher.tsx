@@ -40,7 +40,9 @@ export function WorkspaceSwitcher({ onNavigate }: { onNavigate?: () => void } = 
         }}
       />
       <div className="px-3 pb-2">
-        <DropdownMenu>
+        {/* The navigation Sheet owns modal focus and pointer isolation on phones.
+            A second modal lock can outlive it when selection closes both layers. */}
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"

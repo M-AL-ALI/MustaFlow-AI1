@@ -4,6 +4,7 @@ import projectsRouter from "./projects";
 import projectPurgeRouter from "./project-purge";
 import messagesRouter from "./messages";
 import tasksRouter from "./tasks";
+import taskCancellationSignalRouter from "./task-cancellation-signal";
 import taskSteeringRouter from "./task-steering";
 import versionsRouter from "./versions";
 import checkpointsRouter from "./checkpoints";
@@ -337,6 +338,9 @@ router.post("/billing/checkout", exportLimiter);
 // than acquiring a second advisory lock. Trash, restore, and governed retirement
 // retry are excluded because they are lifecycle transitions with their own
 // tombstone-aware authority checks and lifecycle locks.
+// Stop must reach the owner-authorized local controller before waiting for a
+// build's lifecycle lock. Terminal persistence below still uses the same fence.
+router.use(taskCancellationSignalRouter);
 router.use(requireActiveProjectMutationLifecycleSession);
 
 // ── Builder handoff exchange (auth-gated) ─────────────────────────────────────

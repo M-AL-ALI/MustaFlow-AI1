@@ -17,6 +17,9 @@ const requireDb = createRequire(new URL("lib/db/package.json", root));
 const requireRoot = createRequire(new URL("package.json", root));
 const requireApi = createRequire(new URL("artifacts/api-server/package.json", root));
 const tenantContracts = requireApi("@workspace/tenant-runtime-contracts");
+const oraContracts = requireApi("@workspace/ora-contracts");
+const express = requireApi("express");
+const request = requireApi("supertest");
 const ts = requireRoot("typescript");
 const { Pool, Client } = requireDb("pg");
 const orm = requireDb("drizzle-orm");
@@ -186,6 +189,8 @@ test(
         runMode: text("run_mode"),
         wallClockCapMs: integer("wall_clock_cap_ms"),
         creditsReserved: integer("credits_reserved"),
+        intentReceiptId: integer("intent_receipt_id"),
+        terminal: jsonb("terminal"),
         taskAgentMode: text("task_agent_mode"),
         deepReasoning: boolean("deep_reasoning"),
         hasBrainstormContext: boolean("has_brainstorm_context"),
@@ -582,6 +587,157 @@ test(
           assert.ok(
             route.includes("withResponseProjectLifecycleTransaction(res, project.id, createTask)"),
           );
+        },
+      );
+      await t.test(
+        "owner Stop reaches a lock-owning worker and replays its terminal without another refund",
+        async () => {
+          await reset();
+          const [task] = await db
+            .insert(agentTasksTable)
+            .values({
+              projectId,
+              status: "building",
+              kind: "main",
+              intentReceiptId: 67,
+            })
+            .returning();
+          const holder = await admit();
+          assert.equal(await canLock(), false);
+          const controller = new AbortController();
+          const terminal = {
+            schema: "zero-terminal-v1",
+            taskId: task.id,
+            intent: "mutate",
+            intentReceiptId: 67,
+            completedAt: new Date().toISOString(),
+            outcome: "interrupted",
+            runStatus: "interrupted",
+            cause: "user_stop",
+            evidence: { lastPhase: "agent_loop", changedPaths: [] },
+          };
+          let signalCount = 0;
+          let workerStopped = Promise.resolve();
+          controller.signal.addEventListener(
+            "abort",
+            () => {
+              workerStopped = (async () => {
+                await db
+                  .update(agentTasksTable)
+                  .set({ status: "canceled", terminal })
+                  .where(orm.eq(agentTasksTable.id, task.id));
+                await finish(holder);
+              })();
+            },
+            { once: true },
+          );
+          const cancelActiveJob = (id) => {
+            assert.equal(id, task.id);
+            signalCount += 1;
+            controller.abort();
+            return true;
+          };
+          const requireProjectOwnership = async (req, res, next) => {
+            const [project] = await db
+              .select()
+              .from(projectsTable)
+              .where(
+                orm.and(
+                  orm.eq(projectsTable.id, Number(req.params.id)),
+                  orm.isNull(projectsTable.deletedAt),
+                ),
+              );
+            if (project?.ownerId !== req.userId) {
+              res.status(404).json({ error: "Project not found" });
+              return;
+            }
+            next();
+          };
+          const receipt = sourceModule("artifacts/api-server/src/lib/confirmed-user-stop.ts", {
+            "@workspace/ora-contracts": oraContracts,
+          });
+          const apiZod = requireApi("@workspace/api-zod");
+          const signalRouter = sourceModule(
+            "artifacts/api-server/src/routes/task-cancellation-signal.ts",
+            {
+              express,
+              "drizzle-orm": orm,
+              "@workspace/db": dbModule,
+              "@workspace/api-zod": apiZod,
+              "../lib/auth": { requireProjectOwnership },
+              "../lib/jobs": { cancelActiveJob },
+              "../lib/confirmed-user-stop": receipt,
+            },
+          ).default;
+          const taskSource = source("artifacts/api-server/src/routes/tasks.ts");
+          const cancelStart = taskSource.indexOf(
+            'router.post(\n  "/projects/:id/tasks/:taskId/cancel",',
+          );
+          const cancelEnd = taskSource.indexOf("\nrouter.post(", cancelStart + 1);
+          assert.ok(cancelStart >= 0 && cancelEnd > cancelStart);
+          const cancellationRouter = express.Router();
+          compile(
+            taskSource.slice(cancelStart, cancelEnd),
+            "tasks.cancel-handler.ts",
+            {},
+            {
+              router: cancellationRouter,
+              requireProjectOwnership,
+              CancelTaskParams: apiZod.CancelTaskParams,
+              db,
+              ...tables,
+              ...orm,
+              ...receipt,
+              cancelActiveJob,
+              persistInterruptedZeroTerminal() {
+                assert.fail("worker already owns the canonical terminal");
+              },
+              refundCredits() {
+                assert.fail("replay must not repeat a refund");
+              },
+            },
+          );
+          const indexSource = source("artifacts/api-server/src/routes/index.ts");
+          const signalMount = indexSource.indexOf("router.use(taskCancellationSignalRouter)");
+          const fenceMount = indexSource.indexOf(
+            "router.use(requireActiveProjectMutationLifecycleSession)",
+          );
+          assert.ok(
+            signalMount >= 0 && fenceMount > signalMount,
+            "production mounts the signal before the lifecycle fence",
+          );
+          const server = express();
+          server.use((req, _res, next) => {
+            req.userId = owner;
+            next();
+          });
+          server.use(signalRouter);
+          server.use((_req, res, next) =>
+            lifecycle.requireActiveProjectLifecycleFor(projectId, res, next),
+          );
+          server.use(cancellationRouter);
+          const cancellationPath = `/projects/${projectId}/tasks/${task.id}/cancel`;
+          try {
+            const started = Date.now();
+            const first = await request(server).post(cancellationPath).timeout({ deadline: 10000 });
+            assert.equal(first.status, 200);
+            assert.ok(
+              Date.now() - started < 8000,
+              "Stop must not wait for the 15-second lifecycle timeout",
+            );
+            assert.equal(first.body.status, "canceled");
+            assert.deepEqual(first.body.terminal, terminal);
+            await workerStopped;
+            const replay = await request(server)
+              .post(cancellationPath)
+              .timeout({ deadline: 10000 });
+            assert.equal(replay.status, 200);
+            assert.deepEqual(replay.body, first.body);
+            assert.equal(signalCount, 1);
+          } finally {
+            await workerStopped;
+            await finish(holder);
+          }
         },
       );
       t.diagnostic(

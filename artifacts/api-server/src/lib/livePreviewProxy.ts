@@ -6,12 +6,11 @@
  * WebSocket upgrades for the direct-container path, or a signed browser
  * handoff for private Cloudflare runtimes).
  *
- * - Cold start: if the container is hibernated / stopped, the proxy
- *   auto-wakes it (best-effort, via the same pipeline `POST /container/start`
- *   uses) and returns a small "Starting your app…" HTML page that
- *   self-refreshes until the dev server responds.
- * - Errors: if the container is in `error` or has no `containerUrl`, an
- *   error HTML page is rendered with a link to the workspace logs tab.
+ * - Private Cloudflare previews only hand off an already running runtime.
+ *   Unavailable previews render a read-only response; the explicit guarded
+ *   `POST /container/start` owns accepted sealed-release resume.
+ * - Legacy providers retain their best-effort cold-start wake behavior.
+ * - Unavailable and error documents retain the enforced preview sandbox.
  *
  * Static-legacy projects (`builder_mode = 'static-legacy'`) continue to be
  * served from `project_files` rows by the original handler in
@@ -423,6 +422,10 @@ const proxyMiddleware: RequestHandler = createProxyMiddleware({
   },
 });
 
+function usesCloudflarePreview(provider: { providerId: string }): boolean {
+  return provider.providerId === "cloudflare";
+}
+
 /**
  * Express handler that proxies a preview request to the project's container.
  * Caller must already have authorised access to the project.
@@ -446,6 +449,23 @@ export async function handleLivePreviewHttp(
       .setHeader("Referrer-Policy", "no-referrer")
       .setHeader("Location", cloudflareLaunchUrl)
       .end();
+    return;
+  }
+
+  // Cloudflare has no legacy file-provision capability, and a null direct URL
+  // is normal for its private runtimes. A GET must not wake, provision, or
+  // substitute draft files for an accepted sealed release. The guarded start
+  // POST alone distinguishes a resumable release from a required fresh build.
+  if (usesCloudflarePreview(tenantRuntimeProvider)) {
+    sendHtml(
+      res,
+      project.containerStatus === "running" || project.containerStatus === "error" ? 502 : 503,
+      ERROR_HTML(
+        project.id,
+        "The preview is not available. Opening this page does not start or rebuild the app. Use Wake preview in the workspace to resume an accepted build. If a fresh build is required, review Retry Build in Project history.",
+      ),
+      project.containerStatus === "error" ? "container-error" : "proxy-unavailable",
+    );
     return;
   }
 

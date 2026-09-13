@@ -138,6 +138,7 @@ import { AgentPromptCardsList, type AgentPromptCard } from "./components/agent-p
 import { NotificationsBell } from "@/components/notifications-bell";
 import { AgenticOnboardingTooltip } from "@/components/agentic-onboarding-tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { requestConfirmedTaskStop } from "./components/confirmed-task-stop";
 import { ProvisioningProgress } from "./components/provisioning-progress";
 import { ConnectionQualityIndicator } from "./components/connection-quality-indicator";
 import { cn } from "@/lib/utils";
@@ -1062,8 +1063,18 @@ export default function ProjectWorkspacePage() {
   >(null);
   const [activeTaskStreamHasReceipt, setActiveTaskStreamHasReceipt] = useState(false);
   const [editorRunReceipt, setEditorRunReceipt] = useState<EditorRunReceipt | null>(null);
+  const editorRunGenerationRef = useRef(0);
   const editorRunScopeRef = useRef({ projectId, taskId: activeTaskId });
+  if (editorRunScopeRef.current.projectId !== projectId) {
+    editorRunGenerationRef.current += 1;
+  }
   editorRunScopeRef.current = { projectId, taskId: activeTaskId };
+  useEffect(
+    () => () => {
+      editorRunGenerationRef.current += 1;
+    },
+    [],
+  );
   const editorRequestProjectIdRef = useRef<number | null>(null);
   const seenTaskEventIdsRef = useRef<Set<number>>(new Set());
   const liveRunStepIdsRef = useRef<RunStepIdSet>(createRunStepIdSet());
@@ -2861,6 +2872,7 @@ export default function ProjectWorkspacePage() {
     pendingIsPlanRef.current = true;
     setPendingIsPlan(true);
     setCalmPhase("planning");
+    editorRunGenerationRef.current += 1;
     sendMessage.mutate(
       {
         id: projectId,
@@ -3043,6 +3055,9 @@ export default function ProjectWorkspacePage() {
       // request). The same key is reused for stream retries and regular fallbacks
       // within this single logical send — a new send always gets a new key.
       const idempotencyKey = crypto.randomUUID();
+      // A new logical send owns the display even before its task id is known.
+      // Stream retries and regular fallbacks retain this generation.
+      editorRunGenerationRef.current += 1;
 
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectiveDeepReasoning = effectiveMode === "lite" ? false : deepReasoning;
@@ -3489,19 +3504,48 @@ export default function ProjectWorkspacePage() {
     ],
   );
 
-  const cancelTask = useCancelTask({
-    mutation: {
-      onSuccess: (_data, variables) => {
+  const cancelTask = useCancelTask();
+  const handleStopStream = useCallback(() => {
+    if (cancelTask.isPending) return;
+    const taskToCancel = activeTaskId ?? pendingFeedTaskIdRef.current;
+    const closeStoppedStream = () => {
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
+      taskEventSourceRef.current?.close();
+      taskEventSourceRef.current = null;
+      setLiveCodeBuffer("");
+      setIsStreaming(false);
+      setStreamingText("");
+      setStreamReconnectAttempt(0);
+      setStreamError(false);
+      setStreamErrorStatus(null);
+      setPendingIsConverse(false);
+      pendingIsConverseRef.current = false;
+    };
+    if (taskToCancel === null) {
+      closeStoppedStream();
+      return;
+    }
+    void requestConfirmedTaskStop({
+      projectId,
+      taskId: taskToCancel,
+      runGeneration: editorRunGenerationRef.current,
+      cancel: (variables) => cancelTask.mutateAsync(variables),
+      currentScope: () => ({
+        projectId: editorRunScopeRef.current.projectId,
+        taskId: editorRunScopeRef.current.taskId ?? pendingFeedTaskIdRef.current,
+        runGeneration: editorRunGenerationRef.current,
+      }),
+      onConfirmed: () => {
+        closeStoppedStream();
         setEditorRunReceipt((current) =>
           reconcileEditorRunReceipt(
             current,
-            { projectId: variables.id, taskId: variables.taskId, terminal: "cancelled" },
+            { projectId, taskId: taskToCancel, terminal: "cancelled" },
             editorRunScopeRef.current,
           ),
         );
-        // Stop closes the SSE connection before the mutation returns. Mark the
-        // run terminal locally so the workspace never waits on a frame it can
-        // no longer receive, then reconcile both persisted surfaces.
+        // Only a server-confirmed cancellation may close the feed and mark the run terminal.
         setLiveRunTerminalEvent("cancelled");
         setPendingBuildStartedAt(null);
         pendingIsPlanRef.current = false;
@@ -3512,34 +3556,18 @@ export default function ProjectWorkspacePage() {
         void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
         void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
       },
-    },
-  });
-  const handleStopStream = useCallback(() => {
-    if (streamAbortRef.current) {
-      streamAbortRef.current.abort();
-      streamAbortRef.current = null;
-    }
-    // Close the task SSE stream immediately so the client stops receiving events.
-    if (taskEventSourceRef.current) {
-      taskEventSourceRef.current.close();
-      taskEventSourceRef.current = null;
-    }
-    setLiveCodeBuffer("");
-    // Also cancel the server-side task so the agent loop unwinds cleanly.
-    // During sendMessage.isPending, activeTaskId is null but pendingFeedTaskIdRef
-    // may already hold the in-flight task — cancel whichever is available.
-    const taskToCancel = activeTaskId ?? pendingFeedTaskIdRef.current;
-    if (taskToCancel != null) {
-      cancelTask.mutate({ id: projectId, taskId: taskToCancel });
-    }
-    setIsStreaming(false);
-    setStreamingText("");
-    setStreamReconnectAttempt(0);
-    setStreamError(false);
-    setStreamErrorStatus(null);
-    setPendingIsConverse(false);
-    pendingIsConverseRef.current = false;
-  }, [activeTaskId, projectId, cancelTask]);
+      onUnconfirmed: () => {
+        toast({
+          title: "Stop was not confirmed",
+          description:
+            "The build may still be running. Live updates remain open; check its status and try Stop again.",
+          variant: "destructive",
+        });
+        void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+        void queryClient.invalidateQueries({ queryKey: getListMessagesQueryKey(projectId) });
+      },
+    });
+  }, [activeTaskId, projectId, cancelTask, queryClient, toast]);
 
   const handleEditAndResend = useCallback((content: string) => {
     setShowChatHistory(false);

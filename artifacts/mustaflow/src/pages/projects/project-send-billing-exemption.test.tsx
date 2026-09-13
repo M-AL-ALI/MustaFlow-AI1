@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectWorkspacePage from "./[id]";
+import * as confirmedTaskStop from "./components/confirmed-task-stop";
 
 const testState = vi.hoisted(() => ({
   billing: {
@@ -24,6 +25,7 @@ const testState = vi.hoisted(() => ({
     isError: false,
   },
   sendMessageMutate: vi.fn(),
+  sendMessagePending: false,
   cancelTaskMutate: vi.fn(),
   clearComposer: vi.fn(),
   tasks: [] as Array<Record<string, unknown>>,
@@ -91,6 +93,10 @@ vi.mock("@workspace/api-client-react", () => ({
       ) => void;
     };
   }) => ({
+    mutateAsync: async (variables: { id: number; taskId: number }) => {
+      await testState.cancelTaskMutate(variables);
+      return { id: variables.taskId, status: "canceled" };
+    },
     mutate: (variables: { id: number; taskId: number }) => {
       testState.cancelTaskMutate(variables);
       options?.mutation?.onSuccess?.(
@@ -128,7 +134,10 @@ vi.mock("@workspace/api-client-react", () => ({
   useListTaskEvents: () => ({ data: [] }),
   useListTasks: () => ({ data: testState.tasks }),
   useRollbackVersion: () => ({ mutate: vi.fn(), isPending: false }),
-  useSendMessage: () => ({ mutate: testState.sendMessageMutate, isPending: false }),
+  useSendMessage: () => ({
+    mutate: testState.sendMessageMutate,
+    isPending: testState.sendMessagePending,
+  }),
   useUpdateMyPreferences: () => ({ mutate: vi.fn() }),
   useUpdateProject: () => ({ mutate: vi.fn(), mutateAsync: vi.fn() }),
 }));
@@ -295,6 +304,7 @@ function installCapturedTaskEventSource() {
 }
 
 afterEach(() => {
+  testState.sendMessagePending = false;
   testState.tasks = [];
   testState.messages = [
     {
@@ -479,6 +489,7 @@ describe("project send — no confirmation dialog", () => {
 describe("project Stop with captured task 189 planning traffic", () => {
   beforeEach(() => {
     testState.cancelTaskMutate.mockReset();
+    testState.sendMessageMutate.mockReset();
     testState.tasks = [
       {
         id: 189,
@@ -521,6 +532,125 @@ describe("project Stop with captured task 189 planning traffic", () => {
     });
     installCapturedTaskEventSource();
   });
+
+  it("keeps the captured live feed open until cancellation is acknowledged", async () => {
+    let acknowledge!: () => void;
+    testState.cancelTaskMutate.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const taskStream = await waitFor(() => {
+      const stream = testState.eventSources.find((source) =>
+        source.url.includes("/tasks/189/events/stream"),
+      );
+      expect(stream).toBeDefined();
+      return stream!;
+    });
+    taskStream.close.mockClear();
+    await user.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(taskStream.close).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    await act(async () => {
+      acknowledge();
+    });
+    await waitFor(() => expect(taskStream.close).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument(),
+    );
+  });
+
+  it.each([404, 503])(
+    "keeps Stop and live updates available after an unconfirmed %s response",
+    async (status) => {
+      testState.cancelTaskMutate.mockRejectedValueOnce({ status });
+      const user = userEvent.setup();
+      renderPage();
+      const taskStream = await waitFor(() => {
+        const stream = testState.eventSources.find((source) =>
+          source.url.includes("/tasks/189/events/stream"),
+        );
+        expect(stream).toBeDefined();
+        return stream!;
+      });
+      taskStream.close.mockClear();
+      await user.click(await screen.findByRole("button", { name: "Stop" }));
+      await waitFor(() =>
+        expect(testState.cancelTaskMutate).toHaveBeenCalledWith({ id: 47, taskId: 189 }),
+      );
+      expect(taskStream.close).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    },
+  );
+
+  it.each(["confirmed", "rejected"] as const)(
+    "does not apply a delayed %s Stop callback to the next same-project request",
+    async (outcome) => {
+      const realRequest = confirmedTaskStop.requestConfirmedTaskStop;
+      type StopInput = Parameters<typeof realRequest>[0];
+      let observed: StopInput | undefined;
+      const confirmed = vi.fn();
+      const unconfirmed = vi.fn();
+      const requestSpy = vi
+        .spyOn(confirmedTaskStop, "requestConfirmedTaskStop")
+        .mockImplementation((input) => {
+          observed = input;
+          return realRequest({
+            ...input,
+            onConfirmed: () => {
+              confirmed();
+              input.onConfirmed();
+            },
+            onUnconfirmed: () => {
+              unconfirmed();
+              input.onUnconfirmed();
+            },
+          });
+        });
+      try {
+        let settle!: () => void;
+        testState.cancelTaskMutate.mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve, reject) => {
+              settle = () =>
+                outcome === "confirmed" ? resolve() : reject(new Error("Late Stop failure"));
+            }),
+        );
+        const user = userEvent.setup();
+        const page = renderPage();
+        await user.click(await screen.findByRole("button", { name: "Stop" }));
+        expect(observed).toBeDefined();
+
+        // Polling can observe worker completion before the Stop HTTP response arrives.
+        testState.tasks = testState.tasks.map((task) => ({ ...task, status: "canceled" }));
+        page.rerender(
+          <QueryClientProvider client={testState.queryClient!}>
+            <ProjectWorkspacePage />
+          </QueryClientProvider>,
+        );
+        await waitFor(() => expect(screen.getByTestId("real-send-path")).toBeEnabled());
+        testState.sendMessageMutate.mockImplementationOnce(() => {
+          testState.sendMessagePending = true;
+        });
+        await user.click(screen.getByTestId("real-send-path"));
+        await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
+        expect(observed!.currentScope()).toMatchObject({ projectId: 47, taskId: null });
+        expect(observed!.currentScope().runGeneration).not.toBe(observed!.runGeneration);
+
+        await act(async () => {
+          settle();
+        });
+        expect(confirmed).not.toHaveBeenCalled();
+        expect(unconfirmed).not.toHaveBeenCalled();
+        expect(screen.getByTestId("real-send-path")).toBeDisabled();
+      } finally {
+        requestSpy.mockRestore();
+      }
+    },
+  );
 
   it("terminalizes locally after cancel and makes the captured user message editable again", async () => {
     const user = userEvent.setup();

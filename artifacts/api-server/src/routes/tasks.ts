@@ -33,6 +33,7 @@ import { taskCreditSettlementKey } from "../lib/billing-settlement-outbox";
 import { projectSummaryProvenance } from "../lib/project-summary-provenance";
 import { governIntentAdmission } from "../lib/zero-intent-admission";
 import { persistInterruptedZeroTerminal } from "../lib/zero-terminal-persistence";
+import { hasConfirmedUserStop } from "../lib/confirmed-user-stop";
 
 const router: IRouter = Router();
 
@@ -238,6 +239,12 @@ router.post(
       res.status(404).json({ error: "Task not found" });
       return;
     }
+    if (hasConfirmedUserStop(pre, { projectId: params.data.id, taskId: params.data.taskId })) {
+      // The worker may have finished stopping while this request waited for its
+      // lifecycle lock. Replay its receipt without another abort or refund.
+      res.json(pre);
+      return;
+    }
     if (!["queued", "building", "planning"].includes(pre.status)) {
       res
         .status(409)
@@ -264,7 +271,12 @@ router.post(
       .from(agentTasksTable)
       .where(eq(agentTasksTable.id, pre.id))
       .limit(1);
-    if (!persisted && task?.terminal?.outcome !== "interrupted") {
+    if (!persisted) {
+      if (hasConfirmedUserStop(task, { projectId: params.data.id, taskId: params.data.taskId })) {
+        // Another writer owns this terminal and its settlement. Do not refund twice.
+        res.json(task);
+        return;
+      }
       res.status(409).json({
         error: `Task is already in state "${task?.status ?? "unknown"}" and cannot be canceled`,
       });

@@ -4,6 +4,7 @@ import {
   ZERO_SEALED_PRODUCTION_GENERATION_GATE_VALUE,
 } from "@workspace/tenant-runtime-contracts";
 import { checksForLiveServerCapability, type CheckSpec } from "./check-profiles";
+import { ZERO_SEALED_NODE_PROMPT_EXTENSION } from "./zero-sealed-generation";
 import {
   checkZeroSealedFinalizeContract,
   describeZeroSealedSourceRepairs,
@@ -167,6 +168,72 @@ app.listen(Number(process.env.PORT ?? "8080"));`,
       code: "zero_sealed_source_contract_error",
       reasonCodes: ["network_bind"],
     });
+  });
+});
+
+describe("sealed capability repair feedback", () => {
+  it.each(["process.env.NODE_ENV", "import.meta.env.MODE"])(
+    "identifies and explains %s without weakening the gate or exposing source values",
+    async (environmentRead) => {
+      const files = [
+        packageFile(),
+        tsconfigFile,
+        {
+          path: "src/index.ts",
+          mimeType: "application/typescript",
+          content: `import express from "express";
+const app = express();
+const mode = ${environmentRead} ?? "source-value-not-for-feedback"; void mode;
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
+        },
+      ];
+      const before = JSON.stringify(files);
+      const result = await checkZeroSealedFinalizeContract({ files });
+      expect(result).toMatchObject({
+        passed: false,
+        code: "zero_capability_gap",
+        reasonCodes: ["credential_assumption"],
+      });
+      expect(result.message).toContain("credential_assumption (src/index.ts)");
+      expect(result.message).toContain("other than process.env.PORT");
+      expect(result.message).toContain("NODE_ENV");
+      expect(result.message).toContain("import.meta.env.MODE");
+      expect(result.message).toContain("not bracket access or aliases");
+      expect(result.message).toContain("do not replace persistence with mock data");
+      expect(result.message).not.toContain("source-value-not-for-feedback");
+      expect(JSON.stringify(files)).toBe(before);
+
+      const repaired = files.map((file) => ({
+        ...file,
+        content: file.content.replace(environmentRead, '"production"'),
+      }));
+      expect(await checkZeroSealedFinalizeContract({ files: repaired })).toMatchObject({
+        passed: true,
+        code: "zero_sealed_source_ready",
+      });
+    },
+  );
+
+  it("keeps environment repairs ahead of a truncated capability diagnostic", () => {
+    const observation = formatZeroSealedFinalizeFailure(
+      {
+        passed: false,
+        code: "zero_capability_gap",
+        reasonCodes: ["credential_assumption"],
+        message: "diagnostic ".repeat(2000),
+      },
+      ["- typecheck: " + "x".repeat(20000)],
+    ).slice(0, 4000);
+    expect(observation).toContain("other than process.env.PORT");
+    expect(observation).toContain("NODE_ENV");
+    expect(observation).toContain("Fix the failures and call finalize again.");
+  });
+
+  it("tells generation the same environment rule before code is written", () => {
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("may read only process.env.PORT");
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("including NODE_ENV, import.meta.env.MODE");
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain("bracket access or aliases");
   });
 });
 

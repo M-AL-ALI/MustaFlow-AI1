@@ -77,6 +77,16 @@ export function describeZeroSealedSourceRepairs(reasonCodes: readonly string[]):
     .join("; ");
 }
 
+function describeZeroCapabilityRepairs(reasonCodes: readonly string[]): string {
+  return reasonCodes
+    .map((reason) =>
+      reason === "credential_assumption"
+        ? "remove application environment reads other than process.env.PORT, including NODE_ENV and import.meta.env.MODE; use explicit non-secret defaults, not bracket access or aliases. Keep requested database and payment behavior through the NabuFlow runtime SDK; do not replace persistence with mock data or embed credentials"
+        : `resolve ${reason} using supported runtime capabilities; preserve the user's requirements and report an unavailable capability instead of silently dropping it`,
+    )
+    .join("; ");
+}
+
 /** Keep actionable guidance ahead of any diagnostic text the observation cap can remove. */
 export function formatZeroSealedFinalizeFailure(
   check: ZeroSealedFinalizeCheckResult,
@@ -85,7 +95,9 @@ export function formatZeroSealedFinalizeFailure(
   const repairs =
     check.code === "zero_sealed_source_contract_error"
       ? describeZeroSealedSourceRepairs(check.reasonCodes)
-      : check.message;
+      : check.code === "zero_capability_gap"
+        ? describeZeroCapabilityRepairs(check.reasonCodes)
+        : check.message;
   return [
     "BLOCKED: cannot finalize.",
     `Required repairs: ${repairs}`,
@@ -135,11 +147,18 @@ export async function checkZeroSealedFinalizeContract(input: {
     }
     if (error instanceof ZeroCapabilityGapError) {
       const reasonCodes = [...new Set(error.result.reasons.map((reason) => reason.code))].sort();
+      const affectedFiles = [
+        ...new Set(
+          error.result.reasons.map(
+            (reason) => `${reason.code}${reason.path ? ` (${reason.path})` : ""}`,
+          ),
+        ),
+      ].sort();
       return {
         passed: false,
         code: error.code,
         reasonCodes,
-        message: `${error.code}: ${reasonCodes.join(", ")}`,
+        message: `${error.code}: ${reasonCodes.join(", ")}. Required repairs: ${describeZeroCapabilityRepairs(reasonCodes)}. Affected files: ${affectedFiles.join("; ")}`,
       };
     }
     const errorClass = error instanceof Error ? error.name : "UnknownError";
