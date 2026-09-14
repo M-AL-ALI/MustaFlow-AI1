@@ -3,7 +3,10 @@ import { Script } from "node:vm";
 import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 import type { TaskReport } from "@workspace/db";
-import { CommittedBuildFileReport } from "./committed-build-file-report";
+import {
+  CommittedBuildFileReport,
+  describeCommittedFileChanges,
+} from "./committed-build-file-report";
 
 // Exercise the actual report projection without starting the queue/worker module.
 const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
@@ -92,18 +95,17 @@ describe("sealed failed-draft report projection", () => {
   });
 
   it("retains acknowledged file changes after a later staging failure without claiming success", () => {
-    const committed = new CommittedBuildFileReport([
+    const committed = new CommittedBuildFileReport();
+    const before = [
       { path: "server.ts", content: "before", mimeType: "text/typescript" },
       { path: "obsolete.ts", content: "before", mimeType: "text/typescript" },
-    ]);
-    committed.record({
-      files: [
+    ];
+    committed.record(
+      describeCommittedFileChanges(before, [
         { path: "server.ts", content: "after", mimeType: "text/typescript" },
         { path: "notes.ts", content: "PRIVATE_SOURCE", mimeType: "text/typescript" },
-      ],
-      replaceAll: false,
-      removedPaths: ["obsolete.ts"],
-    });
+      ]),
+    );
     const report = projectFailure({
       ...context,
       sealedFailureReport: {

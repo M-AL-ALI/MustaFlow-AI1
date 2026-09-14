@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { Script } from "node:vm";
 import * as ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import { CommittedBuildFileReport } from "./committed-build-file-report";
+import {
+  CommittedBuildFileReport,
+  describeCommittedFileChanges,
+} from "./committed-build-file-report";
 
 const file = (path: string, content = "before", mimeType = "text/plain") => ({
   path,
@@ -11,7 +14,7 @@ const file = (path: string, content = "before", mimeType = "text/plain") => ({
 });
 const empty = { filesCreated: [], filesChanged: [], filesRemoved: [], warnings: [] };
 
-// Exercise the real writer/tracker pairs without starting the jobs queue.
+// Exercise the real writer/receipt pairs without starting the jobs queue.
 const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
 const parsed = ts.createSourceFile("jobs.ts", source, ts.ScriptTarget.Latest, true);
 const pairs: Array<(context: Record<string, unknown>) => Promise<void>> = [];
@@ -22,19 +25,18 @@ function visit(node: ts.Node): void {
       const write = node.statements[index - 1]?.getText(parsed);
       const record = node.statements[index + 1]?.getText(parsed);
       if (
-        !write?.startsWith("await writeProjectFilesAtomically(") ||
-        !record?.startsWith("committedFileChanges.record(")
+        !write?.startsWith("const fileWriteReceipt = await writeProjectFilesAtomically(") ||
+        !record?.startsWith("committedFileChanges.record(fileWriteReceipt.effectiveFileChanges)")
       ) {
-        throw new Error("Every acknowledged file commit must immediately update its report");
+        throw new Error(
+          "Every acknowledged file commit must immediately record its effective-result receipt",
+        );
       }
       const compiled = ts.transpileModule(
-        `(async function (context) {
-          const { writeProjectFilesAtomically, committedFileChanges, input, projectId,
-            filesWithHealth, sealedWriteGuard, result, repairLoopResult,
-            appliedChangedFiles, appliedRemovedPaths } = context;
-          ${write}
-          ${record}
-        })`,
+        "(async function (context) { const { writeProjectFilesAtomically, committedFileChanges, input, projectId, filesWithHealth, sealedWriteGuard, result, repairLoopResult, appliedChangedFiles, appliedRemovedPaths } = context; " +
+          write +
+          record +
+          " })",
         { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } },
       );
       pairs.push(new Script(compiled.outputText).runInNewContext({}, { timeout: 1_000 }));
@@ -51,79 +53,44 @@ function contextFor(committedFileChanges: CommittedBuildFileReport, writer: unkn
     committedFileChanges,
     input: {},
     projectId: 61,
-    filesWithHealth: [file("new.ts"), file("health.ts")],
+    filesWithHealth: [file("requested.ts")],
     sealedWriteGuard: () => undefined,
-    result: { changedFiles: [file("new.ts")], removedPaths: ["old.ts"] },
-    repairLoopResult: { changedFiles: [file("new.ts")] },
-    appliedChangedFiles: [file("new.ts")],
-    appliedRemovedPaths: ["old.ts"],
+    result: { changedFiles: [file("requested.ts")], removedPaths: ["legacy.ts"] },
+    repairLoopResult: { changedFiles: [file("requested.ts")] },
+    appliedChangedFiles: [file("requested.ts")],
+    appliedRemovedPaths: ["legacy.ts"],
   };
 }
 
-describe("acknowledged build file reports", () => {
-  it("starts empty and does not treat baseline files as created", () => {
-    expect(new CommittedBuildFileReport([file("existing.ts")]).toReport()).toEqual(empty);
-  });
-
-  it("compares replacements against real pre-run files, including removed paths", () => {
-    const tracker = new CommittedBuildFileReport([file("kept.ts"), file("old.ts")]);
-    tracker.record({ files: [file("kept.ts"), file("new.ts")], replaceAll: true });
-    expect(tracker.toReport()).toMatchObject({
-      filesCreated: ["new.ts"],
-      filesChanged: [],
-      filesRemoved: ["old.ts"],
-    });
-  });
-
-  it("reports initial build and injected health files without source content", () => {
-    const tracker = new CommittedBuildFileReport([]);
-    tracker.record({
-      files: [file("server.ts", "PRIVATE_SOURCE"), file("health.ts")],
-      replaceAll: true,
-    });
-    expect(tracker.toReport().filesCreated).toEqual(["health.ts", "server.ts"]);
-    expect(JSON.stringify(tracker.toReport())).not.toContain("PRIVATE_SOURCE");
-  });
-
-  it("tracks changes to content and MIME type, but not unchanged writes or absent removals", () => {
-    const tracker = new CommittedBuildFileReport([file("a"), file("b"), file("c")]);
-    tracker.record({
-      files: [file("a", "after"), file("b", "before", "text/html"), file("c")],
-      replaceAll: false,
-      removedPaths: ["never-existed"],
-    });
-    expect(tracker.toReport().filesChanged).toEqual(["a", "b"]);
-    expect(tracker.toReport().filesRemoved).toEqual([]);
-  });
-
-  it("accumulates repairs and reports net changes only once", () => {
-    const tracker = new CommittedBuildFileReport([file("existing.ts")]);
-    tracker.record({ files: [file("new.ts"), file("existing.ts", "after")], replaceAll: false });
-    tracker.record({
-      files: [file("new.ts", "repaired"), file("existing.ts", "repaired")],
-      replaceAll: false,
-    });
-    expect(tracker.toReport()).toMatchObject({
-      filesCreated: ["new.ts"],
-      filesChanged: ["existing.ts"],
-      filesRemoved: [],
-    });
-  });
-
-  it("does not count reverted edits or files created and then removed", () => {
-    const tracker = new CommittedBuildFileReport([file("existing.ts")]);
-    tracker.record({ files: [file("new.ts"), file("existing.ts", "after")], replaceAll: false });
-    tracker.record({ files: [file("existing.ts")], replaceAll: false, removedPaths: ["new.ts"] });
+describe("acknowledged effective-file reports", () => {
+  it("starts empty and ignores effective no-ops", () => {
+    const tracker = new CommittedBuildFileReport();
+    tracker.record(describeCommittedFileChanges([file("legacy.ts")], [file("legacy.ts")]));
     expect(tracker.toReport()).toEqual(empty);
   });
 
-  it("matches the writer's insert-after-delete behavior for overlapping paths", () => {
-    const tracker = new CommittedBuildFileReport([file("same.ts")]);
-    tracker.record({
-      files: [file("same.ts", "after")],
-      replaceAll: false,
-      removedPaths: ["same.ts"],
+  it("reports actual additions, modifications and removals without storing source", () => {
+    const changes = describeCommittedFileChanges(
+      [file("changed.ts"), file("removed.ts"), file("kept.ts")],
+      [file("changed.ts", "PRIVATE_SOURCE"), file("created.ts"), file("kept.ts")],
+    );
+    const tracker = new CommittedBuildFileReport();
+    tracker.record(changes);
+    expect(tracker.toReport()).toMatchObject({
+      filesCreated: ["created.ts"],
+      filesChanged: ["changed.ts"],
+      filesRemoved: ["removed.ts"],
     });
+    expect(JSON.stringify(changes)).not.toContain("PRIVATE_SOURCE");
+    expect(JSON.stringify(tracker.toReport())).not.toContain("PRIVATE_SOURCE");
+    expect(changes[0].before).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("counts an exposed legacy fallback as a change, not a removal", () => {
+    const tracker = new CommittedBuildFileReport();
+    tracker.record(
+      describeCommittedFileChanges([file("same.ts", "scoped")], [file("same.ts", "legacy")]),
+    );
     expect(tracker.toReport()).toMatchObject({
       filesCreated: [],
       filesChanged: ["same.ts"],
@@ -131,47 +98,95 @@ describe("acknowledged build file reports", () => {
     });
   });
 
-  it("copies file values so later draft mutations cannot change acknowledged evidence", () => {
-    const original = file("same.ts");
-    const tracker = new CommittedBuildFileReport([original]);
-    original.content = "after";
-    tracker.record({ files: [original], replaceAll: false });
-    original.content = "before";
-    expect(tracker.toReport().filesChanged).toEqual(["same.ts"]);
-    const report = tracker.toReport();
-    report.filesChanged.length = 0;
-    expect(tracker.toReport().filesChanged).toEqual(["same.ts"]);
+  it("distinguishes empty files from absent files and tracks MIME changes", () => {
+    const tracker = new CommittedBuildFileReport();
+    tracker.record(
+      describeCommittedFileChanges(
+        [file("old.ts", ""), file("mime", "")],
+        [file("new.ts", ""), file("mime", "", "text/html")],
+      ),
+    );
+    expect(tracker.toReport()).toMatchObject({
+      filesCreated: ["new.ts"],
+      filesChanged: ["mime"],
+      filesRemoved: ["old.ts"],
+    });
   });
 
-  it.each([0, 1, 2, 3])("records production writer path %s only after success", async (index) => {
-    const tracker = new CommittedBuildFileReport([file("old.ts")]);
-    let finish: () => void = () => {};
-    const writer = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
+  it("aggregates repeated repairs into one net change per path", () => {
+    const tracker = new CommittedBuildFileReport();
+    tracker.record(
+      describeCommittedFileChanges([file("existing")], [file("existing", "after"), file("new")]),
     );
-    const pending = pairs[index](contextFor(tracker, writer));
+    tracker.record(
+      describeCommittedFileChanges(
+        [file("existing", "after"), file("new")],
+        [file("existing", "repaired"), file("new", "repaired")],
+      ),
+    );
+    expect(tracker.toReport()).toMatchObject({
+      filesCreated: ["new"],
+      filesChanged: ["existing"],
+      filesRemoved: [],
+    });
+  });
+
+  it("drops changes that were completely reverted by later acknowledged writes", () => {
+    const tracker = new CommittedBuildFileReport();
+    const before = [file("existing")];
+    const changed = [file("existing", "after"), file("temporary")];
+    tracker.record(describeCommittedFileChanges(before, changed));
+    tracker.record(describeCommittedFileChanges(changed, before));
     expect(tracker.toReport()).toEqual(empty);
-    expect(writer).toHaveBeenCalledOnce();
-    finish();
-    await pending;
-    expect(tracker.toReport().filesCreated).toEqual(
-      index === 0 ? ["health.ts", "new.ts"] : ["new.ts"],
-    );
-    expect(tracker.toReport().filesRemoved).toEqual(index === 2 ? [] : ["old.ts"]);
+  });
+
+  it("copies receipt values and does not expose mutable report state", () => {
+    const tracker = new CommittedBuildFileReport();
+    const changes = describeCommittedFileChanges([], [file("created")]);
+    tracker.record(changes);
+    changes.length = 0;
+    const report = tracker.toReport();
+    report.filesCreated.length = 0;
+    expect(tracker.toReport().filesCreated).toEqual(["created"]);
   });
 
   it.each([0, 1, 2, 3])(
-    "does not advance evidence when production writer path %s rejects",
+    "records production writer %s only after its captured receipt resolves",
     async (index) => {
-      const tracker = new CommittedBuildFileReport([file("old.ts")]);
-      tracker.record({ files: [file("earlier.ts")], replaceAll: false });
+      const tracker = new CommittedBuildFileReport();
+      const receipt = {
+        authoritativeVersion: null,
+        effectiveFileChanges: describeCommittedFileChanges([], [file("actually-saved.ts")]),
+      };
+      let finish: (value: typeof receipt) => void = () => {};
+      const writer = vi.fn(
+        () =>
+          new Promise<typeof receipt>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const pending = pairs[index](contextFor(tracker, writer));
+      expect(tracker.toReport()).toEqual(empty);
+      expect(writer).toHaveBeenCalledWith(
+        expect.objectContaining({ captureEffectiveFileChanges: true, scope: { kind: "artifact" } }),
+      );
+      finish(receipt);
+      await pending;
+      expect(tracker.toReport().filesCreated).toEqual(["actually-saved.ts"]);
+      expect(tracker.toReport().filesRemoved).toEqual([]);
+    },
+  );
+
+  it.each([0, 1, 2, 3])(
+    "does not invent saved changes when production writer %s rejects",
+    async (index) => {
+      const tracker = new CommittedBuildFileReport();
+      tracker.record(describeCommittedFileChanges([], [file("earlier.ts")]));
       const beforeFailure = tracker.toReport();
       const failure = new Error("transaction rejected");
-      const writer = vi.fn().mockRejectedValue(failure);
-      await expect(pairs[index](contextFor(tracker, writer))).rejects.toBe(failure);
+      await expect(
+        pairs[index](contextFor(tracker, vi.fn().mockRejectedValue(failure))),
+      ).rejects.toBe(failure);
       expect(tracker.toReport()).toEqual(beforeFailure);
     },
   );

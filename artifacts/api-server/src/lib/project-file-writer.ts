@@ -10,6 +10,10 @@ import {
 } from "@workspace/db";
 import type { BuilderFile } from "./builder";
 import { selectPrimaryArtifactFiles } from "./primary-artifact-files";
+import {
+  describeCommittedFileChanges,
+  type EffectiveFileChange,
+} from "./committed-build-file-report";
 import { FailedDraftRecoveryError, failedDraftFingerprint } from "./zero-sealed-failed-draft";
 import { resolveArtifactId } from "./artifacts";
 import { PROJECT_LIFECYCLE_LOCK_NAMESPACE } from "./project-retirement-contract";
@@ -76,6 +80,8 @@ export interface ProjectFileMutation {
   replaceAll: boolean;
   scope: ProjectFileWriteScope;
   removedPaths?: string[];
+  /** Opt-in evidence of the effective artifact view, captured under the write lock. */
+  captureEffectiveFileChanges?: boolean;
   /** Compare-and-write fence for sealed drafts, checked under the lifecycle lock. */
   expectedBase?: { fingerprint: string; taskId: number; ownerUserId: string };
   authoritativeVersion?: {
@@ -89,12 +95,19 @@ export interface ProjectFileMutation {
 
 export interface ProjectFileWriteReceipt {
   authoritativeVersion: { id: number; filesSnapshot: FileSnapshotEntry[] } | null;
+  effectiveFileChanges?: EffectiveFileChange[];
 }
 
 /**
  * Replace or patch one explicitly requested mutable file scope in a bounded transaction.
  * A failed delete, insert, or timeout leaves the previously committed rows unchanged.
  */
+export function writeProjectFilesAtomically(
+  input: ProjectFileMutation & { captureEffectiveFileChanges: true },
+): Promise<ProjectFileWriteReceipt & { effectiveFileChanges: EffectiveFileChange[] }>;
+export function writeProjectFilesAtomically(
+  input: ProjectFileMutation,
+): Promise<ProjectFileWriteReceipt>;
 export async function writeProjectFilesAtomically(
   input: ProjectFileMutation,
 ): Promise<ProjectFileWriteReceipt> {
@@ -116,6 +129,10 @@ export async function writeProjectFilesAtomically(
     throw new ProjectFileWriteError({ cause: error });
   }
 
+  if (input.captureEffectiveFileChanges && resolvedScope.kind !== "artifact") {
+    throw new ProjectFileArtifactScopeError();
+  }
+
   const affectedPaths = [
     ...new Set([...input.files.map((file) => file.path), ...(input.removedPaths ?? [])]),
   ];
@@ -128,6 +145,7 @@ export async function writeProjectFilesAtomically(
         );
 
   let authoritativeVersion: { id: number; filesSnapshot: FileSnapshotEntry[] } | null;
+  let effectiveFileChanges: EffectiveFileChange[] | undefined;
   try {
     const lifecycleResponse =
       input.lifecycleResponse &&
@@ -211,6 +229,27 @@ export async function writeProjectFilesAtomically(
           }
         }
 
+        const readEffectiveFiles = async () => {
+          const rows = await tx
+            .select({
+              projectId: projectFilesTable.projectId,
+              artifactId: projectFilesTable.artifactId,
+              path: projectFilesTable.path,
+              content: projectFilesTable.content,
+              mimeType: projectFilesTable.mimeType,
+            })
+            .from(projectFilesTable)
+            .where(eq(projectFilesTable.projectId, input.projectId));
+          return selectPrimaryArtifactFiles(
+            rows,
+            input.projectId,
+            resolvedScope.kind === "artifact" ? resolvedScope.artifactId : null,
+          );
+        };
+        const effectiveBefore = input.captureEffectiveFileChanges
+          ? await readEffectiveFiles()
+          : null;
+
         const reconciliationPaths = new Set(affectedPaths);
         if (input.replaceAll) {
           const priorFiles = await tx
@@ -248,6 +287,13 @@ export async function writeProjectFilesAtomically(
             filePath,
             nextContent: nextContentByPath.get(filePath) ?? null,
           });
+        }
+
+        if (effectiveBefore !== null) {
+          effectiveFileChanges = describeCommittedFileChanges(
+            effectiveBefore,
+            await readEffectiveFiles(),
+          );
         }
 
         if (!input.authoritativeVersion) return null;
@@ -288,5 +334,8 @@ export async function writeProjectFilesAtomically(
     throw new ProjectFileWriteError({ cause: error });
   }
 
-  return { authoritativeVersion };
+  return {
+    authoritativeVersion,
+    ...(effectiveFileChanges === undefined ? {} : { effectiveFileChanges }),
+  };
 }

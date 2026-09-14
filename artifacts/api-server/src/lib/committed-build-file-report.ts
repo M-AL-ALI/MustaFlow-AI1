@@ -1,32 +1,57 @@
+import { createHash } from "node:crypto";
 import type { TaskReport } from "@workspace/db";
 
-type SavedFile = Readonly<{ path: string; content: string; mimeType: string }>;
-type FileValue = Readonly<{ content: string; mimeType: string }>;
+interface SavedFile {
+  readonly path: string;
+  readonly content: string;
+  readonly mimeType: string;
+}
+
+export interface EffectiveFileChange {
+  readonly path: string;
+  readonly before: string | null;
+  readonly after: string | null;
+}
+
 type FileReport = Pick<TaskReport, "filesCreated" | "filesChanged" | "filesRemoved" | "warnings">;
 
-/** Tracks acknowledged database writes, never generated drafts or runtime-only edits. */
-export class CommittedBuildFileReport {
-  private readonly before: Map<string, FileValue>;
-  private readonly current: Map<string, FileValue>;
-
-  constructor(files: readonly SavedFile[]) {
-    this.before = new Map(
-      files.map((file) => [file.path, { content: file.content, mimeType: file.mimeType }]),
+/** Compare actual effective snapshots, not requested removals or generated drafts. */
+export function describeCommittedFileChanges(
+  before: readonly SavedFile[],
+  after: readonly SavedFile[],
+): EffectiveFileChange[] {
+  const fingerprints = (files: readonly SavedFile[]) =>
+    new Map(
+      files.map((file) => [
+        file.path,
+        createHash("sha256")
+          .update(JSON.stringify([file.content, file.mimeType]))
+          .digest("hex"),
+      ]),
     );
-    this.current = new Map(this.before);
+  const previous = fingerprints(before);
+  const current = fingerprints(after);
+  const changes: EffectiveFileChange[] = [];
+  const paths = new Set([...previous.keys(), ...current.keys()]);
+  for (const path of [...paths].sort()) {
+    const oldValue = previous.get(path) ?? null;
+    const newValue = current.get(path) ?? null;
+    if (oldValue !== newValue) changes.push({ path, before: oldValue, after: newValue });
   }
+  return changes;
+}
 
-  /** Call only after writeProjectFilesAtomically resolves successfully. */
-  record(input: {
-    files: readonly SavedFile[];
-    replaceAll: boolean;
-    removedPaths?: readonly string[];
-  }): void {
-    if (input.replaceAll) this.current.clear();
-    for (const path of input.removedPaths ?? []) this.current.delete(path);
-    // The database writer inserts supplied files after removing affected paths.
-    for (const file of input.files) {
-      this.current.set(file.path, { content: file.content, mimeType: file.mimeType });
+/** Retains only acknowledged changes from the writer's transaction-bound snapshots. */
+export class CommittedBuildFileReport {
+  private readonly changes = new Map<string, { before: string | null; after: string | null }>();
+
+  record(changes: readonly EffectiveFileChange[]): void {
+    for (const change of changes) {
+      const previous = this.changes.get(change.path);
+      this.changes.set(change.path, {
+        before: previous ? previous.before : change.before,
+        after: change.after,
+      });
     }
   }
 
@@ -34,14 +59,11 @@ export class CommittedBuildFileReport {
     const filesCreated: string[] = [];
     const filesChanged: string[] = [];
     const filesRemoved: string[] = [];
-    for (const [path, file] of this.current) {
-      const previous = this.before.get(path);
-      if (!previous) filesCreated.push(path);
-      else if (previous.content !== file.content || previous.mimeType !== file.mimeType)
-        filesChanged.push(path);
-    }
-    for (const path of this.before.keys()) {
-      if (!this.current.has(path)) filesRemoved.push(path);
+    for (const [path, change] of this.changes) {
+      if (change.before === change.after) continue;
+      if (change.before === null) filesCreated.push(path);
+      else if (change.after === null) filesRemoved.push(path);
+      else filesChanged.push(path);
     }
     return {
       filesCreated: filesCreated.sort(),

@@ -42,6 +42,7 @@ const harness = vi.hoisted(() => ({
   pendingUsage: [] as Usage[],
   committedUsage: [] as Usage[],
   reconciliationFailure: null as Error | null,
+  failEvidenceReadAfterMutation: false,
 }));
 
 vi.mock("drizzle-orm", async (importOriginal) => ({
@@ -146,6 +147,11 @@ vi.mock("@workspace/db", () => {
                           rows = [{ ...harness.primary }];
                           break;
                         case "files":
+                          if (
+                            harness.failEvidenceReadAfterMutation &&
+                            harness.events.includes("delete:files")
+                          )
+                            throw new Error("evidence snapshot read failed");
                           rows = working.map((row) => ({ ...row }));
                           break;
                         default:
@@ -235,6 +241,7 @@ import {
   type ProjectFileMutation,
 } from "./project-file-writer";
 import { FailedDraftRecoveryError, failedDraftFingerprint } from "./zero-sealed-failed-draft";
+import { CommittedBuildFileReport } from "./committed-build-file-report";
 
 const initialRows: StoredFile[] = [
   {
@@ -333,9 +340,113 @@ beforeEach(() => {
   harness.pendingUsage = [];
   harness.committedUsage = [];
   harness.reconciliationFailure = null;
+  harness.failEvidenceReadAfterMutation = false;
 });
 
 describe("failed-draft guarded project file writes", () => {
+  it("does not report removal of legacy-only rows that the scoped writer retains", async () => {
+    const tracker = new CommittedBuildFileReport();
+    const receipt = await writeProjectFilesAtomically({
+      ...guardedInput(),
+      files: [],
+      removedPaths: ["README.md"],
+      captureEffectiveFileChanges: true,
+    });
+    tracker.record(receipt.effectiveFileChanges);
+    expect(harness.rows).toEqual(initialRows);
+    expect(receipt.effectiveFileChanges).toEqual([]);
+    expect(tracker.toReport()).toEqual({
+      filesCreated: [],
+      filesChanged: [],
+      filesRemoved: [],
+      warnings: [],
+    });
+  });
+
+  it("reports an override removal as a change when its legacy fallback becomes visible", async () => {
+    const tracker = new CommittedBuildFileReport();
+    const receipt = await writeProjectFilesAtomically({
+      ...guardedInput(),
+      files: [],
+      removedPaths: ["src/index.ts"],
+      captureEffectiveFileChanges: true,
+    });
+    tracker.record(receipt.effectiveFileChanges);
+    expect(tracker.toReport()).toMatchObject({
+      filesCreated: [],
+      filesChanged: ["src/index.ts"],
+      filesRemoved: [],
+    });
+    expect(harness.rows).toContainEqual(initialRows[0]);
+    expect(harness.rows).not.toContainEqual(initialRows[1]);
+    expect(JSON.stringify(receipt)).not.toContain("legacy shadow");
+    expect(JSON.stringify(receipt)).not.toContain("primary source");
+  });
+
+  it("retains legacy, sibling and other-project files when reporting a full scoped replacement", async () => {
+    const tracker = new CommittedBuildFileReport();
+    const receipt = await writeProjectFilesAtomically({
+      ...guardedInput(),
+      replaceAll: true,
+      captureEffectiveFileChanges: true,
+    });
+    tracker.record(receipt.effectiveFileChanges);
+    expect(tracker.toReport()).toMatchObject({
+      filesCreated: [],
+      filesChanged: ["src/index.ts"],
+      filesRemoved: ["obsolete.ts"],
+    });
+    for (const index of [0, 3, 4, 5]) expect(harness.rows).toContainEqual(initialRows[index]);
+  });
+
+  it("does not include a concurrent edit committed before the file-write lock", async () => {
+    harness.beforeLock = () => {
+      harness.rows[3].content = "other writer's saved notes";
+    };
+    const receipt = await writeProjectFilesAtomically({
+      ...guardedInput(),
+      expectedBase: undefined,
+      removedPaths: [],
+      captureEffectiveFileChanges: true,
+    });
+    expect(receipt.effectiveFileChanges.map((change) => change.path)).toEqual(["src/index.ts"]);
+    expect(harness.rows[3].content).toBe("other writer's saved notes");
+    expect(harness.events.indexOf("read:files")).toBeGreaterThan(
+      harness.events.indexOf("lifecycle-lock"),
+    );
+  });
+
+  it("rolls back the file mutation if its effective-result read fails", async () => {
+    harness.failEvidenceReadAfterMutation = true;
+    await expect(
+      writeProjectFilesAtomically({
+        ...guardedInput(),
+        captureEffectiveFileChanges: true,
+      }),
+    ).rejects.toBeInstanceOf(ProjectFileWriteError);
+    expect(harness.rows).toEqual(initialRows);
+    expect(harness.committedUsage).toEqual([]);
+    expect(harness.rollbacks).toBe(1);
+  });
+
+  it("leaves receipt capture off for existing callers and rejects project-wide capture", async () => {
+    const receipt = await writeProjectFilesAtomically(guardedInput());
+    expect(receipt.effectiveFileChanges).toBeUndefined();
+    const transactions = harness.transactions;
+    const rows = harness.rows.map((row) => ({ ...row }));
+    await expect(
+      writeProjectFilesAtomically({
+        projectId: 61,
+        scope: { kind: "project" },
+        files: [],
+        replaceAll: true,
+        captureEffectiveFileChanges: true,
+      }),
+    ).rejects.toMatchObject({ code: "project_file_artifact_scope_unavailable" });
+    expect(harness.transactions).toBe(transactions);
+    expect(harness.rows).toEqual(rows);
+  });
+
   it("commits a matching primary/legacy overlay only after lifecycle and task locks", async () => {
     await writeProjectFilesAtomically(guardedInput());
     expect(harness.rows).toContainEqual(
