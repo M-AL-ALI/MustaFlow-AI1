@@ -3,6 +3,7 @@ import { Script } from "node:vm";
 import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 import type { TaskReport } from "@workspace/db";
+import { CommittedBuildFileReport } from "./committed-build-file-report";
 
 // Exercise the actual report projection without starting the queue/worker module.
 const source = readFileSync(new URL("./jobs.ts", import.meta.url), "utf8");
@@ -21,7 +22,7 @@ function visit(node: ts.Node): void {
 visit(parsed);
 if (nodes.length !== 1) throw new Error("Expected one production failedReport projection");
 const compiled = ts.transpileModule(
-  "(function (context) { const { sealedFailureReport, modelFailureReport, userPrompt, failureEvidence, retrySource, draft } = context; " +
+  "(function (context) { const { sealedFailureReport, modelFailureReport, userPrompt, failureEvidence, retrySource, draft, committedFileReport } = context; " +
     nodes[0].getText(parsed) +
     "; return failedReport; })",
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } },
@@ -88,5 +89,59 @@ describe("sealed failed-draft report projection", () => {
     expect(report.sealedFailedDraft).toBeUndefined();
     expect(report.nextRecommendation).toBeUndefined();
     expect(report.userRequest).toBe(context.userPrompt);
+  });
+
+  it("retains acknowledged file changes after a later staging failure without claiming success", () => {
+    const committed = new CommittedBuildFileReport([
+      { path: "server.ts", content: "before", mimeType: "text/typescript" },
+      { path: "obsolete.ts", content: "before", mimeType: "text/typescript" },
+    ]);
+    committed.record({
+      files: [
+        { path: "server.ts", content: "after", mimeType: "text/typescript" },
+        { path: "notes.ts", content: "PRIVATE_SOURCE", mimeType: "text/typescript" },
+      ],
+      replaceAll: false,
+      removedPaths: ["obsolete.ts"],
+    });
+    const report = projectFailure({
+      ...context,
+      sealedFailureReport: {
+        filesCreated: ["not-saved.ts"],
+        previewUpdated: true,
+        syntaxValid: true,
+        warnings: ["Validation incomplete"],
+      },
+      committedFileReport: committed.toReport(),
+      failureEvidence: { code: "staging_failed", message: "Staging failed", evidence: null },
+    });
+    expect(report.filesCreated).toEqual(["notes.ts"]);
+    expect(report.filesChanged).toEqual(["server.ts"]);
+    expect(report.filesRemoved).toEqual(["obsolete.ts"]);
+    expect(report.previewUpdated).toBe(false);
+    expect(report.syntaxValid).toBeUndefined();
+    expect(report.sealedFailedDraft).toBeUndefined();
+    expect(report.warnings[0]).toBe("Validation incomplete");
+    expect(report.warnings[1]).toContain("saved before this run failed");
+    expect(report.warnings[1]).toContain("does not mean");
+    expect(report.failureEvidence?.code).toBe("staging_failed");
+    expect(JSON.stringify(report)).not.toContain("PRIVATE_SOURCE");
+  });
+
+  it("does not count model-reported edits when no database commit was acknowledged", () => {
+    const report = projectFailure({
+      ...context,
+      modelFailureReport: {
+        filesCreated: ["draft.ts"],
+        filesChanged: ["server.ts"],
+        filesRemoved: ["notes.ts"],
+        warnings: ["Model request failed"],
+      },
+    });
+    expect(report.filesCreated).toEqual([]);
+    expect(report.filesChanged).toEqual([]);
+    expect(report.filesRemoved).toEqual([]);
+    expect(report.warnings).toEqual(["Model request failed"]);
+    expect(report.previewUpdated).toBe(false);
   });
 });

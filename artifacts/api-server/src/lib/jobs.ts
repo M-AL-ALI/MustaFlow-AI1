@@ -108,6 +108,7 @@ import { autoCommitProjectFiles } from "./github";
 import { staleDraftCandidate } from "./testing-invalidation";
 import { ProjectFileVersionHandoffError, writeProjectFilesAtomically } from "./project-file-writer";
 import { restoreInterruptedProjectFiles } from "./interrupted-project-file-restore";
+import { CommittedBuildFileReport } from "./committed-build-file-report";
 import {
   FailedDraftRecoveryError,
   describeFailedDraft,
@@ -2462,6 +2463,7 @@ export async function runJob(input: JobInput): Promise<void> {
   // keep an honest list of paths until the run reaches its terminal.
   let interruptedPreRunFiles: BuilderFile[] | null = null;
   let interruptedMutationCommitted = false;
+  let committedFileChanges: CommittedBuildFileReport | null = null;
   let interruptedRuntimeId: string | null = null;
   const interruptedChangedPaths = new Set<string>();
   // Job-level heartbeat timer — runs every 30 s for the entire job duration.
@@ -3359,6 +3361,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
 
       if (kind === "build") {
         interruptedPreRunFiles = recoveredBase ?? (await loadFiles(projectId));
+        committedFileChanges = new CommittedBuildFileReport(interruptedPreRunFiles);
         interruptedRuntimeId =
           isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
             ? null
@@ -3879,6 +3882,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             expectedBase: sealedWriteGuard(),
           });
           interruptedMutationCommitted = true;
+          committedFileChanges.record({ files: filesWithHealth, replaceAll: true });
           void staleDraftCandidate(projectId, "build").catch(() => {});
         }
         diffSummary = computeBuildDiff(result.files);
@@ -3917,6 +3921,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         const currentFiles = recoveredBase ?? (await loadFiles(projectId));
         const existingFiles = recoveredFiles ?? currentFiles;
         interruptedPreRunFiles = currentFiles.map((file) => ({ ...file }));
+        committedFileChanges = new CommittedBuildFileReport(interruptedPreRunFiles);
         interruptedRuntimeId =
           isZeroSealedGenerationTarget(zeroGenerationTarget) || !projectHasLiveServer()
             ? null
@@ -4717,6 +4722,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             expectedBase: sealedWriteGuard(),
           });
           interruptedMutationCommitted = true;
+          committedFileChanges.record({
+            files: result.changedFiles,
+            replaceAll: false,
+            removedPaths: result.removedPaths,
+          });
           for (const file of result.changedFiles) interruptedChangedPaths.add(file.path);
           for (const path of result.removedPaths) interruptedChangedPaths.add(path);
           void staleDraftCandidate(projectId, "refine").catch(() => {});
@@ -4880,6 +4890,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 replaceAll: false,
               });
               interruptedMutationCommitted = true;
+              committedFileChanges.record({
+                files: repairLoopResult.changedFiles,
+                replaceAll: false,
+              });
               for (const file of repairLoopResult.changedFiles) {
                 interruptedChangedPaths.add(file.path);
               }
@@ -5953,6 +5967,11 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                   removedPaths: appliedRemovedPaths,
                 });
                 interruptedMutationCommitted = true;
+                committedFileChanges.record({
+                  files: appliedChangedFiles,
+                  replaceAll: false,
+                  removedPaths: appliedRemovedPaths,
+                });
                 for (const file of appliedChangedFiles) interruptedChangedPaths.add(file.path);
                 for (const path of appliedRemovedPaths) interruptedChangedPaths.add(path);
                 for (const file of appliedChangedFiles) {
@@ -7611,17 +7630,21 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         }
       }
       const message = sealedProjectRecovery?.message ?? rawMessage;
+      const committedFileReport = committedFileChanges?.toReport();
       const failedReport: TaskReport = {
         ...(modelFailureReport ?? {}),
         ...(modelFailureReport || !sealedFailureReport?.agentLoop
           ? {}
           : { agentLoop: sealedFailureReport.agentLoop }),
         userRequest: userPrompt,
-        filesCreated: [],
-        filesChanged: [],
-        filesRemoved: [],
+        filesCreated: committedFileReport?.filesCreated ?? [],
+        filesChanged: committedFileReport?.filesChanged ?? [],
+        filesRemoved: committedFileReport?.filesRemoved ?? [],
         previewUpdated: false,
-        warnings: modelFailureReport?.warnings ?? sealedFailureReport?.warnings ?? [],
+        warnings: [
+          ...(modelFailureReport?.warnings ?? sealedFailureReport?.warnings ?? []),
+          ...(committedFileReport?.warnings ?? []),
+        ],
         ...(failureEvidence ? { failureEvidence } : {}),
         ...(retrySource ? { retrySource } : {}),
         ...(draft
