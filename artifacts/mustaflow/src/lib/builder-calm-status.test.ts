@@ -32,6 +32,83 @@ describe("builder calm status", () => {
     ).toBe("Updating preview\u2026");
   });
 
+  it.each([
+    ["failed", "Request failed"],
+    ["cancelled", "Run cancelled"],
+    ["canceled", "Run cancelled"],
+    ["discarded", "Run cancelled"],
+  ])("stops stale preview progress after a persisted %s result", (status, label) => {
+    expect(
+      getCalmBuilderStatus({
+        phase: "building",
+        previewSyncPending: true,
+        run: { projectId: 61, task: { projectId: 61, id: 329, status } },
+      }),
+    ).toBe(label);
+  });
+
+  it.each([
+    ["failed", "Request failed"],
+    ["cancelled", "Run cancelled"],
+    ["unknown", "Run ended; status unavailable"],
+  ] as const)(
+    "uses a matching %s receipt even before the task query refreshes",
+    (terminal, label) => {
+      expect(
+        getCalmBuilderStatus({
+          phase: "building",
+          previewSyncPending: true,
+          run: {
+            projectId: 61,
+            task: { projectId: 61, id: 329, status: "building" },
+            receipt: { projectId: 61, taskId: 329, terminal },
+          },
+        }),
+      ).toBe(label);
+    },
+  );
+
+  it("keeps a successful run's genuine preview update visible until it is ready", () => {
+    const run = {
+      projectId: 61,
+      task: { projectId: 61, id: 329, status: "completed" },
+      receipt: { projectId: 61, taskId: 329, terminal: "completed" as const },
+    };
+    expect(getCalmBuilderStatus({ phase: "idle", previewSyncPending: true, run })).toBe(
+      "Updating preview\u2026",
+    );
+    expect(getCalmBuilderStatus({ phase: "idle", previewSyncPending: false, run })).toBe(
+      CALM_STATUS_VOCABULARY.idle,
+    );
+  });
+
+  it("does not carry a prior run's failure into a newer run or a different project", () => {
+    const failed = { projectId: 61, taskId: 329, terminal: "failed" as const };
+    for (const run of [
+      { projectId: 61, task: { projectId: 61, id: 330, status: "building" }, receipt: failed },
+      { projectId: 62, task: { projectId: 62, id: 329, status: "building" }, receipt: failed },
+      { projectId: 62, task: { projectId: 61, id: 329, status: "failed" }, receipt: failed },
+      { projectId: 61, task: null, receipt: failed },
+    ]) {
+      expect(getCalmBuilderStatus({ phase: "building", previewSyncPending: true, run })).toBe(
+        "Updating preview\u2026",
+      );
+    }
+  });
+
+  it("does not label independent image creation as the previous app run's failure", () => {
+    expect(
+      getCalmBuilderStatus({
+        phase: "images",
+        run: {
+          projectId: 61,
+          task: { projectId: 61, id: 329, status: "failed" },
+          receipt: { projectId: 61, taskId: 329, terminal: "failed" },
+        },
+      }),
+    ).toBe(CALM_STATUS_VOCABULARY.images);
+  });
+
   it("collapses internal task events into one calm phase", () => {
     expect(calmPhaseForTaskEvent("file_diff")).toBe("building");
     expect(calmPhaseForTaskEvent("command_output")).toBe("testing");

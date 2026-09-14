@@ -21,11 +21,18 @@ export function getCalmBuilderStatus({
   phase,
   fileCount = 0,
   previewSyncPending = false,
+  run,
 }: {
   phase: CalmBuilderPhase;
   fileCount?: number;
   previewSyncPending?: boolean;
+  run?: EditorRunContext;
 }): string {
+  const terminal = run ? scopedEditorRun(run).terminal : undefined;
+  // Image Studio can be active independently of the last app-building run.
+  if (terminal && terminal !== "completed" && phase !== "images") {
+    return EDITOR_RUN_TERMINAL_LABELS[terminal];
+  }
   if (previewSyncPending) return "Updating preview\u2026";
   if (phase === "building" && fileCount > 0) {
     return `Building — ${fileCount} file${fileCount === 1 ? "" : "s"} so far`;
@@ -84,6 +91,13 @@ export function calmPhaseForTaskEvent(eventType: string, message = ""): CalmBuil
 
 export type EditorRunTerminal = "completed" | "failed" | "cancelled" | "unknown";
 
+const EDITOR_RUN_TERMINAL_LABELS: Record<EditorRunTerminal, string> = {
+  completed: "Run completed",
+  failed: "Request failed",
+  cancelled: "Run cancelled",
+  unknown: "Run ended; status unavailable",
+};
+
 export interface EditorRunReceipt {
   projectId: number;
   taskId: number;
@@ -128,28 +142,32 @@ function editorTaskTerminal(status: string | undefined): EditorRunTerminal | und
   return undefined;
 }
 
-/** Presentation only: this never changes task, runtime, publishing, or access state. */
-export function getEditorWorkStatus(input: {
+export interface EditorRunContext {
   projectId: number;
-  projectStatus?: string;
   task?: { projectId: number; id: number; status: string } | null;
   receipt?: EditorRunReceipt | null;
-  requestPending?: boolean;
-}): EditorWorkStatus {
+}
+
+function scopedEditorRun(input: EditorRunContext) {
   const task = input.task?.projectId === input.projectId ? input.task : null;
   const receipt =
     task && input.receipt?.projectId === input.projectId && input.receipt.taskId === task.id
       ? input.receipt
       : null;
+  return { task, receipt, terminal: receipt?.terminal ?? editorTaskTerminal(task?.status) };
+}
+
+/** Presentation only: this never changes task, runtime, publishing, or access state. */
+export function getEditorWorkStatus(
+  input: EditorRunContext & {
+    projectStatus?: string;
+    requestPending?: boolean;
+  },
+): EditorWorkStatus {
+  const { task, receipt, terminal } = scopedEditorRun(input);
   const previousBuildFailed = input.projectStatus === "failed";
-  const terminal = receipt?.terminal ?? editorTaskTerminal(task?.status);
   if (terminal) {
-    const label = {
-      completed: "Run completed",
-      failed: "Request failed",
-      cancelled: "Run cancelled",
-      unknown: "Run ended; status unavailable",
-    }[terminal];
+    const label = EDITOR_RUN_TERMINAL_LABELS[terminal];
     return {
       label,
       tone:

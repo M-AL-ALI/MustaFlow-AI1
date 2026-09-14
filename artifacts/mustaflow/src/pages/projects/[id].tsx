@@ -2130,13 +2130,16 @@ export default function ProjectWorkspacePage() {
 
   const editorActiveTask = tasksForFeed.find((task) => task.id === activeTaskId);
   const activeTaskStatus = editorActiveTask?.status;
-  const editorWorkStatus = getEditorWorkStatus({
+  const editorRunContext = {
     projectId,
-    projectStatus: project?.status,
     task: editorActiveTask
       ? { projectId, id: editorActiveTask.id, status: editorActiveTask.status }
       : null,
     receipt: editorRunReceipt,
+  };
+  const editorWorkStatus = getEditorWorkStatus({
+    ...editorRunContext,
+    projectStatus: project?.status,
     requestPending:
       (sendMessage.isPending && sendMessage.variables?.id === projectId) ||
       (isStreaming && editorRequestProjectIdRef.current === projectId),
@@ -2188,6 +2191,7 @@ export default function ProjectWorkspacePage() {
     phase: visibleCalmPhase,
     fileCount: calmFileCount,
     previewSyncPending,
+    run: editorRunContext,
   });
 
   // ── Project issues detection ────────────────────────────────────────────────
