@@ -2191,6 +2191,7 @@ export default function ProjectWorkspacePage() {
     phase: visibleCalmPhase,
     fileCount: calmFileCount,
     previewSyncPending,
+    independentImageGeneration: projectImages.isGenerating,
     run: editorRunContext,
   });
 

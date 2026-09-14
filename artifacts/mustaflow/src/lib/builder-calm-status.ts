@@ -21,16 +21,20 @@ export function getCalmBuilderStatus({
   phase,
   fileCount = 0,
   previewSyncPending = false,
+  independentImageGeneration = false,
   run,
 }: {
   phase: CalmBuilderPhase;
   fileCount?: number;
   previewSyncPending?: boolean;
+  independentImageGeneration?: boolean;
   run?: EditorRunContext;
 }): string {
   const terminal = run ? scopedEditorRun(run).terminal : undefined;
-  // Image Studio can be active independently of the last app-building run.
-  if (terminal && terminal !== "completed" && phase !== "images") {
+  // A task-owned image flag can outlive Stop. Only a separate image operation
+  // may take precedence over the selected app task's terminal result.
+  const independentImageWork = phase === "images" && independentImageGeneration;
+  if (terminal && terminal !== "completed" && !independentImageWork) {
     return EDITOR_RUN_TERMINAL_LABELS[terminal];
   }
   if (previewSyncPending) return "Updating preview\u2026";

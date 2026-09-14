@@ -401,7 +401,11 @@ describe("failed-draft guarded project file writes", () => {
 
   it("does not include a concurrent edit committed before the file-write lock", async () => {
     harness.beforeLock = () => {
-      harness.rows[3].content = "other writer's saved notes";
+      const notes = harness.rows.find(
+        (row) => row.projectId === 61 && row.artifactId === null && row.path === "README.md",
+      );
+      if (!notes) throw new Error("Expected the legacy README fixture");
+      notes.content = "other writer's saved notes";
     };
     const receipt = await writeProjectFilesAtomically({
       ...guardedInput(),
@@ -410,7 +414,11 @@ describe("failed-draft guarded project file writes", () => {
       captureEffectiveFileChanges: true,
     });
     expect(receipt.effectiveFileChanges.map((change) => change.path)).toEqual(["src/index.ts"]);
-    expect(harness.rows[3].content).toBe("other writer's saved notes");
+    expect(
+      harness.rows.find(
+        (row) => row.projectId === 61 && row.artifactId === null && row.path === "README.md",
+      )?.content,
+    ).toBe("other writer's saved notes");
     expect(harness.events.indexOf("read:files")).toBeGreaterThan(
       harness.events.indexOf("lifecycle-lock"),
     );

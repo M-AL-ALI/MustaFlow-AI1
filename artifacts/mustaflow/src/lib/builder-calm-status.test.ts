@@ -100,6 +100,7 @@ describe("builder calm status", () => {
     expect(
       getCalmBuilderStatus({
         phase: "images",
+        independentImageGeneration: true,
         run: {
           projectId: 61,
           task: { projectId: 61, id: 329, status: "failed" },
@@ -107,6 +108,26 @@ describe("builder calm status", () => {
         },
       }),
     ).toBe(CALM_STATUS_VOCABULARY.images);
+  });
+
+  it.each([
+    ["failed", "Request failed"],
+    ["cancelled", "Run cancelled"],
+    ["unknown", "Run ended; status unavailable"],
+  ] as const)("does not let stale task-owned images hide a %s result", (terminal, label) => {
+    for (const previewSyncPending of [false, true]) {
+      expect(
+        getCalmBuilderStatus({
+          phase: "images",
+          previewSyncPending,
+          run: {
+            projectId: 61,
+            task: { projectId: 61, id: 329, status: "building" },
+            receipt: { projectId: 61, taskId: 329, terminal },
+          },
+        }),
+      ).toBe(label);
+    }
   });
 
   it("collapses internal task events into one calm phase", () => {

@@ -2,12 +2,21 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Script } from "node:vm";
 import * as ts from "typescript";
-import { describe, expect, it } from "vitest";
-import { getCalmBuilderStatus, getEditorWorkStatus } from "../lib/builder-calm-status";
+import { describe, expect, it, vi } from "vitest";
+import {
+  getCalmBuilderStatus,
+  getEditorWorkStatus,
+  reconcileEditorRunReceipt,
+  type CalmBuilderPhase,
+  type EditorRunContext,
+  type EditorRunReceipt,
+} from "../lib/builder-calm-status";
+import { requestConfirmedTaskStop } from "./projects/components/confirmed-task-stop";
 
 const source = readFileSync(path.join(process.cwd(), "src/pages/projects/[id].tsx"), "utf8");
 
-// Evaluate the actual project-page call so a helper-only fix cannot miss its caller.
+// Execute the actual phase derivation, status call and Stop callback. Injecting
+// an already chosen phase would miss task-owned image state surviving Stop.
 const parsed = ts.createSourceFile(
   "project.tsx",
   source,
@@ -15,30 +24,169 @@ const parsed = ts.createSourceFile(
   true,
   ts.ScriptKind.TSX,
 );
-const initializers: ts.Expression[] = [];
+const initializerNames = new Set([
+  "isCreatingImages",
+  "visibleCalmPhase",
+  "calmStatusText",
+  "handleStopStream",
+]);
+const initializers = new Map<string, ts.Expression>();
 function visit(node: ts.Node): void {
   if (
     ts.isVariableDeclaration(node) &&
-    node.name.getText(parsed) === "calmStatusText" &&
+    initializerNames.has(node.name.getText(parsed)) &&
     node.initializer
   ) {
-    initializers.push(node.initializer);
+    const name = node.name.getText(parsed);
+    if (initializers.has(name)) throw new Error(`Duplicate project initializer: ${name}`);
+    initializers.set(name, node.initializer);
   }
   ts.forEachChild(node, visit);
 }
 visit(parsed);
-if (initializers.length !== 1)
-  throw new Error("Expected the actual project calm-status initializer");
+function initializer(name: string): string {
+  const expression = initializers.get(name);
+  if (!expression) throw new Error(`Missing actual project initializer: ${name}`);
+  return expression.getText(parsed);
+}
 const compiled = ts.transpileModule(
-  "(function (context) { const { visibleCalmPhase, calmFileCount, previewSyncPending, editorRunContext } = context; return " +
-    initializers[0].getText(parsed) +
+  "(function (context) { const { liveImageGenerating = false, projectImages = { isGenerating: false }, isBusy = false, pendingIsConverse = false, pendingIsPlan = false, calmPhase = 'idle', calmFileCount = 0, previewSyncPending = false, editorRunContext } = context; const isCreatingImages = " +
+    initializer("isCreatingImages") +
+    "; const visibleCalmPhase = " +
+    initializer("visibleCalmPhase") +
+    "; return " +
+    initializer("calmStatusText") +
     "; })",
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } },
 );
 const projectCalmStatus = new Script(compiled.outputText).runInNewContext(
   { getCalmBuilderStatus },
   { timeout: 1_000 },
-) as (context: Record<string, unknown>) => string;
+) as (context: {
+  liveImageGenerating?: boolean;
+  projectImages?: { isGenerating: boolean };
+  isBusy?: boolean;
+  pendingIsConverse?: boolean;
+  pendingIsPlan?: boolean;
+  calmPhase?: CalmBuilderPhase;
+  calmFileCount?: number;
+  previewSyncPending?: boolean;
+  editorRunContext: EditorRunContext;
+}) => string;
+
+const stopBindings = [
+  "activeTaskId",
+  "cancelTask",
+  "pendingFeedTaskIdRef",
+  "streamAbortRef",
+  "taskEventSourceRef",
+  "setLiveCodeBuffer",
+  "setIsStreaming",
+  "setStreamingText",
+  "setStreamReconnectAttempt",
+  "setStreamError",
+  "setStreamErrorStatus",
+  "setPendingIsConverse",
+  "pendingIsConverseRef",
+  "projectId",
+  "editorRunGenerationRef",
+  "editorRunScopeRef",
+  "requestConfirmedTaskStop",
+  "setEditorRunReceipt",
+  "setLiveRunTerminalEvent",
+  "setLiveImageGenerating",
+  "setPendingBuildStartedAt",
+  "pendingIsPlanRef",
+  "setPendingIsPlan",
+  "queryClient",
+  "toast",
+];
+const compiledStop = ts.transpileModule(
+  "(function (context) { const { " +
+    stopBindings.join(", ") +
+    " } = context; return " +
+    initializer("handleStopStream") +
+    "; })",
+  { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } },
+);
+const projectStop = new Script(compiledStop.outputText).runInNewContext(
+  {
+    useCallback: (callback: () => void) => callback,
+    reconcileEditorRunReceipt,
+    getListTasksQueryKey: (id: number) => ["tasks", id],
+    getListMessagesQueryKey: (id: number) => ["messages", id],
+  },
+  { timeout: 1_000 },
+) as (context: Record<string, unknown>) => () => void;
+
+function imageStopHarness(cancel: () => Promise<unknown> = async () => undefined) {
+  const task = { projectId: 61, id: 329, status: "building" };
+  let receipt: EditorRunReceipt | null = { projectId: 61, taskId: 329, phase: "images" };
+  let liveImageGenerating = true;
+  let pendingStop: Promise<void> | undefined;
+  const close = vi.fn();
+  const toast = vi.fn();
+  const cancelMutation = vi.fn(cancel);
+  const stop = projectStop({
+    projectId: 61,
+    activeTaskId: 329,
+    cancelTask: { isPending: false, mutateAsync: cancelMutation },
+    pendingFeedTaskIdRef: { current: 329 },
+    streamAbortRef: { current: { abort: vi.fn() } },
+    taskEventSourceRef: { current: { close } },
+    pendingIsConverseRef: { current: false },
+    pendingIsPlanRef: { current: false },
+    editorRunGenerationRef: { current: 1 },
+    editorRunScopeRef: { current: { projectId: 61, taskId: 329 } },
+    requestConfirmedTaskStop: (input: Parameters<typeof requestConfirmedTaskStop>[0]) => {
+      pendingStop = requestConfirmedTaskStop(input);
+      return pendingStop;
+    },
+    setEditorRunReceipt: (
+      update: (current: EditorRunReceipt | null) => EditorRunReceipt | null,
+    ) => {
+      receipt = update(receipt);
+    },
+    setLiveImageGenerating: (value: boolean) => {
+      liveImageGenerating = value;
+    },
+    setLiveCodeBuffer: vi.fn(),
+    setIsStreaming: vi.fn(),
+    setStreamingText: vi.fn(),
+    setStreamReconnectAttempt: vi.fn(),
+    setStreamError: vi.fn(),
+    setStreamErrorStatus: vi.fn(),
+    setPendingIsConverse: vi.fn(),
+    setLiveRunTerminalEvent: vi.fn(),
+    setPendingBuildStartedAt: vi.fn(),
+    setPendingIsPlan: vi.fn(),
+    queryClient: { invalidateQueries: vi.fn(async () => undefined) },
+    toast,
+  });
+  return {
+    close,
+    toast,
+    cancelMutation,
+    async stop() {
+      stop();
+      if (!pendingStop) throw new Error("The actual Stop callback did not request cancellation");
+      await pendingStop;
+    },
+    status(previewSyncPending: boolean, independentImages = false) {
+      const editorRunContext = { projectId: 61, task, receipt };
+      return {
+        header: getEditorWorkStatus(editorRunContext).label,
+        chat: projectCalmStatus({
+          liveImageGenerating,
+          projectImages: { isGenerating: independentImages },
+          isBusy: true,
+          previewSyncPending,
+          editorRunContext,
+        }),
+      };
+    },
+  };
+}
 
 describe("project header status truth", () => {
   it("distinguishes the last build result from the live runtime state", () => {
@@ -78,7 +226,8 @@ describe("project header status truth", () => {
     };
     expect(
       projectCalmStatus({
-        visibleCalmPhase: "building",
+        isBusy: true,
+        calmPhase: "building",
         calmFileCount: 4,
         previewSyncPending: true,
         editorRunContext,
@@ -90,14 +239,15 @@ describe("project header status truth", () => {
   it("accepts persisted failure without a stream receipt and ignores an older run's terminal", () => {
     expect(
       projectCalmStatus({
-        visibleCalmPhase: "idle",
+        isBusy: false,
         previewSyncPending: true,
         editorRunContext: { projectId: 61, task: { projectId: 61, id: 329, status: "failed" } },
       }),
     ).toBe("Request failed");
     expect(
       projectCalmStatus({
-        visibleCalmPhase: "building",
+        isBusy: true,
+        calmPhase: "building",
         previewSyncPending: true,
         editorRunContext: {
           projectId: 61,
@@ -111,10 +261,52 @@ describe("project header status truth", () => {
   it("does not call a successful run's preview ready before reconciliation completes", () => {
     expect(
       projectCalmStatus({
-        visibleCalmPhase: "idle",
+        isBusy: false,
         previewSyncPending: true,
         editorRunContext: { projectId: 61, task: { projectId: 61, id: 329, status: "completed" } },
       }),
     ).toBe("Updating preview\u2026");
+  });
+
+  it.each([false, true])(
+    "confirmed Stop ends task-owned image progress with pending preview %s",
+    async (previewSyncPending) => {
+      const run = imageStopHarness();
+      expect(run.status(previewSyncPending).chat).toBe(
+        previewSyncPending ? "Updating preview\u2026" : "Creating images for your app...",
+      );
+      await run.stop();
+      expect(run.cancelMutation).toHaveBeenCalledWith({ id: 61, taskId: 329 });
+      expect(run.close).toHaveBeenCalledTimes(1);
+      expect(run.status(previewSyncPending)).toEqual({
+        header: "Run cancelled",
+        chat: "Run cancelled",
+      });
+    },
+  );
+
+  it("preserves independently active images after the app task is cancelled", async () => {
+    const run = imageStopHarness();
+    await run.stop();
+    expect(run.status(false, true)).toEqual({
+      header: "Run cancelled",
+      chat: "Creating images for your app...",
+    });
+    expect(run.status(false, false).chat).toBe("Run cancelled");
+  });
+
+  it("does not claim cancellation or close the feed when the server rejects Stop", async () => {
+    const run = imageStopHarness(async () => {
+      throw new Error("Stop unavailable");
+    });
+    await run.stop();
+    expect(run.close).not.toHaveBeenCalled();
+    expect(run.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Stop was not confirmed" }),
+    );
+    expect(run.status(false)).toEqual({
+      header: "Creating images for your app...",
+      chat: "Creating images for your app...",
+    });
   });
 });
