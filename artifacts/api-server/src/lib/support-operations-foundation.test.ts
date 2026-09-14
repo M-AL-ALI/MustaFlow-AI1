@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 process.env.ENCRYPTION_KEY = process.env.ENCRYPTION_KEY ?? Buffer.alloc(32, 11).toString("base64");
@@ -10,6 +11,64 @@ afterEach(() => {
 
 function source(relative: string): string {
   return readFileSync(new URL(relative, import.meta.url), "utf8");
+}
+
+function inspectConsentBeforeProjectWrites(text: string) {
+  const file = ts.createSourceFile("jobs.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const runJob = file.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === "runJob",
+  );
+  if (!runJob?.body) throw new Error("Missing runJob body");
+  const writes: ts.CallExpression[] = [];
+  const guards: ts.CallExpression[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      if (node.expression.text === "writeProjectFilesAtomically") writes.push(node);
+      if (node.expression.text === "assertSupportGrantStillAuthorizesMutation") guards.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(runJob.body);
+  if (writes.length === 0) throw new Error("No project-file writes found");
+  for (const write of writes) {
+    const awaited = write.parent;
+    if (!ts.isAwaitExpression(awaited)) throw new Error("Project-file write is not awaited");
+    let statement: ts.Statement | undefined;
+    if (ts.isExpressionStatement(awaited.parent)) {
+      statement = awaited.parent;
+    } else if (
+      ts.isVariableDeclaration(awaited.parent) &&
+      awaited.parent.initializer === awaited &&
+      ts.isVariableDeclarationList(awaited.parent.parent) &&
+      awaited.parent.parent.declarations.length === 1 &&
+      (awaited.parent.parent.flags & ts.NodeFlags.Const) !== 0 &&
+      ts.isVariableStatement(awaited.parent.parent.parent)
+    ) {
+      statement = awaited.parent.parent.parent;
+    }
+    if (!statement || !ts.isBlock(statement.parent)) {
+      throw new Error("Project-file write must be a standalone awaited statement or const receipt");
+    }
+    const previous =
+      statement.parent.statements[statement.parent.statements.indexOf(statement) - 1];
+    if (
+      !previous ||
+      !ts.isExpressionStatement(previous) ||
+      !ts.isAwaitExpression(previous.expression) ||
+      !ts.isCallExpression(previous.expression.expression) ||
+      !ts.isIdentifier(previous.expression.expression.expression) ||
+      previous.expression.expression.expression.text !==
+        "assertSupportGrantStillAuthorizesMutation" ||
+      previous.expression.expression.arguments.length !== 0
+    ) {
+      throw new Error("Project-file write lacks its immediately preceding awaited consent check");
+    }
+  }
+  if (guards.length !== writes.length + 1) {
+    throw new Error("Expected one entry consent check plus one check for every write");
+  }
+  return { writes, guards };
 }
 
 describe("consented support operations", () => {
@@ -144,21 +203,62 @@ describe("consented support operations", () => {
     expect(jobs).toContain("needsFix && !isArchitectAutoFix && !input.supportSessionId");
     expect(jobs).toContain("hasMomentNotice && !input.supportSessionId");
     expect(jobs).toContain("!isAutoFixTask &&\n                !input.supportSessionId");
-    const runJob = jobs.slice(
-      jobs.indexOf("export async function runJob"),
-      jobs.indexOf("async function runPostWriteMigrationSync"),
-    );
-    const projectFileCommits = runJob.match(/await writeProjectFilesAtomically\(/g) ?? [];
-    const consentedProjectFileCommits =
-      runJob.match(
-        /await assertSupportGrantStillAuthorizesMutation\(\);\s*await writeProjectFilesAtomically\(/g,
-      ) ?? [];
-    expect(projectFileCommits.length).toBeGreaterThan(0);
-    expect(consentedProjectFileCommits).toHaveLength(projectFileCommits.length);
-    expect(runJob.match(/await assertSupportGrantStillAuthorizesMutation\(\);/g)).toHaveLength(
-      projectFileCommits.length + 1,
-    );
+    const { writes, guards } = inspectConsentBeforeProjectWrites(jobs);
+    expect(writes).toHaveLength(4);
+    expect(guards).toHaveLength(writes.length + 1);
     expect(jobs).toContain('event: applied ? "zero_change_applied" : "zero_change_interrupted"');
+  });
+
+  it.each([
+    "await writeProjectFilesAtomically({});",
+    "const receipt = await writeProjectFilesAtomically({});",
+  ])("accepts adjacent consent with a bare write or an acknowledged receipt: %s", (write) => {
+    const inspected = inspectConsentBeforeProjectWrites(`export async function runJob() {
+      await assertSupportGrantStillAuthorizesMutation();
+      await assertSupportGrantStillAuthorizesMutation();
+      ${write}
+    }`);
+    expect(inspected.writes).toHaveLength(1);
+    expect(inspected.guards).toHaveLength(2);
+  });
+
+  it.each([
+    [
+      "missing entry check",
+      "await assertSupportGrantStillAuthorizesMutation(); await writeProjectFilesAtomically({});",
+    ],
+    [
+      "missing adjacent check",
+      "await assertSupportGrantStillAuthorizesMutation(); await otherWork(); await writeProjectFilesAtomically({});",
+    ],
+    [
+      "unawaited consent",
+      "await assertSupportGrantStillAuthorizesMutation(); assertSupportGrantStillAuthorizesMutation(); await writeProjectFilesAtomically({});",
+    ],
+    [
+      "intervening mutation",
+      "await assertSupportGrantStillAuthorizesMutation(); await assertSupportGrantStillAuthorizesMutation(); await otherWork(); await writeProjectFilesAtomically({});",
+    ],
+    [
+      "different statement block",
+      "await assertSupportGrantStillAuthorizesMutation(); { await assertSupportGrantStillAuthorizesMutation(); } await writeProjectFilesAtomically({});",
+    ],
+    [
+      "conditional consent",
+      "await assertSupportGrantStillAuthorizesMutation(); if (allowed) { await assertSupportGrantStillAuthorizesMutation(); } await writeProjectFilesAtomically({});",
+    ],
+    [
+      "unawaited write",
+      "await assertSupportGrantStillAuthorizesMutation(); await assertSupportGrantStillAuthorizesMutation(); writeProjectFilesAtomically({});",
+    ],
+    [
+      "additional initializer",
+      "await assertSupportGrantStillAuthorizesMutation(); await assertSupportGrantStillAuthorizesMutation(); const receipt = await writeProjectFilesAtomically({}), other = otherWork();",
+    ],
+  ])("rejects a consent contract with %s", (_label, body) => {
+    expect(() =>
+      inspectConsentBeforeProjectWrites(`export async function runJob() { ${body} }`),
+    ).toThrow();
   });
 
   it("makes ticket closure proof-bearing and all three classes explicit", () => {

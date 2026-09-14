@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -13,6 +15,93 @@ const backend = readFileSync(
   resolve(here, "../../../nabuflow-runtime-worker/src/runtime-backend.ts"),
   "utf8",
 );
+
+const jobsSyntax = ts.createSourceFile(
+  "jobs.ts",
+  jobs,
+  ts.ScriptTarget.Latest,
+  true,
+  ts.ScriptKind.TS,
+);
+
+function nodesOf<T extends ts.Node>(root: ts.Node, predicate: (node: ts.Node) => node is T): T[] {
+  const found: T[] = [];
+  const visit = (node: ts.Node) => {
+    if (predicate(node)) found.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(root);
+  return found;
+}
+
+function reportProperty(object: ts.ObjectLiteralExpression, name: string): ts.Expression {
+  const properties = object.properties.filter(
+    (node): node is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(node) &&
+      (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+      node.name.text === name,
+  );
+  if (properties.length !== 1) throw new Error(`Expected one ${name} property`);
+  return properties[0]!.initializer;
+}
+
+function failureReportExpressions() {
+  const declarations = nodesOf(jobsSyntax, ts.isVariableDeclaration).filter(
+    (node) => ts.isIdentifier(node.name) && node.name.text === "failedReport",
+  );
+  const report = declarations[0]?.initializer;
+  if (declarations.length !== 1 || !report || !ts.isObjectLiteralExpression(report)) {
+    throw new Error("Expected one failedReport object");
+  }
+  const spreads = report.properties.filter(ts.isSpreadAssignment);
+  const model = spreads.find(
+    (node) => node.expression.getText(jobsSyntax) === "(modelFailureReport ?? {})",
+  );
+  const loop = spreads.find((node) =>
+    node.expression.getText(jobsSyntax).includes("sealedFailureReport.agentLoop"),
+  );
+  if (!model || !loop) throw new Error("Missing original model or loop retention expression");
+  const terminalCalls = nodesOf(jobsSyntax, ts.isCallExpression).filter(
+    (node) =>
+      ts.isIdentifier(node.expression) && node.expression.text === "persistFailedZeroTerminal",
+  );
+  const terminalReports = terminalCalls
+    .flatMap((call) => {
+      const argument = call.arguments[0];
+      if (!argument || !ts.isObjectLiteralExpression(argument)) return [];
+      const taskUpdate = reportProperty(argument, "taskUpdate");
+      if (!ts.isObjectLiteralExpression(taskUpdate))
+        throw new Error("Expected terminal taskUpdate object");
+      return [reportProperty(taskUpdate, "report")];
+    })
+    .filter((node) => ts.isIdentifier(node) && node.text === "failedReport");
+  const laterReports = nodesOf(jobsSyntax, ts.isObjectLiteralExpression).filter((object) =>
+    object.properties.some(
+      (node) =>
+        ts.isSpreadAssignment(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "failedReport",
+    ),
+  );
+  if (terminalReports.length !== 1 || laterReports.length !== 1) {
+    throw new Error("Expected failedReport in both terminal and later persistence payloads");
+  }
+  const later = laterReports[0]!;
+  if (
+    !ts.isCallExpression(later.parent) ||
+    !ts.isPropertyAccessExpression(later.parent.expression) ||
+    later.parent.expression.getText(jobsSyntax) !== "JSON.stringify"
+  ) {
+    throw new Error("Later report must be the persisted JSON payload");
+  }
+  return {
+    warnings: reportProperty(report, "warnings"),
+    model: model.expression,
+    loop: loop.expression,
+    terminal: terminalReports[0]!,
+    later,
+  };
+}
 
 describe("Zero sealed generation product wiring", () => {
   it("propagates classified model failures before post-loop checks or either sealed wrapper", () => {
@@ -52,13 +141,103 @@ describe("Zero sealed generation product wiring", () => {
     expect(jobs).toContain("...(modelFailureReport ?? {})");
     expect(jobs).toContain("completionKind: modelRequestFailure.completionKind");
     expect(jobs).toContain("...(modelFailureReport ?? {})");
-    expect(jobs).toMatch(
-      /warnings:\s*modelFailureReport\?\.warnings\s*\?\?\s*sealedFailureReport\?\.warnings\s*\?\?\s*\[\]/,
-    );
+    const { warnings } = failureReportExpressions();
+    expect(ts.isArrayLiteralExpression(warnings)).toBe(true);
+    if (!ts.isArrayLiteralExpression(warnings)) throw new Error("Expected additive warning array");
+    expect(
+      warnings.elements.map((element) => {
+        if (!ts.isSpreadElement(element)) throw new Error("Expected ordered warning spreads");
+        let expression = element.expression;
+        while (ts.isParenthesizedExpression(expression)) expression = expression.expression;
+        return expression.getText(jobsSyntax).replace(/\s+/g, "");
+      }),
+    ).toEqual([
+      "modelFailureReport?.warnings??sealedFailureReport?.warnings??[]",
+      "committedFileReport?.warnings??[]",
+    ]);
     expect(jobs).toMatch(
       /modelFailureReport\?\.suggestions\s*\?\?\s*sealedProjectRecovery\?\.suggestions\s*\?\?\s*buildFailureFixSuggestions\(\)/,
     );
   });
+
+  it.each([
+    {
+      name: "model report",
+      model: { warnings: ["model"], agentLoop: { source: "model" } },
+      sealed: { warnings: ["sealed"], agentLoop: { source: "sealed" } },
+      expected: ["model"],
+      expectedLoop: { source: "model" },
+    },
+    {
+      name: "sealed fallback",
+      model: undefined,
+      sealed: { warnings: ["sealed"], agentLoop: { source: "sealed" } },
+      expected: ["sealed"],
+      expectedLoop: { source: "sealed" },
+    },
+    {
+      name: "neither report",
+      model: undefined,
+      sealed: undefined,
+      expected: [],
+      expectedLoop: undefined,
+    },
+    {
+      name: "explicit empty model warnings",
+      model: { warnings: [], agentLoop: { source: "model" } },
+      sealed: { warnings: ["sealed"], agentLoop: { source: "sealed" } },
+      expected: [],
+      expectedLoop: { source: "model" },
+    },
+    {
+      name: "null model warnings",
+      model: { warnings: null, agentLoop: { source: "model" } },
+      sealed: { warnings: ["sealed"], agentLoop: { source: "sealed" } },
+      expected: ["sealed"],
+      expectedLoop: { source: "model" },
+    },
+    {
+      name: "missing model warnings",
+      model: {},
+      sealed: { warnings: ["sealed"], agentLoop: { source: "sealed" } },
+      expected: ["sealed"],
+      expectedLoop: undefined,
+    },
+  ])(
+    "retains $name warnings and loop evidence in both persistence payload expressions",
+    ({ model, sealed, expected, expectedLoop }) => {
+      const expressions = failureReportExpressions();
+      for (const receiptWarnings of [undefined, [], ["Files saved; build not proven"]]) {
+        const reports = {
+          modelFailureReport: model,
+          sealedFailureReport: sealed,
+          committedFileReport:
+            receiptWarnings === undefined ? undefined : { warnings: receiptWarnings },
+        };
+        const evaluate = (expression: ts.Expression, context: object) =>
+          runInNewContext(`(${expression.getText(jobsSyntax)})`, context, { timeout: 1_000 });
+        const failedReport = {
+          ...evaluate(expressions.model, reports),
+          ...evaluate(expressions.loop, reports),
+          warnings: evaluate(expressions.warnings, reports),
+        };
+        const context = {
+          failedReport,
+          failureTerminal: {},
+          zeroTerminalRef: () => "terminal-proof",
+          suggestions: ["Retry the build"],
+          sealedProjectRecovery: undefined,
+        };
+        for (const payload of [
+          evaluate(expressions.terminal, context),
+          evaluate(expressions.later, context),
+        ]) {
+          expect(payload.warnings).toEqual([...expected, ...(receiptWarnings ?? [])]);
+          expect(payload.agentLoop).toEqual(expectedLoop);
+        }
+      }
+    },
+  );
 
   it("selects the target from deployment state and never from the public route", () => {
     expect(jobs).toContain("resolveZeroGenerationTarget(process.env)");
