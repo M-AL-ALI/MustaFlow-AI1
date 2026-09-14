@@ -34,15 +34,42 @@ function nodesOf<T extends ts.Node>(root: ts.Node, predicate: (node: ts.Node) =>
   return found;
 }
 
-function reportProperty(object: ts.ObjectLiteralExpression, name: string): ts.Expression {
+function optionalReportProperty(
+  object: ts.ObjectLiteralExpression,
+  name: string,
+): ts.Expression | undefined {
   const properties = object.properties.filter(
     (node): node is ts.PropertyAssignment =>
       ts.isPropertyAssignment(node) &&
       (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
       node.name.text === name,
   );
-  if (properties.length !== 1) throw new Error(`Expected one ${name} property`);
-  return properties[0]!.initializer;
+  if (properties.length > 1) throw new Error(`Expected at most one ${name} property`);
+  return properties[0]?.initializer;
+}
+
+function reportProperty(object: ts.ObjectLiteralExpression, name: string): ts.Expression {
+  const property = optionalReportProperty(object, name);
+  if (!property) throw new Error(`Expected one ${name} property`);
+  return property;
+}
+
+function terminalFailureReport(root: ts.Node): ts.Expression {
+  const reports = nodesOf(root, ts.isCallExpression)
+    .filter(
+      (node) =>
+        ts.isIdentifier(node.expression) && node.expression.text === "persistFailedZeroTerminal",
+    )
+    .flatMap((call) => {
+      const argument = call.arguments[0];
+      if (!argument || !ts.isObjectLiteralExpression(argument)) return [];
+      const update = optionalReportProperty(argument, "taskUpdate");
+      if (!update || !ts.isObjectLiteralExpression(update)) return [];
+      const report = optionalReportProperty(update, "report");
+      return report && ts.isIdentifier(report) && report.text === "failedReport" ? [report] : [];
+    });
+  if (reports.length !== 1) throw new Error("Expected one failedReport terminal payload");
+  return reports[0]!;
 }
 
 function failureReportExpressions() {
@@ -61,20 +88,7 @@ function failureReportExpressions() {
     node.expression.getText(jobsSyntax).includes("sealedFailureReport.agentLoop"),
   );
   if (!model || !loop) throw new Error("Missing original model or loop retention expression");
-  const terminalCalls = nodesOf(jobsSyntax, ts.isCallExpression).filter(
-    (node) =>
-      ts.isIdentifier(node.expression) && node.expression.text === "persistFailedZeroTerminal",
-  );
-  const terminalReports = terminalCalls
-    .flatMap((call) => {
-      const argument = call.arguments[0];
-      if (!argument || !ts.isObjectLiteralExpression(argument)) return [];
-      const taskUpdate = reportProperty(argument, "taskUpdate");
-      if (!ts.isObjectLiteralExpression(taskUpdate))
-        throw new Error("Expected terminal taskUpdate object");
-      return [reportProperty(taskUpdate, "report")];
-    })
-    .filter((node) => ts.isIdentifier(node) && node.text === "failedReport");
+  const terminal = terminalFailureReport(jobsSyntax);
   const laterReports = nodesOf(jobsSyntax, ts.isObjectLiteralExpression).filter((object) =>
     object.properties.some(
       (node) =>
@@ -83,8 +97,8 @@ function failureReportExpressions() {
         node.expression.text === "failedReport",
     ),
   );
-  if (terminalReports.length !== 1 || laterReports.length !== 1) {
-    throw new Error("Expected failedReport in both terminal and later persistence payloads");
+  if (laterReports.length !== 1) {
+    throw new Error("Expected one later failedReport persistence payload");
   }
   const later = laterReports[0]!;
   if (
@@ -98,12 +112,56 @@ function failureReportExpressions() {
     warnings: reportProperty(report, "warnings"),
     model: model.expression,
     loop: loop.expression,
-    terminal: terminalReports[0]!,
+    terminal,
     later,
   };
 }
 
 describe("Zero sealed generation product wiring", () => {
+  it.each([
+    ["missing report", "persistFailedZeroTerminal({ taskUpdate: { tokenCount: 0 } });"],
+    ["missing update", "persistFailedZeroTerminal({});"],
+    ["another report", "persistFailedZeroTerminal({ taskUpdate: { report: otherReport } });"],
+    ["another update", "persistFailedZeroTerminal({ taskUpdate: otherUpdate });"],
+  ])("selects the intended report despite an unrelated payload with %s", (_label, unrelated) => {
+    const fixture = ts.createSourceFile(
+      "terminal-fixture.ts",
+      `${unrelated}\npersistFailedZeroTerminal({ taskUpdate: { report: failedReport } });`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(terminalFailureReport(fixture).getText(fixture)).toBe("failedReport");
+  });
+
+  it.each([
+    [
+      "missing intended report",
+      "persistFailedZeroTerminal({ taskUpdate: { report: otherReport } });",
+    ],
+    [
+      "duplicate intended payload",
+      "persistFailedZeroTerminal({ taskUpdate: { report: failedReport } }); persistFailedZeroTerminal({ taskUpdate: { report: failedReport } });",
+    ],
+    [
+      "overridden report",
+      "persistFailedZeroTerminal({ taskUpdate: { report: failedReport, report: otherReport } });",
+    ],
+    [
+      "overridden update",
+      "persistFailedZeroTerminal({ taskUpdate: { report: failedReport }, taskUpdate: {} });",
+    ],
+  ])("rejects a terminal report contract with %s", (_label, text) => {
+    const fixture = ts.createSourceFile(
+      "terminal-fixture.ts",
+      text,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(() => terminalFailureReport(fixture)).toThrow();
+  });
+
   it("propagates classified model failures before post-loop checks or either sealed wrapper", () => {
     const failureThrow = loop.indexOf("throw modelRequestFailure;");
     const postLoopChecks = loop.indexOf("// \u2500\u2500 Post-loop: run required checks");
