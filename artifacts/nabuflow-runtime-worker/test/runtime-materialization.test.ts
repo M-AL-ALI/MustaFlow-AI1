@@ -345,8 +345,55 @@ describe("aggregate runtime materialization", () => {
         `release:${next}`,
       );
 
-      const replay = await runMaterializer(fixture, next);
+      const replay = await runMaterializer(fixture, next, {
+        rollbackReleaseSha256: current,
+      });
       expect(JSON.parse(replay.stdout)).toMatchObject({ ok: true, releasesRetained: 1 });
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the recorded rollback on same-release replay instead of a stale durable hint", async () => {
+    const fixture = await materializerFixture();
+    const current = "1".repeat(64);
+    const next = "2".repeat(64);
+    const staleHint = "3".repeat(64);
+    try {
+      await runMaterializer(fixture, current);
+      await runMaterializer(fixture, next, { rollbackReleaseSha256: current });
+
+      const replay = await runMaterializer(fixture, next, {
+        rollbackReleaseSha256: staleHint,
+      });
+
+      expect(JSON.parse(replay.stdout)).toMatchObject({ ok: true, releasesRetained: 2 });
+      expect(await managedReleaseNames(fixture)).toEqual([current, next]);
+      await expect(
+        readFile(`${fixture.releaseBase}/.release-state.json`, "utf8").then(JSON.parse),
+      ).resolves.toEqual({ currentReleaseSha256: next, rollbackReleaseSha256: current });
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not discard a missing recorded rollback during same-release replay", async () => {
+    const fixture = await materializerFixture();
+    const current = "4".repeat(64);
+    const next = "5".repeat(64);
+    try {
+      await runMaterializer(fixture, current);
+      await runMaterializer(fixture, next, { rollbackReleaseSha256: current });
+      await rm(`${fixture.releaseBase}/${current}`, { recursive: true, force: false });
+
+      await expect(
+        runMaterializer(fixture, next, { rollbackReleaseSha256: "6".repeat(64) }),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining("rollback release is unavailable"),
+      });
+      await expect(
+        readFile(`${fixture.releaseBase}/.release-state.json`, "utf8").then(JSON.parse),
+      ).resolves.toEqual({ currentReleaseSha256: next, rollbackReleaseSha256: current });
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }

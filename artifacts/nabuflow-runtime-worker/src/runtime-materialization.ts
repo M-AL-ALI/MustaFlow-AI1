@@ -764,12 +764,12 @@ try {
   const localExplicitRollback = freshFilesystem && !completeReleases.some((entry) => entry.name === explicitRollback)
     ? ""
     : explicitRollback;
-  const knownRollback =
-    priorCurrent ||
-    localExplicitRollback ||
-    (releaseState.currentReleaseSha256 === manifest.sealedArtifactSha256
-      ? releaseState.rollbackReleaseSha256
-      : "");
+  // Once this release is recorded locally, its recorded rollback (including no
+  // rollback on a cold disk) is authoritative. A repeated delivery can still
+  // carry the older durable hint when its completion response was lost.
+  const knownRollback = releaseState.currentReleaseSha256 === manifest.sealedArtifactSha256
+    ? releaseState.rollbackReleaseSha256
+    : priorCurrent || localExplicitRollback;
   if (knownRollback !== "") {
     if (!completeReleases.some((entry) => entry.name === knownRollback)) {
       fail("rollback release is unavailable");
