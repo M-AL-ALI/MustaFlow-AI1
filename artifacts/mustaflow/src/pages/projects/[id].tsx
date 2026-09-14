@@ -151,6 +151,10 @@ import {
   type BuilderComposerIntent,
   type BuilderReceiptIntent,
 } from "@/lib/builder-followup-submit";
+import {
+  builderClarificationReply,
+  builderPlanExecutionOptions,
+} from "@/lib/builder-explicit-actions";
 import { builderIntentChipLabel } from "@/lib/builder-intent-chip";
 import { loadBuilderDeepReasoning, saveBuilderDeepReasoning } from "@/lib/builder-mode-persistence";
 import {
@@ -3680,7 +3684,9 @@ export default function ProjectWorkspacePage() {
   const runPlanned = useCallback(
     (editedPrompt: string, mode: AgentMode, background: boolean) => {
       setAgentMode(mode);
-      send(editedPrompt, { planMode: false, background, agentMode: mode });
+      setPlanMode(false);
+      setAgentIdentity("main");
+      send(editedPrompt, { ...builderPlanExecutionOptions(), background, agentMode: mode });
     },
     [send],
   );
@@ -4635,7 +4641,21 @@ export default function ProjectWorkspacePage() {
                                           {opts.map((opt) => (
                                             <button
                                               key={opt}
-                                              onClick={() => send(opt)}
+                                              onClick={() => {
+                                                const originalRequest = visibleMsgs
+                                                  .slice(0, msgIdx)
+                                                  .reverse()
+                                                  .find(
+                                                    (message) => message.role === "user",
+                                                  )?.content;
+                                                const reply = builderClarificationReply(
+                                                  opt,
+                                                  originalRequest,
+                                                );
+                                                setPlanMode(false);
+                                                setAgentIdentity("main");
+                                                send(reply.content, reply.options);
+                                              }}
                                               className="px-2.5 py-1 rounded-full text-[10px] border border-primary/30 bg-primary/8 text-primary hover:bg-primary/15 hover:border-primary/50 transition-colors font-medium"
                                             >
                                               {opt}
