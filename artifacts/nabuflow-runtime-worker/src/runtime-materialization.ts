@@ -756,9 +756,17 @@ try {
   const explicitRollback = rollbackReleaseSha256 === manifest.sealedArtifactSha256 ? "" : rollbackReleaseSha256;
   const priorCurrent = releaseState.currentReleaseSha256 === manifest.sealedArtifactSha256 ? "" : releaseState.currentReleaseSha256;
   const protectedReleases = new Set([manifest.sealedArtifactSha256]);
+  // The durable runtime can outlive a container's writable disk. On a genuinely
+  // fresh filesystem its prior release is a remote recovery hint, not a local
+  // rollback copy. Never relax missing-rollback checks when local state or other
+  // releases exist: those indicate an inconsistent, rather than fresh, disk.
+  const freshFilesystem = releaseState.currentReleaseSha256 === "" && completeReleases.length === 1;
+  const localExplicitRollback = freshFilesystem && !completeReleases.some((entry) => entry.name === explicitRollback)
+    ? ""
+    : explicitRollback;
   const knownRollback =
     priorCurrent ||
-    explicitRollback ||
+    localExplicitRollback ||
     (releaseState.currentReleaseSha256 === manifest.sealedArtifactSha256
       ? releaseState.rollbackReleaseSha256
       : "");

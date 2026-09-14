@@ -327,6 +327,72 @@ describe("aggregate runtime materialization", () => {
     }
   });
 
+  it("materializes on a fresh container when the durable prior release is not on its disk", async () => {
+    const fixture = await materializerFixture();
+    const current = "a".repeat(64);
+    const next = "b".repeat(64);
+    try {
+      const result = await runMaterializer(fixture, next, {
+        rollbackReleaseSha256: current,
+      });
+
+      expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, releasesRetained: 1 });
+      expect(await managedReleaseNames(fixture)).toEqual([next]);
+      await expect(
+        readFile(`${fixture.releaseBase}/.release-state.json`, "utf8").then(JSON.parse),
+      ).resolves.toEqual({ currentReleaseSha256: next, rollbackReleaseSha256: null });
+      await expect(readFile(`${fixture.releaseBase}/${next}/app/server.mjs`, "utf8")).resolves.toBe(
+        `release:${next}`,
+      );
+
+      const replay = await runMaterializer(fixture, next);
+      expect(JSON.parse(replay.stdout)).toMatchObject({ ok: true, releasesRetained: 1 });
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("still fails closed when a locally recorded rollback disappears", async () => {
+    const fixture = await materializerFixture();
+    const current = "c".repeat(64);
+    const next = "d".repeat(64);
+    try {
+      await runMaterializer(fixture, current);
+      await rm(`${fixture.releaseBase}/${current}`, { recursive: true, force: false });
+
+      await expect(
+        runMaterializer(fixture, next, { rollbackReleaseSha256: current }),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining("rollback release is unavailable"),
+      });
+      await expect(
+        readFile(`${fixture.releaseBase}/.release-state.json`, "utf8").then(JSON.parse),
+      ).resolves.toEqual({ currentReleaseSha256: current, rollbackReleaseSha256: null });
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat an ambiguous release inventory as a fresh container", async () => {
+    const fixture = await materializerFixture();
+    const current = "e".repeat(64);
+    const orphan = "f".repeat(64);
+    const next = "0".repeat(64);
+    try {
+      await mkdir(`${fixture.releaseBase}/${orphan}`, { recursive: true });
+
+      await expect(
+        runMaterializer(fixture, next, { rollbackReleaseSha256: current }),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining("rollback release is unavailable"),
+      });
+      expect(await managedReleaseNames(fixture)).toEqual([next, orphan]);
+      await expect(access(`${fixture.releaseBase}/.release-state.json`)).rejects.toThrow();
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("serializes concurrent same-SHA attempts without deleting a peer stage or release", async () => {
     const fixture = await materializerFixture();
     const release = "1".repeat(64);
