@@ -3,6 +3,8 @@ import {
   ARTIFACT_COMMIT_SERVER_EXECUTION_DEADLINE_MS,
   DURABLE_OPERATION_LEASE_MS,
   DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
+  artifactCommitFailureSchema,
+  type ArtifactCommitFailure,
   sha256Hex,
   signControlRequest,
   type CapabilityDefinition,
@@ -570,12 +572,17 @@ export class MemoryCoordinator implements ControlCoordinator {
     ownerId: string,
     ownerGeneration: number,
     response: StoredHttpResponse,
+    _nowMs = TEST_NOW_MS,
+    failure?: ArtifactCommitFailure,
   ): Promise<"completed" | "already_terminal" | "not_owner"> {
     if (this.artifactCommitJobs.has(jobKey)) {
       const job = this.artifactCommitJobs.get(jobKey);
       if (job === undefined) return "not_owner";
       if (job.state !== "active") return "already_terminal";
       if (job.attempt !== ownerGeneration || job.ownerId !== ownerId) return "not_owner";
+      const parsedFailure = artifactCommitFailureSchema.safeParse(failure);
+      delete job.failure;
+      if (parsedFailure.success) job.failure = parsedFailure.data;
       await this.failArtifactCommit(jobKey, ownerId, response);
       return "completed";
     }

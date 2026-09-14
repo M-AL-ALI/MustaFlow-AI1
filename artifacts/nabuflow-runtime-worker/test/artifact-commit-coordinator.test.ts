@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ArtifactCommitFailure } from "@workspace/tenant-runtime-contracts";
 import { ControlDurableObject } from "../src/control-durable-object";
 import {
   DURABLE_OPERATION_DEPLOYMENT_DEFERRAL_CAP,
@@ -78,6 +79,93 @@ const claim = {
 afterEach(() => vi.useRealTimers());
 
 describe("artifact commit coordinator leases", () => {
+  it("fences and preserves bounded failure metadata with the terminal response", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const durable = coordinator();
+    const registered = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });
+    if (registered.state !== "new") throw new Error("expected new job");
+    const key = registered.job.jobKey;
+    expect(registered.job).not.toHaveProperty("failure");
+    await durable.claimDurableOperationDriver(key, "owner-1", 1_000);
+    const adopted = await durable.claimDurableOperationDriver(key, "owner-2", 17_000);
+    if (adopted.state !== "adopted") throw new Error("expected adopted job");
+    const failure: ArtifactCommitFailure = {
+      stage: "persist-unpack-complete",
+      errorClass: "RangeError",
+      materializationResultObserved: true,
+    };
+    const response = { status: 500, body: { ok: false, code: "internal_error" } };
+    await expect(
+      durable.failDurableOperation(key, "owner-1", 1, response, 18_000, failure),
+    ).resolves.toBe("not_owner");
+    expect(await durable.getArtifactCommit(key)).toMatchObject({
+      state: "active",
+      ownerId: "owner-2",
+    });
+    expect(await durable.getArtifactCommit(key)).not.toHaveProperty("failure");
+    await expect(
+      durable.failDurableOperation(key, "owner-2", adopted.job.attempt, response, 18_000, failure),
+    ).resolves.toBe("completed");
+    const savedFailure = { ...failure };
+    failure.errorClass = "UnknownError";
+    expect(await durable.getArtifactCommit(key)).toMatchObject({
+      state: "failed",
+      response,
+      failure: savedFailure,
+    });
+    await expect(
+      durable.failDurableOperation(
+        key,
+        "owner-2",
+        adopted.job.attempt,
+        { status: 502, body: { code: "late" } },
+        19_000,
+        failure,
+      ),
+    ).resolves.toBe("already_terminal");
+    expect(await durable.getArtifactCommit(key)).toMatchObject({ response, failure: savedFailure });
+  });
+
+  it("omits invalid diagnostic input without blocking terminal persistence or storing secrets", async () => {
+    const secret = "do-not-store-failure-secret-117";
+    const safe = {
+      stage: "materialization",
+      errorClass: "Error",
+      materializationResultObserved: false,
+    };
+    for (const invalid of [
+      { ...safe, message: secret },
+      { ...safe, errorClass: secret },
+      { ...safe, materializationResultObserved: secret },
+    ]) {
+      const storage = new MemoryDurableStorage();
+      const durable = coordinator(storage);
+      const registered = await durable.registerArtifactCommit({ ...claim, nowMs: 1_000 });
+      if (registered.state !== "new") throw new Error("expected new job");
+      const driver = await durable.claimDurableOperationDriver(
+        registered.job.jobKey,
+        "owner-1",
+        1_000,
+      );
+      if (driver.state !== "claimed") throw new Error("expected claimed job");
+      await expect(
+        durable.failDurableOperation(
+          registered.job.jobKey,
+          "owner-1",
+          driver.job.attempt,
+          { status: 500, body: { ok: false, code: "internal_error" } },
+          2_000,
+          invalid as unknown as ArtifactCommitFailure,
+        ),
+      ).resolves.toBe("completed");
+      const job = await durable.getArtifactCommit(registered.job.jobKey);
+      expect(job).toMatchObject({ state: "failed", response: { status: 500 } });
+      expect(job).not.toHaveProperty("failure");
+      expect(JSON.stringify([...(await storage.list({ prefix: "" }))])).not.toContain(secret);
+    }
+  });
+
   it("uses invocation-owned runtime guards without persisting orphan lock rows", async () => {
     const storage = new MemoryDurableStorage();
     const durable = coordinator(storage);

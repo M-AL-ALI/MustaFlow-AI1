@@ -11,6 +11,7 @@ import {
   RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
   durableOperationDiscoveryResponseSchema,
   artifactCommitDiagnosticsResponseSchema,
+  artifactCommitFailureSchema,
   runtimeManifestRestartDiagnosticsResponseSchema,
   runtimeStartDiagnosticsResponseSchema,
 } from "../src";
@@ -31,6 +32,62 @@ describe("artifact commit execution contract", () => {
     expect(
       DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS + DURABLE_OPERATION_OBSERVATION_MARGIN_MS,
     ).toBe(DURABLE_OPERATION_PROVIDER_BOUND_MS);
+  });
+
+  it("accepts legacy diagnostics and only bounded failure metadata on failed jobs", () => {
+    const legacy = {
+      ok: true,
+      job: {
+        kind: "layers-v1",
+        runtimeIdentity: "nrf-e919a75364398a44-p42-preview-primary",
+        sealedArtifactSha256: "a".repeat(64),
+        state: "failed",
+        checkpoint: "payloads-transferred",
+        attempt: 1,
+        leaseUntil: null,
+        deadline: "2026-08-10T00:04:30.000Z",
+        updatedAt: "2026-08-10T00:00:05.000Z",
+        terminal: { status: 500, code: "internal_error" },
+        events: [],
+      },
+    };
+    expect(artifactCommitDiagnosticsResponseSchema.parse(legacy)).toEqual(legacy);
+    const failure = {
+      stage: "persist-unpack-complete",
+      errorClass: "TypeError",
+      materializationResultObserved: true,
+    };
+    const enriched = { ...legacy, job: { ...legacy.job, failure } };
+    expect(artifactCommitDiagnosticsResponseSchema.parse(enriched)).toEqual(enriched);
+    for (const state of ["active", "succeeded"]) {
+      expect(
+        artifactCommitDiagnosticsResponseSchema.safeParse({
+          ...enriched,
+          job: { ...enriched.job, state },
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects secret-bearing extras, arbitrary class names, and non-boolean observation flags", () => {
+    const safe = {
+      stage: "materialization",
+      errorClass: "Error",
+      materializationResultObserved: false,
+    };
+    expect(artifactCommitFailureSchema.parse(safe)).toEqual(safe);
+    for (const key of ["message", "stack", "cause", "stdout", "stderr", "environment"]) {
+      expect(
+        artifactCommitFailureSchema.safeParse({ ...safe, [key]: "private-value-117" }).success,
+      ).toBe(false);
+    }
+    expect(
+      artifactCommitFailureSchema.safeParse({ ...safe, errorClass: "private-value-117" }).success,
+    ).toBe(false);
+    expect(
+      artifactCommitFailureSchema.safeParse({ ...safe, materializationResultObserved: "false" })
+        .success,
+    ).toBe(false);
   });
 
   it("accepts only the bounded sanitized diagnostic shape", () => {

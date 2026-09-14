@@ -2,12 +2,14 @@ import { DurableObject } from "cloudflare:workers";
 import { RuntimeExecutionRegistry, type RuntimeExecutionLease } from "./runtime-execution-guard";
 import {
   ARTIFACT_COMMIT_EVENT_LIMIT,
+  artifactCommitFailureSchema,
   DURABLE_OPERATION_LEASE_MS,
   DURABLE_OPERATION_QUEUE_WATCHDOG_MS,
   DURABLE_OPERATION_SERVER_EXECUTION_DEADLINE_MS,
   sha256Hex,
 } from "@workspace/tenant-runtime-contracts";
 import type {
+  ArtifactCommitFailure,
   RouteRecord,
   RuntimeReconciliationAuditRecord,
   RuntimeReconciliationObservation,
@@ -1284,8 +1286,17 @@ export class ControlDurableObject
     ownerGeneration: number,
     response: StoredHttpResponse,
     nowMs: number,
+    failure?: ArtifactCommitFailure,
   ): Promise<"completed" | "already_terminal" | "not_owner"> {
-    return this.finishDurableOperation(jobKey, ownerId, ownerGeneration, "failed", response, nowMs);
+    return this.finishDurableOperation(
+      jobKey,
+      ownerId,
+      ownerGeneration,
+      "failed",
+      response,
+      nowMs,
+      failure,
+    );
   }
 
   async failArtifactCommit(
@@ -1305,6 +1316,7 @@ export class ControlDurableObject
     state: "succeeded" | "failed",
     response: StoredHttpResponse,
     nowMs: number,
+    failure?: ArtifactCommitFailure,
   ): Promise<"completed" | "already_terminal" | "not_owner"> {
     const expiresAtMs = nowMs + IDEMPOTENCY_COMPLETED_TTL_MS;
     const result = await this.ctx.storage.transaction(async (transaction) => {
@@ -1316,6 +1328,24 @@ export class ControlDurableObject
       }
       if (state === "succeeded" && job.checkpoint !== "finalized") {
         throw new Error("Artifact commit cannot complete before finalization");
+      }
+      if (job.kind === "v1" || job.kind === "layers-v1") {
+        delete job.failure;
+        if (state === "failed" && failure !== undefined) {
+          try {
+            // RPC callers are not a runtime type boundary. Persist only schema-validated scalars.
+            const parsed = artifactCommitFailureSchema.safeParse(failure);
+            if (parsed.success) {
+              job.failure = {
+                stage: parsed.data.stage,
+                errorClass: parsed.data.errorClass,
+                materializationResultObserved: parsed.data.materializationResultObserved,
+              };
+            }
+          } catch {
+            // Malformed diagnostics must never prevent the original terminal response.
+          }
+        }
       }
       job.state = state;
       job.ownerId = null;

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MAX_RUNTIME_ARTIFACT_BYTES,
   RUNTIME_ARTIFACT_CHUNK_BYTES,
   RUNTIME_ARTIFACT_FORMAT,
+  artifactCommitDiagnosticsResponseSchema,
   deriveRuntimeIdentity,
   runtimeArtifactContentHash,
   runtimeArtifactContentManifestSchema,
@@ -31,6 +32,8 @@ import {
   signedRawRequest,
   signedRequest,
 } from "./helpers";
+
+afterEach(() => vi.restoreAllMocks());
 
 it("waits for an already-started runtime before reporting destructive cleanup complete", async () => {
   const coordinator = new MemoryCoordinator();
@@ -154,6 +157,139 @@ async function makeArtifact(input: {
 }
 
 describe("sealed runtime artifact control plane", () => {
+  it.each(["materialization", "persist-unpack-complete"] as const)(
+    "records secret-safe %s failures without re-executing a terminal commit",
+    async (stage) => {
+      const coordinator = new MemoryCoordinator();
+      const backend = new MockBackend();
+      const env = fakeEnv();
+      const identity = await deriveRuntimeIdentity({
+        namespace: "staging",
+        projectId: 42,
+        role: "preview",
+        slot: "primary",
+      });
+      const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+      const dependencies = { coordinator, backend, nowMs: TEST_NOW_MS };
+      const ensured = await handleControlRequest(
+        await signedRequest({
+          path: base,
+          method: "PUT",
+          nonce: "failure-ensure-nonce117",
+          idempotencyKey: "failure-ensure117",
+          body: ensureBody(),
+        }),
+        env,
+        dependencies,
+      );
+      expect(ensured.status).toBe(200);
+      const artifact = await makeArtifact({
+        identity,
+        manifestRevision: "manifest-1",
+        artifactRevision: "failure-diagnostics117",
+      });
+      const secret = "never-persist-error-secret117";
+      const unpack = vi.spyOn(backend, "unpackMaterialization");
+      if (stage === "materialization") {
+        unpack.mockRejectedValueOnce(
+          Object.assign(new TypeError(secret), { name: secret, cause: secret }),
+        );
+      } else {
+        const checkpoint = coordinator.checkpointDurableOperation.bind(coordinator);
+        vi.spyOn(coordinator, "checkpointDurableOperation").mockImplementation(async (input) => {
+          if (input.checkpoint === "unpack-complete") throw new RangeError(secret);
+          return checkpoint(input);
+        });
+      }
+      const result = await deliverArtifact({
+        base,
+        artifact,
+        coordinator,
+        backend,
+        env,
+        expectedStatus: 500,
+      });
+      const failureBody = await result.json();
+      expect(failureBody).toMatchObject({ code: "internal_error" });
+      const sha = artifact.envelope.sealedArtifactSha256;
+      const diagnosticPath = base + "/artifacts/" + sha + "/commit-diagnostics";
+      const read = async (includeFailure: boolean, nonce: string) => {
+        const response = await handleControlRequest(
+          await signedRequest({
+            path: diagnosticPath + (includeFailure ? "?includeFailure=true" : ""),
+            nonce,
+          }),
+          env,
+          dependencies,
+        );
+        expect(response.status).toBe(200);
+        return artifactCommitDiagnosticsResponseSchema.parse(await response.json());
+      };
+      const legacy = await read(false, "failure-legacy-nonce117");
+      expect(legacy.job).not.toHaveProperty("failure");
+      const explicitFalse = await handleControlRequest(
+        await signedRequest({
+          path: diagnosticPath + "?includeFailure=false",
+          nonce: "failure-false-nonce117",
+        }),
+        env,
+        dependencies,
+      );
+      expect(explicitFalse.status).toBe(200);
+      expect(
+        artifactCommitDiagnosticsResponseSchema.parse(await explicitFalse.json()).job,
+      ).not.toHaveProperty("failure");
+      for (const [index, query] of [
+        "includeFailure=1",
+        "includeFailure=true&includeFailure=false",
+        "unknown=true",
+      ].entries()) {
+        const invalid = await handleControlRequest(
+          await signedRequest({
+            path: diagnosticPath + "?" + query,
+            nonce: "failure-invalid117-" + index,
+          }),
+          env,
+          dependencies,
+        );
+        expect(invalid.status).toBe(400);
+      }
+      const optedIn = await read(true, "failure-opt-in-nonce117");
+      const expectedFailure = {
+        stage,
+        errorClass: stage === "materialization" ? "TypeError" : "RangeError",
+        materializationResultObserved: stage === "persist-unpack-complete",
+      };
+      expect(optedIn.job).toMatchObject({
+        state: "failed",
+        checkpoint: "payloads-transferred",
+        failure: expectedFailure,
+      });
+      const stored = await coordinator.getLatestDurableOperation("v1", identity, sha);
+      expect(stored).toMatchObject({ failure: expectedFailure });
+      expect(JSON.stringify({ failureBody, legacy, optedIn, stored })).not.toContain(secret);
+      const replay = await commitArtifactAndDrain({
+        path: base + "/artifacts/" + sha + "/commit",
+        nonce: "failure-replay-nonce117",
+        idempotencyKey: "deliver-commit-" + artifact.envelope.artifactRevision,
+        body: {
+          locator: ensureBody().locator,
+          expectedDeploymentVersion: "worker-version-test-1",
+          sealedArtifactSha256: sha,
+        },
+        env,
+        coordinator,
+        backend,
+        nowMs: TEST_NOW_MS,
+      });
+      expect(replay.status).toBe(500);
+      expect(await replay.json()).toEqual(failureBody);
+      expect(unpack).toHaveBeenCalledTimes(1);
+      expect(backend.materializations).toBe(stage === "materialization" ? 0 : 1);
+      expect((await read(true, "failure-final-nonce117")).job.failure).toEqual(expectedFailure);
+    },
+  );
+
   it("exposes only the signed, identity-bound bounded commit event trail", async () => {
     const coordinator = new MemoryCoordinator();
     const backend = new MockBackend();
@@ -1434,7 +1570,8 @@ async function deliverArtifact(input: {
   env: ReturnType<typeof fakeEnv>;
   artifact: Awaited<ReturnType<typeof makeArtifact>>;
   base: string;
-}) {
+  expectedStatus?: number;
+}): Promise<Response> {
   const locator = ensureBody().locator;
   const artifactBase = `${input.base}/artifacts/${input.artifact.envelope.sealedArtifactSha256}`;
   expect(
@@ -1473,24 +1610,22 @@ async function deliverArtifact(input: {
       ).status,
     ).toBe(200);
   }
-  expect(
-    (
-      await commitArtifactAndDrain({
-        path: `${artifactBase}/commit`,
-        nonce: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
-        idempotencyKey: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
-        body: {
-          locator,
-          expectedDeploymentVersion: "worker-version-test-1",
-          sealedArtifactSha256: input.artifact.envelope.sealedArtifactSha256,
-        },
-        env: input.env,
-        coordinator: input.coordinator,
-        backend: input.backend,
-        nowMs: TEST_NOW_MS,
-      })
-    ).status,
-  ).toBe(200);
+  const response = await commitArtifactAndDrain({
+    path: `${artifactBase}/commit`,
+    nonce: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
+    idempotencyKey: `deliver-commit-${input.artifact.envelope.artifactRevision}`,
+    body: {
+      locator,
+      expectedDeploymentVersion: "worker-version-test-1",
+      sealedArtifactSha256: input.artifact.envelope.sealedArtifactSha256,
+    },
+    env: input.env,
+    coordinator: input.coordinator,
+    backend: input.backend,
+    nowMs: TEST_NOW_MS,
+  });
+  expect(response.status, await response.clone().text()).toBe(input.expectedStatus ?? 200);
+  return response;
 }
 
 async function startArtifact(input: {

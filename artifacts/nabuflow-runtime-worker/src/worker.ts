@@ -79,6 +79,7 @@ import {
   pantryCatalogStockIdentityStatusResponseSchema,
   pantryShelfContentHashesResponseSchema,
   artifactCommitDiagnosticsResponseSchema,
+  artifactCommitFailureSchema,
   layeredArtifactPromotionDiagnosticsResponseSchema,
   productionDatabaseDiagnosticsResponseSchema,
   durableOperationDiscoveryRequestSchema,
@@ -106,6 +107,7 @@ import {
   runtimeLayeredArtifactSealedHash,
 } from "@workspace/tenant-runtime-contracts";
 import type {
+  ArtifactCommitFailure,
   ActivateRouteRequest,
   BeginRuntimeArtifactRequest,
   BeginRuntimeLayeredArtifactRequest,
@@ -318,6 +320,7 @@ interface MatchedRoute {
   auditRequestId?: string;
   capability?: { projectId: number; provider: string; name: string };
   artifactSha256?: string;
+  includeFailure?: boolean;
   promotionIdentity?: string;
   allocationIdentity?: string;
   layerContentSha256?: string;
@@ -369,6 +372,8 @@ interface RequestExecutionContext {
 interface DurableOperationExecution {
   job: StoredDurableOperationJob;
   ownerId: string;
+  /** Set only after this driver's awaited materialization call returns. */
+  materializationResultObserved?: boolean;
 }
 
 class ControlHttpError extends Error {
@@ -380,6 +385,42 @@ class ControlHttpError extends Error {
     readonly evidence?: RuntimeReconciliationEvidence,
   ) {
     super(message);
+  }
+}
+
+class ArtifactCommitStageError extends Error {
+  constructor(
+    readonly stage: ArtifactCommitFailure["stage"],
+    readonly originalError: unknown,
+  ) {
+    super("Artifact commit stage failed");
+  }
+}
+
+async function runArtifactCommitStage<T>(
+  stage: ArtifactCommitFailure["stage"],
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    // Keep the original exception local; it is unwrapped before existing queue error routing.
+    throw new ArtifactCommitStageError(stage, error);
+  }
+}
+
+function artifactCommitErrorClass(error: unknown): ArtifactCommitFailure["errorClass"] {
+  try {
+    // Classify native error types without consulting mutable or secret-bearing error properties.
+    if (error instanceof TypeError) return "TypeError";
+    if (error instanceof RangeError) return "RangeError";
+    if (error instanceof SyntaxError) return "SyntaxError";
+    if (error instanceof ReferenceError) return "ReferenceError";
+    if (error instanceof URIError) return "URIError";
+    if (error instanceof EvalError) return "EvalError";
+    return error instanceof Error ? "Error" : "UnknownError";
+  } catch {
+    return "UnknownError";
   }
 }
 
@@ -1032,7 +1073,9 @@ export async function handleDurableOperationQueue(
         );
         validateResponse(endpoint, result.body);
       } catch (error) {
-        if (error instanceof StagingDurableOperationOwnerLossError) {
+        const originalError =
+          error instanceof ArtifactCommitStageError ? error.originalError : error;
+        if (originalError instanceof StagingDurableOperationOwnerLossError) {
           // Deliberately leave this queue delivery unacknowledged. Queue redelivery and the
           // coordinator alarm are independent recovery paths and both resume by checkpoint.
           // eslint-disable-next-line no-console -- metadata-only staging recovery evidence
@@ -1042,12 +1085,12 @@ export async function handleDurableOperationQueue(
               kind: job.kind,
               attempt: job.attempt,
               checkpoint: execution.job.checkpoint,
-              stage: error.stage,
+              stage: originalError.stage,
             }),
           );
-          throw error;
+          throw originalError;
         }
-        const controlError = toControlError(error);
+        const controlError = toControlError(originalError);
         if (controlError.code === "runtime_execution_in_progress") {
           // Preserve the job/checkpoint. The lease watchdog also owns redelivery.
           message.retry({ delaySeconds: 1 });
@@ -1060,6 +1103,13 @@ export async function handleDurableOperationQueue(
             job.attempt,
             { status: controlError.status, body: errorBody(controlError, ownerId) },
             Date.now(),
+            job.kind === "v1" || job.kind === "layers-v1"
+              ? {
+                  stage: error instanceof ArtifactCommitStageError ? error.stage : "other-commit",
+                  errorClass: artifactCommitErrorClass(originalError),
+                  materializationResultObserved: execution.materializationResultObserved === true,
+                }
+              : undefined,
           );
         } catch (finalizationError) {
           logControlErrorFinalizationFailure(ownerId, endpoint, "idempotency", finalizationError);
@@ -2775,7 +2825,26 @@ function parseInput(route: MatchedRoute, url: URL, rawBody: Uint8Array): Control
   }
   if (
     route.endpoint === "artifactCommitDiagnostics" ||
-    route.endpoint === "layeredArtifactCommitDiagnostics" ||
+    route.endpoint === "layeredArtifactCommitDiagnostics"
+  ) {
+    assertEmptyBody(rawBody);
+    let invalidQuery = false;
+    url.searchParams.forEach((value, key) => {
+      if (key !== "includeFailure" || (value !== "true" && value !== "false")) {
+        invalidQuery = true;
+      }
+    });
+    if (invalidQuery || url.searchParams.getAll("includeFailure").length > 1) {
+      throw new ControlHttpError(
+        400,
+        "invalid_request",
+        "Invalid artifact commit diagnostics query",
+      );
+    }
+    route.includeFailure = url.searchParams.get("includeFailure") === "true";
+    return {};
+  }
+  if (
     route.endpoint === "layeredArtifactPromotionDiagnostics" ||
     route.endpoint === "productionDatabaseDiagnostics" ||
     route.endpoint === "startDiagnostics" ||
@@ -3610,6 +3679,10 @@ async function executeEndpointWithoutRuntimeGuard(
     if (job === null || job.kind !== expectedKind || job.runtimeIdentity !== identity) {
       throw new ControlHttpError(404, "artifact_commit_not_found", "Artifact commit was not found");
     }
+    const failure =
+      matchedRoute?.includeFailure === true
+        ? artifactCommitFailureSchema.safeParse(job.failure)
+        : undefined;
     const terminalBody = job.response?.body as { code?: unknown } | undefined;
     return {
       status: 200,
@@ -3637,6 +3710,15 @@ async function executeEndpointWithoutRuntimeGuard(
                         ? "ok"
                         : "artifact_commit_failed",
                 },
+          ...(failure?.success === true
+            ? {
+                failure: {
+                  stage: failure.data.stage,
+                  errorClass: failure.data.errorClass,
+                  materializationResultObserved: failure.data.materializationResultObserved,
+                },
+              }
+            : {}),
           events: job.events,
         },
       }),
@@ -3898,14 +3980,19 @@ async function executeEndpointWithoutRuntimeGuard(
       next: StoredArtifactCommitJob["checkpoint"],
       payloadContentSha256s?: string[],
     ) => {
-      const updated = await coordinator.checkpointDurableOperation({
-        jobKey: artifactCommitExecution.job.jobKey,
-        ownerId: artifactCommitExecution.ownerId,
-        ownerGeneration: artifactCommitExecution.job.attempt,
-        checkpoint: next,
-        ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
-        nowMs: Date.now(),
-      });
+      const writeCheckpoint = () =>
+        coordinator.checkpointDurableOperation({
+          jobKey: artifactCommitExecution.job.jobKey,
+          ownerId: artifactCommitExecution.ownerId,
+          ownerGeneration: artifactCommitExecution.job.attempt,
+          checkpoint: next,
+          ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
+          nowMs: Date.now(),
+        });
+      const updated =
+        next === "unpack-complete"
+          ? await runArtifactCommitStage("persist-unpack-complete", writeCheckpoint)
+          : await writeCheckpoint();
       if (updated.kind !== "v1" && updated.kind !== "layers-v1") {
         throw new Error("Artifact commit job changed kind");
       }
@@ -3987,17 +4074,22 @@ async function executeEndpointWithoutRuntimeGuard(
           artifact.envelope.artifactRevision,
           artifactCommitExecution.job,
         );
-        const result = await backend.unpackLayeredMaterialization(
-          runtime,
-          artifact,
-          layers,
-          ticket,
-          stagingMaterializationOptions(
-            env,
-            artifact.envelope.artifactRevision,
-            artifactCommitExecution.job,
+        const materializationTicket = ticket;
+        const materializationJob = artifactCommitExecution.job;
+        const result = await runArtifactCommitStage("materialization", () =>
+          backend.unpackLayeredMaterialization(
+            runtime,
+            artifact,
+            layers,
+            materializationTicket,
+            stagingMaterializationOptions(
+              env,
+              artifact.envelope.artifactRevision,
+              materializationJob,
+            ),
           ),
         );
+        artifactCommitExecution.materializationResultObserved = true;
         filesWritten = result.filesWritten;
         layersMaterialized = result.layersMaterialized;
         await checkpoint("unpack-complete");
@@ -4176,14 +4268,19 @@ async function executeEndpointWithoutRuntimeGuard(
       next: StoredArtifactCommitJob["checkpoint"],
       payloadContentSha256s?: string[],
     ) => {
-      const updated = await coordinator.checkpointDurableOperation({
-        jobKey: artifactCommitExecution.job.jobKey,
-        ownerId: artifactCommitExecution.ownerId,
-        ownerGeneration: artifactCommitExecution.job.attempt,
-        checkpoint: next,
-        ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
-        nowMs: Date.now(),
-      });
+      const writeCheckpoint = () =>
+        coordinator.checkpointDurableOperation({
+          jobKey: artifactCommitExecution.job.jobKey,
+          ownerId: artifactCommitExecution.ownerId,
+          ownerGeneration: artifactCommitExecution.job.attempt,
+          checkpoint: next,
+          ...(payloadContentSha256s === undefined ? {} : { payloadContentSha256s }),
+          nowMs: Date.now(),
+        });
+      const updated =
+        next === "unpack-complete"
+          ? await runArtifactCommitStage("persist-unpack-complete", writeCheckpoint)
+          : await writeCheckpoint();
       if (updated.kind !== "v1" && updated.kind !== "layers-v1") {
         throw new Error("Artifact commit job changed kind");
       }
@@ -4241,16 +4338,21 @@ async function executeEndpointWithoutRuntimeGuard(
           artifact.envelope.artifactRevision,
           artifactCommitExecution.job,
         );
-        const result = await backend.unpackMaterialization(
-          runtime,
-          artifact,
-          ticket,
-          stagingMaterializationOptions(
-            env,
-            artifact.envelope.artifactRevision,
-            artifactCommitExecution.job,
+        const materializationTicket = ticket;
+        const materializationJob = artifactCommitExecution.job;
+        const result = await runArtifactCommitStage("materialization", () =>
+          backend.unpackMaterialization(
+            runtime,
+            artifact,
+            materializationTicket,
+            stagingMaterializationOptions(
+              env,
+              artifact.envelope.artifactRevision,
+              materializationJob,
+            ),
           ),
         );
+        artifactCommitExecution.materializationResultObserved = true;
         filesWritten = result.filesWritten;
         await checkpoint("unpack-complete");
       } else {

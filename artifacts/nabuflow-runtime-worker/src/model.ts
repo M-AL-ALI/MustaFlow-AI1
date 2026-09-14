@@ -13,6 +13,7 @@ import type {
   RuntimeManifestContract,
   ArtifactCommitCheckpoint,
   ArtifactCommitEvent,
+  ArtifactCommitFailure,
   ArtifactCommitKind,
   AcceptanceLeaseDurableCheckpoint,
   AcceptanceLeaseJobRequest,
@@ -207,6 +208,8 @@ export interface StoredArtifactCommitJob extends StoredDurableOperationJobBase {
   checkpoint: ArtifactCommitCheckpoint;
   sealedArtifactSha256: string;
   payloadContentSha256s?: string[];
+  /** Optional redacted terminal diagnostics; absent on legacy jobs. */
+  failure?: ArtifactCommitFailure;
 }
 
 export interface StoredRuntimeStartJob extends StoredDurableOperationJobBase {
@@ -419,6 +422,7 @@ export interface ControlCoordinator {
     ownerGeneration: number,
     response: StoredHttpResponse,
     nowMs: number,
+    failure?: ArtifactCommitFailure,
   ): Promise<"completed" | "already_terminal" | "not_owner">;
   recordAudit(record: ControlAuditRecord): Promise<void>;
   beginRuntimeReconciliation(record: RuntimeReconciliationAuditRecord): Promise<void>;

@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PANTRY_LAYER_FORMAT,
   PANTRY_SCHEMA_VERSION,
   RUNTIME_ARTIFACT_CHUNK_BYTES,
   RUNTIME_ARTIFACT_FORMAT,
   RUNTIME_ARTIFACT_LAYERS_FORMAT,
+  artifactCommitDiagnosticsResponseSchema,
   deriveRuntimeIdentity,
   runtimeArtifactContentHash,
   runtimeArtifactContentManifestSchema,
@@ -34,6 +35,8 @@ import {
   signedRawRequest,
   signedRequest,
 } from "./helpers";
+
+afterEach(() => vi.restoreAllMocks());
 
 const platform: PantryPlatform = {
   runtime: "node",
@@ -209,6 +212,140 @@ describe("additive layered artifact control plane", () => {
       retryable: false,
     });
   });
+
+  it.each(["materialization", "persist-unpack-complete"] as const)(
+    "records secret-safe %s failures without re-executing a terminal commit",
+    async (stage) => {
+      const coordinator = new MemoryCoordinator();
+      const backend = new MockBackend();
+      const env = fakeEnv();
+      const identity = await deriveRuntimeIdentity({
+        namespace: "staging",
+        projectId: 42,
+        role: "preview",
+        slot: "primary",
+      });
+      const base = "/_nabuflow/control/v1/runtimes/42/preview/primary";
+      const dependencies = { coordinator, backend, nowMs: TEST_NOW_MS };
+      const ensured = await handleControlRequest(
+        await signedRequest({
+          path: base,
+          method: "PUT",
+          nonce: "failure-ensure-nonce117",
+          idempotencyKey: "failure-ensure117",
+          body: ensureBody(),
+        }),
+        env,
+        dependencies,
+      );
+      expect(ensured.status).toBe(200);
+      const artifact = await makeLayeredArtifact({
+        identity,
+        artifactRevision: "failure-diagnostics117",
+        appText: "console.log(117)\n",
+      });
+      const secret = "never-persist-error-secret117";
+      const unpack = vi.spyOn(backend, "unpackLayeredMaterialization");
+      if (stage === "materialization") {
+        unpack.mockRejectedValueOnce(
+          Object.assign(new TypeError(secret), { name: secret, cause: secret }),
+        );
+      } else {
+        const checkpoint = coordinator.checkpointDurableOperation.bind(coordinator);
+        vi.spyOn(coordinator, "checkpointDurableOperation").mockImplementation(async (input) => {
+          if (input.checkpoint === "unpack-complete") throw new RangeError(secret);
+          return checkpoint(input);
+        });
+      }
+      const result = await deliver({
+        base,
+        artifact,
+        coordinator,
+        backend,
+        env,
+        key: "failure117",
+        expectedStatus: 500,
+      });
+      const failureBody = await result.json();
+      expect(failureBody).toMatchObject({ code: "internal_error" });
+      const sha = artifact.envelope.sealedArtifactSha256;
+      const diagnosticPath = base + "/layered-artifacts/" + sha + "/commit-diagnostics";
+      const read = async (includeFailure: boolean, nonce: string) => {
+        const response = await handleControlRequest(
+          await signedRequest({
+            path: diagnosticPath + (includeFailure ? "?includeFailure=true" : ""),
+            nonce,
+          }),
+          env,
+          dependencies,
+        );
+        expect(response.status).toBe(200);
+        return artifactCommitDiagnosticsResponseSchema.parse(await response.json());
+      };
+      const legacy = await read(false, "failure-legacy-nonce117");
+      expect(legacy.job).not.toHaveProperty("failure");
+      const explicitFalse = await handleControlRequest(
+        await signedRequest({
+          path: diagnosticPath + "?includeFailure=false",
+          nonce: "failure-false-nonce117",
+        }),
+        env,
+        dependencies,
+      );
+      expect(explicitFalse.status).toBe(200);
+      expect(
+        artifactCommitDiagnosticsResponseSchema.parse(await explicitFalse.json()).job,
+      ).not.toHaveProperty("failure");
+      for (const [index, query] of [
+        "includeFailure=1",
+        "includeFailure=true&includeFailure=false",
+        "unknown=true",
+      ].entries()) {
+        const invalid = await handleControlRequest(
+          await signedRequest({
+            path: diagnosticPath + "?" + query,
+            nonce: "failure-invalid117-" + index,
+          }),
+          env,
+          dependencies,
+        );
+        expect(invalid.status).toBe(400);
+      }
+      const optedIn = await read(true, "failure-opt-in-nonce117");
+      const expectedFailure = {
+        stage,
+        errorClass: stage === "materialization" ? "TypeError" : "RangeError",
+        materializationResultObserved: stage === "persist-unpack-complete",
+      };
+      expect(optedIn.job).toMatchObject({
+        state: "failed",
+        checkpoint: "payloads-transferred",
+        failure: expectedFailure,
+      });
+      const stored = await coordinator.getLatestDurableOperation("layers-v1", identity, sha);
+      expect(stored).toMatchObject({ failure: expectedFailure });
+      expect(JSON.stringify({ failureBody, legacy, optedIn, stored })).not.toContain(secret);
+      const replay = await commitArtifactAndDrain({
+        path: base + "/layered-artifacts/" + sha + "/commit",
+        nonce: "failure-replay-nonce117",
+        idempotencyKey: "layers-failure117-commit",
+        body: {
+          locator: ensureBody().locator,
+          expectedDeploymentVersion: "worker-version-test-1",
+          sealedArtifactSha256: sha,
+        },
+        env,
+        coordinator,
+        backend,
+        nowMs: TEST_NOW_MS,
+      });
+      expect(replay.status).toBe(500);
+      expect(await replay.json()).toEqual(failureBody);
+      expect(unpack).toHaveBeenCalledTimes(1);
+      expect(backend.materializations).toBe(stage === "materialization" ? 0 : 1);
+      expect((await read(true, "failure-final-nonce117")).job.failure).toEqual(expectedFailure);
+    },
+  );
 
   it("commits, starts, rehydrates, and reference-counts a shared dependency layer", async () => {
     const coordinator = new MemoryCoordinator();
@@ -588,7 +725,8 @@ async function deliver(input: {
   backend: MockBackend;
   env: ReturnType<typeof fakeEnv>;
   key: string;
-}): Promise<void> {
+  expectedStatus?: number;
+}): Promise<Response> {
   const dependencies = {
     coordinator: input.coordinator,
     backend: input.backend,
@@ -646,12 +784,15 @@ async function deliver(input: {
     backend: input.backend,
     nowMs: TEST_NOW_MS,
   });
-  expect(response.status, await response.clone().text()).toBe(200);
-  await expect(response.json()).resolves.toMatchObject({
-    materialized: true,
-    filesWritten: 2,
-    layersMaterialized: 1,
-  });
+  expect(response.status, await response.clone().text()).toBe(input.expectedStatus ?? 200);
+  if ((input.expectedStatus ?? 200) === 200) {
+    await expect(response.clone().json()).resolves.toMatchObject({
+      materialized: true,
+      filesWritten: 2,
+      layersMaterialized: 1,
+    });
+  }
+  return response;
 }
 
 async function start(input: {

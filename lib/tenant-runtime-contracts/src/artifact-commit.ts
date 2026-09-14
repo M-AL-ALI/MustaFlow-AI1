@@ -107,6 +107,25 @@ export const artifactCommitEventSchema = z
   })
   .strict();
 
+export const artifactCommitFailureSchema = z
+  .object({
+    stage: z.enum(["materialization", "persist-unpack-complete", "other-commit"]),
+    errorClass: z.enum([
+      "Error",
+      "TypeError",
+      "RangeError",
+      "SyntaxError",
+      "ReferenceError",
+      "URIError",
+      "EvalError",
+      "UnknownError",
+    ]),
+    // False means this attempt did not observe a successful materialization result.
+    // It does not assert that materialization failed or that no files were written.
+    materializationResultObserved: z.boolean(),
+  })
+  .strict();
+
 export const artifactCommitDiagnosticsResponseSchema = z
   .object({
     ok: z.literal(true),
@@ -128,9 +147,14 @@ export const artifactCommitDiagnosticsResponseSchema = z
           })
           .strict()
           .nullable(),
+        failure: artifactCommitFailureSchema.optional(),
         events: z.array(artifactCommitEventSchema).max(ARTIFACT_COMMIT_EVENT_LIMIT),
       })
-      .strict(),
+      .strict()
+      .refine((job) => job.failure === undefined || job.state === "failed", {
+        message: "Failure diagnostics require a failed job",
+        path: ["failure"],
+      }),
   })
   .strict();
 
@@ -307,6 +331,7 @@ export const runtimeManifestRestartDiagnosticsResponseSchema = z
   })
   .strict();
 
+export type ArtifactCommitFailure = z.infer<typeof artifactCommitFailureSchema>;
 export type ArtifactCommitKind = z.infer<typeof artifactCommitKindSchema>;
 export type ArtifactCommitCheckpoint = z.infer<typeof artifactCommitCheckpointSchema>;
 export type DurableOperationKind = z.infer<typeof durableOperationKindSchema>;
