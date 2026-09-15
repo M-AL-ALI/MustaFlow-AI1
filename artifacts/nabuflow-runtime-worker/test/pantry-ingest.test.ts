@@ -81,7 +81,9 @@ interface FixturePackage {
   attestations?: unknown;
 }
 
-async function registryFixture(packages: Record<string, FixturePackage>): Promise<{
+async function registryFixture(
+  packages: Record<string, FixturePackage | FixturePackage[]>,
+): Promise<{
   client: NpmRegistryClient;
   requests: Array<{ url: string; headers: Headers }>;
 }> {
@@ -99,55 +101,61 @@ async function registryFixture(packages: Record<string, FixturePackage>): Promis
       ],
     }),
   );
-  for (const [name, fixture] of Object.entries(packages)) {
-    const version = fixture.version ?? "1.0.0";
-    const bytes = tarball(
-      fixture.tarFiles ?? [
-        { path: "package/index.js", body: `export default ${JSON.stringify(name)};\n` },
-      ],
-    );
-    const integrity =
-      fixture.integrityOverride ?? `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
-    const signature = fixture.invalidSignature
-      ? Buffer.from("not-a-signature").toString("base64")
-      : sign(null, Buffer.from(`${name}@${version}:${integrity}`), privateKey).toString("base64");
-    const tarballUrl = `${NPM_REGISTRY_ORIGIN}/${encodeURIComponent(name)}/-/${name.split("/").at(-1)}-${version}.tgz`;
-    const attestationsUrl = `${NPM_REGISTRY_ORIGIN}/-/npm/v1/attestations/${encodeURIComponent(name)}@${version}`;
+  for (const [name, input] of Object.entries(packages)) {
+    const fixtures = Array.isArray(input) ? input : [input];
+    const versions: Record<string, unknown> = {};
+    const publishTimes: Record<string, string> = {};
+    let latest = "1.0.0";
+    for (const fixture of fixtures) {
+      const version = fixture.version ?? "1.0.0";
+      latest = version;
+      const bytes = tarball(
+        fixture.tarFiles ?? [
+          { path: "package/index.js", body: `export default ${JSON.stringify(name)};\n` },
+        ],
+      );
+      const integrity =
+        fixture.integrityOverride ??
+        `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+      const signature = fixture.invalidSignature
+        ? Buffer.from("not-a-signature").toString("base64")
+        : sign(null, Buffer.from(`${name}@${version}:${integrity}`), privateKey).toString("base64");
+      const tarballUrl = `${NPM_REGISTRY_ORIGIN}/${encodeURIComponent(name)}/-/${name.split("/").at(-1)}-${version}.tgz`;
+      const attestationsUrl = `${NPM_REGISTRY_ORIGIN}/-/npm/v1/attestations/${encodeURIComponent(name)}@${version}`;
+      versions[version] = {
+        name,
+        version,
+        dependencies: fixture.dependencies ?? {},
+        optionalDependencies: fixture.optionalDependencies ?? {},
+        peerDependencies: fixture.peerDependencies ?? {},
+        peerDependenciesMeta: fixture.peerDependenciesMeta ?? {},
+        scripts: fixture.scripts ?? {},
+        bin: fixture.bin,
+        os: fixture.os,
+        license: "MIT",
+        dist: {
+          integrity,
+          tarball: tarballUrl,
+          fileCount: fixture.fileCount ?? fixture.tarFiles?.length ?? 1,
+          unpackedSize: 100,
+          signatures: [{ keyid, sig: signature }],
+          ...(fixture.attestations === undefined ? {} : { attestations: { url: attestationsUrl } }),
+        },
+      };
+      publishTimes[version] = "2026-08-01T00:00:00.000Z";
+      responses.set(tarballUrl, new Response(new Uint8Array(bytes).buffer));
+      if (fixture.attestations !== undefined)
+        responses.set(attestationsUrl, Response.json(fixture.attestations));
+    }
     responses.set(
       `${NPM_REGISTRY_ORIGIN}/${encodeURIComponent(name)}`,
       Response.json({
         name,
-        "dist-tags": { latest: version },
-        versions: {
-          [version]: {
-            name,
-            version,
-            dependencies: fixture.dependencies ?? {},
-            optionalDependencies: fixture.optionalDependencies ?? {},
-            peerDependencies: fixture.peerDependencies ?? {},
-            peerDependenciesMeta: fixture.peerDependenciesMeta ?? {},
-            scripts: fixture.scripts ?? {},
-            bin: fixture.bin,
-            os: fixture.os,
-            license: "MIT",
-            dist: {
-              integrity,
-              tarball: tarballUrl,
-              fileCount: fixture.fileCount ?? fixture.tarFiles?.length ?? 1,
-              unpackedSize: 100,
-              signatures: [{ keyid, sig: signature }],
-              ...(fixture.attestations === undefined
-                ? {}
-                : { attestations: { url: attestationsUrl } }),
-            },
-          },
-        },
-        time: { [version]: "2026-08-01T00:00:00.000Z" },
+        "dist-tags": { latest },
+        versions,
+        time: publishTimes,
       }),
     );
-    responses.set(tarballUrl, new Response(new Uint8Array(bytes).buffer));
-    if (fixture.attestations !== undefined)
-      responses.set(attestationsUrl, Response.json(fixture.attestations));
   }
   const requests: Array<{ url: string; headers: Headers }> = [];
   const client = new NpmRegistryClient(async (request) => {
@@ -158,9 +166,13 @@ async function registryFixture(packages: Record<string, FixturePackage>): Promis
   return { client, requests };
 }
 
-async function stockRequest(names: string[]) {
+async function stockRequest(names: string[], selectors: Record<string, string> = {}) {
   const identity = {
-    intents: names.sort().map((name) => ({ ecosystem: "npm" as const, name, selector: "latest" })),
+    intents: names.sort().map((name) => ({
+      ecosystem: "npm" as const,
+      name,
+      selector: selectors[name] ?? "latest",
+    })),
     platform: PLATFORM,
   };
   return pantryCatalogStockRequestSchema.parse({
@@ -296,6 +308,62 @@ describe("trusted npm Pantry ingest", () => {
         (ingredient) => ingredient.package.name === "required-peer-parent",
       )?.dependencies,
     ).toEqual([{ name: "required-peer", version: "1.0.0", kind: "peer" }]);
+  });
+
+  it.each(["@types/cookie-parser", "zzz-cookie-parser"])(
+    "pins %s to the compatible explicit peer root regardless of traversal order",
+    async (parentName) => {
+      const { client, requests } = await registryFixture({
+        [parentName]: { version: "1.4.10", peerDependencies: { "@types/express": "*" } },
+        "@types/express": [{ version: "4.17.25" }, { version: "5.0.6" }],
+      });
+      const result = await ingestPantryStockRequest(
+        await stockRequest([parentName, "@types/express"], { "@types/express": "4.17.25" }),
+        client,
+      );
+      expect(
+        result.closure.ingredients.find((ingredient) => ingredient.package.name === parentName)
+          ?.dependencies,
+      ).toEqual([{ name: "@types/express", version: "4.17.25", kind: "peer" }]);
+      expect(
+        result.closure.ingredients
+          .filter((ingredient) => ingredient.package.name === "@types/express")
+          .map((ingredient) => ingredient.package.version),
+      ).toEqual(["4.17.25"]);
+      expect(requests.some((request) => request.url.endsWith("express-5.0.6.tgz"))).toBe(false);
+    },
+  );
+
+  it("retains a required peer's constraint when the explicit root is incompatible", async () => {
+    const { client } = await registryFixture({
+      "peer-parent": { peerDependencies: { "@types/express": "^5.0.0" } },
+      "@types/express": [{ version: "4.17.25" }, { version: "5.0.6" }],
+    });
+    const result = await ingestPantryStockRequest(
+      await stockRequest(["peer-parent", "@types/express"], { "@types/express": "4.17.25" }),
+      client,
+    );
+    expect(
+      result.closure.ingredients.find((ingredient) => ingredient.package.name === "peer-parent")
+        ?.dependencies,
+    ).toEqual([{ name: "@types/express", version: "5.0.6", kind: "peer" }]);
+    expect(
+      result.closure.ingredients
+        .filter((ingredient) => ingredient.package.name === "@types/express")
+        .map((ingredient) => ingredient.package.version),
+    ).toEqual(["4.17.25", "5.0.6"]);
+  });
+
+  it("still resolves an unselected required peer from the published range", async () => {
+    const { client } = await registryFixture({
+      "peer-parent": { peerDependencies: { "@types/express": "*" } },
+      "@types/express": [{ version: "4.17.25" }, { version: "5.0.6" }],
+    });
+    const result = await ingestPantryStockRequest(await stockRequest(["peer-parent"]), client);
+    expect(
+      result.closure.ingredients.find((ingredient) => ingredient.package.name === "peer-parent")
+        ?.dependencies,
+    ).toEqual([{ name: "@types/express", version: "5.0.6", kind: "peer" }]);
   });
 
   it("verifies normalized SHA-512 SRI and rejects a mutated tarball", async () => {

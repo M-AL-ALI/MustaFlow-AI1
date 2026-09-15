@@ -550,9 +550,29 @@ export async function ingestPantryStockRequest(
             "Dependency closure exceeded its edge limit",
           );
         try {
+          let selector = dependency.selector;
+          if (dependency.kind === "peer") {
+            // A peer shares its consumer's environment. Prefer an explicitly
+            // selected root that satisfies the published peer range, rather
+            // than pinning an unrelated newer major from the registry.
+            const rootIntents = request.intents.filter((intent) => intent.name === dependency.name);
+            if (rootIntents.length > 0) {
+              const { packument } = await getPackument(dependency.name);
+              const rootVersions = rootIntents.map((intent) =>
+                resolveVersion(packument, intent.selector),
+              );
+              const range = validRange(selector);
+              const preferred =
+                range === null
+                  ? rootVersions.find((version) => version === resolveVersion(packument, selector))
+                  : maxSatisfying(rootVersions, range, { includePrerelease: false });
+              // Never relax an incompatible peer constraint or omit its edge.
+              if (preferred != null) selector = preferred;
+            }
+          }
           const child = await resolve(
             dependency.name,
-            dependency.selector,
+            selector,
             dependency.optional,
             new Set([...ancestors, key]),
           );
