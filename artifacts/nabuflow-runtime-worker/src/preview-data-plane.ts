@@ -9,6 +9,12 @@ import {
 import type { WorkerBindings } from "./bindings";
 import type { ControlAuditRecord, ControlCoordinator } from "./model";
 import { runtimeSandboxStub, runtimeSandboxWebSocketConnect } from "./runtime-backend";
+import {
+  PreviewNavigationError,
+  rewritePreviewHtml,
+  rewritePreviewUrl,
+  type PreviewRewriteContext,
+} from "./preview-url-rewrite";
 
 const PREVIEW_COOKIE_PREFIX = "__Host-nabuflow_preview_";
 // Preview documents are intentionally framed by the NabuFlow app, which lives
@@ -178,26 +184,48 @@ export async function handlePreviewDataPlaneRequest(
       // request URL and metadata here while removing gateway credentials.
       return await sandbox.wsConnect(new Request(request, { headers }), claims.port);
     }
-    const upstreamUrl = new URL(`${route.appPath}${url.search}`, "https://tenant.preview.invalid");
+    const upstreamUrl = new URL("https://tenant.preview.invalid");
+    // The admitted app path is a path, including leading //, never a host.
+    upstreamUrl.pathname = route.appPath;
+    upstreamUrl.search = url.search;
     const body = request.method === "GET" || request.method === "HEAD" ? null : request.body;
     const upstreamRequest = new Request(upstreamUrl, {
       method: request.method,
       headers,
       body,
+      signal: request.signal,
       redirect: "manual",
       ...(body === null ? {} : ({ duplex: "half" } as RequestInit & { duplex: "half" })),
     });
-    return await sanitizeUpstreamResponse(
-      await sandbox.containerFetch(upstreamRequest, claims.port),
-      request.method,
-    );
+    const upstreamResponse = await sandbox.containerFetch(upstreamRequest, claims.port);
+    try {
+      return await sanitizeUpstreamResponse(upstreamResponse, request.method, {
+        identity: route.identity,
+        previewUrl: url,
+        appUrl: upstreamUrl,
+        signal: request.signal,
+      });
+    } catch (error) {
+      // Until sanitization succeeds, this handler owns the fetched response.
+      // Never await an uncooperative cancellation or replace the original error.
+      try {
+        void upstreamResponse.body?.cancel(error).catch(() => undefined);
+      } catch {
+        // Best-effort cleanup also tolerates a synchronous cancellation failure.
+      }
+      throw error;
+    }
   } catch (error) {
-    if (!(error instanceof PreviewHttpError)) throw error;
+    const httpError =
+      error instanceof PreviewNavigationError
+        ? new PreviewHttpError(502, error.code, error.message)
+        : error;
+    if (!(httpError instanceof PreviewHttpError)) throw httpError;
     await recordPreviewAudit(dependencies.coordinator, requestId, request, null, {
-      status: error.status,
-      outcome: error.code,
+      status: httpError.status,
+      outcome: httpError.code,
     });
-    return previewErrorResponse(error.status, error.code, error.message, requestId);
+    return previewErrorResponse(httpError.status, httpError.code, httpError.message, requestId);
   }
 }
 
@@ -441,6 +469,7 @@ function injectVisualEditBridge(body: ReadableStream<Uint8Array>): ReadableStrea
 async function sanitizeUpstreamResponse(
   upstream: Response,
   requestMethod: string,
+  context: PreviewRewriteContext,
 ): Promise<Response> {
   const headers = new Headers(upstream.headers);
   const connectionTokens = (headers.get("connection") ?? "")
@@ -467,19 +496,41 @@ async function sanitizeUpstreamResponse(
   // policies intersect; this adds framing protection without weakening or
   // replacing the app's resource restrictions.
   headers.append("content-security-policy", PREVIEW_FRAME_ANCESTORS_POLICY);
-  const injectBridge =
-    requestMethod === "GET" &&
-    upstream.status >= 200 &&
-    upstream.status < 300 &&
+  const location = headers.get("location");
+  if (location !== null) headers.set("location", rewritePreviewUrl(location, context));
+  const contentType = headers.get("content-type") ?? "";
+  const rewriteHtml =
+    requestMethod !== "HEAD" &&
+    upstream.status !== 206 &&
+    !headers.has("content-range") &&
     upstream.body !== null &&
-    (headers.get("content-type") ?? "").toLowerCase().includes("text/html");
-  if (injectBridge) {
-    headers.delete("content-length");
-    headers.delete("content-encoding");
-    headers.delete("etag");
-    headers.set("x-nabuflow-preview-bridge", "visual-edit-v1");
+    contentType.split(";", 1)[0].trim().toLowerCase() === "text/html";
+  let body: ReadableStream<Uint8Array> | null = upstream.body;
+  if (rewriteHtml) {
+    const rewritten = await rewritePreviewHtml(
+      body!,
+      contentType,
+      upstream.headers.get("content-security-policy"),
+      context,
+    );
+    body = new Response(rewritten).body;
+    for (const name of [
+      "content-length",
+      "content-encoding",
+      "etag",
+      "last-modified",
+      "content-md5",
+      "digest",
+      "content-digest",
+      "repr-digest",
+    ])
+      headers.delete(name);
+    if (requestMethod === "GET" && upstream.status >= 200 && upstream.status < 300) {
+      body = injectVisualEditBridge(body!);
+      headers.set("x-nabuflow-preview-bridge", "visual-edit-v1");
+    }
   }
-  return new Response(injectBridge ? injectVisualEditBridge(upstream.body!) : upstream.body, {
+  return new Response(body, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers,

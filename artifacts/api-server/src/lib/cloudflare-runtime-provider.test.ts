@@ -157,6 +157,179 @@ async function v1Artifact(identity: string) {
   });
 }
 
+describe("accepted preview database preparation", () => {
+  beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  async function setup(
+    namespace = "production",
+    initialManifest = "manifest-1",
+    initialStatus = "stopped",
+  ) {
+    const projectId = 61;
+    const identity = await deriveRuntimeIdentity({
+      namespace,
+      projectId,
+      role: "preview",
+      slot: "primary",
+    });
+    const release = acceptedRelease(identity);
+    const events: string[] = [];
+    let manifestRevision = initialManifest;
+    let status = initialStatus;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      const method = init?.method ?? "GET";
+      if (path.endsWith("/version") && init?.headers === undefined) {
+        return json({ code: "unauthorized" }, 401);
+      }
+      if (path.endsWith("/version")) {
+        return json({
+          protocolVersion: CONTROL_PROTOCOL_VERSION,
+          deploymentVersion: `${namespace}-v1`,
+          provider: "cloudflare",
+          supportedRoles: ["preview", "production"],
+          features: ["artifact-layers-v1", "manifest-update-v1"],
+        });
+      }
+      if (method !== "GET") events.push(`${method} ${path}`);
+      if (path.endsWith("/manifest")) manifestRevision = release.manifest.revision;
+      if (path.endsWith("/start")) status = "running";
+      return json({
+        runtime: {
+          ...(runningRuntime(identity, projectId) as { runtime: Record<string, unknown> }).runtime,
+          manifestRevision,
+          status,
+          deploymentVersion: `${namespace}-v1`,
+        },
+      });
+    });
+    const provider = new CloudflareRuntimeProvider({
+      ...config,
+      deploymentNamespace: namespace,
+    });
+    const prepare = vi
+      .spyOn(provider, "ensureProductionDatabaseCapability")
+      .mockImplementation(async () => {
+        events.push("database-ready");
+        return {
+          allocationIdentity: "a".repeat(64),
+          revision: "production-database-ready",
+          providerProjectId: "test-provider-project-61",
+          reused: true,
+        };
+      });
+    return { projectId, identity, release, provider, prepare, events };
+  }
+
+  it("prepares declared storage before starting the accepted preview", async () => {
+    const fixture = await setup();
+    const controller = new AbortController();
+    await fixture.provider.zeroGenerationStartAcceptedSealedRelease({
+      projectId: fixture.projectId,
+      acceptedRelease: fixture.release,
+      signal: controller.signal,
+      operationTimeoutMs: 12_000,
+    });
+    expect(fixture.prepare).toHaveBeenCalledExactlyOnceWith({
+      projectId: fixture.projectId,
+      signal: controller.signal,
+      operationTimeoutMs: 12_000,
+    });
+    expect(fixture.events[0]).toBe("database-ready");
+    expect(fixture.events[1]).toMatch(/^POST .*\/preview\/primary\/start$/);
+  });
+
+  it("prepares storage before a manifest reconciliation can restart a running preview", async () => {
+    const fixture = await setup("production", "old-manifest", "running");
+    await fixture.provider.zeroGenerationStartAcceptedSealedRelease({
+      projectId: fixture.projectId,
+      acceptedRelease: fixture.release,
+    });
+    expect(fixture.events[0]).toBe("database-ready");
+    expect(fixture.events[1]).toMatch(/^PUT .*\/preview\/primary\/manifest$/);
+    expect(fixture.events.some((event) => event.endsWith("/start"))).toBe(false);
+  });
+
+  it.each(["stopped", "running"])(
+    "does not start or restart a %s preview if database preparation fails",
+    async (status) => {
+      const fixture = await setup("production", "old-manifest", status);
+      fixture.prepare.mockRejectedValueOnce(new Error("production_database_admission_denied"));
+      await expect(
+        fixture.provider.zeroGenerationStartAcceptedSealedRelease({
+          projectId: fixture.projectId,
+          acceptedRelease: fixture.release,
+        }),
+      ).rejects.toThrow("production_database_admission_denied");
+      expect(fixture.events).toEqual([]);
+    },
+  );
+
+  it("does not allocate storage when the accepted release declares none", async () => {
+    const fixture = await setup();
+    await fixture.provider.zeroGenerationStartAcceptedSealedRelease({
+      projectId: fixture.projectId,
+      acceptedRelease: { ...fixture.release, declaredCapabilities: [] },
+    });
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    expect(fixture.events).toHaveLength(1);
+  });
+
+  it("does not allocate production storage for a staging runtime", async () => {
+    const fixture = await setup("staging");
+    await fixture.provider.zeroGenerationStartAcceptedSealedRelease({
+      projectId: fixture.projectId,
+      acceptedRelease: fixture.release,
+    });
+    expect(fixture.prepare).not.toHaveBeenCalled();
+  });
+
+  it("rejects another project's accepted release before database preparation", async () => {
+    const fixture = await setup();
+    const otherIdentity = await deriveRuntimeIdentity({
+      namespace: "production",
+      projectId: 62,
+      role: "preview",
+      slot: "primary",
+    });
+    await expect(
+      fixture.provider.zeroGenerationStartAcceptedSealedRelease({
+        projectId: fixture.projectId,
+        acceptedRelease: { ...fixture.release, sourceRuntimeIdentity: otherIdentity },
+      }),
+    ).rejects.toThrow();
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    expect(fixture.events).toEqual([]);
+  });
+
+  it("rejects a mismatched durable descriptor before database preparation", async () => {
+    const fixture = await setup();
+    vi.spyOn(fixture.provider, "zeroGenerationRuntimeDescriptorForProject").mockResolvedValue({
+      identity: await deriveRuntimeIdentity({
+        namespace: "production",
+        projectId: 62,
+        role: "preview",
+        slot: "primary",
+      }),
+      manifestRevision: "manifest-1",
+      status: "stopped",
+      endpoint: null,
+    });
+    await expect(
+      fixture.provider.zeroGenerationStartAcceptedSealedRelease({
+        projectId: fixture.projectId,
+        acceptedRelease: fixture.release,
+      }),
+    ).rejects.toThrow("durable preview runtime");
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    expect(fixture.events).toEqual([]);
+  });
+});
+
 describe("CloudflareRuntimeProvider", () => {
   beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
   afterEach(() => vi.unstubAllGlobals());

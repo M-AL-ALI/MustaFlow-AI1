@@ -920,6 +920,12 @@ importers:
       '@workspace/tenant-runtime-contracts':
         specifier: workspace:*
         version: link:../../lib/tenant-runtime-contracts
+      entities:
+        specifier: 8.0.0
+        version: 8.0.0
+      parse5:
+        specifier: 8.0.1
+        version: 8.0.1
       semver:
         specifier: 7.8.5
         version: 7.8.5

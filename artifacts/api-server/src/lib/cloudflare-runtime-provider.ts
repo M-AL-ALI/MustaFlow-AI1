@@ -1672,6 +1672,16 @@ export class CloudflareRuntimeProvider
       );
     }
     await this.requireControlFeature("artifact-layers-v1");
+    if (
+      this.config.deploymentNamespace === "production" &&
+      release.declaredCapabilities.includes("database")
+    ) {
+      await this.ensureProductionDatabaseCapability({
+        projectId: input.projectId,
+        operationTimeoutMs: input.operationTimeoutMs,
+        signal: input.signal,
+      });
+    }
     let reconciledManifest = false;
     if (current.manifestRevision !== release.manifest.revision) {
       await this.updateRuntimeManifest(release.sourceRuntimeIdentity, input.projectId, {
