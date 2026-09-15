@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PANTRY_ASSEMBLY_LEASE_MS,
   PANTRY_CATALOG_STAMP_FORMAT,
+  PANTRY_ROOT_AWARE_PEER_RESOLUTION,
+  pantryCatalogStockRequestHash,
+  pantryCatalogStockRequestSchema,
   pantryShelfContentHashesHash,
   pantryShelfContentHashesResponseSchema,
   sha256Hex,
@@ -976,6 +979,82 @@ describe("private Pantry catalog Worker", () => {
       },
       r2: { quarantineObjects: 0 },
     });
+  });
+
+  it("stocks the corrected policy separately without mutating the committed legacy shelf", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await beginAndStage(test, fixture);
+    expect((await commit(test, fixture)).status).toBe(201);
+    const legacyIdentity = await test.coordinator.getStockIdentity(fixture.request.requestSha256);
+    const legacyShelf = await test.coordinator.getShelfByRoot(fixture.commit.revision.rootSha256);
+    const legacyObjects = structuredClone([...test.bucket.objects.entries()]);
+    const identity = { ...fixture.request, resolutionPolicy: PANTRY_ROOT_AWARE_PEER_RESOLUTION };
+    const corrected = pantryCatalogStockRequestSchema.parse({
+      ...identity,
+      requestSha256: await pantryCatalogStockRequestHash(identity),
+    });
+    expect(corrected.requestSha256).not.toBe(fixture.request.requestSha256);
+    const created = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: corrected,
+    });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      state: "created",
+      assemblyId: `passembly_${corrected.requestSha256}`,
+    });
+    const replay = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: corrected,
+    });
+    expect(replay.status).toBe(200);
+    await expect(replay.json()).resolves.toMatchObject({
+      state: "assembling",
+      assemblyId: `passembly_${corrected.requestSha256}`,
+    });
+    expect(
+      (await test.coordinator.getAssembly(`passembly_${corrected.requestSha256}`))?.request
+        .resolutionPolicy,
+    ).toBe(PANTRY_ROOT_AWARE_PEER_RESOLUTION);
+    expect(await test.coordinator.getStockIdentity(fixture.request.requestSha256)).toEqual(
+      legacyIdentity,
+    );
+    expect(await test.coordinator.getShelfByRoot(fixture.commit.revision.rootSha256)).toEqual(
+      legacyShelf,
+    );
+    expect([...test.bucket.objects.entries()]).toEqual(legacyObjects);
+    const legacyReplay = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: fixture.request,
+    });
+    await expect(legacyReplay.json()).resolves.toMatchObject({
+      state: "committed",
+      revisionRootSha256: fixture.commit.revision.rootSha256,
+    });
+  });
+
+  it("rejects a policy change that reuses the legacy identity hash", async () => {
+    const test = context();
+    const fixture = await makePantryFixture({ nowMs: Date.now() });
+    await test.coordinator.beginStock(fixture.request);
+    const altered = { ...fixture.request, resolutionPolicy: PANTRY_ROOT_AWARE_PEER_RESOLUTION };
+    const response = await call(test, "/internal/v1/stock-requests", {
+      method: "POST",
+      principal: "catalog-admin",
+      body: altered,
+    });
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({ code: "catalog_integrity_mismatch" });
+    await expect(test.coordinator.beginStock(altered)).resolves.toMatchObject({
+      state: "conflict",
+    });
+    expect(
+      (await test.coordinator.getAssembly(fixture.commit.assemblyId))?.request.resolutionPolicy,
+    ).toBeUndefined();
   });
 
   it("attaches or adopts resumed semantic identities with fresh timestamps", async () => {

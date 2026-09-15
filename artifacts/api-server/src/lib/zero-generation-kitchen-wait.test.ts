@@ -8,12 +8,14 @@ import {
   RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
   RUNTIME_START_OPERATION_BOUND_MS,
   ZERO_SEALED_BUILD_PLATFORM,
+  PANTRY_ROOT_AWARE_PEER_RESOLUTION,
   pantryCatalogStockRequestHash,
   pantryCatalogStockRequestSchema,
   type PantryCatalogShelfRecord,
 } from "@workspace/tenant-runtime-contracts";
 import {
   makeZeroTrustedBuildRequest,
+  makeZeroPantryStockRequest,
   ZERO_TRUSTED_BUILD_REQUEST_INVALID_MESSAGE,
   ZeroGenerationKitchenError,
   readZeroGenerationControlWithWeather,
@@ -97,6 +99,61 @@ describe("Zero generator Pantry lifecycle waiting", () => {
       message: ZERO_TRUSTED_BUILD_REQUEST_INVALID_MESSAGE,
       evidence: { stage: "request-validation", fields: ["source"] },
     });
+  });
+
+  it("requests a fresh root-aware stock identity without changing legacy or resumed identities", async () => {
+    const legacy = await stockRequest();
+    const requestedAt = new Date(legacy.requestedAt);
+    const first = await makeZeroPantryStockRequest(legacy.intents, requestedAt);
+    const resumed = await makeZeroPantryStockRequest(
+      legacy.intents,
+      new Date(requestedAt.getTime() + 30_000),
+    );
+    expect(first.resolutionPolicy).toBe(PANTRY_ROOT_AWARE_PEER_RESOLUTION);
+    expect(first.requestSha256).not.toBe(legacy.requestSha256);
+    expect(resumed.requestSha256).toBe(first.requestSha256);
+    expect(resumed.requestedAt).not.toBe(first.requestedAt);
+    expect(await pantryCatalogStockRequestHash(first)).toBe(first.requestSha256);
+    expect(legacy).not.toHaveProperty("resolutionPolicy");
+  });
+
+  it("changes build identity when a corrected Pantry revision replaces a failed build input", async () => {
+    const input: Parameters<typeof makeZeroTrustedBuildRequest>[0] = {
+      files: [
+        { path: "src/index.ts", content: "export const value = 1;\n", mimeType: "text/typescript" },
+      ],
+      dependencyPlan: {
+        format: "nabu-zero-generation/v1",
+        schemaVersion: 1,
+        target: "cloudflare-sealed-v1",
+        intents: [{ ecosystem: "npm", name: "express", selector: "4.22.3" }],
+      },
+      shelf: {
+        lockfileSha256: "a".repeat(64),
+        revision: {
+          rootSha256: "b".repeat(64),
+          content: {
+            revisionId: "pantry-2026-08-27.1",
+            dependencyClosureSha256: "c".repeat(64),
+          },
+        },
+      } as PantryCatalogShelfRecord,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    };
+    const first = await makeZeroTrustedBuildRequest(input);
+    const resumed = await makeZeroTrustedBuildRequest({
+      ...input,
+      createdAt: "2026-08-27T00:00:30.000Z",
+    });
+    const correctedShelf = structuredClone(input.shelf);
+    correctedShelf.revision.rootSha256 = "d".repeat(64);
+    correctedShelf.revision.content.revisionId = "pantry-2026-08-27.2";
+    const corrected = await makeZeroTrustedBuildRequest({ ...input, shelf: correctedShelf });
+    expect(resumed.input.buildId).toBe(first.input.buildId);
+    expect(corrected.input.buildId).not.toBe(first.input.buildId);
+    expect(corrected.requestId).not.toBe(first.requestId);
+    expect(corrected.input.sourceArtifactSha256).toBe(first.input.sourceArtifactSha256);
+    expect(corrected.input.dependencyIntentSha256).toBe(first.input.dependencyIntentSha256);
   });
 
   it("preserves sanitized trusted-build identity and per-attempt diagnostics", () => {

@@ -49,6 +49,7 @@ import type {
   TrustedBuildCell,
   TrustedBuildCoordinator,
   TrustedBuildFailure,
+  TrustedBuildLegacyIdentity,
   TrustedBuildQueueMessage,
   TrustedBuildRequestMetadata,
   TrustedBuildWorkerBindings,
@@ -1007,6 +1008,17 @@ async function executeBuild(
   }
 }
 
+async function trustedBuildSemanticRequestHash(
+  metadata: TrustedBuildRequestMetadata,
+): Promise<string> {
+  const { requestId: _requestId, input, ...rest } = metadata;
+  const { createdAt: _createdAt, ...semanticInput } = input;
+  return sha256Hex(
+    "NABUFLOW_TRUSTED_BUILD_V1\nsemantic-request\n" +
+      canonicalPantryJson({ ...rest, input: semanticInput }),
+  );
+}
+
 async function handleBegin(
   request: Request,
   env: TrustedBuildWorkerBindings,
@@ -1028,6 +1040,22 @@ async function handleBegin(
     ...parsed,
     source: { manifest: parsed.source.manifest },
   };
+  const semanticRequestSha256 = await trustedBuildSemanticRequestHash(metadata);
+  const existing = await coordinator.get(parsed.input.buildId);
+  let legacyIdentity: TrustedBuildLegacyIdentity | undefined;
+  if (
+    existing !== null &&
+    existing.semanticRequestSha256 === undefined &&
+    existing.requestId !== parsed.requestId
+  ) {
+    const storedMetadata = await readStoredRequestMetadata(env, existing);
+    legacyIdentity = {
+      requestId: existing.requestId,
+      requestSha256: existing.requestSha256,
+      requestObjectSha256: existing.requestObjectSha256,
+      semanticRequestSha256: await trustedBuildSemanticRequestHash(storedMetadata),
+    };
+  }
   const canonicalBytes = textEncoder.encode(canonicalPantryJson(metadata));
   const requestObjectSha256 = await sha256Hex(canonicalBytes);
   const sourceObjectSha256 = await sha256Hex(verified.sourcePayload);
@@ -1048,6 +1076,7 @@ async function handleBegin(
       buildId: parsed.input.buildId,
       requestId: parsed.requestId,
       requestSha256: verified.requestSha256,
+      semanticRequestSha256,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       requestObjectSha256,
@@ -1055,7 +1084,16 @@ async function handleBegin(
       sourceBytes: verified.sourcePayload.byteLength,
     },
     maxActive(env),
+    legacyIdentity,
   );
+  if (begun.state === "conflict") {
+    throw new TrustedBuildHttpError(
+      409,
+      "build_invalid_request",
+      "Build identity is already bound to different inputs",
+      false,
+    );
+  }
   if (begun.state === "backpressure") {
     await deleteTrustedBuildPrefix(
       env.TRUSTED_BUILD_OBJECTS,

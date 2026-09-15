@@ -1340,9 +1340,10 @@ export function PreviewTab({
   const webContainerLive =
     isReactVite && !serverPreviewLive && wc.status === "ready" && wc.previewUrl != null;
 
-  // Detect agentic preview failure class from the backend header. A 502 can mean
-  // either the Fly proxy is unreachable or the app server crashed; keep those
-  // separate so the UI suggests the right action.
+  // Inspect only the authenticated platform response. A gateway redirect belongs
+  // to iframe navigation, not this status probe: following it would redeem a
+  // second launch grant and require cross-origin access to tenant content.
+  // An opaque redirect is a handoff, not proof that the app rendered correctly.
   useEffect(() => {
     if (!serverPreviewLive) {
       setPreviewIssue(null);
@@ -1355,6 +1356,7 @@ export function PreviewTab({
         const res = await authFetch(`/api/projects/${project.id}/preview/?t=${Date.now()}`, {
           method: "GET",
           credentials: "include",
+          redirect: "manual",
         });
         if (!cancelled) {
           setPreviewAuthorizationStatus(

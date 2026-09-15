@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   PANTRY_CATALOG_SCHEMA_VERSION,
+  PANTRY_CATALOG_HASH_DOMAIN,
+  PANTRY_ROOT_AWARE_PEER_RESOLUTION,
+  canonicalPantryJson,
+  pantryCatalogStockIdentityEquals,
+  sha256Hex,
   PANTRY_CATALOG_SHELF_FORMAT,
   PANTRY_CATALOG_STAMP_FORMAT,
   canonicalPantryCatalogStockIdentity,
@@ -135,6 +140,47 @@ describe("Pantry catalog contracts", () => {
     const resumed = await pantryCatalogStockRequestHash(resumedEnvelope);
     expect(resumed).toBe(first);
     expect(await pantryCatalogStockRequestHash(unsorted)).toBe(first);
+  });
+
+  it("keeps the exact legacy stock hash while versioning corrected peer resolution", async () => {
+    const identity = canonicalPantryCatalogStockIdentity({
+      intents: [{ ecosystem: "npm", name: "express", selector: "4.22.3" }],
+      platform: PANTRY_COMPATIBILITY_PLATFORM,
+    });
+    const legacyHash = await pantryCatalogStockRequestHash(identity);
+    expect(legacyHash).toBe(
+      await sha256Hex(
+        `${PANTRY_CATALOG_HASH_DOMAIN}\nstock-request\n${canonicalPantryJson({
+          intents: identity.intents,
+          platform: identity.platform,
+        })}`,
+      ),
+    );
+    expect(identity).not.toHaveProperty("resolutionPolicy");
+    const corrected = canonicalPantryCatalogStockIdentity({
+      ...identity,
+      resolutionPolicy: PANTRY_ROOT_AWARE_PEER_RESOLUTION,
+    });
+    const correctedHash = await pantryCatalogStockRequestHash(corrected);
+    expect(corrected.resolutionPolicy).toBe(PANTRY_ROOT_AWARE_PEER_RESOLUTION);
+    expect(correctedHash).not.toBe(legacyHash);
+    expect(pantryCatalogStockIdentityEquals(identity, corrected)).toBe(false);
+    expect(
+      await pantryCatalogStockRequestHash({
+        ...corrected,
+        intents: [...corrected.intents].reverse(),
+      }),
+    ).toBe(correctedHash);
+  });
+
+  it("rejects an unknown resolution policy instead of dropping it from stock identity", () => {
+    expect(() =>
+      canonicalPantryCatalogStockIdentity({
+        intents: [{ ecosystem: "npm", name: "express", selector: "4.22.3" }],
+        platform: PANTRY_COMPATIBILITY_PLATFORM,
+        resolutionPolicy: "ignore-peer-conflicts",
+      } as unknown as Parameters<typeof canonicalPantryCatalogStockIdentity>[0]),
+    ).toThrow();
   });
 
   it("contracts the explicit stock and assembly-progress lifecycle", () => {

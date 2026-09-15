@@ -15,6 +15,7 @@ import { compareUtf8, validateRuntimeArtifactPath } from "./runtime-artifact";
 import { sha256Hex } from "./request-signing";
 
 export const PANTRY_CATALOG_SCHEMA_VERSION = 1 as const;
+export const PANTRY_ROOT_AWARE_PEER_RESOLUTION = "root-aware-peers-v1" as const;
 export const PANTRY_CATALOG_SHELF_FORMAT = "nabu-pantry-catalog-shelf/v1" as const;
 export const PANTRY_CATALOG_STAMP_FORMAT = "nabu-pantry-catalog-stamp/v1" as const;
 export const PANTRY_CATALOG_HASH_DOMAIN = "NABUFLOW_PANTRY_CATALOG_V1" as const;
@@ -103,6 +104,8 @@ const pantryCatalogStockIdentityCoreSchema = z
   .object({
     intents: z.array(pantryPackageIntentSchema).min(1).max(1_000),
     platform: pantryPlatformSchema,
+    // Optional so legacy requests and their committed content addresses remain valid.
+    resolutionPolicy: z.literal(PANTRY_ROOT_AWARE_PEER_RESOLUTION).optional(),
   })
   .strict();
 
@@ -139,6 +142,7 @@ export function canonicalPantryCatalogStockIdentity(
       return compareUtf8(leftKey, rightKey);
     }),
     platform: input.platform,
+    ...(input.resolutionPolicy === undefined ? {} : { resolutionPolicy: input.resolutionPolicy }),
   });
 }
 
@@ -457,11 +461,12 @@ export const pantryCatalogObjectInventoryResponseSchema = z
   .strict();
 
 export async function pantryCatalogStockRequestHash(
-  input: Pick<PantryCatalogStockRequest, "intents" | "platform">,
+  input: Pick<PantryCatalogStockRequest, "intents" | "platform" | "resolutionPolicy">,
 ): Promise<string> {
   const identity = canonicalPantryCatalogStockIdentity({
     intents: input.intents,
     platform: input.platform,
+    ...(input.resolutionPolicy === undefined ? {} : { resolutionPolicy: input.resolutionPolicy }),
   });
   return sha256Hex(
     `${PANTRY_CATALOG_HASH_DOMAIN}\nstock-request\n${canonicalPantryJson(identity)}`,

@@ -13,6 +13,7 @@ import type {
   TrustedBuildCoordinator,
   TrustedBuildDiagnostics,
   TrustedBuildFailure,
+  TrustedBuildLegacyIdentity,
   TrustedBuildWorkerBindings,
 } from "./trusted-build-model";
 
@@ -98,6 +99,7 @@ export class TrustedBuildDurableObject
       | "buildId"
       | "requestId"
       | "requestSha256"
+      | "semanticRequestSha256"
       | "createdAt"
       | "updatedAt"
       | "requestObjectSha256"
@@ -105,23 +107,64 @@ export class TrustedBuildDurableObject
       | "sourceBytes"
     >,
     maxActive: number,
+    legacyIdentity?: TrustedBuildLegacyIdentity,
   ): Promise<TrustedBuildBegin> {
     const result = await this.ctx.storage.transaction<TrustedBuildBegin>(async (transaction) => {
+      const coalesce = async (existing: StoredTrustedBuild): Promise<TrustedBuildBegin> => {
+        const counters = (await transaction.get<Counters>(COUNTERS_KEY)) ?? {
+          queueDeliveries: 0,
+          coalescedRequests: 0,
+        };
+        counters.coalescedRequests += 1;
+        await transaction.put(COUNTERS_KEY, counters);
+        return {
+          state: existing.state === "succeeded" ? "succeeded" : "coalesced",
+          build: existing,
+        };
+      };
       const existingBuildId = await transaction.get<string>(requestKey(request.requestId));
       if (existingBuildId !== undefined) {
         const existing = await transaction.get<StoredTrustedBuild>(buildKey(existingBuildId));
-        if (existing !== undefined && existing.requestSha256 === request.requestSha256) {
-          const counters = (await transaction.get<Counters>(COUNTERS_KEY)) ?? {
-            queueDeliveries: 0,
-            coalescedRequests: 0,
-          };
-          counters.coalescedRequests += 1;
-          await transaction.put(COUNTERS_KEY, counters);
-          return {
-            state: existing.state === "succeeded" ? "succeeded" : "coalesced",
-            build: existing,
-          };
+        if (
+          existing === undefined ||
+          existingBuildId !== request.buildId ||
+          existing.buildId !== request.buildId ||
+          existing.requestSha256 !== request.requestSha256
+        ) {
+          return { state: "conflict" };
         }
+        return coalesce(existing);
+      }
+
+      // A new transport request must never reset an existing job, lease, or deadline.
+      const existing = await transaction.get<StoredTrustedBuild>(buildKey(request.buildId));
+      if (existing !== undefined) {
+        if (
+          existing.buildId !== request.buildId ||
+          request.semanticRequestSha256 === undefined ||
+          !/^[0-9a-f]{64}$/u.test(request.semanticRequestSha256)
+        ) {
+          return { state: "conflict" };
+        }
+        let existingIdentity = existing.semanticRequestSha256;
+        if (
+          existingIdentity === undefined &&
+          legacyIdentity?.requestId === existing.requestId &&
+          legacyIdentity.requestSha256 === existing.requestSha256 &&
+          legacyIdentity.requestObjectSha256 === existing.requestObjectSha256
+        ) {
+          existingIdentity = legacyIdentity.semanticRequestSha256;
+        }
+        if (existingIdentity !== request.semanticRequestSha256) {
+          return { state: "conflict" };
+        }
+        if (existing.semanticRequestSha256 === undefined) {
+          // Hydrate only after hash-verified legacy metadata still matches this row.
+          existing.semanticRequestSha256 = existingIdentity;
+          await transaction.put(buildKey(existing.buildId), existing);
+        }
+        // Do not create alias request indexes that could outlive the original job.
+        return coalesce(existing);
       }
       const builds = await transaction.list<StoredTrustedBuild>({ prefix: BUILD_PREFIX });
       const active = [...builds.values()].filter((build) => !isTerminal(build.state)).length;

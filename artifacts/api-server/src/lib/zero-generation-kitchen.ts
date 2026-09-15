@@ -14,6 +14,7 @@ import {
   RUNTIME_ARTIFACT_OPERATION_BOUND_MS,
   RUNTIME_START_OPERATION_BOUND_MS,
   ZERO_SEALED_BUILD_PLATFORM,
+  PANTRY_ROOT_AWARE_PEER_RESOLUTION,
   canonicalPantryJson,
   pantryCatalogAssemblyStatusResponseSchema,
   pantryCatalogAssemblyDiagnosticsResponseSchema,
@@ -167,6 +168,24 @@ function sourceBytes(file: BuilderFile): Uint8Array {
   return new TextEncoder().encode(file.content.replace(/\r\n?/gu, "\n"));
 }
 
+export async function makeZeroPantryStockRequest(
+  intents: PantryCatalogStockRequest["intents"],
+  requestedAt: Date,
+): Promise<PantryCatalogStockRequest> {
+  const identity = {
+    intents,
+    platform: ZERO_SEALED_BUILD_PLATFORM,
+    resolutionPolicy: PANTRY_ROOT_AWARE_PEER_RESOLUTION,
+  };
+  return pantryCatalogStockRequestSchema.parse({
+    schemaVersion: 1,
+    ...identity,
+    requestSha256: await pantryCatalogStockRequestHash(identity),
+    requestedAt: requestedAt.toISOString(),
+    expiresAt: new Date(requestedAt.getTime() + 60 * 60_000).toISOString(),
+  });
+}
+
 export async function makeZeroTrustedBuildRequest(input: {
   files: readonly BuilderFile[];
   dependencyPlan: ZeroGeneratedDependencyPlan;
@@ -203,7 +222,11 @@ export async function makeZeroTrustedBuildRequest(input: {
     const dependencyIntentSha256 = await trustedBuildDependencyIntentHash(
       input.dependencyPlan.intents,
     );
-    const buildId = `pbuild_zero_${await sha256Hex(`${sourceArtifactSha256}:${dependencyIntentSha256}`)}`;
+    // A corrected immutable Pantry revision is a different build input even
+    // when the application's source and declared dependencies are unchanged.
+    const buildId = `pbuild_zero_${await sha256Hex(
+      `${sourceArtifactSha256}:${dependencyIntentSha256}:${input.shelf.revision.rootSha256}`,
+    )}`;
     const unsigned = {
       format: TRUSTED_BUILD_REQUEST_FORMAT,
       schemaVersion: TRUSTED_BUILD_SCHEMA_VERSION,
@@ -779,18 +802,7 @@ export async function runZeroGenerationKitchen(
     signal: input.signal,
   });
 
-  const stockIdentity = {
-    intents: input.dependencyPlan.intents,
-    platform: ZERO_SEALED_BUILD_PLATFORM,
-  };
-  const requestedAt = now();
-  const stockRequest = pantryCatalogStockRequestSchema.parse({
-    schemaVersion: 1,
-    ...stockIdentity,
-    requestSha256: await pantryCatalogStockRequestHash(stockIdentity),
-    requestedAt: requestedAt.toISOString(),
-    expiresAt: new Date(requestedAt.getTime() + 60 * 60_000).toISOString(),
-  });
+  const stockRequest = await makeZeroPantryStockRequest(input.dependencyPlan.intents, now());
   const { shelfRootSha256: shelfRoot } = await waitForPantryShelf(provider, stockRequest, {
     startedAtMs: productStartedAtMs,
     deadlineMs: assemblyDeadlineMs,

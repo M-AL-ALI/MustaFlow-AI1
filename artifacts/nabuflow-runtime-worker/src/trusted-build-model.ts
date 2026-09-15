@@ -53,6 +53,8 @@ export interface StoredTrustedBuild {
   buildId: string;
   requestId: string;
   requestSha256: string;
+  /** Input identity excluding transport request IDs and input timestamps. */
+  semanticRequestSha256?: string;
   state: TrustedBuildState;
   attempt: number;
   queueDeliveries: number;
@@ -70,10 +72,18 @@ export interface StoredTrustedBuild {
   attempts: TrustedBuildAttemptEvidence[];
 }
 
+export interface TrustedBuildLegacyIdentity {
+  requestId: string;
+  requestSha256: string;
+  requestObjectSha256: string;
+  semanticRequestSha256: string;
+}
+
 export type TrustedBuildBegin =
   | { state: "created"; build: StoredTrustedBuild }
   | { state: "coalesced" | "succeeded"; build: StoredTrustedBuild }
-  | { state: "backpressure" };
+  | { state: "backpressure" }
+  | { state: "conflict" };
 
 export type TrustedBuildClaim =
   | { state: "claimed"; build: StoredTrustedBuild }
@@ -97,6 +107,7 @@ export interface TrustedBuildCoordinator {
       | "buildId"
       | "requestId"
       | "requestSha256"
+      | "semanticRequestSha256"
       | "createdAt"
       | "updatedAt"
       | "requestObjectSha256"
@@ -104,6 +115,7 @@ export interface TrustedBuildCoordinator {
       | "sourceBytes"
     >,
     maxActive: number,
+    legacyIdentity?: TrustedBuildLegacyIdentity,
   ): Promise<TrustedBuildBegin>;
   recordQueueDelivery(buildId: string): Promise<"recorded" | "not_found">;
   recordStage(
