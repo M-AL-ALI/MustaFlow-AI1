@@ -757,7 +757,8 @@ router.post(
     // refactor, review, explain) are always allowed — they never write to the
     // container. We also allow when provisioningStatus is null / 'idle' so that
     // static and legacy projects are never gated.
-    const needsContainer = resolvedIntent === "mutate" || runInBackground;
+    // Background delivery cannot override the authoritative non-mutation decision.
+    const needsContainer = resolvedIntent === "mutate";
     if (needsContainer) {
       const bMode = (project as unknown as { builderMode?: string | null }).builderMode;
       const pStatus = (project as unknown as { provisioningStatus?: string | null })

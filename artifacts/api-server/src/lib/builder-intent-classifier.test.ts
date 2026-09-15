@@ -146,4 +146,56 @@ describe("zero closed intent classifier", () => {
     expect(createChatCompletion).toHaveBeenCalledTimes(1);
     expect(streamChatCompletion).not.toHaveBeenCalled();
   });
+
+  it("returns a deterministic skipped-check report without invoking generation", async () => {
+    const args = {
+      projectName: "Validation boundary",
+      userPrompt:
+        "Comparison audit only. Validate this existing app without modifying any project files. Run the existing typecheck and production-build checks.",
+      conversationHistory: [{ role: "user" as const, content: "Build and deploy this app." }],
+      currentFiles: [
+        {
+          path: "package.json",
+          content: '{"scripts":{"typecheck":"tsc --noEmit","build":"vite build"}}',
+          mimeType: "application/json",
+        },
+      ],
+      agentMode: "eco" as const,
+    };
+    const ordinary = await runConversePipeline(args);
+    const onToken = vi.fn();
+    const streamed = await runConverseStreamPipeline(args, onToken);
+    expect(streamed).toEqual(ordinary);
+    expect(ordinary.markdown).toContain("**SKIPPED:**");
+    expect(ordinary.markdown).toContain("**Exact commands executed:** none.");
+    expect(ordinary.stopEvidence).toEqual({
+      source: "local_contract_fallback",
+      fallbackCode: "read_only_execution_unavailable",
+    });
+    expect(onToken).toHaveBeenCalledExactlyOnceWith(ordinary.markdown);
+    expect(createChatCompletion).not.toHaveBeenCalled();
+    expect(streamChatCompletion).not.toHaveBeenCalled();
+  });
+
+  it("does not emit a skipped-check response after a streaming cancellation", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const onToken = vi.fn();
+    await expect(
+      runConverseStreamPipeline(
+        {
+          projectName: "Canceled validation",
+          userPrompt: "Do not change this project. Run typecheck.",
+          conversationHistory: [],
+          currentFiles: [],
+          agentMode: "eco",
+          signal: controller.signal,
+        },
+        onToken,
+      ),
+    ).rejects.toMatchObject({ code: "stream_aborted" });
+    expect(onToken).not.toHaveBeenCalled();
+    expect(createChatCompletion).not.toHaveBeenCalled();
+    expect(streamChatCompletion).not.toHaveBeenCalled();
+  });
 });

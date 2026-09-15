@@ -33,4 +33,9 @@ describe("authoritative message intent wiring", () => {
       source.match(/mutationForbidden: isExplicitNoProjectMutationRequest\(content\)/g),
     ).toHaveLength(2);
   });
+
+  it("does not make a read-only request require a runtime because background delivery was selected", () => {
+    expect(source).toContain('const needsContainer = resolvedIntent === "mutate";');
+    expect(source).not.toContain('resolvedIntent === "mutate" || runInBackground');
+  });
 });

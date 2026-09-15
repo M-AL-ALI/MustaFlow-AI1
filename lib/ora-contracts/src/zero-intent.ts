@@ -51,12 +51,67 @@ export type IntentReceiptDecision = Pick<
   "intent" | "decidingSource" | "confidence" | "reasonCode"
 >;
 
-const EXPLICIT_NO_PROJECT_MUTATION =
-  /^\s*(?:please\s+)?(?:do\s+not|don't|dont|never)\s+(?:change|modify|edit|update|build|mutate)\s+(?:this|the|my)\s+(?:project|app|codebase)\b/iu;
+const WHOLE_PROJECT_TARGET =
+  "(?:this|the|my|our|any|all|existing|current)(?:\\s+(?:existing|current))?\\s+(?:(?:project|app|codebase)(?:\\s+files)?|files)";
+const NARROW_PROJECT_PROPERTY =
+  "(?:names?|titles?|icons?|logos?|slugs?|headings?|headers?|footers?)";
+// Qualifiers do not revoke a whole-project veto. Only an explicitly narrower
+// property target is excluded; unknown continuations keep the protective rule.
+const WHOLE_PROJECT_BOUNDARY =
+  "\\b(?!(?:['\\u2019]s)?[^\\S\\r\\n\\u2028\\u2029]+" + NARROW_PROJECT_PROPERTY + "\\b)";
+const INSTRUCTION_START = "(?:^|[.!?;\\n])\\s*(?:please\\s+)?";
+const EXPLICIT_NO_PROJECT_MUTATION = new RegExp(
+  INSTRUCTION_START +
+    "(?:do\\s+not|don['\\u2019]?t|never)\\s+(?:change|modify|edit|update|build|mutate|touch|alter)\\s+" +
+    WHOLE_PROJECT_TARGET +
+    WHOLE_PROJECT_BOUNDARY,
+  "iu",
+);
+const INSPECT_WITHOUT_MUTATION = new RegExp(
+  INSTRUCTION_START +
+    "(?:validate|inspect|review|audit|check|run)\\b[^.!?;\\n]{0,240}\\bwithout\\s+(?:changing|modifying|editing|updating|touching|altering)\\s+" +
+    WHOLE_PROJECT_TARGET +
+    WHOLE_PROJECT_BOUNDARY,
+  "iu",
+);
+const LEAVE_PROJECT_UNCHANGED = new RegExp(
+  INSTRUCTION_START + "(?:leave|keep)\\s+" + WHOLE_PROJECT_TARGET + "\\s+unchanged\\b",
+  "iu",
+);
+
+/** Mask reference material without joining the surrounding instruction fragments. */
+export function zeroIntentInstructionText(
+  content: string,
+  retainQuotedValue?: (prefix: string, value: string) => boolean,
+): string {
+  const outsideFences = content.replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/gu, "\uFFFC");
+  return outsideFences.replace(
+    /`((?:\\[\s\S]|[^`\\])*)`|"((?:\\[\s\S]|[^"\\])*)"|\u201c((?:\\[\s\S]|[^\u201d\\])*)\u201d/gu,
+    (
+      _match,
+      inline: string | undefined,
+      quoted: string | undefined,
+      curly: string | undefined,
+      offset: number,
+    ) => {
+      const value = inline ?? quoted ?? curly ?? "";
+      return retainQuotedValue?.(outsideFences.slice(0, offset), value)
+        ? // A retained argument must not manufacture another instruction boundary.
+          // This is routing-only text; the original prompt is never rewritten.
+          value.replace(/[.!?;\r\n\u2028\u2029]/gu, "\uFFFC")
+        : "\uFFFC";
+    },
+  );
+}
 
 /** A whole-project no-change instruction is authoritative user control. */
 export function isExplicitNoProjectMutationRequest(content: string): boolean {
-  return EXPLICIT_NO_PROJECT_MUTATION.test(content);
+  const instructions = zeroIntentInstructionText(content);
+  return (
+    EXPLICIT_NO_PROJECT_MUTATION.test(instructions) ||
+    INSPECT_WITHOUT_MUTATION.test(instructions) ||
+    LEAVE_PROJECT_UNCHANGED.test(instructions)
+  );
 }
 
 export const ZERO_INTENT_RECEIPT_ERROR_CODES = [

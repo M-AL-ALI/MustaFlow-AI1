@@ -26,7 +26,10 @@ export type ZeroTerminalDiffRef = {
   revision: 1;
 };
 
-export const ZERO_LOCAL_CONTRACT_FALLBACK_CODES = ["clarification_provider_unavailable"] as const;
+export const ZERO_LOCAL_CONTRACT_FALLBACK_CODES = [
+  "clarification_provider_unavailable",
+  "read_only_execution_unavailable",
+] as const;
 export type ZeroLocalContractFallbackCode = (typeof ZERO_LOCAL_CONTRACT_FALLBACK_CODES)[number];
 
 export type ZeroTerminalStopEvidence =
@@ -433,6 +436,20 @@ export function presentZeroTerminalV1(
         shouldRefreshPreview: terminal.evidence.preview.state === "ready",
       };
     case "response_succeeded":
+      if (
+        terminal.evidence.stopEvidence.source === "local_contract_fallback" &&
+        terminal.evidence.stopEvidence.fallbackCode === "read_only_execution_unavailable"
+      ) {
+        return {
+          outcome: terminal.outcome,
+          tone: "warning",
+          taskStatus: "completed",
+          title: "Checks not run",
+          message: "Source inspected only. Command checks were skipped; the app was not rebuilt.",
+          previewState: "not_promised",
+          shouldRefreshPreview: false,
+        };
+      }
       return {
         outcome: terminal.outcome,
         tone: "success",

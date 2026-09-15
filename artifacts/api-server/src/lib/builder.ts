@@ -8527,6 +8527,10 @@ export async function runConversePipeline(args: {
   systemPromptOverride?: string;
   taskId?: number;
 }): Promise<ConverseResult> {
+  const { readOnlyValidationReport } = await import("./read-only-validation-report");
+  const validationReport = readOnlyValidationReport(args.userPrompt, args.currentFiles);
+  if (validationReport) return validationReport;
+
   const {
     projectName,
     userPrompt,
@@ -8765,6 +8769,19 @@ export async function runConverseStreamPipeline(
   },
   onToken: (token: string) => void,
 ): Promise<ConverseResult> {
+  const { readOnlyValidationReport } = await import("./read-only-validation-report");
+  const validationReport = readOnlyValidationReport(args.userPrompt, args.currentFiles);
+  if (validationReport) {
+    if (args.signal?.aborted) {
+      requireCleanConverseCompletion(
+        completionSummaryFromResponse({ finishReason: null, aborted: true }),
+        "",
+      );
+    }
+    onToken(validationReport.markdown);
+    return validationReport;
+  }
+
   const {
     projectName,
     userPrompt,

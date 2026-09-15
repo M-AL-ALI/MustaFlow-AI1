@@ -205,6 +205,30 @@ describe("ZeroTerminalV1", () => {
       },
     });
   });
+
+  it("persists a skipped-check response without presenting validation or preview success", () => {
+    const terminal = responseSucceededTerminal({
+      ...common,
+      intent: "answer",
+      outcome: "response_succeeded",
+      runStatus: "completed",
+      evidence: {
+        assistantMessageId: 44,
+        stopEvidence: {
+          source: "local_contract_fallback",
+          fallbackCode: "read_only_execution_unavailable",
+        },
+      },
+    });
+    const restored = parseZeroTerminalV1(JSON.parse(JSON.stringify(terminal)));
+    expect(restored).not.toBe(ZERO_TERMINAL_UNKNOWN);
+    expect(presentZeroTerminalV1(restored)).toMatchObject({
+      tone: "warning",
+      title: "Checks not run",
+      shouldRefreshPreview: false,
+      previewState: "not_promised",
+    });
+  });
 });
 
 describe("migration 145 terminal column", () => {
