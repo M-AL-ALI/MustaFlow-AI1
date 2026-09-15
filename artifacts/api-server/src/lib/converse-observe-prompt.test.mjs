@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { URL } from "node:url";
 import { test } from "vitest";
 
 // Static JRN151 regressions against the actual factory template. Avoid importing
@@ -7,7 +8,7 @@ import { test } from "vitest";
 // interpolated platform guidance, intent routing, or execution enforcement.
 const builderSource = readFileSync(new URL("./builder.ts", import.meta.url), "utf8");
 const factoryMatch = builderSource.match(
-  /export function createConverseSystemPrompt\(\): string \{\r?\n  return `([\s\S]*?)`;\r?\n\}/,
+  /export function createConverseSystemPrompt\(\): string \{\r?\n {2}return `([\s\S]*?)`;\r?\n\}/,
 );
 assert.ok(factoryMatch, "The converse prompt factory template must be available");
 const prompt = factoryMatch[1];
