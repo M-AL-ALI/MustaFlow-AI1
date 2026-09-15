@@ -858,7 +858,6 @@ router.post(
       }
 
       let assistantContent: string;
-      // eslint-disable-next-line no-useless-assignment
       let plan: Record<string, unknown> | null = null;
       let persistedAssistantMessage: typeof chatMessagesTable.$inferSelect | null = null;
       let terminalAfterAssistant: ((assistantMessageId: number) => ZeroTerminalV1) | null = null;

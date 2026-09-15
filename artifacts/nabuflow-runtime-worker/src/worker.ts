@@ -1,3 +1,4 @@
+import { RuntimeStopFailure } from "./runtime-stop-failure";
 import {
   CONTROL_PROTOCOL_VERSION,
   CONTROL_FEATURES,
@@ -6231,6 +6232,9 @@ function reconciliationEvidence(
 
 function toControlError(error: unknown): ControlHttpError {
   if (error instanceof ControlHttpError) return error;
+  if (error instanceof RuntimeStopFailure) {
+    return new ControlHttpError(503, error.code, error.message, true);
+  }
   return new ControlHttpError(500, "internal_error", "The staging control plane failed", true);
 }
 

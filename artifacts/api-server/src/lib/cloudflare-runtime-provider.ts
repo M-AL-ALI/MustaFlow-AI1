@@ -153,6 +153,7 @@ export class CloudflareRuntimeControlError extends Error {
     readonly retryable: boolean,
     message: string,
     readonly transportCause: CloudflareRuntimeTransportCause | null = null,
+    readonly requestId: string | null = null,
   ) {
     super(message);
     this.name = "CloudflareRuntimeControlError";
@@ -677,6 +678,8 @@ export class CloudflareRuntimeProvider
             parsedError.data.code,
             parsedError.data.retryable,
             parsedError.data.message,
+            null,
+            parsedError.data.requestId,
           )
         : new CloudflareRuntimeControlError(
             response.status,

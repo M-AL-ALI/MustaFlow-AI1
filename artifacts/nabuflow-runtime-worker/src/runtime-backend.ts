@@ -16,6 +16,7 @@ import type {
 } from "@workspace/tenant-runtime-contracts";
 import type { WorkerBindings } from "./bindings";
 import { PREVIEW_CAPTURE_FORWARD_ORIGIN } from "./preview-capture-policy";
+import { runtimeStopStage } from "./runtime-stop-failure";
 import { forwardPreviewCaptureInSandbox } from "./preview-capture-sandbox";
 import { handleCapabilityIntentFromContainer } from "./capability-endpoint";
 import type {
@@ -708,9 +709,11 @@ export class CloudflareSandboxBackend implements RuntimeBackend {
   }
 
   async stop(runtime: StoredRuntime): Promise<void> {
-    const sandbox = await this.configuredSandbox(runtime.descriptor.identity, false);
-    await sandbox.killAllProcesses();
-    await sandbox.stop();
+    const sandbox = await runtimeStopStage("configuration", () =>
+      this.configuredSandbox(runtime.descriptor.identity, false),
+    );
+    await runtimeStopStage("processes", () => sandbox.killAllProcesses());
+    await runtimeStopStage("container", () => sandbox.stop());
   }
 
   async destroy(runtime: StoredRuntime): Promise<void> {
