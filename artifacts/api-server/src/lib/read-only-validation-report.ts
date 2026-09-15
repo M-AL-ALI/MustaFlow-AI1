@@ -18,9 +18,9 @@ const REQUEST_POLITENESS =
   "(?:please[ ,]+)?(?:(?:can|could|would|will)\\s+you\\s+(?:please\\s+)?)?";
 const COMMAND_ACTION =
   "(?:run|execute|perform)\\s+(?:(?:the|these|existing|current|all|installed|available|only)\\s+)*";
-const COMMAND_CHECK_TARGET =
+const COMMAND_REQUEST_TARGET =
   "(?:(?:type[-\\s]?checks?|production[-\\s]build|build|tests?|checks?|scripts?|lint|tsc|vitest)\\b|" +
-  "(?:npm|pnpm|yarn|bun|npx)\\s+[^\\n;!?]{0,160}\\b(?:test|build|typecheck|check|lint|tsc|vitest)\\b)";
+  "(?:npm|pnpm|yarn|bun|npx)\\b)";
 const COMMAND_REQUEST_PREFIX_END = new RegExp(
   "(?:^|[.!?;\\n]|,\\s*(?:(?:and|then)\\s+)?|\\s+(?:and|then)\\s+)\\s*" +
     REQUEST_POLITENESS +
@@ -28,13 +28,13 @@ const COMMAND_REQUEST_PREFIX_END = new RegExp(
     "$",
   "iu",
 );
-const DIRECT_COMMAND_CHECKS = new RegExp(
-  "^\\s*" + REQUEST_POLITENESS + COMMAND_ACTION + COMMAND_CHECK_TARGET,
+const DIRECT_COMMAND_REQUEST = new RegExp(
+  "^\\s*" + REQUEST_POLITENESS + COMMAND_ACTION + COMMAND_REQUEST_TARGET,
   "iu",
 );
 // A conjunction inherits instruction status only from an actual source-reading
 // imperative, not a description such as "Our CI will install and run tests".
-const PREPARED_COMMAND_CHECKS = new RegExp(
+const PREPARED_COMMAND_REQUEST = new RegExp(
   "^\\s*" +
     REQUEST_POLITENESS +
     "(?:read|inspect|review|check|validate|audit)\\s+" +
@@ -43,11 +43,11 @@ const PREPARED_COMMAND_CHECKS = new RegExp(
     "\\s*,?\\s*(?:and\\s+then|and|then)\\s+" +
     REQUEST_POLITENESS +
     COMMAND_ACTION +
-    COMMAND_CHECK_TARGET,
+    COMMAND_REQUEST_TARGET,
   "iu",
 );
 
-function requestsCommandChecks(content: string): boolean {
+function requestsCommands(content: string): boolean {
   const instructions = zeroIntentInstructionText(content, (prefix) =>
     // Quoted command names are arguments only; the enclosing clause must still
     // pass the anchored instruction rules below.
@@ -56,7 +56,8 @@ function requestsCommandChecks(content: string): boolean {
   return instructions
     .split(/[.!?;](?:\s+|$)|\r?\n/u)
     .some(
-      (sentence) => DIRECT_COMMAND_CHECKS.test(sentence) || PREPARED_COMMAND_CHECKS.test(sentence),
+      (sentence) =>
+        DIRECT_COMMAND_REQUEST.test(sentence) || PREPARED_COMMAND_REQUEST.test(sentence),
     );
 }
 
@@ -73,7 +74,7 @@ export function readOnlyValidationReport(
   userPrompt: string,
   currentFiles: readonly ProjectSourceFile[],
 ): ReadOnlyValidationReport | null {
-  if (!isExplicitNoProjectMutationRequest(userPrompt) || !requestsCommandChecks(userPrompt)) {
+  if (!isExplicitNoProjectMutationRequest(userPrompt) || !requestsCommands(userPrompt)) {
     return null;
   }
 
@@ -108,7 +109,7 @@ export function readOnlyValidationReport(
 
   const reason =
     "This read-only response has no command executor. Installed tools and side effects cannot be verified, so no project script was run.";
-  const checks = [{ name: "Requested command checks", status: "skipped" as const, reason }];
+  const checks = [{ name: "Requested commands", status: "skipped" as const, reason }];
   const manifestLines = manifests.length
     ? manifests.map((manifest) =>
         manifest.status === "invalid"
@@ -128,7 +129,7 @@ export function readOnlyValidationReport(
       fallbackCode: "read_only_execution_unavailable",
     },
     markdown: [
-      "## Checks not run",
+      "## Commands not run",
       "",
       `**SKIPPED:** ${reason}`,
       "",
@@ -139,7 +140,7 @@ export function readOnlyValidationReport(
       "",
       "This response did not write project files, install packages, start or stop project services, refresh the runtime, or publish. It inspected stored source records only; concurrent changes by other runs were not audited.",
       "",
-      "The app remains unvalidated by this request. Running these checks requires a separate, safely isolated command-execution capability; retrying this same request will not make a missing executor available.",
+      "The app remains unvalidated by this request. Running these commands requires a separate, safely isolated command-execution capability; retrying this same request will not make a missing executor available.",
     ].join("\n"),
   };
 }

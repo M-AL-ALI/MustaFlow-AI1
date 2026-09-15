@@ -6,6 +6,25 @@ const prompt =
 
 describe("read-only validation execution boundary", () => {
   it.each([
+    'Run "npm --version; echo test".',
+    "Run npm --version.",
+    "Run npm install.",
+    "Run npm view test.",
+    "Run pnpm why vitest.",
+    "Run yarn info tsc.",
+    "Run npx cowsay test.",
+    "Run npm run inspect -- --label test.",
+  ])("reports unavailable commands without claiming they were validation checks: %s", (request) => {
+    const report = readOnlyValidationReport("Do not change this project. " + request, []);
+    expect(report).toMatchObject({
+      commandExecution: "unavailable",
+      checks: [{ name: "Requested commands", status: "skipped" }],
+    });
+    expect(report?.markdown).toContain("## Commands not run");
+    expect(report?.markdown).toContain("**Exact commands executed:** none.");
+    expect(report?.markdown).not.toContain("Requested commands");
+  });
+  it.each([
     '"the documented steps:\nRun npm test.\n"',
     '"the documented steps:\r\nRun npm test.\r\n"',
     '"the documented steps. Run npm test."',
@@ -134,7 +153,6 @@ describe("read-only validation execution boundary", () => {
     "Explain this example:\n```sh\nnpm test\nnpm run build\n```\nNo execution.",
     "Explain this example:\n~~~text\nRun npm test.\n~~~",
     "Explain this quotation: \u201cRun typecheck.\u201d",
-    "Run npm install.",
     "Do not run tests.",
     'Explain "Run npm test"; no execution requested.',
     "Why does the production build fail?",

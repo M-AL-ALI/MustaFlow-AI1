@@ -444,8 +444,9 @@ export function presentZeroTerminalV1(
           outcome: terminal.outcome,
           tone: "warning",
           taskStatus: "completed",
-          title: "Checks not run",
-          message: "Source inspected only. Command checks were skipped; the app was not rebuilt.",
+          title: "Commands not run",
+          message:
+            "Source inspected only. Requested commands were skipped; the app was not rebuilt.",
           previewState: "not_promised",
           shouldRefreshPreview: false,
         };

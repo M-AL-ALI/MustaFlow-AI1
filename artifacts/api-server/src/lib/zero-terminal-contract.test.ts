@@ -224,7 +224,7 @@ describe("ZeroTerminalV1", () => {
     expect(restored).not.toBe(ZERO_TERMINAL_UNKNOWN);
     expect(presentZeroTerminalV1(restored)).toMatchObject({
       tone: "warning",
-      title: "Checks not run",
+      title: "Commands not run",
       shouldRefreshPreview: false,
       previewState: "not_promised",
     });
