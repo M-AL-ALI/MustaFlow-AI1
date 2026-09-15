@@ -192,15 +192,22 @@ export function ArtifactTabs(props: {
         </div>
       )}
 
-      {/* Compact "+" affordance in the corner when strip is hidden */}
+      {/* Keep creation in normal flow so it cannot cover the project tool strip. */}
       {!showStrip && (
-        <button
-          onClick={() => setModalOpen(true)}
-          className="hidden md:flex absolute right-3 top-14 z-10 items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium border border-dashed border-border text-muted-foreground bg-card/80 backdrop-blur hover:text-foreground hover:border-primary/40 transition-colors"
-          title="Add a mobile app, API, or another artifact to this project"
+        <div
+          role="group"
+          aria-label="Project components"
+          className="flex shrink-0 justify-end border-b border-border bg-card/40 px-3 py-1"
         >
-          <Plus className="h-3 w-3" /> Add artifact
-        </button>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            title="Add a mobile app, API, or another artifact to this project"
+          >
+            <Plus aria-hidden="true" className="h-3.5 w-3.5" /> Add artifact
+          </button>
+        </div>
       )}
 
       <AddArtifactModal
