@@ -4418,20 +4418,19 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           refineResult.correctionFailed = false;
         }
 
-        // Empty-refine retry guard: if the model returned 0 changed/removed files for a clearly
-        // actionable request (contains a build verb), retry once with a stricter user instruction
-        // appended. Prevents "explanation only, preview never updates" failure mode.
-        const BUILD_VERB_RE =
-          /\b(add|remove|delete|create|build|make|generate|change|update|modify|fix|refactor|implement|set\s*up|setup|install|integrate|wire|connect|enable|disable|hide|show|render|style|design|move|rename|replace|swap|upgrade|migrate|extract|split|merge)\b/i;
-        // Question exclusion: prompts that are phrased as questions should not trigger a retry —
-        // the model is expected to reply with an explanation, not file changes.
-        const QUESTION_RE =
-          /^\s*(what|how|why|when|where|who|which|can\s+you\s+explain|could\s+you\s+explain|do\s+you|does\s+it|is\s+there|are\s+there|tell\s+me|explain)\b/i;
-        const endsWithQuestion = /\?\s*$/.test(userPrompt);
-        const isQuestion = endsWithQuestion || QUESTION_RE.test(userPrompt);
-        const refineEmpty =
-          refineResult.changedFiles.length === 0 && refineResult.removedPaths.length === 0;
-        if (refineEmpty && BUILD_VERB_RE.test(userPrompt) && !isQuestion) {
+        // The agent loop already owns its bounded attempts. An unchanged source
+        // tree must still reach validation and the trusted build path below.
+        // Only the separate legacy pipelines retain the empty-diff retry.
+        const { shouldRetryEmptyRefine } = await import("./empty-refine-retry-policy");
+        if (
+          shouldRetryEmptyRefine({
+            usesAgentLoop: USE_AGENT_LOOP_REFINE,
+            specializedStaticProject: isSpecializedStaticProject,
+            userPrompt,
+            changedFilesCount: refineResult.changedFiles.length,
+            removedPathsCount: refineResult.removedPaths.length,
+          })
+        ) {
           logger.info(
             { taskId, projectId },
             "Refine returned 0 changes for an action-style prompt — retrying with stricter instruction",
