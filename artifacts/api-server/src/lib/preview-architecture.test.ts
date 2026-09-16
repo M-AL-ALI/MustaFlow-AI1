@@ -235,7 +235,11 @@ describe("Preview Architecture Fix regression coverage", () => {
     );
     expect(previewTabSource).not.toContain("Boolean(containerUrl)");
     expect(previewTabSource).toMatch(
-      /const src\s*=\s*webContainerLive\s*\?\s*\(?\s*webContainerPageUrl\(\s*wc\.previewUrl!\s*,\s*currentPath\s*,?\s*\)\s*\?\?\s*wc\.previewUrl!\s*\)?\s*:\s*previewSrc/u,
+      /const src\s*=\s*webContainerLive\s*\?\s*\(?\s*webContainerPageUrl\(\s*wc\.previewUrl!\s*,\s*requestedPath\s*,?\s*\)\s*\?\?\s*wc\.previewUrl!\s*\)?\s*:\s*previewSrc/u,
+    );
+    // Observed app navigation must not rewrite the iframe URL and discard form state.
+    expect(previewTabSource).not.toMatch(
+      /webContainerPageUrl\(\s*wc\.previewUrl!\s*,\s*currentPath\s*[,)]/u,
     );
   });
 

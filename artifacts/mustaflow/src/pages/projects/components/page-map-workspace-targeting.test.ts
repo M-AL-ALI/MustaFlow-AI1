@@ -188,7 +188,7 @@ describe("Page Map route in the actual PreviewTab WebContainer renderer", () => 
     ts.ScriptKind.TSX,
   );
 
-  function frameAt(currentPath: string, requestId: number) {
+  function frameAt(requestedPath: string, requestId: number, currentPath = requestedPath) {
     let renderer: ts.Expression | undefined;
     const visit = (node: ts.Node): void => {
       if (ts.isVariableDeclaration(node) && node.name.getText(preview) === "renderIframe")
@@ -213,10 +213,10 @@ describe("Page Map route in the actual PreviewTab WebContainer renderer", () => 
       serverPreviewLive: false,
       wc: { previewUrl: "https://runtime.example/" },
       currentPath,
+      requestedPath,
       previewSrc: "/api/projects/901/preview/",
       device: "desktop",
-      navigationRequest: { path: currentPath, requestId },
-      iframeKey: 0,
+      iframeKey: requestId,
       iframeRef: { current: null },
       handleIframeLoad: vi.fn(),
       cn: (...classes: unknown[]) => classes.filter(Boolean).join(" "),
@@ -239,5 +239,12 @@ describe("Page Map route in the actual PreviewTab WebContainer renderer", () => 
     expect(another.props.src).toBe("https://runtime.example/settings");
     expect(another.key).not.toBe(frame.key);
     expect(frameAt("/settings", 103).key).not.toBe(another.key);
+  });
+
+  it("keeps the same document when an app reports a different observed route", () => {
+    const loaded = frameAt("/notes/new", 104);
+    const observed = frameAt("/notes/new", 104, "/notes/saved?tab=edit#body");
+    expect(observed.props.src).toBe(loaded.props.src);
+    expect(observed.key).toBe(loaded.key);
   });
 });
