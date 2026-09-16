@@ -5,7 +5,7 @@ import type { BuilderFile } from "./builder";
 import { hasPageMapControlCharacter } from "./page-map-path-characters";
 import { PageMapAnalysisValidationError } from "./page-map-validation";
 
-type Fn = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
+type Fn = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | ts.MethodDeclaration;
 type Import = { owner: ts.Node; module: string; name: string };
 type Module = {
   file: BuilderFile;
@@ -63,7 +63,10 @@ export type ExpressPage = {
 };
 
 const isFn = (node: ts.Node): node is Fn =>
-  ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node);
+  ts.isFunctionDeclaration(node) ||
+  ts.isFunctionExpression(node) ||
+  ts.isArrowFunction(node) ||
+  ts.isMethodDeclaration(node);
 const isConst = (node: ts.VariableDeclaration) =>
   ts.isVariableDeclarationList(node.parent) && !!(node.parent.flags & ts.NodeFlags.Const);
 const isValueIdentifier = (node: ts.Identifier): boolean => {
@@ -559,42 +562,249 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
       if (candidate.fn === scope.fn && candidate.module === scope.module) return candidate;
     return undefined;
   };
-  // Binding writes invalidate substitutions, including writes inside closures.
+  // Index assignment provenance before evaluating effects: AST traversal order must
+  // not decide whether an alias can replace a native rendering operation.
   const written = new Set<ts.Node>();
   const memberWritten = new Set<ts.Node>();
   const bindingUses = new Map<ts.Node, ts.Identifier[]>();
+  const bindingAssignments = new Map<ts.Node, Array<{ name: string; value: ts.Expression }>>();
+  type NativeSelection = Array<string | undefined>;
+  type NativeBindingSource = { value: ts.Node; selection: NativeSelection };
+  const nativeAssignments = new Map<ts.Node, Array<NativeBindingSource & { name: string }>>();
+  const nativeElementKey = (value: ts.Node): string | undefined => {
+    value = unwrap(value);
+    return ts.isStringLiteralLike(value) || ts.isNumericLiteral(value) ? value.text : undefined;
+  };
+  const nativeSelectionKey = (name: ts.Node | undefined): string | undefined => {
+    if (!name) return undefined;
+    // A property name is syntax; a computed identifier is a value, not its name.
+    if (ts.isComputedPropertyName(name)) return nativeElementKey(name.expression);
+    return ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)
+      ? name.text
+      : undefined;
+  };
+  const recordNativeAssignment = (
+    target: ts.Node,
+    value: ts.Node,
+    selection: NativeSelection = [],
+    depth = 0,
+  ): void => {
+    consume();
+    if (depth > 16) throw new PageMapAnalysisValidationError();
+    target = unwrap(target);
+    if (ts.isIdentifier(target)) {
+      const binding = bindingAt(target)?.node;
+      if (binding) {
+        const sources = nativeAssignments.get(binding) ?? [];
+        sources.push({ name: target.text, value, selection });
+        nativeAssignments.set(binding, sources);
+      }
+    } else if (ts.isObjectLiteralExpression(target)) {
+      for (const item of target.properties) {
+        if (ts.isShorthandPropertyAssignment(item))
+          recordNativeAssignment(item.name, value, [...selection, item.name.text], depth + 1);
+        else if (ts.isPropertyAssignment(item))
+          recordNativeAssignment(
+            item.initializer,
+            value,
+            [...selection, nativeSelectionKey(item.name)],
+            depth + 1,
+          );
+        else if (ts.isSpreadAssignment(item))
+          recordNativeAssignment(item.expression, value, [...selection, undefined], depth + 1);
+      }
+    } else if (ts.isArrayLiteralExpression(target)) {
+      target.elements.forEach((item, index) =>
+        recordNativeAssignment(item, value, [...selection, String(index)], depth + 1),
+      );
+    } else if (ts.isSpreadElement(target))
+      recordNativeAssignment(target.expression, value, [...selection, undefined], depth + 1);
+    else if (
+      ts.isBinaryExpression(target) &&
+      target.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    ) {
+      recordNativeAssignment(target.left, value, selection, depth + 1);
+      recordNativeAssignment(target.left, target.right, [], depth + 1);
+    }
+  };
+  const nativeBindingSources = (
+    name: ts.BindingName,
+    identifier: string,
+    value: ts.Node,
+    selection: NativeSelection = [],
+    depth = 0,
+  ): NativeBindingSource[] => {
+    consume();
+    if (depth > 16) throw new PageMapAnalysisValidationError();
+    if (ts.isIdentifier(name)) return name.text === identifier ? [{ value, selection }] : [];
+    const result: NativeBindingSource[] = [];
+    name.elements.forEach((item, index) => {
+      if (!ts.isBindingElement(item)) return;
+      const key = item.dotDotDotToken
+        ? undefined
+        : ts.isArrayBindingPattern(name)
+          ? String(index)
+          : nativeSelectionKey(item.propertyName ?? item.name);
+      result.push(
+        ...nativeBindingSources(item.name, identifier, value, [...selection, key], depth + 1),
+      );
+      if (item.initializer)
+        result.push(
+          ...nativeBindingSources(item.name, identifier, item.initializer, [], depth + 1),
+        );
+    });
+    return result;
+  };
+  const nativeEffects: ts.Node[] = [];
+  for (const module of modules.values()) {
+    const pending: ts.Node[] = [module.source];
+    while (pending.length) {
+      consume();
+      const node = pending.pop()!;
+      if (ts.isTypeNode(node)) continue;
+      if (ts.isIdentifier(node) && isValueIdentifier(node)) {
+        const binding = bindingAt(node)?.node;
+        if (binding) {
+          const uses = bindingUses.get(binding) ?? [];
+          uses.push(node);
+          bindingUses.set(binding, uses);
+        }
+      }
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        recordNativeAssignment(node.left, node.right);
+        const target = unwrap(node.left);
+        const binding = ts.isIdentifier(target) ? bindingAt(target)?.node : undefined;
+        if (binding && ts.isIdentifier(target)) {
+          const assignments = bindingAssignments.get(binding) ?? [];
+          assignments.push({ name: target.text, value: node.right });
+          bindingAssignments.set(binding, assignments);
+        }
+      }
+      if (
+        ts.isCallExpression(node) ||
+        ts.isNewExpression(node) ||
+        ts.isDeleteExpression(node) ||
+        ts.isBinaryExpression(node) ||
+        ts.isPrefixUnaryExpression(node) ||
+        ts.isPostfixUnaryExpression(node) ||
+        ts.isForInStatement(node) ||
+        ts.isForOfStatement(node)
+      )
+        nativeEffects.push(node);
+      ts.forEachChild(node, (child) => {
+        pending.push(child);
+      });
+    }
+  }
   let nativeStrings = true;
   let nativeArrays = true;
   let nativeBoolean = true;
-  type NativeOwner = "global" | "String" | "Array" | "Boolean" | "unknown-global";
-  const nativeOwner = (node: ts.Node, depth = 0): NativeOwner | undefined => {
+  let nativeObjectReflection = true;
+  let nativeReflectReflection = true;
+  type NativeOwner =
+    | "global"
+    | "String"
+    | "Array"
+    | "Boolean"
+    | "Object"
+    | "Reflect"
+    | "unknown-global";
+  const nativeOwner = (
+    node: ts.Node,
+    depth = 0,
+    selection: NativeSelection = [],
+  ): NativeOwner | undefined => {
     consume();
     if (depth > 16) return "unknown-global";
     node = unwrap(node);
+    const merge = (owners: Array<NativeOwner | undefined>): NativeOwner | undefined => {
+      const known = new Set(owners.filter((owner): owner is NativeOwner => owner !== undefined));
+      return known.size > 1 ? "unknown-global" : known.values().next().value;
+    };
+    const project = (owner: NativeOwner | undefined): NativeOwner | undefined => {
+      for (const key of selection) {
+        consume();
+        if (owner !== "global") continue;
+        if (
+          key === "String" ||
+          key === "Array" ||
+          key === "Boolean" ||
+          key === "Object" ||
+          key === "Reflect"
+        )
+          owner = key;
+        else if (key === "globalThis" || key === "global") owner = "global";
+        else owner = key === undefined ? "unknown-global" : undefined;
+      }
+      return owner;
+    };
     if (ts.isIdentifier(node)) {
       const found = bindingAt(node);
       if (!found) {
-        if (node.text === "globalThis" || node.text === "global") return "global";
-        if (node.text === "String" || node.text === "Array" || node.text === "Boolean")
-          return node.text;
+        if (node.text === "globalThis" || node.text === "global") return project("global");
+        if (
+          node.text === "String" ||
+          node.text === "Array" ||
+          node.text === "Boolean" ||
+          node.text === "Object" ||
+          node.text === "Reflect"
+        )
+          return project(node.text);
         return undefined;
       }
       const binding = found.node;
-      return binding && ts.isVariableDeclaration(binding) && binding.initializer
-        ? nativeOwner(binding.initializer, depth + 1)
-        : undefined;
+      if (!binding || !ts.isVariableDeclaration(binding)) return undefined;
+      const sources = binding.initializer
+        ? nativeBindingSources(binding.name, node.text, binding.initializer)
+        : [];
+      sources.push(
+        ...(nativeAssignments.get(binding) ?? []).filter((item) => item.name === node.text),
+      );
+      return merge(
+        sources.map((source) =>
+          nativeOwner(source.value, depth + 1, [...source.selection, ...selection]),
+        ),
+      );
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      const owner = nativeOwner(node.expression, depth + 1);
-      if (owner !== "global") return owner;
       const key = ts.isPropertyAccessExpression(node)
         ? node.name.text
-        : ts.isStringLiteralLike(node.argumentExpression)
-          ? node.argumentExpression.text
-          : undefined;
-      if (key === "String" || key === "Array" || key === "Boolean") return key;
-      if (key === "globalThis" || key === "global") return "global";
-      return key === undefined ? "unknown-global" : undefined;
+        : nativeElementKey(node.argumentExpression);
+      return nativeOwner(node.expression, depth + 1, [key, ...selection]);
+    }
+    if (ts.isConditionalExpression(node))
+      return merge([
+        nativeOwner(node.whenTrue, depth + 1, selection),
+        nativeOwner(node.whenFalse, depth + 1, selection),
+      ]);
+    if (!selection.length) return undefined;
+    const [key, ...remaining] = selection;
+    if (ts.isObjectLiteralExpression(node)) {
+      if (node.properties.some(ts.isSpreadAssignment)) return "unknown-global";
+      return merge(
+        node.properties
+          .filter(
+            (item) =>
+              key === undefined ||
+              nativeSelectionKey(item.name) === undefined ||
+              nativeSelectionKey(item.name) === key,
+          )
+          .map((item) =>
+            ts.isPropertyAssignment(item)
+              ? nativeOwner(item.initializer, depth + 1, remaining)
+              : ts.isShorthandPropertyAssignment(item)
+                ? nativeOwner(item.name, depth + 1, remaining)
+                : undefined,
+          ),
+      );
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      if (node.elements.some(ts.isSpreadElement)) return "unknown-global";
+      return merge(
+        node.elements
+          .filter((_item, index) => key === undefined || String(index) === key)
+          .map((item) => nativeOwner(item, depth + 1, remaining)),
+      );
     }
     return undefined;
   };
@@ -602,12 +812,16 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
     if (owner === "String" || owner === "unknown-global") nativeStrings = false;
     if (owner === "Array" || owner === "unknown-global") nativeArrays = false;
     if (owner === "Boolean" || owner === "unknown-global") nativeBoolean = false;
+    if (owner === "Object" || owner === "unknown-global") nativeObjectReflection = false;
+    if (owner === "Reflect" || owner === "unknown-global") nativeReflectReflection = false;
   };
   const markWritten = (node: ts.Node, memberWrite = false, depth = 0): void => {
     consume();
     if (depth > 16) throw new PageMapAnalysisValidationError();
     node = unwrap(node);
-    if (depth === 0) invalidateNative(nativeOwner(node));
+    // Rebinding a local alias is not a mutation of the value it may reference.
+    if (depth === 0 && (memberWrite || !ts.isIdentifier(node) || !bindingAt(node)))
+      invalidateNative(nativeOwner(node));
     if (ts.isIdentifier(node)) {
       const binding = bindingAt(node)?.node;
       if (!binding) {
@@ -644,73 +858,89 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
     else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken)
       markWritten(node.left, memberWrite, depth + 1);
   };
-  for (const module of modules.values()) {
-    const pending: ts.Node[] = [module.source];
-    while (pending.length) {
-      consume();
-      const node = pending.pop()!;
-      if (ts.isTypeNode(node)) continue;
-      if (ts.isIdentifier(node) && isValueIdentifier(node)) {
-        const binding = bindingAt(node)?.node;
-        if (binding) {
-          const uses = bindingUses.get(binding);
-          if (uses) uses.push(node);
-          else bindingUses.set(binding, [node]);
+  const reflectionCandidate = (node: ts.Node) =>
+    ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) &&
+    ["Object", "Reflect"].includes(node.expression.expression.text) &&
+    !bindingAt(node.expression.expression) &&
+    [
+      "assign",
+      "defineProperty",
+      "defineProperties",
+      "set",
+      "setPrototypeOf",
+      "deleteProperty",
+    ].includes(node.expression.name.text) &&
+    node.arguments[0]
+      ? {
+          target: node.arguments[0],
+          key: node.arguments[1],
+          method: node.expression.name.text,
+          owner: node.expression.expression.text,
         }
+      : undefined;
+  const invalidateEscapingNative = (argument: ts.Node): void => {
+    const owner = nativeOwner(argument);
+    if (owner === "global") invalidateNative("unknown-global");
+    else if (owner !== "Boolean") invalidateNative(owner);
+  };
+  // First collect every visible write and escape, including replacement of the
+  // reflection helpers themselves. No precise native-helper exemption is granted yet.
+  for (const node of nativeEffects) {
+    consume();
+    const candidate = reflectionCandidate(node);
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      for (const [index, argument] of (node.arguments ?? []).entries()) {
+        if (index !== 0 || !candidate) invalidateEscapingNative(argument);
       }
-      if (ts.isDeleteExpression(node)) markWritten(node.expression, true);
-      if (
-        ts.isCallExpression(node) &&
-        ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        ["Object", "Reflect"].includes(node.expression.expression.text) &&
-        !bindingAt(node.expression.expression) &&
-        [
-          "assign",
-          "defineProperty",
-          "defineProperties",
-          "set",
-          "setPrototypeOf",
-          "deleteProperty",
-        ].includes(node.expression.name.text) &&
-        node.arguments[0]
-      ) {
-        // A write to a known unrelated global property does not replace a native contract.
-        if (nativeOwner(node.arguments[0]) === "global") {
-          const key = node.arguments[1];
-          const singleKey = ["defineProperty", "set", "deleteProperty"].includes(
-            node.expression.name.text,
-          );
-          invalidateNative(
-            singleKey && key && ts.isStringLiteralLike(key)
-              ? key.text === "String" || key.text === "Array" || key.text === "Boolean"
-                ? key.text
-                : undefined
-              : "unknown-global",
-          );
-        }
-        markWritten(node.arguments[0], true);
-      }
-      if (
-        ts.isBinaryExpression(node) &&
-        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-      )
-        markWritten(node.left);
-      if (
-        (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
-        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)
-      )
-        markWritten(node.operand);
-      if (
-        (ts.isForInStatement(node) || ts.isForOfStatement(node)) &&
-        !ts.isVariableDeclarationList(node.initializer)
-      )
-        markWritten(node.initializer);
-      ts.forEachChild(node, (child) => {
-        pending.push(child);
-      });
     }
+    if (ts.isDeleteExpression(node)) markWritten(node.expression, true);
+    if (candidate) {
+      const { target, key, method } = candidate;
+      if (nativeOwner(target) === "global") {
+        const singleKey = ["defineProperty", "set", "deleteProperty"].includes(method);
+        invalidateNative(
+          singleKey && key && ts.isStringLiteralLike(key)
+            ? key.text === "String" ||
+              key.text === "Array" ||
+              key.text === "Boolean" ||
+              key.text === "Object" ||
+              key.text === "Reflect"
+              ? key.text
+              : undefined
+            : "unknown-global",
+        );
+      }
+      markWritten(target, true);
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    )
+      markWritten(node.left);
+    if (
+      (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+      [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)
+    )
+      markWritten(node.operand);
+    if (
+      (ts.isForInStatement(node) || ts.isForOfStatement(node)) &&
+      !ts.isVariableDeclarationList(node.initializer)
+    )
+      markWritten(node.initializer);
+  }
+  // A replaced helper is an arbitrary call, even with an unrelated property key.
+  // Process these deferred targets after all helper mutations have been collected.
+  for (const node of nativeEffects) {
+    consume();
+    const candidate = reflectionCandidate(node);
+    if (
+      candidate &&
+      !(candidate.owner === "Object" ? nativeObjectReflection : nativeReflectReflection)
+    )
+      invalidateEscapingNative(candidate.target);
   }
   const reference = (value: Value, depth = 0): Value | undefined => {
     consume();
@@ -1132,7 +1362,722 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
     return result.length ? alternatives(result) : unknown();
   };
   // The array contract is a source declaration, not evidence of executed iteration.
-  const declaredArray = (value: Value, depth = 0): boolean => {
+  const supportedNativeSplit = (node: ts.CallExpression, context: Context): boolean =>
+    nativeStrings &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    node.expression.name.text === "split" &&
+    node.arguments.length === 1 &&
+    ts.isStringLiteralLike(node.arguments[0]) &&
+    primitiveString({ node: node.expression.expression, context });
+  const supportedNativeFilter = (node: ts.CallExpression): boolean => {
+    const predicate = node.arguments[0];
+    return (
+      nativeBoolean &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "filter" &&
+      node.arguments.length === 1 &&
+      !!predicate &&
+      ts.isIdentifier(predicate) &&
+      predicate.text === "Boolean" &&
+      !bindingAt(predicate)
+    );
+  };
+  // Method ownership is required even when the map callback ignores its element.
+  // Keep this separate from element typing: database-backed arrays may be reassigned.
+  const arrayUsesStayLocal = (
+    binding: ts.VariableDeclaration | ts.ParameterDeclaration,
+    operation: ts.CallExpression,
+    seen = new Map<ts.Node, Set<string>>(),
+    depth = 0,
+    referenceName = ts.isIdentifier(binding.name) ? binding.name.text : undefined,
+    returnedValues: ReadonlySet<ts.Node> = new Set(),
+  ): boolean => {
+    consume();
+    if (depth > 12 || !referenceName) return false;
+    if (seen.get(binding)?.has(referenceName)) return true;
+    const names = seen.get(binding) ?? new Set<string>();
+    names.add(referenceName);
+    seen.set(binding, names);
+    if (
+      memberWritten.has(binding) ||
+      (ts.getCombinedModifierFlags(binding) & ts.ModifierFlags.Export) !== 0
+    )
+      return false;
+    for (const use of bindingUses.get(binding) ?? []) {
+      consume();
+      if (use.text !== referenceName) continue;
+      if (use.pos >= binding.name.pos && use.end <= binding.name.end) continue;
+      let expression: ts.Node = use;
+      while (
+        expression.parent &&
+        (ts.isParenthesizedExpression(expression.parent) ||
+          ts.isAsExpression(expression.parent) ||
+          ts.isTypeAssertionExpression(expression.parent) ||
+          ts.isSatisfiesExpression(expression.parent))
+      )
+        expression = expression.parent;
+      const parent = expression.parent;
+      if (returnedValues.has(expression)) continue;
+      if (
+        ts.isVariableDeclaration(parent) &&
+        parent.initializer === expression &&
+        arrayUsesStayLocal(parent, operation, seen, depth + 1, undefined, returnedValues)
+      )
+        continue;
+      if (
+        ts.isBinaryExpression(parent) &&
+        parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      ) {
+        if (
+          (ts.isParameter(binding) || (ts.isVariableDeclaration(binding) && !isConst(binding))) &&
+          parent.left === expression
+        )
+          continue;
+        const target = unwrap(parent.left);
+        const targetBinding = ts.isIdentifier(target) ? bindingAt(target)?.node : undefined;
+        if (
+          parent.right === expression &&
+          targetBinding &&
+          ts.isVariableDeclaration(targetBinding) &&
+          ts.isIdentifier(target) &&
+          arrayUsesStayLocal(targetBinding, operation, seen, depth + 1, target.text, returnedValues)
+        )
+          continue;
+      }
+      if (
+        ts.isPropertyAccessExpression(parent) &&
+        parent.expression === expression &&
+        (parent.name.text === "length" ||
+          (parent === operation.expression &&
+            (parent.name.text === "map" || parent.name.text === "filter")))
+      )
+        continue;
+      return false;
+    }
+    return true;
+  };
+  const arrayProducerPropertyKey = (name: ts.PropertyName | undefined): string | undefined =>
+    name && (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name))
+      ? name.text
+      : undefined;
+  // An array annotation supplies a source-level shape contract, not permission
+  // to ignore a visible producer, alias escape, reassignment or custom method.
+  const arrayProducerIsLocal = (
+    value: Value,
+    operation: ts.CallExpression,
+    seen = new Map<ts.Node, Set<string>>(),
+    depth = 0,
+    returnedValues: ReadonlySet<ts.Node> = new Set(),
+  ): boolean => {
+    consume();
+    if (depth > 12) return false;
+    const node = unwrap(value.node);
+    if (ts.isIdentifier(node)) {
+      const found = bindingAt(node);
+      const binding = found?.node;
+      if (!binding || (!ts.isVariableDeclaration(binding) && !ts.isParameter(binding)))
+        return false;
+      if (!arrayUsesStayLocal(binding, operation, new Map(), 0, node.text, returnedValues))
+        return false;
+      if (ts.isParameter(binding)) {
+        const context = found && contextAt(found.scope, value.context);
+        const assignmentsSafe = () =>
+          (bindingAssignments.get(binding) ?? [])
+            .filter((assignment) => assignment.name === node.text)
+            .every((assignment) =>
+              arrayProducerIsLocal(
+                { node: assignment.value, context: value.context },
+                operation,
+                seen,
+                depth + 1,
+                returnedValues,
+              ),
+            );
+        // Rest parameters create a fresh array; their elements gain no string proof.
+        if (binding.dotDotDotToken) return assignmentsSafe();
+        if (context?.args?.has(node.text)) {
+          const argument =
+            context.args.get(node.text) ??
+            (binding.initializer ? { node: binding.initializer, context } : undefined);
+          if (!argument) return false;
+          const transfers = new Set(returnedValues);
+          // Permit only actual arguments whose corresponding parameter uses were
+          // checked. Another alias passed to a mutating parameter is not exempt.
+          for (const parameter of context.fn?.parameters ?? []) {
+            if (!ts.isIdentifier(parameter.name) || parameter.dotDotDotToken) continue;
+            const actual = context.args.get(parameter.name.text);
+            if (
+              actual &&
+              arrayUsesStayLocal(
+                parameter,
+                operation,
+                new Map(),
+                0,
+                parameter.name.text,
+                returnedValues,
+              )
+            )
+              transfers.add(unwrap(actual.node));
+          }
+          // Recheck actual arguments before cycle shortcuts, including calls to
+          // the same factory with different inputs.
+          return (
+            arrayProducerIsLocal(argument, operation, seen, depth + 1, transfers) &&
+            assignmentsSafe()
+          );
+        }
+      }
+      if (seen.get(binding)?.has(node.text)) return true;
+      const names = seen.get(binding) ?? new Set<string>();
+      names.add(node.text);
+      seen.set(binding, names);
+      if (binding.initializer) {
+        if (ts.isIdentifier(binding.name)) {
+          if (
+            !arrayProducerIsLocal(
+              { node: binding.initializer, context: value.context },
+              operation,
+              seen,
+              depth + 1,
+              returnedValues,
+            )
+          )
+            return false;
+        } else {
+          if (!ts.isObjectBindingPattern(binding.name)) return false;
+          const element = binding.name.elements.find(
+            (item) => ts.isIdentifier(item.name) && item.name.text === node.text,
+          );
+          if (!element || element.dotDotDotToken || element.initializer) return false;
+          let producer = unwrap(binding.initializer);
+          if (ts.isAwaitExpression(producer)) producer = unwrap(producer.expression);
+          if (ts.isObjectLiteralExpression(producer)) {
+            if (producer.properties.some(ts.isSpreadAssignment)) return false;
+            const key = arrayProducerPropertyKey(
+              element.propertyName ?? (ts.isIdentifier(element.name) ? element.name : undefined),
+            );
+            const properties = producer.properties.filter(
+              (property) =>
+                !ts.isSpreadAssignment(property) && arrayProducerPropertyKey(property.name) === key,
+            );
+            if (!key || properties.length !== 1) return false;
+            const property = properties[0];
+            const item = ts.isPropertyAssignment(property)
+              ? property.initializer
+              : ts.isShorthandPropertyAssignment(property)
+                ? property.name
+                : undefined;
+            if (
+              !item ||
+              !arrayProducerIsLocal(
+                { node: item, context: value.context },
+                operation,
+                seen,
+                depth + 1,
+                returnedValues,
+              )
+            )
+              return false;
+          } else {
+            const key = arrayProducerPropertyKey(
+              element.propertyName ?? (ts.isIdentifier(element.name) ? element.name : undefined),
+            );
+            if (
+              !ts.isCallExpression(producer) ||
+              !key ||
+              !arrayCallProducerIsLocal(
+                { node: producer, context: value.context },
+                operation,
+                seen,
+                depth + 1,
+                returnedValues,
+                key,
+              )
+            )
+              return false;
+          }
+          // Opaque query results retain the declared array contract, but their
+          // named local binding must still have no observed mutation or escape.
+        }
+      }
+      return (bindingAssignments.get(binding) ?? [])
+        .filter((assignment) => assignment.name === node.text)
+        .every((assignment) =>
+          arrayProducerIsLocal(
+            { node: assignment.value, context: value.context },
+            operation,
+            seen,
+            depth + 1,
+            returnedValues,
+          ),
+        );
+    }
+    if (
+      ts.isObjectLiteralExpression(node) ||
+      ts.isClassExpression(node) ||
+      ts.isNewExpression(node)
+    )
+      return false;
+    if (ts.isAwaitExpression(node))
+      return arrayProducerIsLocal(
+        { node: node.expression, context: value.context },
+        operation,
+        seen,
+        depth + 1,
+        returnedValues,
+      );
+    if (ts.isConditionalExpression(node))
+      return (
+        arrayProducerIsLocal(
+          { node: node.whenTrue, context: value.context },
+          operation,
+          seen,
+          depth + 1,
+          returnedValues,
+        ) &&
+        arrayProducerIsLocal(
+          { node: node.whenFalse, context: value.context },
+          operation,
+          seen,
+          depth + 1,
+          returnedValues,
+        )
+      );
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ["split", "filter"].includes(node.expression.name.text)
+    )
+      return declaredArray(value, operation, depth + 1);
+    if (ts.isCallExpression(node))
+      return arrayCallProducerIsLocal(value, operation, seen, depth + 1, returnedValues);
+    return ts.isArrayLiteralExpression(node);
+  };
+  // Opaque query calls retain a declared shape contract. A visible local factory
+  // is different: its returned values must pass the same ownership checks.
+  // Language intrinsics and global namespace objects are not external data
+  // providers. Unsupported reflective construction must keep its result unknown.
+  const intrinsicFactoryRoots = new Set([
+    "eval",
+    "Array",
+    "Object",
+    "Reflect",
+    "Function",
+    "Proxy",
+    "Promise",
+    "String",
+    "Number",
+    "Boolean",
+    "BigInt",
+    "Symbol",
+    "Date",
+    "RegExp",
+    "Map",
+    "Set",
+    "WeakMap",
+    "WeakSet",
+    "WeakRef",
+    "FinalizationRegistry",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "DataView",
+    "JSON",
+    "Math",
+    "Atomics",
+    "Intl",
+    "WebAssembly",
+    "globalThis",
+    "global",
+    "window",
+    "self",
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Uint16Array",
+    "Int32Array",
+    "Uint32Array",
+    "Float32Array",
+    "Float64Array",
+    "BigInt64Array",
+    "BigUint64Array",
+  ]);
+  type ArrayReceiverSource = {
+    kind: "source" | "opaque" | "unknown";
+    value?: Value;
+    bindings: ts.VariableDeclaration[];
+    transfers: Set<ts.Node>;
+  };
+  // This recovers source provenance, not a general value substitution. The selected
+  // method's uses are checked separately before any recovered body is trusted.
+  const arrayReceiverSource = (value: Value, depth = 0): ArrayReceiverSource => {
+    consume();
+    const unknownReceiver = (): ArrayReceiverSource => ({
+      kind: "unknown",
+      bindings: [],
+      transfers: new Set(),
+    });
+    if (depth > 12) return unknownReceiver();
+    const node = unwrap(value.node);
+    if (ts.isIdentifier(node)) {
+      const found = bindingAt(node);
+      if (!found?.node)
+        return intrinsicFactoryRoots.has(node.text)
+          ? unknownReceiver()
+          : { kind: "opaque", bindings: [], transfers: new Set() };
+      const imported = found.scope.module.imports.get(node.text);
+      if (imported?.owner === found.node) {
+        const module = resolveModule(found.scope.module, imported.module);
+        if (!module) return { kind: "opaque", bindings: [], transfers: new Set() };
+        const exported = module.exports.get(imported.name);
+        return exported
+          ? arrayReceiverSource({ node: exported, context: { module } }, depth + 1)
+          : unknownReceiver();
+      }
+      const binding = found.node;
+      if (!ts.isVariableDeclaration(binding) || !ts.isIdentifier(binding.name))
+        return unknownReceiver();
+      const context = contextAt(found.scope, value.context);
+      if (!context) return unknownReceiver();
+      const assignments = (bindingAssignments.get(binding) ?? []).filter(
+        (assignment) => assignment.name === node.text,
+      );
+      const sources = [
+        ...(binding.initializer ? [binding.initializer] : []),
+        ...assignments.map((assignment) => assignment.value),
+      ];
+      if (sources.length !== 1) return unknownReceiver();
+      const result = arrayReceiverSource({ node: sources[0], context }, depth + 1);
+      return { ...result, bindings: [binding, ...result.bindings] };
+    }
+    if (ts.isObjectLiteralExpression(node))
+      return {
+        kind: "source",
+        value: { node, context: value.context },
+        bindings: [],
+        transfers: new Set(),
+      };
+    if (ts.isAwaitExpression(node))
+      return arrayReceiverSource({ node: node.expression, context: value.context }, depth + 1);
+    if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
+      const factory = arrayFactorySource({ node, context: value.context }, depth + 1);
+      if (factory.kind === "opaque") return { kind: "opaque", bindings: [], transfers: new Set() };
+      if (factory.kind !== "source") return unknownReceiver();
+      const { node: fn, context: enclosing } = factory.value;
+      const context = arrayFactoryContext(fn, enclosing, node, value.context);
+      if (!context || !fn.body) return unknownReceiver();
+      const values: ts.Node[] = [];
+      if (ts.isBlock(fn.body))
+        walkBody(
+          fn.body,
+          (child) => {
+            if (ts.isReturnStatement(child)) values.push(child.expression ?? child);
+          },
+          consume,
+        );
+      else values.push(fn.body);
+      if (values.length !== 1) return unknownReceiver();
+      const result = arrayReceiverSource({ node: values[0], context }, depth + 1);
+      result.transfers.add(unwrap(values[0]));
+      return result;
+    }
+    return unknownReceiver();
+  };
+  const arrayReceiverMethodStable = (
+    binding: ts.VariableDeclaration,
+    key: string | undefined,
+    opaque: boolean,
+    transfers: ReadonlySet<ts.Node>,
+    seen = new Set<ts.Node>(),
+    depth = 0,
+  ): boolean => {
+    consume();
+    if (depth > 12 || !ts.isIdentifier(binding.name)) return false;
+    if (seen.has(binding)) return true;
+    seen.add(binding);
+    for (const identifier of bindingUses.get(binding) ?? []) {
+      consume();
+      if (identifier.text !== binding.name.text || identifier === binding.name) continue;
+      let use: ts.Node = identifier;
+      while (
+        use.parent &&
+        (ts.isParenthesizedExpression(use.parent) ||
+          ts.isAsExpression(use.parent) ||
+          ts.isTypeAssertionExpression(use.parent) ||
+          ts.isSatisfiesExpression(use.parent))
+      )
+        use = use.parent;
+      if (transfers.has(unwrap(use))) continue;
+      const parent = use.parent;
+      if (
+        ts.isVariableDeclaration(parent) &&
+        parent.initializer === use &&
+        arrayReceiverMethodStable(parent, key, opaque, transfers, seen, depth + 1)
+      )
+        continue;
+      if (
+        ts.isBinaryExpression(parent) &&
+        parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+      ) {
+        const target = unwrap(parent.left);
+        const targetBinding = ts.isIdentifier(target) ? bindingAt(target)?.node : undefined;
+        if (
+          parent.right === use &&
+          targetBinding &&
+          ts.isVariableDeclaration(targetBinding) &&
+          arrayReceiverMethodStable(targetBinding, key, opaque, transfers, seen, depth + 1)
+        )
+          continue;
+        if (
+          parent.left === use &&
+          !binding.initializer &&
+          (bindingAssignments.get(binding) ?? []).length === 1
+        )
+          continue;
+      }
+      if (
+        (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
+        parent.expression === use
+      ) {
+        const member = ts.isPropertyAccessExpression(parent)
+          ? parent.name.text
+          : nativeElementKey(parent.argumentExpression);
+        if (member === undefined) return false;
+        if (key === undefined || member === key) {
+          if (
+            (ts.isCallExpression(parent.parent) || ts.isNewExpression(parent.parent)) &&
+            parent.parent.expression === parent
+          )
+            continue;
+          return false;
+        }
+        // Another local method could replace the selected method through this.
+        if (
+          !opaque &&
+          (ts.isCallExpression(parent.parent) || ts.isNewExpression(parent.parent)) &&
+          parent.parent.expression === parent
+        )
+          return false;
+        continue;
+      }
+      if (ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.ExclamationToken)
+        continue;
+      if (ts.isConditionalExpression(parent) && parent.condition === use) continue;
+      if (ts.isIfStatement(parent) && parent.expression === use) continue;
+      if (
+        ts.isBinaryExpression(parent) &&
+        ([
+          ts.SyntaxKind.EqualsEqualsEqualsToken,
+          ts.SyntaxKind.ExclamationEqualsEqualsToken,
+        ].includes(parent.operatorToken.kind) ||
+          (parent.left === use &&
+            parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken))
+      )
+        continue;
+      if (ts.isExportAssignment(parent) || ts.isExportSpecifier(parent)) continue;
+      return false;
+    }
+    return true;
+  };
+  const arrayFactoryContext = (
+    fn: Fn,
+    enclosing: Context,
+    call: ts.CallExpression | ts.NewExpression,
+    caller: Context,
+  ): Context | undefined => {
+    let use: ts.Node = call;
+    while (
+      use.parent &&
+      (ts.isParenthesizedExpression(use.parent) ||
+        ts.isAsExpression(use.parent) ||
+        ts.isTypeAssertionExpression(use.parent) ||
+        ts.isSatisfiesExpression(use.parent))
+    )
+      use = use.parent;
+    const awaited = ts.isAwaitExpression(use.parent) && use.parent.expression === use;
+    if (
+      !fn.body ||
+      ("asteriskToken" in fn && !!fn.asteriskToken) ||
+      (fn.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) &&
+        (ts.isNewExpression(call) || !awaited))
+    )
+      return undefined;
+    const args = new Map<string, Value | null>();
+    const context: Context = { module: enclosing.module, fn, args, parent: enclosing };
+    fn.parameters.forEach((parameter, index) => {
+      if (!ts.isIdentifier(parameter.name) || parameter.dotDotDotToken) return;
+      const actual = call.arguments?.[index];
+      const unwrapped = actual && unwrap(actual);
+      const missing =
+        !actual ||
+        (unwrapped &&
+          ts.isIdentifier(unwrapped) &&
+          unwrapped.text === "undefined" &&
+          !bindingAt(unwrapped));
+      args.set(
+        parameter.name.text,
+        missing
+          ? parameter.initializer
+            ? { node: parameter.initializer, context }
+            : null
+          : { node: actual, context: caller },
+      );
+    });
+    return context;
+  };
+  type ArrayFactorySource =
+    | { kind: "source"; value: Value & { node: Fn } }
+    | { kind: "opaque" | "unknown" };
+  // Direct array producers and methods returning another receiver share one
+  // classifier. An unresolved local call must never become an external query.
+  const arrayFactorySource = (value: Value, depth = 0): ArrayFactorySource => {
+    consume();
+    if (depth > 12) return { kind: "unknown" };
+    const call = unwrap(value.node);
+    if (!ts.isCallExpression(call) && !ts.isNewExpression(call)) return { kind: "unknown" };
+    const expression = unwrap(call.expression);
+    let callee = reference({ node: expression, context: value.context });
+    const method =
+      ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression);
+    if (method) {
+      const key = ts.isPropertyAccessExpression(expression)
+        ? expression.name.text
+        : nativeElementKey(expression.argumentExpression);
+      const receiver = arrayReceiverSource(
+        { node: expression.expression, context: value.context },
+        depth + 1,
+      );
+      if (
+        receiver.kind === "unknown" ||
+        !receiver.bindings.every((binding) =>
+          arrayReceiverMethodStable(binding, key, receiver.kind === "opaque", receiver.transfers),
+        )
+      )
+        return { kind: "unknown" };
+      if (receiver.kind === "opaque") return { kind: "opaque" };
+      const source = receiver.value;
+      if (
+        !source ||
+        !ts.isObjectLiteralExpression(source.node) ||
+        key === undefined ||
+        source.node.properties.some(
+          (property) =>
+            ts.isSpreadAssignment(property) ||
+            ts.isGetAccessorDeclaration(property) ||
+            ts.isSetAccessorDeclaration(property),
+        )
+      )
+        return { kind: "unknown" };
+      const properties = source.node.properties.filter(
+        (property) =>
+          nativeSelectionKey(property.name) === undefined ||
+          nativeSelectionKey(property.name) === key,
+      );
+      if (properties.length !== 1) return { kind: "unknown" };
+      const property = properties[0];
+      if (ts.isMethodDeclaration(property)) callee = { node: property, context: source.context };
+      else if (ts.isPropertyAssignment(property))
+        callee = reference({ node: property.initializer, context: source.context });
+      else if (ts.isShorthandPropertyAssignment(property))
+        callee = reference({ node: property.name, context: source.context });
+      else return { kind: "unknown" };
+      if (!callee) return { kind: "unknown" };
+    }
+    for (let count = 0; callee && ts.isVariableDeclaration(callee.node); count++) {
+      consume();
+      if (count > 12 || !isConst(callee.node) || !callee.node.initializer)
+        return { kind: "unknown" };
+      callee = reference({ node: callee.node.initializer, context: callee.context });
+    }
+    if (!callee || !isFn(callee.node)) {
+      if (ts.isIdentifier(expression)) {
+        const found = bindingAt(expression);
+        if (!found?.node)
+          return { kind: intrinsicFactoryRoots.has(expression.text) ? "unknown" : "opaque" };
+        const imported = found.scope.module.imports.get(expression.text);
+        if (imported?.owner === found.node && !resolveModule(found.scope.module, imported.module))
+          return { kind: "opaque" };
+      }
+      return { kind: "unknown" };
+    }
+    const fn = callee.node;
+    // Only ordinary functions can supply a supported explicit constructor
+    // return. Class instances, arrows and methods are not reclassified as queries.
+    if (ts.isNewExpression(call) && !ts.isFunctionDeclaration(fn) && !ts.isFunctionExpression(fn))
+      return { kind: "unknown" };
+    if (method || ts.isNewExpression(call)) {
+      if (!fn.body) return { kind: "unknown" };
+      const pending: ts.Node[] = [fn.body];
+      while (pending.length) {
+        consume();
+        const node = pending.pop()!;
+        if (node.kind === ts.SyntaxKind.ThisKeyword || node.kind === ts.SyntaxKind.SuperKeyword)
+          return { kind: "unknown" };
+        if (!ts.isTypeNode(node))
+          ts.forEachChild(node, (child) => {
+            pending.push(child);
+          });
+      }
+    }
+    return { kind: "source", value: { node: fn, context: callee.context } };
+  };
+  const arrayCallProducerIsLocal = (
+    value: Value,
+    operation: ts.CallExpression,
+    _seen: Map<ts.Node, Set<string>>,
+    depth: number,
+    returnedValues: ReadonlySet<ts.Node>,
+    selectedKey?: string,
+  ): boolean => {
+    consume();
+    if (depth > 12) return false;
+    const call = unwrap(value.node);
+    if (!ts.isCallExpression(call)) return false;
+    const factory = arrayFactorySource({ node: call, context: value.context }, depth + 1);
+    if (factory.kind !== "source") return factory.kind === "opaque";
+    const { node: fn, context: enclosing } = factory.value;
+    const context = arrayFactoryContext(fn, enclosing, call, value.context);
+    if (!context || !fn.body) return false;
+    const values: Value[] = [];
+    if (ts.isBlock(fn.body)) {
+      walkBody(
+        fn.body,
+        (node) => {
+          if (ts.isReturnStatement(node)) {
+            if (node.expression) values.push({ node: node.expression, context });
+            else values.push({ node, context });
+          }
+        },
+        consume,
+      );
+    } else values.push({ node: fn.body, context });
+    if (!values.length || values.length > 32) return false;
+    const returned = new Set(returnedValues);
+    const allowReturnedLeaves = (node: ts.Node, level = 0): void => {
+      consume();
+      if (level > 12) throw new PageMapAnalysisValidationError();
+      node = unwrap(node);
+      returned.add(node);
+      if (ts.isConditionalExpression(node)) {
+        allowReturnedLeaves(node.whenTrue, level + 1);
+        allowReturnedLeaves(node.whenFalse, level + 1);
+      }
+    };
+    const selected: Value[] = [];
+    for (const result of values) {
+      const items = selectedKey === undefined ? [result] : objectProperty(result, selectedKey);
+      if (!items?.length) return false;
+      selected.push(...items);
+      for (const item of items) allowReturnedLeaves(item.node);
+    }
+    // A local alias belongs to this invocation. A previous call's success must
+    // never certify another call with different actual arguments.
+    const invocationSeen = new Map<ts.Node, Set<string>>();
+    return selected.every((result) =>
+      arrayProducerIsLocal(result, operation, invocationSeen, depth + 1, returned),
+    );
+  };
+  const declaredArray = (value: Value, operation: ts.CallExpression, depth = 0): boolean => {
     consume();
     if (depth > 12 || !nativeArrays) return false;
     const node = unwrap(value.node);
@@ -1140,14 +2085,23 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
     if (ts.isIdentifier(node)) {
       const binding = bindingAt(node)?.node;
       if (binding && (ts.isVariableDeclaration(binding) || ts.isParameter(binding))) {
-        if (!ts.isIdentifier(binding.name) || memberWritten.has(binding)) return false;
-        if (
-          ts.isVariableDeclaration(binding) &&
-          binding.initializer &&
-          (ts.isObjectLiteralExpression(unwrap(binding.initializer)) ||
-            ts.isClassExpression(unwrap(binding.initializer)))
-        )
-          return false;
+        if (!arrayProducerIsLocal(value, operation)) return false;
+        if (ts.isVariableDeclaration(binding) && binding.initializer) {
+          const initializer = unwrap(binding.initializer);
+          if (ts.isObjectLiteralExpression(initializer) || ts.isClassExpression(initializer))
+            return false;
+          // An annotation cannot override an observable custom producer.
+          if (
+            ts.isCallExpression(initializer) &&
+            ts.isPropertyAccessExpression(initializer.expression) &&
+            ["split", "filter"].includes(initializer.expression.name.text)
+          )
+            return declaredArray(
+              { node: initializer, context: value.context },
+              operation,
+              depth + 1,
+            );
+        }
         if (
           binding.type &&
           (ts.isArrayTypeNode(binding.type) ||
@@ -1160,81 +2114,35 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
           ts.isVariableDeclaration(binding) &&
           !written.has(binding) &&
           !!binding.initializer &&
-          declaredArray({ node: binding.initializer, context: value.context }, depth + 1)
+          declaredArray({ node: binding.initializer, context: value.context }, operation, depth + 1)
         );
       }
       return false;
     }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      if (node.expression.name.text === "split") {
-        const receiver = unwrap(node.expression.expression);
-        return (
-          ts.isStringLiteralLike(receiver) ||
-          (ts.isCallExpression(receiver) &&
-            ts.isIdentifier(receiver.expression) &&
-            receiver.expression.text === "String" &&
-            !bindingAt(receiver.expression))
-        );
-      }
+      if (node.expression.name.text === "split") return supportedNativeSplit(node, value.context);
       if (node.expression.name.text === "filter")
-        return declaredArray(
-          { node: node.expression.expression, context: value.context },
-          depth + 1,
+        return (
+          supportedNativeFilter(node) &&
+          declaredArray(
+            { node: node.expression.expression, context: value.context },
+            node,
+            depth + 1,
+          )
         );
     }
     return false;
   };
-  // Only a local, unescaped producer may certify a map element's primitive type.
+  // Only a stable producer may also certify a map element's primitive type.
   // This is not a value substitution and does not make the element HTML-safe.
   const localArrayLineage = (
     binding: ts.VariableDeclaration,
     mapCall: ts.CallExpression,
-    seen = new Set<ts.Node>(),
-    depth = 0,
-  ): boolean => {
-    consume();
-    if (depth > 12) return false;
-    if (seen.has(binding)) return true;
-    seen.add(binding);
-    if (
-      !isConst(binding) ||
-      !ts.isIdentifier(binding.name) ||
-      !binding.initializer ||
-      written.has(binding) ||
-      memberWritten.has(binding) ||
-      (ts.getCombinedModifierFlags(binding) & ts.ModifierFlags.Export) !== 0
-    )
-      return false;
-    for (const use of bindingUses.get(binding) ?? []) {
-      consume();
-      if (use === binding.name) continue;
-      let expression: ts.Node = use;
-      while (
-        expression.parent &&
-        (ts.isParenthesizedExpression(expression.parent) ||
-          ts.isAsExpression(expression.parent) ||
-          ts.isTypeAssertionExpression(expression.parent) ||
-          ts.isSatisfiesExpression(expression.parent))
-      )
-        expression = expression.parent;
-      const parent = expression.parent;
-      if (
-        ts.isVariableDeclaration(parent) &&
-        parent.initializer === expression &&
-        localArrayLineage(parent, mapCall, seen, depth + 1)
-      )
-        continue;
-      if (
-        ts.isPropertyAccessExpression(parent) &&
-        parent.expression === expression &&
-        (parent.name.text === "length" ||
-          (parent.name.text === "map" && parent === mapCall.expression))
-      )
-        continue;
-      return false;
-    }
-    return true;
-  };
+  ): boolean =>
+    isConst(binding) &&
+    !!binding.initializer &&
+    !written.has(binding) &&
+    arrayUsesStayLocal(binding, mapCall);
   const nativeStringElements = (value: Value, mapCall: ts.CallExpression, depth = 0): boolean => {
     consume();
     if (depth > 12 || !nativeStrings || !nativeArrays) return false;
@@ -1248,24 +2156,12 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
         nativeStringElements({ node: node.initializer, context }, mapCall, depth + 1)
       );
     if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false;
-    if (node.expression.name.text === "split")
+    if (node.expression.name.text === "split") return supportedNativeSplit(node, context);
+    if (node.expression.name.text === "filter")
       return (
-        node.arguments.length === 1 &&
-        ts.isStringLiteralLike(node.arguments[0]) &&
-        primitiveString({ node: node.expression.expression, context })
+        supportedNativeFilter(node) &&
+        nativeStringElements({ node: node.expression.expression, context }, node, depth + 1)
       );
-    if (node.expression.name.text === "filter") {
-      const predicate = node.arguments[0];
-      return (
-        nativeBoolean &&
-        node.arguments.length === 1 &&
-        !!predicate &&
-        ts.isIdentifier(predicate) &&
-        predicate.text === "Boolean" &&
-        !bindingAt(predicate) &&
-        nativeStringElements({ node: node.expression.expression, context }, mapCall, depth + 1)
-      );
-    }
     return false;
   };
   const usesArrayCallbackArgument = (fn: Fn): boolean => {
@@ -1403,7 +2299,7 @@ export function discoverExpressPages(files: BuilderFile[]): ExpressPage[] {
         ts.isPropertyAccessExpression(receiver.expression) &&
         receiver.expression.name.text === "map" &&
         receiver.arguments.length === 1 &&
-        declaredArray({ node: receiver.expression.expression, context })
+        declaredArray({ node: receiver.expression.expression, context }, receiver)
       ) {
         const callback = reference({ node: receiver.arguments[0], context });
         if (!callback || !isFn(callback.node)) return unknown();

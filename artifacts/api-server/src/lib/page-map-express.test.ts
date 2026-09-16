@@ -1098,4 +1098,1330 @@ describe("server-rendered Express Page Map", () => {
       ),
     ).toHaveLength(item.expectedEdges);
   });
+
+  it.each([
+    {
+      id: "helper-replaces-array-map",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values) {\n  values.map = () => ["<script>"];\n}\napp.get("/", (req, res) => {\n  const rows = [0];\n  replaceMap(rows);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "native-array-without-helper-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values) {\n  values.map = () => ["<script>"];\n}\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "custom-symbol-split-constant-callback",
+      source:
+        'import express from "express";\nconst app = express();\nconst separator = {\n  [Symbol.split]() {\n    return { map() { return { join() { return "<script>"; } }; } };\n  }\n};\napp.get("/", (req, res) => {\n  const rows = "x".split(separator);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "literal-split-constant-callback-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst separator = {\n  [Symbol.split]() {\n    return { map() { return { join() { return "<script>"; } }; } };\n  }\n};\napp.get("/", (req, res) => {\n  const rows = "x".split(",");\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "helper-replaces-map-through-alias",
+      source:
+        'import express from "express";const app=express();function replaceMap(values){values.map=()=>["<script>"];}app.get("/",(req,res)=>{const rows=[0];const alias=rows;replaceMap(alias);res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-array-helper-escape",
+      source:
+        'import express from "express";const app=express();function replaceMap(values){values.map=()=>["<script>"];}app.get("/",(req,res)=>{let rows:number[]=[];rows=[0];replaceMap(rows);res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "direct-string-split-override",
+      source:
+        'import express from "express";const app=express();String.prototype.split=()=>({map(){return {join(){return "<script>";}}}});app.get("/",(req,res)=>{const rows="x".split(",");res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "helper-array-prototype-escape",
+      source:
+        'import express from "express";const app=express();function replaceMap(values){values.map=()=>["<script>"];}replaceMap(Array.prototype);app.get("/",(req,res)=>{const rows=[0];res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "helper-string-prototype-escape",
+      source:
+        'import express from "express";const app=express();function replaceSplit(value){value.split=()=>({map(){return {join(){return "<script>";}}}});}replaceSplit(String.prototype);app.get("/",(req,res)=>{const rows="x".split(",");res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-custom-split-dispatch",
+      source:
+        'import express from "express";const app=express();const separator={[Symbol.split](){return {map(){return {join(){return "<script>";}}}}}};app.get("/",(req,res)=>{const rows:string[]="x".split(separator);res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-literal-array-control",
+      source:
+        'import express from "express";const app=express();app.get("/",(req,res)=>{let rows:number[]=[];rows=[0];res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "stable-array-alias-control",
+      source:
+        'import express from "express";const app=express();app.get("/",(req,res)=>{const original=[0];const rows=original;res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "native-split-filter-control",
+      source:
+        'import express from "express";const app=express();app.get("/",(req,res)=>{const rows=String("x").split(",").filter(Boolean);res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "native-typed-split-control",
+      source:
+        'import express from "express";const app=express();app.get("/",(req,res)=>{const rows:string[]="x".split(",");res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "unrelated-helper-control",
+      source:
+        'import express from "express";const app=express();function replaceMap(values){values.map=()=>["<script>"];}const unrelated={};replaceMap(unrelated);app.get("/",(req,res)=>{const rows=[0];res.send(`<main>${rows.map(()=>"<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);});app.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+  ])("requires native map and split ownership: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+
+  it.each([
+    {
+      id: "typed-producer-alias-escaped",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  replaceMap(original);\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-producer-alias-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "typed-producer-reassignment-escaped",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  replaceMap(original);\n  let rows: number[] = []; rows = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-producer-reassignment-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  let rows: number[] = []; rows = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "typed-custom-map-alias",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = {map(){return {join(){return "<script>";}}}};\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflect-set-safe-key",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  Reflect.set(globalThis,"appLabel","NabuFlow");\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "define-property-safe-key",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  Object.defineProperty(globalThis,"appLabel",{value:"NabuFlow"});\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "reflect-delete-safe-key",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  Reflect.deleteProperty(globalThis,"appLabel");\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "reflect-set-native-array",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  Reflect.set(globalThis,"Array",{prototype:{map(){return ["<script>"];}}});\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflect-set-native-string",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  Reflect.set(globalThis,"String",()=>"<script>");\n  const original=String("x").split(",");\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflect-unknown-key",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  Reflect.set(globalThis,key,()=>"<script>");\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflection-value-native-escape",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const holder={set value(v){v.map=()=>["<script>"];}};Reflect.set(holder,"value",Array.prototype);\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "unknown-global-helper-escape",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  function mutate(g){g.Array.prototype.map=()=>["<script>"];}mutate(globalThis);\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "shadowed-reflect-global-escape",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const Reflect={set(g,k,v){g.Array.prototype.map=()=>["<script>"];}};Reflect.set(globalThis,"appLabel","NabuFlow");\n  const original = [0];\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-alias-transitive-escape",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  replaceMap(original);\n  const intermediate: number[] = original; const rows: number[] = intermediate;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-alias-transitive-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  const intermediate: number[] = original; const rows: number[] = intermediate;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "typed-initializer-destructured-db-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const {rows: original}=db.query();\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "typed-assignment-destructured-db-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const {rows: original}=db.query();\n  let rows: number[]=[];rows=original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "typed-destructured-db-escape",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const {rows: original}=db.query();\n  replaceMap(original);\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-destructured-object-array-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const {rows: original}={rows:[0]};\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "typed-destructured-custom-map",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const {rows: original}={rows:{map(){return {join(){return "<script>";}}}}};\n  const rows: number[] = original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-reassignment-custom-object",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  let rows:number[]=[];rows={map(){return {join(){return "<script>";}}}};\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "typed-reassignment-custom-split",
+      source:
+        'import express from "express";\nconst app = express();\nfunction replaceMap(values: any) { values.map = () => ["<script>"]; }\napp.get("/", (req, res) => {\n  const original = [0];\n  const separator={[Symbol.split](){return {map(){return {join(){return "<script>";}}}}}};let rows:string[]=[];rows="x".split(separator);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+  ])("preserves reflective targets and typed producer ownership: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+
+  it.each([
+    {
+      id: "assigned-array-prototype-override",
+      source:
+        'import express from "express";\nconst app = express();\nlet prototype;\nprototype = Array.prototype;\nprototype.map = () => ["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "assigned-array-prototype-control",
+      source:
+        'import express from "express";\nconst app = express();\nlet prototype;\nprototype = Array.prototype;\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "replaced-reflect-set",
+      source:
+        'import express from "express";\nconst app = express();\nReflect.set = (target, key, value) => {\n  target.Array.prototype.map = () => ["<script>"];\n  return true;\n};\nReflect.set(globalThis, "appLabel", "NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "native-reflect-set-control",
+      source:
+        'import express from "express";\nconst app = express();\nReflect.set(globalThis, "appLabel", "NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "reassigned-array-prototype-override",
+      source:
+        'import express from "express";\nconst app = express();\nlet prototype = {};\nprototype = Array.prototype;\nprototype.map = () => ["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "assigned-global-alias-override",
+      source:
+        'import express from "express";\nconst app = express();\nlet root;root=globalThis;root.Array.prototype.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "replaced-object-define-property",
+      source:
+        'import express from "express";\nconst app = express();\nObject.defineProperty=(target,key,value)=>{target.Array.prototype.map=()=>["<script>"];return target;};Object.defineProperty(globalThis,"appLabel",{value:"NabuFlow"});\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflect-alias-helper-override",
+      source:
+        'import express from "express";\nconst app = express();\nconst reflector=Reflect;reflector.set=(target,key,value)=>{target.Array.prototype.map=()=>["<script>"];return true;};Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "unrelated-assigned-object-control",
+      source:
+        'import express from "express";\nconst app = express();\nlet prototype;prototype={};prototype.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "assigned-reflect-helper-override",
+      source:
+        'import express from "express";\nconst app=express();\nlet r;r=Reflect;r.set=(g)=>{g.Array.prototype.map=()=>["<script>"];};Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "assigned-object-helper-override",
+      source:
+        'import express from "express";\nconst app=express();\nlet o;o=Object;o.defineProperty=(g)=>{g.Array.prototype.map=()=>["<script>"];};Object.defineProperty(globalThis,"appLabel",{value:"NabuFlow"});\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflection-helper-escaped",
+      source:
+        'import express from "express";\nconst app=express();\nmutate(Reflect);Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "object-helper-escaped",
+      source:
+        'import express from "express";\nconst app=express();\nmutate(Object);Object.defineProperty(globalThis,"appLabel",{value:"NabuFlow"});\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflect-helper-reflectively-replaced",
+      source:
+        'import express from "express";\nconst app=express();\nObject.defineProperty(Reflect,"set",{value:g=>{g.Array.prototype.map=()=>["<script>"];}});Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "global-reflect-replaced",
+      source:
+        'import express from "express";\nconst app=express();\nglobalThis.Reflect={set(g){g.Array.prototype.map=()=>["<script>"];}};Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reflection-helper-deleted",
+      source:
+        'import express from "express";\nconst app=express();\ndelete Reflect.set;Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "assigned-reflect-clean-control",
+      source:
+        'import express from "express";\nconst app=express();\nlet r;r=Reflect;Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "assigned-object-clean-control",
+      source:
+        'import express from "express";\nconst app=express();\nlet o;o=Object;Object.defineProperty(globalThis,"appLabel",{value:"NabuFlow"});\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "mixed-native-alias-mutation",
+      source:
+        'import express from "express";\nconst app=express();\nlet p=String.prototype;p=Array.prototype;p.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "mixed-native-alias-clean-control",
+      source:
+        'import express from "express";\nconst app=express();\nlet p=String.prototype;p=Array.prototype;\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+  ])("revokes replaced native ownership before map discovery: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+
+  it.each([
+    {
+      id: "destructured-array-mutation",
+      source:
+        'import express from "express";const app=express();\nconst {Array:NativeArray}=globalThis;Object.defineProperty(NativeArray.prototype,"map",{value:()=>["<script>"]});\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "destructured-array-control",
+      source:
+        'import express from "express";const app=express();\nconst {Array:NativeArray}=globalThis;\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "destructured-reflect-mutation",
+      source:
+        'import express from "express";const app=express();\nconst {Reflect:r}=globalThis;r.set=(g)=>{g.Array.prototype.map=()=>["<script>"];return true;};Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "destructured-reflect-control",
+      source:
+        'import express from "express";const app=express();\nconst {Reflect:r}=globalThis;Reflect.set(globalThis,"appLabel","NabuFlow");\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "destructured-object-mutation",
+      source:
+        'import express from "express";const app=express();\nconst {Object:o}=globalThis;o.defineProperty=(g)=>{g.Array.prototype.map=()=>["<script>"];return g;};Object.defineProperty(globalThis,"appLabel",{value:"NabuFlow"});\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "destructured-object-control",
+      source:
+        'import express from "express";const app=express();\nconst {Object:o}=globalThis;Object.defineProperty(globalThis,"appLabel",{value:"NabuFlow"});\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "local-factory-initializer-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows():number[]{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "local-factory-initializer-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows():number[]{const items=[0];return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "local-factory-assignment-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows():number[]{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  let rows:number[]=[];rows=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "local-factory-assignment-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows():number[]{const items=[0];return items;}\napp.get("/", (req, res) => {\n  let rows:number[]=[];rows=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "local-arrow-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nconst loadRows=():number[]=>{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;};\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "local-arrow-factory-control",
+      source:
+        'import express from "express";const app=express();\nconst loadRows=():number[]=>{const items=[0];return items;};\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "nested-native-array-mutation",
+      source:
+        'import express from "express";const app=express();\nconst {Array:{prototype:p}}=globalThis;p.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "nested-native-array-control",
+      source:
+        'import express from "express";const app=express();\nconst {Array:{prototype:p}}=globalThis;\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "array-pattern-native-mutation",
+      source:
+        'import express from "express";const app=express();\nconst [A]=[Array];A.prototype.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "array-pattern-native-control",
+      source:
+        'import express from "express";const app=express();\nconst [A]=[Array];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "wrapped-native-property-mutation",
+      source:
+        'import express from "express";const app=express();\nconst {owner:p}={owner:Array.prototype};p.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "wrapped-native-property-control",
+      source:
+        'import express from "express";const app=express();\nconst {owner:p}={owner:Array.prototype};\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "assignment-native-pattern-mutation",
+      source:
+        'import express from "express";const app=express();\nlet A;({Array:A}=globalThis);A.prototype.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "assignment-native-pattern-control",
+      source:
+        'import express from "express";const app=express();\nlet A;({Array:A}=globalThis);\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "default-native-binding-mutation",
+      source:
+        'import express from "express";const app=express();\nconst {p=Array.prototype}={};p.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "default-native-binding-control",
+      source:
+        'import express from "express";const app=express();\nconst {p=Array.prototype}={};\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "destructured-native-string-mutation",
+      source:
+        'import express from "express";const app=express();\nconst {String:S}=globalThis;S.prototype.split=()=>({map(){return {join(){return "<script>";}}}});\napp.get("/", (req, res) => {\n  const rows = "x".split("|");\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "destructured-native-string-control",
+      source:
+        'import express from "express";const app=express();\nconst {String:S}=globalThis;\napp.get("/", (req, res) => {\n  const rows = "x".split("|");\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "selected-local-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(){const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return {rows:items};}\napp.get("/", (req, res) => {\n  const {rows:original}=loadRows();const rows:number[]=original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "selected-local-factory-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(){const items=[0];return {rows:items};}\napp.get("/", (req, res) => {\n  const {rows:original}=loadRows();const rows:number[]=original;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+  ])("tracks selected native bindings and local factory returns: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+
+  it.each([
+    {
+      id: "computed-global-target-mutation",
+      source:
+        'import express from "express";const app=express();\nconst name="Array";globalThis[name].prototype.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "computed-global-target-control",
+      source:
+        'import express from "express";const app=express();\nconst name="Array";\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "computed-binding-pattern-mutation",
+      source:
+        'import express from "express";const app=express();\nconst name="Array";const {[name]:A}=globalThis;A.prototype.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "computed-binding-pattern-control",
+      source:
+        'import express from "express";const app=express();\nconst name="Array";const {[name]:A}=globalThis;\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "computed-wrapped-native-mutation",
+      source:
+        'import express from "express";const app=express();\nconst name="Array";const holder={[name]:Array};const {Array:A}=holder;A.prototype.map=()=>["<script>"];\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "computed-wrapped-native-control",
+      source:
+        'import express from "express";const app=express();\nconst name="Array";const holder={[name]:Array};const {Array:A}=holder;\napp.get("/", (req, res) => {\n  const rows = [0];\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "parameterized-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(_limit:number):number[]{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows(1);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "parameterized-factory-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(_limit:number):number[]{const items=[0];return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows(1);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "awaited-local-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nasync function loadRows():Promise<number[]>{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", async (req, res) => {\n  const rows:number[]=await loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "awaited-local-factory-control",
+      source:
+        'import express from "express";const app=express();\nasync function loadRows():Promise<number[]>{const items=[0];return items;}\napp.get("/", async (req, res) => {\n  const rows:number[]=await loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "forwarded-local-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]):number[]{Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  const original=[0];const rows:number[]=loadRows(original);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "forwarded-local-factory-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]):number[]{return items;}\napp.get("/", (req, res) => {\n  const original=[0];const rows:number[]=loadRows(original);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "aliased-forwarded-parameter-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){const alias=items;Object.defineProperty(alias,"map",{value:()=>["<script>"]});return alias;}\napp.get("/", (req, res) => {\n  const original=[0];const rows:number[]=loadRows(original);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "aliased-forwarded-parameter-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){const alias=items;return alias;}\napp.get("/", (req, res) => {\n  const original=[0];const rows:number[]=loadRows(original);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "second-parameter-alias-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[],other:number[]){Object.defineProperty(other,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  const original=[0];const rows:number[]=loadRows(original,original);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "second-parameter-alias-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[],other:number[]){return items;}\napp.get("/", (req, res) => {\n  const original=[0];const rows:number[]=loadRows(original,original);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "default-array-parameter-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]=[0]){Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "default-array-parameter-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]=[0]){return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "explicit-undefined-default-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]=[0]){Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows(undefined);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "explicit-undefined-default-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]=[0]){return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows(undefined);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "rest-array-parameter-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(...items:number[]){Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows(0,1);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "rest-array-parameter-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(...items:number[]){return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows(0,1);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "reassigned-array-parameter-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){items=[0];items={map(){return {join(){return "<script>";}}}} as any;return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows([1]);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "reassigned-array-parameter-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){items=[0];return items;}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows([1]);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "method-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}};\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "method-factory-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){const items=[0];return items;}};\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "property-arrow-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows:()=>{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}};\napp.get("/", (req, res) => {\n  const rows:number[]=factory["loadRows"]();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "property-arrow-factory-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows:()=>{const items=[0];return items;}};\napp.get("/", (req, res) => {\n  const rows:number[]=factory["loadRows"]();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "unawaited-promise-is-not-array",
+      source:
+        'import express from "express";const app=express();\nasync function loadRows(){return [0];}\napp.get("/", (req, res) => {\n  const rows:number[]=loadRows() as any;\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "same-factory-different-arguments",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){return items;}\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];Object.defineProperty(bad,"map",{value:()=>["<script>"]});const rows:number[]=unknownChoice?loadRows(good):loadRows(bad);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+  ])("preserves computed keys and safe factory argument flow: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+
+  it.each([
+    {
+      id: "method-alias-forward-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(items:number[]){const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];Object.defineProperty(bad,"map",{value:()=>["<script>"]});const rows:number[]=req.query.good?factory.loadRows(good):factory.loadRows(bad);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "method-alias-forward-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(items:number[]){const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];const rows:number[]=req.query.good?factory.loadRows(good):factory.loadRows(bad);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "method-alias-reverse-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(items:number[]){const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];Object.defineProperty(bad,"map",{value:()=>["<script>"]});const rows:number[]=req.query.good?factory.loadRows(bad):factory.loadRows(good);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "method-alias-reverse-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(items:number[]){const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];const rows:number[]=req.query.good?factory.loadRows(bad):factory.loadRows(good);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "function-alias-forward-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){const alias=items;return alias;}\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];Object.defineProperty(bad,"map",{value:()=>["<script>"]});const rows:number[]=req.query.good?loadRows(good):loadRows(bad);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "function-alias-forward-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){const alias=items;return alias;}\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];const rows:number[]=req.query.good?loadRows(good):loadRows(bad);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "function-alias-reverse-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){const alias=items;return alias;}\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];Object.defineProperty(bad,"map",{value:()=>["<script>"]});const rows:number[]=req.query.good?loadRows(bad):loadRows(good);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "function-alias-reverse-control",
+      source:
+        'import express from "express";const app=express();\nfunction loadRows(items:number[]){const alias=items;return alias;}\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];const rows:number[]=req.query.good?loadRows(bad):loadRows(good);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "arrow-alias-forward-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows:(items:number[])=>{const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];Object.defineProperty(bad,"map",{value:()=>["<script>"]});const rows:number[]=req.query.good?factory.loadRows(good):factory.loadRows(bad);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "arrow-alias-forward-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows:(items:number[])=>{const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];const rows:number[]=req.query.good?factory.loadRows(good):factory.loadRows(bad);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "arrow-alias-reverse-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows:(items:number[])=>{const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];Object.defineProperty(bad,"map",{value:()=>["<script>"]});const rows:number[]=req.query.good?factory.loadRows(bad):factory.loadRows(good);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "arrow-alias-reverse-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows:(items:number[])=>{const alias=items;return alias;}};\napp.get("/", (req, res) => {\n  const good=[0];const bad=[0];const rows:number[]=req.query.good?factory.loadRows(bad):factory.loadRows(good);\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "written-method-receiver-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows(){const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}};factory.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "written-method-receiver-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows(){const items=[0];return items;}};factory.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "written-arrow-receiver-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows:()=>{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}};factory.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "written-arrow-receiver-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows:()=>{const items=[0];return items;}};factory.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "written-alias-receiver-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows(){const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}};const alias=factory;alias.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "written-alias-receiver-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows(){const items=[0];return items;}};const alias=factory;alias.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "written-assigned-receiver-alias-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows(){const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}};let alias;alias=factory;alias.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "written-assigned-receiver-alias-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={label:"v1",loadRows(){const items=[0];return items;}};let alias;alias=factory;alias.label="v2";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "visible-object-returning-factory-mutation",
+      source:
+        'import express from "express";const app=express();\nfunction makeFactory(){return {loadRows(){const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;}};}const factory=makeFactory();\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "visible-object-returning-factory-control",
+      source:
+        'import express from "express";const app=express();\nfunction makeFactory(){return {loadRows(){const items=[0];return items;}};}const factory=makeFactory();\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "receiver-method-replacement-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){return [0];}};factory.loadRows=()=>{const items=[0];Object.defineProperty(items,"map",{value:()=>["<script>"]});return items;};\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "receiver-method-replacement-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){return [0];}};\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "receiver-escape-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){return [0];}};function replace(f){f.loadRows=()=>({map(){return {join(){return "<script>";}}}});}replace(factory);\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "receiver-escape-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){return [0];}};function replace(f){f.loadRows=()=>({map(){return {join(){return "<script>";}}}});}\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+    {
+      id: "receiver-unknown-key-write-mutation",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){return [0];}};const key="loadRows";factory[key]=()=>({map(){return {join(){return "<script>";}}}});\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "receiver-unknown-key-write-control",
+      source:
+        'import express from "express";const app=express();\nconst factory={loadRows(){return [0];}};const key="loadRows";\napp.get("/", (req, res) => {\n  const rows:number[]=factory.loadRows();\n  res.send(`<main>${rows.map(() => "<span>safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+  ])("binds factory proofs to invocation and stable local methods: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+
+  it.each([
+    {
+      id: "method-chain-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        Object.defineProperty(items, "map", { value: () => ["<script>"] });\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "method-chain-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "saved-method-result-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        Object.defineProperty(items, "map", { value: () => ["<script>"] });\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const receiver = provider.create();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "saved-method-result-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const receiver = provider.create();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "property-arrow-chain-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create: () => {\n    return {\n      loadRows() {\n        const items = [0];\n        Object.defineProperty(items, "map", { value: () => ["<script>"] });\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "property-arrow-chain-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create: () => {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "aliased-factory-chain-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        Object.defineProperty(items, "map", { value: () => ["<script>"] });\n        return items;\n      }\n    };\n  }\n};\nconst alias = provider;\napp.get("/", (req, res) => {\n  const rows: number[] = alias.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "aliased-factory-chain-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\nconst alias = provider;\napp.get("/", (req, res) => {\n  const rows: number[] = alias.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "literal-bracket-factory-chain-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        Object.defineProperty(items, "map", { value: () => ["<script>"] });\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider["create"]()["loadRows"]();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "literal-bracket-factory-chain-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider["create"]()["loadRows"]();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "awaited-factory-chain-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  async create() {\n    return {\n      loadRows() {\n        const items = [0];\n        Object.defineProperty(items, "map", { value: () => ["<script>"] });\n        return items;\n      }\n    };\n  }\n};\napp.get("/", async (req, res) => {\n  const rows: number[] = (await provider.create()).loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "awaited-factory-chain-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  async create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\napp.get("/", async (req, res) => {\n  const rows: number[] = (await provider.create()).loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "unawaited-async-factory-is-not-a-receiver",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  async create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "replaced-derived-factory-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\nprovider.create = () => ({ loadRows() { const items = [0]; Object.defineProperty(items, "map", { value: () => ["<script>"] }); return items; } });\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "replaced-derived-factory-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "escaped-derived-factory-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\nfunction replaceFactory(target) { target.create = () => ({ loadRows() { const items = [0]; Object.defineProperty(items, "map", { value: () => ["<script>"] }); return items; } }); }\nreplaceFactory(provider);\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "escaped-derived-factory-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst provider = {\n  create() {\n    return {\n      loadRows() {\n        const items = [0];\n        return items;\n      }\n    };\n  }\n};\nfunction replaceFactory(target) { target.create = () => ({ loadRows() { const items = [0]; Object.defineProperty(items, "map", { value: () => ["<script>"] }); return items; } }); }\napp.get("/", (req, res) => {\n  const rows: number[] = provider.create().loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "captured-factory-argument-mutation",
+      source:
+        'import express from "express";\nconst app=express();\nconst provider={create(items:number[]){return {loadRows(){return items;}};}};\napp.get("/",(req,res)=>{\n const items=[0];\n Object.defineProperty(items,"map",{value:()=>["<script>"]});\n const rows:number[]=provider.create(items).loadRows();\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));\n',
+      expectedEdges: 0,
+    },
+    {
+      id: "captured-factory-argument-control",
+      source:
+        'import express from "express";\nconst app=express();\nconst provider={create(items:number[]){return {loadRows(){return items;}};}};\napp.get("/",(req,res)=>{\n const items=[0];\n \n const rows:number[]=provider.create(items).loadRows();\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));\n',
+      expectedEdges: 1,
+    },
+  ])("keeps derived local factory provenance: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+
+  it.each([
+    {
+      id: "function-constructor-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "function-constructor-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "function-constructor-alias-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\nconst Alias = Factory;\napp.get("/", (req, res) => {\n  const receiver = new Alias();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "function-constructor-alias-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\nconst Alias = Factory;\napp.get("/", (req, res) => {\n  const receiver = new Alias();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "class-constructor-alias-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nclass Local {\n  loadRows() {\n    const items = [0];\n    Object.defineProperty(items, "map", { value: () => ["<script>"] });\n    return items;\n  }\n}\nconst Factory = Local;\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "class-constructor-alias-control",
+      source:
+        'import express from "express";\nconst app = express();\nclass Local {\n  loadRows() {\n    const items = [0];\n    return items;\n  }\n}\nconst Factory = Local;\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "class-expression-constructor-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nconst Factory = class {\n  loadRows() {\n    const items = [0];\n    Object.defineProperty(items, "map", { value: () => ["<script>"] });\n    return items;\n  }\n};\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "class-expression-constructor-control",
+      source:
+        'import express from "express";\nconst app = express();\nconst Factory = class {\n  loadRows() {\n    const items = [0];\n    return items;\n  }\n};\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "direct-class-already-unsupported-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nclass Local {\n  loadRows() {\n    const items = [0];\n    Object.defineProperty(items, "map", { value: () => ["<script>"] });\n    return items;\n  }\n}\napp.get("/", (req, res) => {\n  const receiver = new Local();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "direct-class-already-unsupported-control",
+      source:
+        'import express from "express";\nconst app = express();\nclass Local {\n  loadRows() {\n    const items = [0];\n    return items;\n  }\n}\napp.get("/", (req, res) => {\n  const receiver = new Local();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-reflect-construct-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = Reflect.construct(Factory, []);\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-reflect-construct-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = Reflect.construct(Factory, []);\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-object-create-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = Object.create(Factory());\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-object-create-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = Object.create(Factory());\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-proxy-constructor-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Proxy(Factory(), {});\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-proxy-constructor-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Proxy(Factory(), {});\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-promise-resolved-receiver-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\napp.get("/", async (req, res) => {\n  const receiver = await Promise.resolve(Factory());\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "unsupported-intrinsic-promise-resolved-receiver-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", async (req, res) => {\n  const receiver = await Promise.resolve(Factory());\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "shadowed-intrinsic-constructor-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Object() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Object();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "shadowed-intrinsic-constructor-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Object() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Object();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "local-property-constructor-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\nconst providers = { Factory };\napp.get("/", (req, res) => {\n  const receiver = new providers.Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "local-property-constructor-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\nconst providers = { Factory };\napp.get("/", (req, res) => {\n  const receiver = new providers.Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "constructor-without-argument-list-mutation",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      Object.defineProperty(items, "map", { value: () => ["<script>"] });\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Factory;\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "constructor-without-argument-list-control",
+      source:
+        'import express from "express";\nconst app = express();\nfunction Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Factory;\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "external-import-constructor",
+      source:
+        'import express from "express";\nconst app = express();\nimport { DataClient } from "external-data-client";\napp.get("/", (req, res) => {\n  const receiver = new DataClient();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "external-namespace-constructor",
+      source:
+        'import express from "express";\nconst app = express();\nimport * as vendor from "external-data-client";\napp.get("/", (req, res) => {\n  const receiver = new vendor.DataClient();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "external-unbound-constructor",
+      source:
+        'import express from "express";\nconst app = express();\n\napp.get("/", (req, res) => {\n  const receiver = new DataClient();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "arrow-is-not-a-constructor",
+      source:
+        'import express from "express";\nconst app = express();\nconst Factory = () => {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n};\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "generator-is-not-a-constructor",
+      source:
+        'import express from "express";\nconst app = express();\nfunction* Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", (req, res) => {\n  const receiver = new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "awaited-async-function-is-not-a-constructor",
+      source:
+        'import express from "express";\nconst app = express();\nasync function Factory() {\n  return {\n    loadRows() {\n      const items = [0];\n      return items;\n    }\n  };\n}\napp.get("/", async (req, res) => {\n  const receiver = await new Factory();\n  const rows: number[] = receiver.loadRows();\n  res.send(`<main>${rows.map(() => "<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target", (req, res) => res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+  ])("keeps constructor provenance and intrinsic results honest: $id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.source)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
+});
+
+describe("dynamic evaluator provenance remains unknown", () => {
+  // Inputs are parsed as source only. Never execute an evaluator or its payload.
+  it.each([
+    {
+      id: "direct-eval-mutation",
+      content:
+        'import express from "express"; const app=express();\napp.get("/",(req,res)=>{\n const rows:number[]=eval("Object.assign([0], {map: () => [\'<script>\']})");\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "direct-eval-control",
+      content:
+        'import express from "express"; const app=express();\napp.get("/",(req,res)=>{\n const rows:number[]=eval("[0]");\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "indirect-eval-mutation",
+      content:
+        'import express from "express"; const app=express();\napp.get("/",(req,res)=>{\n const rows:number[]=(0, eval)("Object.assign([0], {map: () => [\'<script>\']})");\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "indirect-eval-control",
+      content:
+        'import express from "express"; const app=express();\napp.get("/",(req,res)=>{\n const rows:number[]=(0, eval)("[0]");\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "aliased-eval-mutation",
+      content:
+        'import express from "express"; const app=express();const run=eval;\napp.get("/",(req,res)=>{\n const rows:number[]=run("Object.assign([0], {map: () => [\'<script>\']})");\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "aliased-eval-control",
+      content:
+        'import express from "express"; const app=express();const run=eval;\napp.get("/",(req,res)=>{\n const rows:number[]=run("[0]");\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "direct-eval-define-property-review-reproduction",
+      content:
+        'import express from "express"; const app=express();\napp.get("/",(req,res)=>{\n const rows:number[]=eval("Object.defineProperty([0], \'map\', {value: () => [\'<script>\']})");\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 0,
+    },
+    {
+      id: "plain-array-retains-source-edge",
+      content:
+        'import express from "express"; const app=express();\napp.get("/",(req,res)=>{\n const rows:number[]=[0];\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "local-factory-retains-source-edge",
+      content:
+        'import express from "express"; const app=express(); function loadRows() { return [0]; }\napp.get("/",(req,res)=>{\n const rows:number[]=loadRows();\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+    {
+      id: "external-query-retains-declared-contract",
+      content:
+        'import express from "express"; const app=express(); import { loadRows } from "external-data-client";\napp.get("/",(req,res)=>{\n const rows:number[]=loadRows();\n res.send(`<main>${rows.map(()=>"<span>Safe</span>").join("")}<a href="/target">Go</a></script></main>`);\n});\napp.get("/target",(req,res)=>res.send("<main>Target</main>"));',
+      expectedEdges: 1,
+    },
+  ])("$id", (item) => {
+    const graph = discoverSourcePageMap([file("index.ts", item.content)]);
+    const routes = new Map(
+      graph.nodes.map((node) => [node.id, node.notes.split("\n")[0].replace("Route: ", "")]),
+    );
+    expect(
+      graph.edges.filter(
+        (edge) => routes.get(edge.source) === "/" && routes.get(edge.target) === "/target",
+      ),
+    ).toHaveLength(item.expectedEdges);
+  });
 });
