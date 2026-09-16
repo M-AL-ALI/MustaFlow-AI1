@@ -6226,7 +6226,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       //
       // Trigger gating:
       //   - Project opt-out (architectReviewEnabled=false) → skipped:"disabled".
-      //   - Empty diff → skipped:"no-diff".
+      //   - Empty diff without a saved version -> skipped:"no-diff".
+      //     A saved version still needs an executed review of its stored source.
       //   - Trivial edit (≤ARCHITECT_LINE_THRESHOLD lines touched, no sensitive
       //     paths) → skipped:"trivial-edit".
       //
@@ -6240,6 +6241,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           (diffSummary?.filesAdded.length ?? 0) +
           (diffSummary?.filesModified.length ?? 0) +
           (diffSummary?.filesRemoved.length ?? 0);
+        const reviewSavedSnapshot = totalFilesTouched === 0 && version?.id != null;
         const linesTouched = (diffSummary?.linesAdded ?? 0) + (diffSummary?.linesRemoved ?? 0);
         // Heuristic: anything that materially affects auth, security, env,
         // database schema, secrets, or build manifests deserves a review even
@@ -6276,7 +6278,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         let skipReason: string | null = null;
         if (!project.architectReviewEnabled) skipReason = "disabled";
         else if (isDomainRewrite) skipReason = "domain-rewrite";
-        else if (!isArchitectAutoFix && totalFilesTouched === 0) skipReason = "no-diff";
+        else if (!isArchitectAutoFix && totalFilesTouched === 0 && !reviewSavedSnapshot)
+          skipReason = "no-diff";
         else if (!isArchitectAutoFix && isTrivialEdit) skipReason = "trivial-edit";
 
         if (skipReason) {
@@ -6328,7 +6331,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
                 onEvent: async () => {},
                 signal: new AbortController().signal,
               },
-              brief: `Architect review for task #${taskId}`,
+              savedVersionId: reviewSavedSnapshot ? version?.id : undefined,
+              brief: reviewSavedSnapshot
+                ? `Review saved version #${version?.id} for task #${taskId}; assess its saved source despite the empty residual diff.`
+                : `Architect review for task #${taskId}`,
               reviewer: {
                 diff: reviewDiff,
                 commandsRun,
@@ -6342,8 +6348,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               },
               skipCredits: true,
             });
-            if (!dispatchResult.review) {
-              throw new Error("dispatchReviewerStandalone returned no review");
+            if (!dispatchResult.ok || !dispatchResult.review) {
+              throw new Error("dispatchReviewerStandalone did not complete an executed review");
             }
             const review = dispatchResult.review;
 
@@ -6467,6 +6473,12 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               "Architect review complete",
             );
           } catch (architectErr) {
+            // An earlier in-loop assessment cannot stand in for this failed final review.
+            delete report.architectReview;
+            report.warnings = [
+              ...(report.warnings ?? []),
+              "The saved source could not be reviewed. Workspace readiness remains unverified.",
+            ];
             logger.warn(
               { err: architectErr, projectId, taskId },
               "Architect review threw — proceeding without (non-fatal)",

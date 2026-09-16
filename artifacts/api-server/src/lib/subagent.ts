@@ -23,7 +23,8 @@
 
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat";
 import type { E2eRunSummary } from "@workspace/db";
-import { db, taskEventsTable } from "@workspace/db";
+import { db, projectVersionsTable, taskEventsTable } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 import { logger } from "./logger";
 import { publishTaskEvent } from "./event-bus";
 import {
@@ -680,6 +681,8 @@ export async function dispatchSubagent(opts: DispatchOpts): Promise<DispatchResu
 export async function dispatchReviewerStandalone(args: {
   input: AgentLoopInput;
   brief: string;
+  /** Review this exact persisted version or fail; never defer it as a success. */
+  savedVersionId?: number;
   reviewer: Omit<ReviewerOpts, "parentInput" | "taskId" | "brief" | "fileExcerpts"> & {
     workspaceFiles: ReviewerFile[];
   };
@@ -687,11 +690,53 @@ export async function dispatchReviewerStandalone(args: {
 }): Promise<DispatchResult> {
   const role: SubagentRole = "reviewer";
   const taskId = args.input.taskId;
+  let workspaceFiles = args.reviewer.workspaceFiles;
+  if (args.savedVersionId !== undefined) {
+    if (!Number.isSafeInteger(args.savedVersionId) || args.savedVersionId <= 0) {
+      throw new Error("Saved-version review requires a valid version id.");
+    }
+    const [savedVersion] = await db
+      .select({
+        id: projectVersionsTable.id,
+        projectId: projectVersionsTable.projectId,
+        filesSnapshot: projectVersionsTable.filesSnapshot,
+      })
+      .from(projectVersionsTable)
+      .where(
+        and(
+          eq(projectVersionsTable.id, args.savedVersionId),
+          eq(projectVersionsTable.projectId, args.input.projectId),
+        ),
+      );
+    if (
+      !savedVersion ||
+      savedVersion.id !== args.savedVersionId ||
+      savedVersion.projectId !== args.input.projectId ||
+      !Array.isArray(savedVersion.filesSnapshot)
+    ) {
+      throw new Error("The exact saved snapshot could not be loaded for review.");
+    }
+    workspaceFiles = savedVersion.filesSnapshot.map((file: unknown) => {
+      if (
+        file === null ||
+        typeof file !== "object" ||
+        !("path" in file) ||
+        typeof file.path !== "string" ||
+        file.path.trim().length === 0 ||
+        !("content" in file) ||
+        typeof file.content !== "string"
+      ) {
+        throw new Error("The saved snapshot contains an invalid review file.");
+      }
+      return { path: file.path, content: file.content };
+    });
+  }
   emitSubagentEvent(taskId, args.input.projectId, "started", role, args.brief.slice(0, 160));
   const selectedContext = buildReviewerContextFromFiles({
     diff: args.reviewer.diff,
-    workspaceFiles: args.reviewer.workspaceFiles,
+    workspaceFiles,
     reviewRequest: args.brief,
+    includeUnchangedFiles: args.savedVersionId !== undefined,
   });
   const reviewerContext = {
     ...args.reviewer,
@@ -700,6 +745,25 @@ export async function dispatchReviewerStandalone(args: {
     missingRequestedPaths: selectedContext.missingRequestedPaths,
   };
   const reviewerStats = reviewerPayloadStats(reviewerContext);
+  if (
+    args.savedVersionId !== undefined &&
+    !reviewerContext.fileExcerpts.some((file) => {
+      // Generated truncation notices are metadata, not source the reviewer inspected.
+      const sourceEnd = file.truncated
+        ? file.content.lastIndexOf("\n\n[REVIEW CONTEXT TRUNCATED:")
+        : file.content.length;
+      return sourceEnd > 0 && file.content.slice(0, sourceEnd).trim().length > 0;
+    })
+  ) {
+    emitSubagentEvent(
+      taskId,
+      args.input.projectId,
+      "done",
+      role,
+      "failed: saved snapshot has no reviewable file content",
+    );
+    throw new Error("The saved snapshot produced no reviewable file excerpts.");
+  }
   if (!hasReviewerPayload(reviewerStats)) {
     const reviewerAssembledPromptStats = emptyReviewerAssembledPromptStats();
     await persistReviewerContextEvent({
@@ -735,6 +799,12 @@ export async function dispatchReviewerStandalone(args: {
       planContext: reviewerContext.planContext,
       knownWarnings: reviewerContext.knownWarnings,
     });
+    if (
+      args.savedVersionId !== undefined &&
+      (!r.ok || !r.review || r.review.reviewExecutionStatus !== "structured")
+    ) {
+      throw new Error("Saved-version review did not return an executed structured assessment.");
+    }
     const reviewerAssembledPromptStats = r.review.reviewerAssembledPromptStats;
     await persistReviewerContextEvent({
       taskId,
@@ -772,6 +842,7 @@ export async function dispatchReviewerStandalone(args: {
     const msg = String((err as Error).message ?? err);
     logger.warn({ err, role }, "dispatchReviewerStandalone threw");
     emitSubagentEvent(taskId, args.input.projectId, "done", role, `error: ${msg.slice(0, 160)}`);
+    if (args.savedVersionId !== undefined) throw err;
     return {
       ok: false,
       observation: `ERROR: subagent ${role} threw: ${msg}`,

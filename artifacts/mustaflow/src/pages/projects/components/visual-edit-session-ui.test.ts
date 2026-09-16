@@ -46,7 +46,11 @@ describe("visual edit session UI contract", () => {
     expect(source).toContain('applyVisualEdit({ kind: "reorder", direction: "down" })');
     expect(source).toContain("Add reference overlay");
     expect(source).toContain('aria-label="Reference overlay opacity"');
-    expect(source.match(/\{renderReferenceOverlay\(\)\}/gu)).toHaveLength(3);
+    expect(source.match(/\{renderReferenceOverlay\(\)\}/gu)).toHaveLength(1);
+    const sharedFrames = source.match(/<PreviewDeviceFrame\b[\s\S]*?<\/PreviewDeviceFrame>/gu);
+    expect(sharedFrames).toHaveLength(1);
+    expect(sharedFrames?.[0]).toContain('{renderIframe("h-full")}');
+    expect(sharedFrames?.[0]).toContain("{renderReferenceOverlay()}");
     expect(source).toContain('aria-label="Drag selected element to resize"');
     expect(source).toContain('aria-label="Drag selected element to reorder"');
     expect(source).toContain("Release to save this size");

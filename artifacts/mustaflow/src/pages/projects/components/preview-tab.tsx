@@ -76,6 +76,7 @@ import { SharePreviewControl } from "./share-preview-control";
 import { pageRouteIsNavigable, webContainerPageUrl } from "./page-map-card-model";
 import { usePreviewNavigation } from "@/hooks/use-preview-navigation";
 import { projectPreviewSource } from "@/lib/preview-navigation";
+import { PreviewDeviceFrame } from "./preview-device-frame";
 import {
   PreviewActionsMenu,
   PreviewRoutesMenu,
@@ -1726,7 +1727,7 @@ export function PreviewTab({
       : previewSrc;
     return (
       <iframe
-        key={webContainerLive ? `wc-${device}-${src}-${iframeKey}` : `src-${device}-${iframeKey}`}
+        key={webContainerLive ? `wc-${src}-${iframeKey}` : `src-${iframeKey}`}
         ref={iframeRef}
         src={src}
         title="App preview"
@@ -3761,141 +3762,25 @@ export function PreviewTab({
             </div>
           </div>
         ) : hasFiles ? (
-          device === "desktop" ? (
-            /* ── Desktop browser chrome ── */
-            <div className="w-full h-full flex flex-col rounded-xl overflow-hidden shadow-2xl border border-white/5">
-              {/* Tab bar */}
-              <div className="h-8 bg-zinc-900 flex items-end px-2 gap-0.5 shrink-0">
-                <div className="h-7 flex items-center gap-2 px-3 bg-zinc-800 rounded-t-lg border border-zinc-700 border-b-0 min-w-[140px] max-w-[200px]">
-                  <Globe className="h-3 w-3 text-zinc-400 shrink-0" />
-                  <span className="text-[11px] text-zinc-300 truncate flex-1">
-                    {project.name ?? "Preview"}
-                  </span>
-                  <X className="h-2.5 w-2.5 text-zinc-500 shrink-0" />
-                </div>
-              </div>
-              {/* Address bar */}
-              <div className="h-9 bg-zinc-800 border-b border-zinc-700 flex items-center gap-2 px-3 shrink-0">
-                <div className="flex items-center gap-1.5">
-                  <div className="w-3.5 h-3.5 rounded-full bg-red-500/80" />
-                  <div className="w-3.5 h-3.5 rounded-full bg-yellow-500/80" />
-                  <div className="w-3.5 h-3.5 rounded-full bg-green-500/80" />
-                </div>
-                <button
-                  onClick={isReactVite ? () => wc.restart() : refresh}
-                  className="text-zinc-400 hover:text-zinc-200 transition-colors p-1 rounded hover:bg-zinc-700"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                </button>
-                <div className="flex-1 flex items-center bg-zinc-900 border border-zinc-700 rounded-md px-3 h-6 gap-2 max-w-md mx-auto">
-                  <Globe className="h-3 w-3 text-zinc-500 shrink-0" />
-                  <span className="text-[11px] text-zinc-300 font-mono truncate flex-1">
-                    {getPreviewAddress({
-                      previewAccess,
-                      containerUrl,
-                      webContainerUrl: isReactVite ? wc.previewUrl : null,
-                      projectId: project.id,
-                    })}
-                  </span>
-                </div>
-              </div>
-              {/* iframe — with WC boot overlay while installing/starting */}
-              <div className="flex-1 min-h-0 bg-white overflow-hidden relative">
-                {isReactVite &&
-                  ["booting", "installing", "starting"].includes(wc.status) &&
-                  renderWcBootOverlay()}
-                {renderIframe("h-full")}
-                {renderReferenceOverlay()}
-              </div>
-            </div>
-          ) : device === "mobile" ? (
-            /* ── Mobile phone shell ── */
-            <div className="flex flex-col items-center justify-start py-4 gap-2">
-              {/* Web simulation label */}
-              {isMobile && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-medium shrink-0">
-                  <Smartphone className="h-3 w-3" />
-                  Mobile preview (web simulation) — {platform === "android"
-                    ? "Android"
-                    : "iOS"}{" "}
-                  frame
-                </div>
-              )}
-              <div
-                className={cn(
-                  "relative flex flex-col shadow-2xl overflow-hidden",
-                  platform === "android"
-                    ? "rounded-[32px] border-[6px] border-zinc-700 bg-zinc-700"
-                    : "rounded-[40px] border-[6px] border-zinc-800 bg-zinc-800",
-                )}
-                style={{ width: 390, minHeight: 844 }}
-              >
-                {/* Dynamic Island (iOS) / Status bar (Android) */}
-                {platform === "android" ? (
-                  <div className="shrink-0 h-10 bg-zinc-900 flex items-center justify-between px-4">
-                    <span className="text-[10px] text-zinc-400 font-medium">9:41</span>
-                    <div className="flex items-center gap-1">
-                      <div className="w-3 h-2 border border-zinc-500 rounded-sm relative">
-                        <div className="absolute inset-0.5 bg-zinc-400 rounded-sm" />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="shrink-0 h-12 bg-black flex justify-center items-center">
-                    <div className="w-28 h-7 bg-zinc-900 rounded-full flex items-center justify-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-zinc-700" />
-                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
-                    </div>
-                  </div>
-                )}
-                {/* Screen */}
-                <div className="flex-1 bg-white overflow-hidden relative">
-                  {isReactVite &&
-                    ["booting", "installing", "starting"].includes(wc.status) &&
-                    renderWcBootOverlay()}
-                  {renderIframe(undefined, { height: 780 })}
-                  {renderReferenceOverlay()}
-                </div>
-                {/* Home bar (iOS) / Nav bar (Android) */}
-                {platform === "android" ? (
-                  <div className="shrink-0 bg-zinc-900 flex justify-center items-center gap-6 py-2.5">
-                    <div className="w-5 h-5 border border-zinc-600 rounded-sm" />
-                    <div className="w-4 h-4 rounded-full border border-zinc-600" />
-                    <div className="w-0 h-0 border-t-[8px] border-t-zinc-600 border-r-[6px] border-r-transparent border-l-[6px] border-l-transparent" />
-                  </div>
-                ) : (
-                  <div className="shrink-0 bg-black flex justify-center py-3">
-                    <div className="w-24 h-1 rounded-full bg-zinc-600" />
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* ── Tablet frame ── */
-            <div className="flex items-center justify-center py-4">
-              <div
-                className="relative flex flex-col rounded-[24px] shadow-2xl border-[6px] border-zinc-800 bg-zinc-800 overflow-hidden"
-                style={{ width: 768, minHeight: 1024 }}
-              >
-                {/* Camera */}
-                <div className="shrink-0 h-7 bg-zinc-900 flex justify-center items-center">
-                  <div className="w-2 h-2 rounded-full bg-zinc-700" />
-                </div>
-                {/* Screen */}
-                <div className="flex-1 bg-white overflow-hidden relative">
-                  {isReactVite &&
-                    ["booting", "installing", "starting"].includes(wc.status) &&
-                    renderWcBootOverlay()}
-                  {renderIframe(undefined, { height: 970 })}
-                  {renderReferenceOverlay()}
-                </div>
-                {/* Home bar */}
-                <div className="shrink-0 bg-zinc-900 flex justify-center py-2">
-                  <div className="w-16 h-1 rounded-full bg-zinc-600" />
-                </div>
-              </div>
-            </div>
-          )
+          <PreviewDeviceFrame
+            device={device}
+            platform={platform}
+            projectName={project.name ?? "Preview"}
+            path={currentPath}
+            address={getPreviewAddress({
+              previewAccess,
+              containerUrl,
+              webContainerUrl: isReactVite ? wc.previewUrl : null,
+              projectId: project.id,
+            })}
+            nativeSimulation={isMobile}
+          >
+            {isReactVite &&
+              ["booting", "installing", "starting"].includes(wc.status) &&
+              renderWcBootOverlay()}
+            {renderIframe("h-full")}
+            {renderReferenceOverlay()}
+          </PreviewDeviceFrame>
         ) : (
           <div className="flex flex-col items-center justify-center h-full max-w-md text-center gap-6 py-16">
             <div className="relative">

@@ -140,6 +140,8 @@ export function buildReviewerContextFromFiles(input: {
   diff: ReviewerDiff;
   workspaceFiles: ReviewerFile[];
   reviewRequest?: string;
+  /** Only opt in when the caller supplies the exact persisted snapshot. */
+  includeUnchangedFiles?: boolean;
 }): ReviewerWorkspaceContext {
   const requestedPaths = extractRequestedPaths(input.reviewRequest);
   const availableByPath = new Map(
@@ -179,14 +181,14 @@ export function buildReviewerContextFromFiles(input: {
   const changedPaths = new Set(
     [...input.diff.filesAdded, ...input.diff.filesModified].map(normalizePath),
   );
-  const remainingChangedFiles = input.workspaceFiles
+  const remainingFiles = input.workspaceFiles
     .filter(
       (file) =>
-        changedPaths.has(normalizePath(file.path)) &&
+        (input.includeUnchangedFiles === true || changedPaths.has(normalizePath(file.path))) &&
         !requestedFilePaths.has(normalizePath(file.path)),
     )
     .sort(compareReviewCandidates);
-  const candidates = [...requestedFiles, ...remainingChangedFiles];
+  const candidates = [...requestedFiles, ...remainingFiles];
 
   let remainingChars = REVIEWER_MAX_TOTAL_EXCERPT_CHARS;
   const fileExcerpts: ReviewerWorkspaceContext["fileExcerpts"] = [];
