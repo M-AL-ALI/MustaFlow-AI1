@@ -74,7 +74,7 @@ export function pageRouteIsNavigable(route: string, planned = false): boolean {
 export function pagePreviewUrl(projectId: number, route: string): string | null {
   if (!Number.isSafeInteger(projectId) || projectId <= 0 || !pageRouteIsNavigable(route))
     return null;
-  return "/api/projects/" + projectId + "/preview" + (route === "/" ? "/index.html" : route);
+  return "/api/projects/" + projectId + "/preview" + route;
 }
 
 /** Apply a local route to the trusted WebContainer URL without changing its origin. */

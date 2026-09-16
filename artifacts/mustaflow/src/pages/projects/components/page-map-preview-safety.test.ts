@@ -25,7 +25,8 @@ describe("Project-local Page Map previews", () => {
         pageRouteFromFilePath("src/pages/Account.tsx", "Route: /account/profile"),
       ),
     ).toBe("/api/projects/901/preview/account/profile");
-    expect(pagePreviewUrl(901, "/")).toBe("/api/projects/901/preview/index.html");
+    expect(pagePreviewUrl(901, "/")).toBe("/api/projects/901/preview/");
+    expect(pagePreviewUrl(901, "/index.html")).toBe("/api/projects/901/preview/index.html");
   });
   it.each([
     "//outside.test/page",

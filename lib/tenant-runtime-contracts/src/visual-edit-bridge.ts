@@ -36,6 +36,43 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
       try { window.parent.postMessage(payload, TRUSTED_PARENT_ORIGINS[i]); } catch(_) {}
     }
   }
+  // Navigation is a separate, non-authoritative UI channel. Never report a
+  // gateway launch grant, and do not send locations before parent subscription.
+  var NAV_NONCE = null;
+  function reportLocation(kind){
+    if (!NAV_NONCE) return;
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.delete("__nfg");
+      var entry = window.navigation && window.navigation.currentEntry;
+      var entryKey = entry && typeof entry.key === "string" ? entry.key : null;
+      tellParent({__mustaflow_preview:true,type:"location",nonce:NAV_NONCE,kind:kind,href:url.href,entryKey:entryKey});
+    } catch(_) {}
+  }
+  function initialNavigationKind(){
+    var entries = window.performance && window.performance.getEntriesByType
+      ? window.performance.getEntriesByType("navigation") : [];
+    return entries[0] && entries[0].type === "back_forward" ? "traverse" : "load";
+  }
+  ["pushState", "replaceState"].forEach(function(name){
+    var original = window.history[name];
+    window.history[name] = function(){
+      var result = original.apply(this, arguments);
+      reportLocation(name === "pushState" ? "push" : "replace");
+      return result;
+    };
+  });
+  if (window.navigation && window.navigation.addEventListener) {
+    window.navigation.addEventListener("currententrychange", function(event){
+      var kind = event.navigationType;
+      reportLocation(kind === "push" || kind === "replace" || kind === "traverse" ? kind : "load");
+    });
+  }
+  window.addEventListener("popstate", function(){ reportLocation("traverse"); });
+  window.addEventListener("hashchange", function(){ reportLocation("push"); });
+  window.addEventListener("pageshow", function(event){
+    if (event.persisted) reportLocation("traverse");
+  });
   var MODE = false; // visual-edit toggle
   var STYLE_ID = "__mfm_ve_style";
   function ensureStyle(){
@@ -169,7 +206,15 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
   }
   window.addEventListener("message", function(ev){
     if (!isTrustedParent(ev)) return;
-    var d = ev.data; if (!d || typeof d !== "object" || !d.__mustaflow_edit) return;
+    var d = ev.data; if (!d || typeof d !== "object") return;
+    if (d.__mustaflow_preview === true) {
+      if (d.type === "subscribe" && typeof d.nonce === "string" && d.nonce.length >= 16 && d.nonce.length <= 100) {
+        NAV_NONCE = d.nonce;
+        reportLocation(initialNavigationKind());
+      }
+      return;
+    }
+    if (!d.__mustaflow_edit) return;
     if (d.type === "setMode") {
       setMode(d.on);
       tellParent({__mustaflow_edit:true,type:"modeApplied"});
@@ -186,6 +231,7 @@ export const VISUAL_EDIT_SCRIPT = `<script>(function(){
       mo.observe(document.body, { childList: true, subtree: true });
     }
     tellParent({__mustaflow_edit:true,type:"ready"});
+    tellParent({__mustaflow_preview:true,type:"ready"});
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();

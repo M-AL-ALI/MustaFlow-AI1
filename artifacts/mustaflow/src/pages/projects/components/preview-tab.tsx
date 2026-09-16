@@ -74,6 +74,8 @@ import {
 } from "@/lib/workspace-readiness";
 import { SharePreviewControl } from "./share-preview-control";
 import { pageRouteIsNavigable, webContainerPageUrl } from "./page-map-card-model";
+import { usePreviewNavigation } from "@/hooks/use-preview-navigation";
+import { projectPreviewSource } from "@/lib/preview-navigation";
 import {
   PreviewActionsMenu,
   PreviewRoutesMenu,
@@ -457,7 +459,30 @@ export function PreviewTab({
   const isReactVite = project.projectFormat === "react-vite" && !isMobile;
   const [platform, setPlatform] = useState<Platform>("web");
   const [device, setDevice] = useState<DeviceFrame>(isMobile ? "mobile" : "desktop");
-  const [iframeKey, setIframeKey] = useState(0);
+  const {
+    iframeRef,
+    iframeKey,
+    setIframeKey,
+    reloadPreview,
+    currentPath,
+    requestedPath,
+    urlInput,
+    setUrlInput,
+    navigateTo: requestPreviewPath,
+    goBack,
+    goForward,
+    canGoBack,
+    canGoForward,
+    onFrameLoad,
+  } = usePreviewNavigation({
+    projectId: project.id,
+    previewAccess,
+    containerUrl,
+    webContainerUrl:
+      isReactVite && !hasServerPreviewAccess(previewAccess) && wc.status === "ready"
+        ? wc.previewUrl
+        : null,
+  });
   const activePreviewSyncRef = useRef<Promise<void> | null>(null);
   const syncFromBackend = wc.syncFromBackend;
   const previewRevisionSubstrate = selectPreviewRevisionSubstrate({
@@ -500,7 +525,7 @@ export function PreviewTab({
       });
       return active;
     },
-    [onPreviewRevisionApplied, onPreviewRevisionFailed, syncFromBackend],
+    [onPreviewRevisionApplied, onPreviewRevisionFailed, syncFromBackend, setIframeKey],
   );
   const prevRefreshTriggerRef = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -534,6 +559,7 @@ export function PreviewTab({
     onPreviewRevisionApplied,
     previewRevisionSubstrate,
     syncPreviewPayload,
+    setIframeKey,
   ]);
 
   // When a project_files_changed SSE event arrives, acknowledge it through the
@@ -562,6 +588,7 @@ export function PreviewTab({
     onPreviewRevisionApplied,
     previewRevisionSubstrate,
     syncPreviewPayload,
+    setIframeKey,
   ]);
   const [healthWarning, setHealthWarning] = useState<string | null>(null);
   const [consoleOpen, setConsoleOpen] = useState(false);
@@ -646,7 +673,7 @@ export function PreviewTab({
       setVeSelections([]);
       setVePanel(null);
     }
-  }, [editMode, iframeKey]);
+  }, [editMode, iframeKey, iframeRef]);
   useEffect(() => {
     if (!editMode) return;
     const timeout = window.setTimeout(() => {
@@ -655,7 +682,7 @@ export function PreviewTab({
       setEditMode(false);
     }, 2_500);
     return () => window.clearTimeout(timeout);
-  }, [editMode, iframeKey]);
+  }, [editMode, iframeKey, iframeRef]);
   useEffect(() => {
     let cancelled = false;
     if (editMode && !veSessionId) {
@@ -1001,6 +1028,8 @@ export function PreviewTab({
       onFixPrompt,
       closeVe,
       wc,
+      iframeRef,
+      setIframeKey,
     ],
   );
 
@@ -1064,7 +1093,7 @@ export function PreviewTab({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-  }, [applyVisualEdit, veDirectDrag, veSelection]);
+  }, [applyVisualEdit, veDirectDrag, veSelection, iframeRef]);
 
   const undoVisualEdit = useCallback(async () => {
     if (!veSessionId || !veCanUndo) return;
@@ -1082,7 +1111,7 @@ export function PreviewTab({
       setVeToast(error instanceof Error ? error.message : "That change could not be undone.");
     }
     setTimeout(() => setVeToast(null), 2500);
-  }, [project.id, veCanUndo, veSessionId]);
+  }, [project.id, veCanUndo, veSessionId, setIframeKey]);
 
   // EAS build status — fetch latest completed build for native QR
   type EasBuildEntry = {
@@ -1138,7 +1167,7 @@ export function PreviewTab({
     }
   }, [nativeFeatures]);
 
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // The navigation hook owns the active iframe and its location subscription.
   const prevStatusRef = useRef<string>(project.status);
   const healthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const entryIdRef = useRef(0);
@@ -1166,40 +1195,14 @@ export function PreviewTab({
   const hasFiles = (files?.length ?? 0) > 0;
   const isLoading = filesLoading && files === undefined;
 
-  // ── In-preview navigation: path stack, editable URL, routes dropdown ──
-  // Iframe is sandboxed without same-origin, so we cannot read the iframe's
-  // own location changes. The URL bar reflects explicit navigations made
-  // from this toolbar (typing a path, clicking back/forward, picking a route).
-  const [currentPath, setCurrentPath] = useState<string>("/");
-  const [pathHistory, setPathHistory] = useState<string[]>(["/"]);
-  const [historyIndex, setHistoryIndex] = useState(0);
-  const [urlInput, setUrlInput] = useState<string>("/");
+  // Observed app navigation updates the address, not the iframe source.
   const [routesOpen, setRoutesOpen] = useState(false);
-
   const navigateTo = useCallback(
-    (rawPath: string) => {
-      const normalized = (() => {
-        let p = rawPath.trim();
-        if (!p) p = "/";
-        if (!p.startsWith("/")) p = "/" + p;
-        return p;
-      })();
-      setCurrentPath(normalized);
-      setUrlInput(normalized);
-      setPathHistory((prev) => {
-        const trimmed = prev.slice(0, historyIndex + 1);
-        if (trimmed[trimmed.length - 1] === normalized) return trimmed;
-        return [...trimmed, normalized];
-      });
-      setHistoryIndex((prev) => {
-        const trimmedLen = pathHistory.slice(0, prev + 1).length;
-        const lastSame = pathHistory.slice(0, prev + 1)[trimmedLen - 1] === normalized;
-        return lastSame ? prev : prev + 1;
-      });
-      setIframeKey((k) => k + 1);
+    (path: string) => {
+      requestPreviewPath(path);
       setRoutesOpen(false);
     },
-    [historyIndex, pathHistory],
+    [requestPreviewPath],
   );
 
   const handledNavigationRequestRef = useRef<number | null>(null);
@@ -1218,34 +1221,9 @@ export function PreviewTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigationRequest?.requestId]);
 
-  const goBack = useCallback(() => {
-    setHistoryIndex((idx) => {
-      const next = Math.max(0, idx - 1);
-      const path = pathHistory[next] ?? "/";
-      setCurrentPath(path);
-      setUrlInput(path);
-      setIframeKey((k) => k + 1);
-      return next;
-    });
-  }, [pathHistory]);
-
-  const goForward = useCallback(() => {
-    setHistoryIndex((idx) => {
-      const next = Math.min(pathHistory.length - 1, idx + 1);
-      const path = pathHistory[next] ?? "/";
-      setCurrentPath(path);
-      setUrlInput(path);
-      setIframeKey((k) => k + 1);
-      return next;
-    });
-  }, [pathHistory]);
-
   const goHome = useCallback(() => {
     navigateTo("/");
   }, [navigateTo]);
-
-  const canGoBack = historyIndex > 0;
-  const canGoForward = historyIndex < pathHistory.length - 1;
 
   // Routes — derived from project files.
   //   • Top-level *.html → web routes (`/`, `/about.html`, …)
@@ -1278,12 +1256,8 @@ export function PreviewTab({
     });
   })();
 
-  // Compose the iframe src from currentPath + cache-buster
-  const previewSrc = (() => {
-    const path = currentPath === "/" ? "/" : currentPath;
-    const sep = path.includes("?") ? "&" : "?";
-    return `/api/projects/${project.id}/preview${path}${sep}t=${iframeKey}`;
-  })();
+  // Only explicit navigation/reload changes src. Cache markers precede fragments.
+  const previewSrc = projectPreviewSource(project.id, requestedPath, iframeKey);
 
   // Backend file events are content-aware and coalesced by useWebContainer.
   // Build completion must not reboot the browser runtime: source edits belong
@@ -1517,7 +1491,7 @@ export function PreviewTab({
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [editMode]);
+  }, [editMode, iframeRef]);
 
   // Scroll console to bottom on new entries
   useEffect(() => {
@@ -1530,8 +1504,8 @@ export function PreviewTab({
     setHealthWarning(null);
     setConsoleEntries([]);
     setCrashBanner(null);
-    setIframeKey((k) => k + 1);
-  }, []);
+    reloadPreview();
+  }, [reloadPreview]);
 
   const requestServerStartupFix = useCallback(() => {
     const target = onAutoSendPrompt ?? onFixPrompt;
@@ -1557,12 +1531,13 @@ export function PreviewTab({
         postBuildWindowRef.current = false;
       }, 30_000);
     }
-  }, [project.status, hasFiles]);
+  }, [project.status, hasFiles, setIframeKey]);
 
   const handleIframeLoad = useCallback(() => {
     setHealthWarning(null);
     if (healthTimerRef.current) clearTimeout(healthTimerRef.current);
-  }, []);
+    onFrameLoad();
+  }, [onFrameLoad]);
 
   useEffect(
     () => () => {
@@ -1587,7 +1562,7 @@ export function PreviewTab({
         height: Math.min(1200, Math.max(240, cssHeight)),
       },
     };
-  }, []);
+  }, [iframeRef]);
 
   const askPreviewPointContext = useCallback(
     async (point: { x: number; y: number }): Promise<string | undefined> => {
@@ -1614,7 +1589,7 @@ export function PreviewTab({
         );
       });
     },
-    [],
+    [iframeRef],
   );
 
   const snapshotToAi = useCallback(async () => {
@@ -1747,15 +1722,11 @@ export function PreviewTab({
       );
     }
     const src = webContainerLive
-      ? (webContainerPageUrl(wc.previewUrl!, currentPath) ?? wc.previewUrl!)
+      ? (webContainerPageUrl(wc.previewUrl!, requestedPath) ?? wc.previewUrl!)
       : previewSrc;
     return (
       <iframe
-        key={
-          webContainerLive
-            ? `wc-${device}-${src}-${navigationRequest?.requestId ?? 0}`
-            : `src-${device}-${iframeKey}`
-        }
+        key={webContainerLive ? `wc-${device}-${src}-${iframeKey}` : `src-${device}-${iframeKey}`}
         ref={iframeRef}
         src={src}
         title="App preview"

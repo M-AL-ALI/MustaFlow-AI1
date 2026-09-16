@@ -22,7 +22,7 @@ vi.mock("./project-file-asset-reference", () => ({ resolveProjectFileBytes: vi.f
 vi.mock("./consoleBridge", () => ({ injectBridge: (html: string) => html, MOCK_FLAG_SCRIPT: "" }));
 vi.mock("./visualEditScript", () => ({ VISUAL_EDIT_SCRIPT: "" }));
 
-import { serveProjectFilesPreview } from "./project-files-preview";
+import { previewFilePathFromUrl, serveProjectFilesPreview } from "./project-files-preview";
 
 function appFor(editor: boolean) {
   const app = express();
@@ -43,6 +43,17 @@ beforeEach(() => {
 });
 
 describe("database-backed editor preview isolation", () => {
+  it("serves the static index from the real root route used by Page Map", async () => {
+    const app = express();
+    app.get("/api/projects/71/preview/", async (req, res) => {
+      const filePath = previewFilePathFromUrl(req.originalUrl);
+      expect(filePath).toBe("index.html");
+      await serveProjectFilesPreview(res, 71, filePath, { visualEditEnabled: true });
+    });
+    const response = await request(app).get("/api/projects/71/preview/?t=1").expect(200);
+    expect(response.text).toContain("window.tenant = true");
+    expect(response.headers["content-security-policy"]).toContain("sandbox allow-scripts");
+  });
   it("enforces a response sandbox when runtime state falls back to stored tenant HTML", async () => {
     const response = await request(appFor(true)).get("/preview").expect(200);
     expect(response.headers["content-security-policy"]).toBe(
