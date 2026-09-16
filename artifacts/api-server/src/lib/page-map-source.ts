@@ -6,6 +6,7 @@ import type { BuilderFile } from "./builder";
 import type { PageMapNode, PageMapEdge, PageMapPlatform } from "./page-map";
 import type { PageMapTransition, PageMapUnresolvedTransition } from "./page-map-transition";
 import { hasPageMapControlCharacter } from "./page-map-path-characters";
+import { discoverExpressPages } from "./page-map-express";
 
 const MAX_FILES = 500;
 const MAX_FILE_CHARS = 500_000;
@@ -25,11 +26,14 @@ type ConditionEvidence = {
 };
 type LinkCandidate = {
   sourceFile: string;
+  sourceRoute?: string;
+  identityContext?: string;
   target?: string;
   redirect?: boolean;
   resolution: "browser" | RouterResolution;
   browserPath?: string;
   baseUnknown?: boolean;
+  parsingUnknown?: boolean;
   declaration: SourceReference;
   transition: PageMapTransition;
 };
@@ -301,7 +305,10 @@ export function discoverSourcePageMap(input: BuilderFile[]): PageMapPlatform {
   const addCandidate = (
     file: BuilderFile,
     declaration: SourceReference,
-    details: Pick<LinkCandidate, "target" | "redirect" | "resolution" | "browserPath"> & {
+    details: Pick<
+      LinkCandidate,
+      "target" | "redirect" | "resolution" | "browserPath" | "sourceRoute" | "identityContext"
+    > & {
       action: PageMapTransition["action"]["kind"];
       control: PageMapTransition["control"];
       outcome: PageMapTransition["outcome"]["kind"];
@@ -732,6 +739,26 @@ export function discoverSourcePageMap(input: BuilderFile[]): PageMapPlatform {
     }
   }
 
+  for (const page of discoverExpressPages(files)) {
+    addNode(page.route, page.filePath);
+    for (const link of page.links) {
+      const candidate = addCandidate(link.file, sourceReference(link.file, link.start, link.end), {
+        target: link.target,
+        resolution: "browser",
+        browserPath: page.documentPath,
+        sourceRoute: page.route,
+        identityContext: page.route + ":" + page.documentPath + ":" + link.ordinal,
+        action: link.kind === "form" ? "submit" : "click",
+        control: { kind: link.kind },
+        outcome: "navigate",
+      });
+      if (candidate) {
+        candidate.baseUnknown = link.baseUnknown;
+        candidate.parsingUnknown = link.parsingUnknown;
+      }
+    }
+  }
+
   for (const file of files) {
     if (!/\.html?$/i.test(file.path)) continue;
     let title = "";
@@ -839,12 +866,18 @@ export function discoverSourcePageMap(input: BuilderFile[]): PageMapPlatform {
             declaration.contentSha256,
             declaration.startOffset,
             declaration.endOffset,
+            ...(candidate.identityContext === undefined ? [] : [candidate.identityContext]),
           ]),
         )
         .digest("hex")
         .slice(0, 20);
     const sources = byFile.get(candidate.sourceFile) ?? [];
-    const source = sources.length === 1 ? sources[0] : undefined;
+    const source =
+      candidate.sourceRoute === undefined
+        ? sources.length === 1
+          ? sources[0]
+          : undefined
+        : nodesByRoute.get(candidate.sourceRoute);
     if (!source)
       transition.unknowns!.push("The declaring file does not identify exactly one source page.");
     const unresolved = (reason: string) => {
@@ -858,7 +891,9 @@ export function discoverSourcePageMap(input: BuilderFile[]): PageMapPlatform {
     const destination = candidate.target?.trim();
     let target: PageMapNode | undefined;
     let reason = "The destination is computed, missing, or overridden by ambiguous JSX attributes.";
-    if (destination !== undefined) {
+    if (candidate.parsingUnknown) {
+      reason = "Unknown HTML composition prevents source attribution of this destination.";
+    } else if (destination !== undefined) {
       if (
         !destination ||
         destination.length > 2048 ||
@@ -931,7 +966,10 @@ export function discoverSourcePageMap(input: BuilderFile[]): PageMapPlatform {
     // A rejected literal URL does not establish a navigation outcome. Keep
     // descriptive control evidence, but neither the URL nor source authority
     // for the original default outcome survives this rejection.
-    if (destination !== undefined && transition.destination.kind === "unknown") {
+    if (
+      (destination !== undefined || candidate.parsingUnknown) &&
+      transition.destination.kind === "unknown"
+    ) {
       transition.outcome = { kind: "unknown" };
       transition.evidence = transition.evidence.map(
         (item): PageMapTransition["evidence"][number] =>
