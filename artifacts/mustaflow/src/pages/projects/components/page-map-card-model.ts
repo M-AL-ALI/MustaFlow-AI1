@@ -27,7 +27,7 @@ const PURPOSE_BY_TYPE: Record<string, string> = {
 };
 
 export function pageRouteFromFilePath(filePath: string, notes = ""): string {
-  const routeInNotes = notes.match(/(?:^|\b)route\s*:\s*([/][^\s,;]+)/i)?.[1];
+  const routeInNotes = notes.match(/(?:^|\b)route\s*:\s*([/][^\s,;]*)/i)?.[1];
   if (routeInNotes) return routeInNotes.replace(/[.!?)]+$/, "");
 
   const normalized = filePath.trim().replaceAll("\\", "/").replace(/^\/+/, "");
@@ -133,7 +133,7 @@ export function pageRedesignPrompt(
 export function pagePurpose(source: Pick<PageCardSource, "label" | "pageType" | "notes">): string {
   const notes = source.notes?.trim();
   if (notes) {
-    const withoutRoutePrefix = notes.replace(/^route\s*:\s*\/[^\s,;]+\s*/i, "").trim();
+    const withoutRoutePrefix = notes.replace(/^route\s*:\s*\/[^\s,;]*\s*/i, "").trim();
     if (withoutRoutePrefix) {
       return withoutRoutePrefix.charAt(0).toUpperCase() + withoutRoutePrefix.slice(1);
     }
