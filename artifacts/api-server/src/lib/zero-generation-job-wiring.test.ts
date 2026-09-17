@@ -300,8 +300,13 @@ describe("Zero sealed generation product wiring", () => {
   it("selects the target from deployment state and never from the public route", () => {
     expect(jobs).toContain("resolveZeroGenerationTarget(process.env)");
     expect(jobs).toContain("isZeroSealedGenerationTarget(zeroGenerationTarget)");
-    expect(messages).not.toContain("modelAdapter");
-    expect(messages).not.toContain("zeroGenerationTarget");
+    // Inspect executable code, not type-only exclusions such as Omit<JobInput,
+    // "modelAdapter">, which explicitly prevent exposing the test adapter.
+    const runtimeMessages = ts.transpileModule(messages, {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    expect(runtimeMessages).not.toContain("modelAdapter");
+    expect(runtimeMessages).not.toContain("zeroGenerationTarget");
   });
 
   it("routes sealed delivery through Pantry and the dock without legacy injection", () => {

@@ -165,7 +165,12 @@ describe("B3b terminal honesty flip", () => {
       expect(allRuntime).not.toContain(forbidden);
     }
     expect(messages).not.toContain('kind: "task-done"');
-    expect(messages).toContain("presentPersistedZeroTerminal(refreshed?.terminal)");
+    // Chat acknowledges durable placement only. The worker later appends the
+    // terminal-backed report; the route must not manufacture a completion.
+    expect(messages).toContain("sendMessageAndDispatch(res, responsePayload, queuedJob)");
+    expect(messages).toContain('plan = { kind: "task-queued", taskId: task.id }');
+    expect(messages).not.toMatch(/\brunJob\s*\(/u);
+    expect(jobs).toContain("content: terminalPresentation.message");
     expect(agentLoop).toContain("observation: AgentLoopObservation");
     expect(agentLoop).not.toContain("Built ${allFiles.length}");
     expect(jobs).toContain('code: "version_receipt_missing"');
