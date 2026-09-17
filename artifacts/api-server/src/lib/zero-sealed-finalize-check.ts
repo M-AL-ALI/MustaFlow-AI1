@@ -4,6 +4,7 @@ import type {
   ZeroSealedGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
 import type { CheckSpec } from "./check-profiles";
+import { ZERO_SEALED_BROWSER_REQUEST_GUIDANCE } from "./zero-sealed-browser-guidance";
 import {
   ZeroSealedSourceContractError,
   isZeroSealedGenerationTarget,
@@ -77,12 +78,14 @@ export function describeZeroSealedSourceRepairs(reasonCodes: readonly string[]):
     .join("; ");
 }
 
-function describeZeroCapabilityRepairs(reasonCodes: readonly string[]): string {
+export function describeZeroCapabilityRepairs(reasonCodes: readonly string[]): string {
   return reasonCodes
     .map((reason) =>
       reason === "credential_assumption"
         ? "remove application environment reads other than process.env.PORT, including NODE_ENV and import.meta.env.MODE; use explicit non-secret defaults, not bracket access or aliases. Keep requested database and payment behavior through the NabuFlow runtime SDK; do not replace persistence with mock data or embed credentials"
-        : `resolve ${reason} using supported runtime capabilities; preserve the user's requirements and report an unavailable capability instead of silently dropping it`,
+        : reason === "arbitrary_runtime_fetch"
+          ? ZERO_SEALED_BROWSER_REQUEST_GUIDANCE
+          : `resolve ${reason} using supported runtime capabilities; preserve the user's requirements and report an unavailable capability instead of silently dropping it`,
     )
     .join("; ");
 }

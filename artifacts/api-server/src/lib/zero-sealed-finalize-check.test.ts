@@ -5,8 +5,10 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import { checksForLiveServerCapability, type CheckSpec } from "./check-profiles";
 import { ZERO_SEALED_NODE_PROMPT_EXTENSION } from "./zero-sealed-generation";
+import { ZERO_SEALED_BROWSER_REQUEST_GUIDANCE } from "./zero-sealed-browser-guidance";
 import {
   checkZeroSealedFinalizeContract,
+  describeZeroCapabilityRepairs,
   describeZeroSealedSourceRepairs,
   formatZeroSealedFinalizeFailure,
   withZeroSealedSourceCheck,
@@ -172,6 +174,79 @@ app.listen(Number(process.env.PORT ?? "8080"));`,
 });
 
 describe("sealed capability repair feedback", () => {
+  it("explains the observed inline form-fetch failure without exempting browser templates", async () => {
+    const files = [
+      packageFile(),
+      tsconfigFile,
+      {
+        path: "src/index.ts",
+        mimeType: "application/typescript",
+        content: `import express from "express";
+const app = express();
+app.get("/healthz", (_request, response) => response.json({ ok: true }));
+app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
+      },
+      {
+        path: "src/routes/notes.ts",
+        mimeType: "application/typescript",
+        content:
+          'export const draftScript = `<script>form.addEventListener("submit", function(event) { event.preventDefault(); fetch(form.action, {method: "POST"}); });</script>`;',
+      },
+    ];
+    const before = JSON.stringify(files);
+    const rejected = await checkZeroSealedFinalizeContract({ files });
+    expect(rejected).toMatchObject({
+      passed: false,
+      code: "zero_capability_gap",
+      reasonCodes: ["arbitrary_runtime_fetch"],
+    });
+    expect(rejected.message).toContain("arbitrary_runtime_fetch (src/routes/notes.ts)");
+    expect(rejected.message).toContain(ZERO_SEALED_BROWSER_REQUEST_GUIDANCE);
+    expect(JSON.stringify(files)).toBe(before);
+
+    // This proves source eligibility only, not that an application save succeeded.
+    const nativeForm = files.map((file) =>
+      file.path === "src/routes/notes.ts"
+        ? {
+            ...file,
+            content:
+              'export const form = `<form method="POST" action="/notes"><input name="title"><button>Save</button></form>`;',
+          }
+        : file,
+    );
+    expect(await checkZeroSealedFinalizeContract({ files: nativeForm })).toMatchObject({
+      passed: true,
+      code: "zero_sealed_source_ready",
+    });
+  });
+
+  it("keeps form lifecycle guidance before a truncated diagnostic without weakening other failures", () => {
+    const observation = formatZeroSealedFinalizeFailure(
+      {
+        passed: false,
+        code: "zero_capability_gap",
+        reasonCodes: ["arbitrary_runtime_fetch", "credential_assumption"],
+        message: "private diagnostic ".repeat(2000),
+      },
+      ["- typecheck: " + "x".repeat(20000)],
+    ).slice(0, 4000);
+    expect(observation).toContain(ZERO_SEALED_BROWSER_REQUEST_GUIDANCE);
+    expect(observation).toContain("other than process.env.PORT");
+    expect(observation).toContain("Fix the failures and call finalize again.");
+    expect(observation).not.toContain("sealed source contract passed");
+  });
+
+  it("uses the same browser request and draft-safety rules before and after generation", () => {
+    expect(ZERO_SEALED_NODE_PROMPT_EXTENSION).toContain(ZERO_SEALED_BROWSER_REQUEST_GUIDANCE);
+    expect(describeZeroCapabilityRepairs(["arbitrary_runtime_fetch"])).toBe(
+      ZERO_SEALED_BROWSER_REQUEST_GUIDANCE,
+    );
+    expect(ZERO_SEALED_BROWSER_REQUEST_GUIDANCE).toContain("server-confirmed successful save");
+    expect(ZERO_SEALED_BROWSER_REQUEST_GUIDANCE).toContain("signed-in user, note, and browser tab");
+    expect(ZERO_SEALED_BROWSER_REQUEST_GUIDANCE).toContain("mutable author field is not proof");
+    expect(ZERO_SEALED_BROWSER_REQUEST_GUIDANCE).toContain("instead of removing functionality");
+  });
+
   it.each(["process.env.NODE_ENV", "import.meta.env.MODE"])(
     "identifies and explains %s without weakening the gate or exposing source values",
     async (environmentRead) => {

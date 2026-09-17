@@ -23,6 +23,7 @@ import {
 } from "@workspace/tenant-runtime-contracts";
 import type { BuilderFile } from "./builder";
 import { inspectSealedEnvironmentSyntax } from "./zero-sealed-environment";
+import { ZERO_SEALED_BROWSER_REQUEST_GUIDANCE } from "./zero-sealed-browser-guidance";
 import {
   VENDORED_FLY_POSTGRES_TYPES_VERSION,
   VENDORED_FLY_POSTGRES_VERSION,
@@ -31,6 +32,7 @@ import {
 
 export const ZERO_SEALED_NODE_PROMPT_EXTENSION = `CLOUDFLARE SEALED-RUNTIME TARGET:
 - Treat a request for a plain website as a complete Node/Express website: serve its real HTML, CSS, and browser JavaScript from compiler-emitted code while preserving the requested design and content. Do not switch the project back to a browser-only framework.
+- ${ZERO_SEALED_BROWSER_REQUEST_GUIDANCE}
 - Keep the source provider-neutral. When the website uses a database or payments capability, import and use createNabuFlowDatabase or createNabuFlowPayments from "../nabuflow/runtime/index.js" in src/*.ts. A website that uses neither capability does not need a runtime-SDK import. Never import a database or payments provider SDK. The explicit .js suffix is required for the emitted ESM path when TypeScript uses NodeNext. In Cloudflare capability mode, the platform owns database provisioning and credentials; application code only uses the runtime SDK.
 - When the user requests persistent backend records, use createNabuFlowDatabase for those records. Do not substitute an in-memory array, object, localStorage, or mock data for requested backend storage. Preserve the requested access rules and use parameterized queries. Records must survive a page refresh and runtime restart. If the database capability is not ready, keep the persistence implementation and return the typed unavailable state described below; do not silently downgrade the requirement or report the app complete without verifying persistence.
 - Server-side payments use createNabuFlowPayments. Sealed mode supports PaymentIntent creation and retrieval only; choose a supported implementation when another payment operation or integration is requested.

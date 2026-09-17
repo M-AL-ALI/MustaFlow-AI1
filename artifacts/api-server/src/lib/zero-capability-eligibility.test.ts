@@ -202,6 +202,16 @@ describe("Zero blueprint and skill capability eligibility", () => {
     ["external browser fetch", "public/index.html", 'void fetch("https://example.test");'],
     ["protocol-relative browser fetch", "public/index.html", 'void fetch("//example.test");'],
     ["dynamic browser fetch", "public/index.html", "void fetch(runtimeTarget);"],
+    [
+      "inline browser fetch inside a server template",
+      "src/index.ts",
+      'const page = `<script>fetch(form.action, { method: "POST" });</script>`; void page;',
+    ],
+    [
+      "literal browser fetch inside a server template",
+      "src/index.ts",
+      'const page = `<script>fetch("/notes", { method: "POST" });</script>`; void page;',
+    ],
   ])("rejects %s", async (_label, filePath, content) => {
     const value = prepared();
     const files =

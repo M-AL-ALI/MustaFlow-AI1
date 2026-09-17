@@ -4,6 +4,7 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({ openai: {} }));
 import { runNodeApiBuildPipeline, type BuilderFile, type BuilderModelAdapter } from "./builder";
 import { ZeroSealedSourceContractError } from "./zero-sealed-generation";
 import { ZeroCapabilityGapError } from "./zero-capability-eligibility";
+import { ZERO_SEALED_BROWSER_REQUEST_GUIDANCE } from "./zero-sealed-browser-guidance";
 
 function fixtureAdapter(captured: string[]): BuilderModelAdapter {
   return {
@@ -167,6 +168,9 @@ app.listen(Number(process.env.PORT ?? "8080"), "0.0.0.0");`,
     });
     expect(calls).toBe(2);
     expect(captured.join("\n")).toContain("zero_capability_gap (arbitrary_runtime_fetch)");
+    expect(captured.join("\n")).toContain(
+      `Required repairs: ${ZERO_SEALED_BROWSER_REQUEST_GUIDANCE}`,
+    );
     expect(result.files.find((file) => file.path === "src/index.ts")?.content).not.toContain(
       "unsupported.example",
     );
