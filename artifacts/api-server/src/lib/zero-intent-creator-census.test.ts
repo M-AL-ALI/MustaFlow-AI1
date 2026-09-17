@@ -6,7 +6,7 @@ function source(relativePath: string): string {
 }
 
 const creatorFiles = [
-  { path: "../routes/messages.ts", creators: 4, jobAdmissions: 2 },
+  { path: "../routes/messages.ts", creators: 4, jobAdmissions: 1 },
   // Block ZZZZ declares the snapshot-observe handler as a non-mutation creator.
   { path: "../routes/snapshot-observe.ts", creators: 1 },
   { path: "../routes/blueprints.ts", creators: 1, executions: 1 },

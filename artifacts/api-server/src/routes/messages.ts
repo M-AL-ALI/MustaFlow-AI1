@@ -38,13 +38,13 @@ import {
   resolveZeroGenerationTarget,
 } from "../lib/zero-sealed-generation";
 import {
-  enqueueJob,
-  runJob,
+  type JobInput,
   resolveAgentIdentity,
   type AgentIdentity,
   backgroundWallClockFor,
   runCancellablePlanTask,
 } from "../lib/jobs";
+import { sendMessageAndDispatch } from "../lib/message-job-dispatch";
 import { deductCreditsAtomic } from "./credits";
 import { settleCreditsDurably } from "../lib/billing-settlement-outbox";
 import { logger } from "../lib/logger";
@@ -86,7 +86,6 @@ import {
   failedTerminal,
   interruptedTerminal,
   planSucceededTerminal,
-  presentPersistedZeroTerminal,
   presentZeroTerminalV1,
   responseSucceededTerminal,
   isZeroProjectChoiceCaptureOnlyMessage,
@@ -859,7 +858,7 @@ router.post(
 
       let assistantContent: string;
       let plan: Record<string, unknown> | null = null;
-      let persistedAssistantMessage: typeof chatMessagesTable.$inferSelect | null = null;
+      let queuedJob: Omit<JobInput, "lifecycleResponse" | "modelAdapter"> | undefined;
       let terminalAfterAssistant: ((assistantMessageId: number) => ZeroTerminalV1) | null = null;
       let completedTerminal: ZeroTerminalV1 | null = null;
       let terminalMemory: {
@@ -1653,8 +1652,12 @@ router.post(
             ? backgroundPlanStepStatus(task.id, "queued")
             : `Your request has been queued as Task #${task.id}. It will run automatically when the current build finishes.`;
           plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
-        } else if (runInBackground) {
-          enqueueJob({
+        } else {
+          // The request owns the project lifecycle lock until its response finishes.
+          // Never await runJob here: its claim needs that same lock on another
+          // connection. Persist the acknowledgement, then dispatch without the
+          // request witness through the existing recoverable queue.
+          queuedJob = {
             taskId: task.id,
             projectId: project.id,
             kind,
@@ -1665,84 +1668,18 @@ router.post(
             origin: messageOrigin,
             conversationHistory,
             imageAttachments: jobImageAttachments,
-            runMode: "background",
+            runMode: runInBackground ? "background" : "foreground",
             wallClockCapMs: wallClockCapMs ?? undefined,
             intentReceiptId: admission.receiptId,
             supportSessionId: supportMutation?.sessionId,
             provenanceActorUserId: supportMutation?.staffUserId ?? req.userId!,
-          });
+          };
           assistantContent = stagedBackgroundPlanStep
             ? backgroundPlanStepStatus(task.id, "queued")
-            : `I've queued this in the background. Task #${task.id} is running and I'll post the report back here when it's done.`;
+            : runInBackground
+              ? `I've queued this in the background as Task #${task.id}. I'll post the result here when it finishes.`
+              : `Your request is queued as Task #${task.id}. I'll post the result here when it finishes.`;
           plan = { kind: "task-queued", taskId: task.id } as unknown as Record<string, unknown>;
-        } else {
-          await runJob({
-            lifecycleResponse: res,
-            taskId: task.id,
-            projectId: project.id,
-            kind,
-            userPrompt: userPromptWithContext,
-            agentMode: mode,
-            deepReasoning,
-            agentIdentity: resolvedAgentIdentity,
-            origin: messageOrigin,
-            conversationHistory,
-            imageAttachments: jobImageAttachments,
-            intentReceiptId: admission.receiptId,
-            supportSessionId: supportMutation?.sessionId,
-            provenanceActorUserId: supportMutation?.staffUserId ?? req.userId!,
-          });
-          const [refreshed] = await db
-            .select()
-            .from(agentTasksTable)
-            .where(eq(agentTasksTable.id, task.id));
-          const persistedTerminalPresentation = presentPersistedZeroTerminal(refreshed?.terminal);
-          assistantContent =
-            persistedTerminalPresentation?.message ?? "Outcome unavailable for this run.";
-          plan = refreshed?.report
-            ? ({
-                kind: "report",
-                report: refreshed.report,
-                taskId: task.id,
-                ...(refreshed?.terminal
-                  ? {
-                      terminalRef: {
-                        kind: "zero_terminal",
-                        schema: "zero-terminal-v1",
-                        taskId: task.id,
-                      },
-                    }
-                  : {}),
-              } as unknown as Record<string, unknown>)
-            : ({ kind: "outcome-unavailable", taskId: task.id } as unknown as Record<
-                string,
-                unknown
-              >);
-          if (refreshed?.report) {
-            plan = { ...plan, intent: resolvedIntent };
-            const checkpointId = checkpointIdFromPlan(plan);
-            const [completionMessage] = await db
-              .update(chatMessagesTable)
-              .set({
-                origin: messageOrigin,
-                checkpointId,
-                plan: sql`COALESCE(${chatMessagesTable.plan}, '{}'::jsonb) || ${JSON.stringify({
-                  intent: resolvedIntent,
-                })}::jsonb`,
-              })
-              .where(
-                sql`id = (
-              SELECT id FROM chat_messages
-              WHERE project_id = ${project.id}
-                AND (plan->>'kind') = 'report'
-                AND (plan->>'taskId') = ${String(task.id)}
-              ORDER BY created_at DESC
-              LIMIT 1
-            )`,
-              )
-              .returning();
-            persistedAssistantMessage = completionMessage ?? null;
-          }
         }
       }
 
@@ -1823,23 +1760,21 @@ router.post(
 
       const planWithIntent = { ...(plan ?? {}), intent: resolvedIntent };
       const checkpointId = checkpointIdFromPlan(planWithIntent);
-      const [insertedAssistantMessage] = persistedAssistantMessage
-        ? [persistedAssistantMessage]
-        : await db
-            .insert(chatMessagesTable)
-            .values({
-              projectId: project.id,
-              role: "assistant",
-              content: assistantContent,
-              agentMode: mode,
-              planMode: effectivePlanMode,
-              plan: planWithIntent,
-              origin: messageOrigin,
-              checkpointId,
-              supportSessionId: supportRun?.sessionId ?? null,
-              provenanceActorUserId: supportRun?.staffUserId ?? null,
-            })
-            .returning();
+      const [insertedAssistantMessage] = await db
+        .insert(chatMessagesTable)
+        .values({
+          projectId: project.id,
+          role: "assistant",
+          content: assistantContent,
+          agentMode: mode,
+          planMode: effectivePlanMode,
+          plan: planWithIntent,
+          origin: messageOrigin,
+          checkpointId,
+          supportSessionId: supportRun?.sessionId ?? null,
+          provenanceActorUserId: supportRun?.staffUserId ?? null,
+        })
+        .returning();
       const assistantMessage = insertedAssistantMessage;
       if (!assistantMessage) {
         if (idempotencyKey) idempotencyStore.delete(idempotencyKey);
@@ -2009,7 +1944,7 @@ router.post(
         });
       }
 
-      res.json(responsePayload);
+      sendMessageAndDispatch(res, responsePayload, queuedJob);
     } finally {
       idempotencyStore.releasePending();
     }
