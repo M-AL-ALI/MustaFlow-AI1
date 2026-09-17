@@ -17,12 +17,7 @@ export type ReviewerWorkspaceContext = {
     filesModified: string[];
     filesRemoved: string[];
   };
-  fileExcerpts: Array<{
-    path: string;
-    content: string;
-    truncated: boolean;
-    originalChars: number;
-  }>;
+  fileExcerpts: ReviewerExcerpt[];
   missingRequestedPaths: string[];
 };
 
@@ -72,6 +67,8 @@ const ENTRY_BASENAMES = new Set(["app", "main", "index"]);
 function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
 }
+
+export { normalizePath as normalizeReviewerPath };
 
 function basename(path: string): string {
   return normalizePath(path).split("/").pop() ?? "";
@@ -136,6 +133,96 @@ function compareReviewCandidates(a: ReviewerFile, b: ReviewerFile): number {
   return normalizePath(a.path).localeCompare(normalizePath(b.path));
 }
 
+export type ReviewerExcerpt = ReviewerFile & {
+  truncated: boolean;
+  originalChars: number;
+};
+
+type ReviewerExcerptInput = ReviewerFile & {
+  truncated?: boolean;
+  originalChars?: number;
+};
+
+/**
+ * Keep requested/changed source ahead of supporting files. Within each group,
+ * share the bounded space so a large first file cannot hide every later file.
+ * The architect assembler uses the same limiter, rather than truncating again
+ * with a different policy.
+ */
+export function boundReviewerFileExcerpts(
+  files: ReviewerExcerptInput[],
+  priorityPaths: string[] = files.map((file) => file.path),
+): ReviewerExcerpt[] {
+  const selected = files.slice(0, REVIEWER_MAX_FILE_EXCERPTS);
+  const priority = new Set(priorityPaths.map(normalizePath));
+  const groups = [
+    selected.filter((file) => priority.has(normalizePath(file.path))),
+    selected.filter((file) => !priority.has(normalizePath(file.path))),
+  ];
+  const bounded = new Map<ReviewerExcerptInput, ReviewerExcerpt>();
+  let remainingChars = REVIEWER_MAX_TOTAL_EXCERPT_CHARS;
+  for (const group of groups) {
+    if (group.length === 0 || remainingChars <= 0) continue;
+    // Water-fill: small files stay complete; large files share what remains.
+    let low = 0;
+    let high = remainingChars;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      const required = group.reduce(
+        (total, file) => total + Math.min(file.content.length, middle),
+        0,
+      );
+      if (required <= remainingChars) low = middle;
+      else high = middle - 1;
+    }
+    const budgets = group.map((file) => Math.min(file.content.length, low));
+    let spare = remainingChars - budgets.reduce((total, budget) => total + budget, 0);
+    for (let index = 0; index < group.length && spare > 0; index++) {
+      if (budgets[index] < group[index].content.length) {
+        budgets[index]++;
+        spare--;
+      }
+    }
+    const appendExcerpt = (file: ReviewerExcerptInput, budget: number): void => {
+      const originalChars = file.originalChars ?? file.content.length;
+      let excerpt: ReviewerExcerpt;
+      if (file.content.length <= budget) {
+        excerpt = {
+          path: file.path,
+          content: file.content,
+          truncated: file.truncated ?? false,
+          originalChars,
+        };
+      } else {
+        // Reserve enough room for the largest possible character-count label.
+        const markerBudget = REVIEWER_TRUNCATION_MARKER(originalChars, file.content.length).length;
+        if (budget <= markerBudget) return;
+        const includedChars = budget - markerBudget;
+        excerpt = {
+          path: file.path,
+          content:
+            file.content.slice(0, includedChars) +
+            REVIEWER_TRUNCATION_MARKER(originalChars, includedChars),
+          truncated: true,
+          originalChars,
+        };
+      }
+      bounded.set(file, excerpt);
+      remainingChars -= excerpt.content.length;
+    };
+    group.forEach((file, index) => appendExcerpt(file, budgets[index]));
+    // Shares smaller than a truncation marker cannot carry source. Reuse that
+    // space for complete small files before spending it on another partial file.
+    const omitted = group
+      .filter((file) => !bounded.has(file))
+      .sort((a, b) => a.content.length - b.content.length);
+    for (const file of omitted) appendExcerpt(file, remainingChars);
+  }
+  return selected
+    .map((file) => bounded.get(file))
+    .filter((file): file is ReviewerExcerpt => file !== undefined);
+}
+
 export function buildReviewerContextFromFiles(input: {
   diff: ReviewerDiff;
   workspaceFiles: ReviewerFile[];
@@ -187,40 +274,19 @@ export function buildReviewerContextFromFiles(input: {
         (input.includeUnchangedFiles === true || changedPaths.has(normalizePath(file.path))) &&
         !requestedFilePaths.has(normalizePath(file.path)),
     )
-    .sort(compareReviewCandidates);
+    .sort((a, b) => {
+      const changedDelta =
+        Number(!changedPaths.has(normalizePath(a.path))) -
+        Number(!changedPaths.has(normalizePath(b.path)));
+      return changedDelta || compareReviewCandidates(a, b);
+    });
   const candidates = [...requestedFiles, ...remainingFiles];
 
-  let remainingChars = REVIEWER_MAX_TOTAL_EXCERPT_CHARS;
-  const fileExcerpts: ReviewerWorkspaceContext["fileExcerpts"] = [];
-  for (const file of candidates) {
-    if (fileExcerpts.length >= REVIEWER_MAX_FILE_EXCERPTS) break;
-    if (remainingChars <= 0) break;
-    if (file.content.length <= remainingChars) {
-      fileExcerpts.push({
-        path: file.path,
-        content: file.content,
-        truncated: false,
-        originalChars: file.content.length,
-      });
-      remainingChars -= file.content.length;
-      continue;
-    }
-
-    const markerProbe = REVIEWER_TRUNCATION_MARKER(file.content.length, 0);
-    if (remainingChars <= markerProbe.length) break;
-    let includedChars = remainingChars - markerProbe.length;
-    let marker = REVIEWER_TRUNCATION_MARKER(file.content.length, includedChars);
-    includedChars = remainingChars - marker.length;
-    marker = REVIEWER_TRUNCATION_MARKER(file.content.length, includedChars);
-    const content = `${file.content.slice(0, includedChars)}${marker}`;
-    fileExcerpts.push({
-      path: file.path,
-      content,
-      truncated: true,
-      originalChars: file.content.length,
-    });
-    remainingChars -= content.length;
-  }
+  const fileExcerpts = boundReviewerFileExcerpts(candidates, [
+    ...requestedFiles.map((file) => file.path),
+    ...input.diff.filesAdded,
+    ...input.diff.filesModified,
+  ]);
 
   return {
     diff: input.diff,

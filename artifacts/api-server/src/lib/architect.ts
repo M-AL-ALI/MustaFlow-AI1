@@ -21,6 +21,7 @@ import { logger } from "./logger";
 import { createChatCompletion, resolveStageProvider } from "./ai-providers";
 import type { AgentMode } from "./ai";
 import type { TaskReport } from "@workspace/db";
+import { boundReviewerFileExcerpts, normalizeReviewerPath } from "./reviewer-context";
 
 /** Title prefix used for architect-triggered auto-fix tasks (recursion guard). */
 export const ARCHITECT_AUTOFIX_TITLE_PREFIX = "Architect Auto-fix:";
@@ -130,24 +131,20 @@ export function assembleArchitectReviewPrompt(input: ArchitectInput): {
   userMessage: string;
   reviewerAssembledPromptStats: ReviewerAssembledPromptStats;
 } {
-  let remainingExcerptChars = 30_000;
-  const embeddedExcerpts: Array<{ path: string; content: string }> = [];
-  for (const file of (input.fileExcerpts ?? []).slice(0, 8)) {
-    if (remainingExcerptChars <= 0) break;
-    if (file.content.length <= remainingExcerptChars) {
-      embeddedExcerpts.push({ path: file.path, content: file.content });
-      remainingExcerptChars -= file.content.length;
-      continue;
-    }
-    const originalChars = file.originalChars ?? file.content.length;
-    const marker = `\n\n[REVIEW CONTEXT TRUNCATED: showing a bounded prefix of ${originalChars} characters. This boundary is not the end of the file; do not infer missing closing syntax from it.]`;
-    if (remainingExcerptChars <= marker.length) break;
-    embeddedExcerpts.push({
-      path: file.path,
-      content: `${file.content.slice(0, remainingExcerptChars - marker.length)}${marker}`,
-    });
-    remainingExcerptChars = 0;
-  }
+  const changedPaths = [...input.diff.filesAdded, ...input.diff.filesModified];
+  // Preserve the caller's selected supporting sources rather than reprioritizing them here.
+  const embeddedExcerpts = boundReviewerFileExcerpts(input.fileExcerpts ?? []);
+  const suppliedPaths = new Set(embeddedExcerpts.map((file) => normalizeReviewerPath(file.path)));
+  const omittedChangedPaths = changedPaths.filter(
+    (path) => !suppliedPaths.has(normalizeReviewerPath(path)),
+  );
+  const truncatedPaths = embeddedExcerpts.filter((file) => file.truncated).map((file) => file.path);
+  const coverageSection = [
+    "\n\nREVIEW SOURCE COVERAGE:",
+    `Changed files without supplied source (${omittedChangedPaths.length}): ${omittedChangedPaths.slice(0, 30).join(", ") || "none"}`,
+    `Truncated supplied files (${truncatedPaths.length}): ${truncatedPaths.join(", ") || "none"}`,
+    "Missing or truncated context is an evidence limit, not proof of defective source. Do not claim those files were fully reviewed.",
+  ].join("\n");
   const planSection = input.planContext
     ? `\n\nPLAN (from Plan Mode):\n${JSON.stringify(input.planContext).slice(0, 4000)}`
     : "";
@@ -191,7 +188,7 @@ ${input.userRequest.slice(0, 4000)}
 ${reviewBriefSection}BUILDER AGENT MODE: ${input.agentMode}${planSection}
 
 DIFF:
-${diffSection}${commandsSection}${excerptsSection}${summarySection}${warningsSection}
+${diffSection}${coverageSection}${commandsSection}${excerptsSection}${summarySection}${warningsSection}
 
 Now produce your JSON review.`;
 
