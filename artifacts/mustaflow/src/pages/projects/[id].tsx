@@ -2142,6 +2142,26 @@ export default function ProjectWorkspacePage() {
     };
   } | null>(null);
 
+  useEffect(() => {
+    // A different project must not inherit a stream, retry, or pending display.
+    setIsStreaming(false);
+    setStreamingText("");
+    setStreamReconnectAttempt(0);
+    setStreamError(false);
+    setStreamErrorStatus(null);
+    setBillingBlock(null);
+    setPendingBuildStartedAt(null);
+    setPendingIsPlan(false);
+    pendingIsPlanRef.current = false;
+    setPendingIsConverse(false);
+    pendingIsConverseRef.current = false;
+    streamRetryParamsRef.current = null;
+    return () => {
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
+    };
+  }, [projectId]);
+
   const editorActiveTask = tasksForFeed.find((task) => task.id === activeTaskId);
   const activeTaskStatus = editorActiveTask?.status;
   const editorRunContext = {
@@ -2893,6 +2913,7 @@ export default function ProjectWorkspacePage() {
   const sendRegular = useCallback(
     (
       content: string,
+      requestGeneration: number,
       opts?: {
         planMode?: boolean;
         background?: boolean;
@@ -2906,6 +2927,12 @@ export default function ProjectWorkspacePage() {
         onSuccess?: () => void;
       },
     ) => {
+      // A fallback retains the original logical send, never the current generation.
+      if (
+        editorRunScopeRef.current.projectId !== projectId ||
+        editorRunGenerationRef.current !== requestGeneration
+      )
+        return;
       // Recovery is an ordinary foreground build, never a planning/task-agent handoff.
       if (opts?.retryTaskId !== undefined) {
         opts = {
@@ -2921,7 +2948,6 @@ export default function ProjectWorkspacePage() {
       const effectiveAgentIntent = opts?.agentIntent
         ? toBuilderReceiptIntent(opts.agentIntent)
         : undefined;
-      const requestGeneration = editorRunGenerationRef.current;
       sendMessage.mutate(
         {
           id: projectId,
@@ -2970,6 +2996,11 @@ export default function ProjectWorkspacePage() {
                 queryKey: getListSuggestionsQueryKey(projectId, {}),
               });
             }, 3000);
+            // Both Auto delivery paths use the server-confirmed action, behind this
+            // callback's existing project/generation fence. Guidance never grants intent.
+            if (opts?.retryTaskId === undefined && data?.detectedIntent === "mutate") {
+              checkUpgradeNudge(content, data.detectedIntent);
+            }
             const plan = data?.assistantMessage?.plan as Record<string, unknown> | null | undefined;
             const tid =
               plan && typeof plan === "object" ? (plan.taskId as number | undefined) : undefined;
@@ -3019,6 +3050,7 @@ export default function ProjectWorkspacePage() {
       deepReasoning,
       runInBackground,
       sendMessage,
+      checkUpgradeNudge,
       queryClient,
       agentIdentity,
     ],
@@ -3067,7 +3099,19 @@ export default function ProjectWorkspacePage() {
       const idempotencyKey = crypto.randomUUID();
       // A new logical send owns the display even before its task id is known.
       // Stream retries and regular fallbacks retain this generation.
-      editorRunGenerationRef.current += 1;
+      const requestGeneration = ++editorRunGenerationRef.current;
+      const isCurrentRequest = () =>
+        editorRunScopeRef.current.projectId === projectId &&
+        editorRunGenerationRef.current === requestGeneration;
+      // A new regular/background send supersedes old streaming work too.
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
+      setIsStreaming(false);
+      setStreamingText("");
+      setStreamReconnectAttempt(0);
+      setStreamError(false);
+      setStreamErrorStatus(null);
+      streamRetryParamsRef.current = null;
 
       const effectiveMode = opts?.agentMode ?? agentMode;
       const effectiveDeepReasoning = effectiveMode === "lite" ? false : deepReasoning;
@@ -3085,6 +3129,7 @@ export default function ProjectWorkspacePage() {
       // overage charge is settled as a pending invoice item in the background
       // via deductCreditsAtomic in jobs.ts — never on the hot send path.
       opts?.onProceed?.();
+      if (!isCurrentRequest()) return;
       pendingTaskIdsBeforeSendRef.current = new Set(tasksForFeed.map((task) => task.id));
       pendingRunShouldRenderInlineRef.current = !effectiveBackground && !isLikelyConverse;
       if (!firstWsMsgFiredRef.current) {
@@ -3123,14 +3168,11 @@ export default function ProjectWorkspacePage() {
         effectiveAgentIntent === "plan" ||
         effectiveAgentIntent === "mutate"
       ) {
-        sendRegular(content, { ...opts, idempotencyKey });
+        sendRegular(content, requestGeneration, { ...opts, idempotencyKey });
         return;
       }
 
-      // Streaming path — cancel any in-progress stream first
-      if (streamAbortRef.current) {
-        streamAbortRef.current.abort();
-      }
+      // Streaming and fallback share the identity captured above.
       const ctrl = new AbortController();
       streamAbortRef.current = ctrl;
 
@@ -3178,6 +3220,7 @@ export default function ProjectWorkspacePage() {
         let tokenCount = 0;
 
         while (true) {
+          if (!isCurrentRequest() || ctrl.signal.aborted) return;
           try {
             let resp: Response;
 
@@ -3188,6 +3231,7 @@ export default function ProjectWorkspacePage() {
             // returns a freshly-minted token via Clerk's getToken(), or null in
             // E2E mode (cookie fallback).
             const authToken = await getAuthToken();
+            if (!isCurrentRequest() || ctrl.signal.aborted) return;
             const authHeaders: Record<string, string> = authToken
               ? { Authorization: `Bearer ${authToken}` }
               : {};
@@ -3212,6 +3256,10 @@ export default function ProjectWorkspacePage() {
               });
             }
 
+            if (!isCurrentRequest() || ctrl.signal.aborted) {
+              void resp.body?.cancel().catch(() => undefined);
+              return;
+            }
             if (!resp.ok || !resp.body) {
               // 401 on the initial POST (before connection was established):
               // the Clerk dev-mode JWT (60s lifetime) may have expired mid-refresh.
@@ -3233,6 +3281,7 @@ export default function ProjectWorkspacePage() {
                 } catch {
                   gate = null;
                 }
+                if (!isCurrentRequest() || ctrl.signal.aborted) return;
                 if (gate) {
                   setIsStreaming(false);
                   setStreamingText("");
@@ -3276,12 +3325,17 @@ export default function ProjectWorkspacePage() {
 
             while (!finished) {
               const { done, value } = await reader.read();
+              if (!isCurrentRequest() || ctrl.signal.aborted) {
+                void reader.cancel().catch(() => undefined);
+                return;
+              }
               if (done) break;
               buf += decoder.decode(value, { stream: true });
               const lines = buf.split("\n");
               buf = lines.pop() ?? "";
 
               for (const line of lines) {
+                if (finished) break;
                 if (!line.startsWith("data: ")) continue;
                 let event: Record<string, unknown>;
                 try {
@@ -3337,7 +3391,7 @@ export default function ProjectWorkspacePage() {
                   setStreamingText("");
                   setStreamReconnectAttempt(0);
                   const fallbackIntent = event.intent as BuilderReceiptIntent | undefined;
-                  sendRegular(content, {
+                  sendRegular(content, requestGeneration, {
                     ...opts,
                     agentMode: effectiveMode,
                     planMode: effectivePlanMode,
@@ -3382,6 +3436,7 @@ export default function ProjectWorkspacePage() {
                 setStreamReconnectAttempt(attempt);
                 const delay = STREAM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
                 await new Promise<void>((resolve) => setTimeout(resolve, delay));
+                if (!isCurrentRequest()) return;
                 if (ctrl.signal.aborted) {
                   setIsStreaming(false);
                   setStreamingText("");
@@ -3408,6 +3463,7 @@ export default function ProjectWorkspacePage() {
 
             return;
           } catch (err) {
+            if (!isCurrentRequest() || ctrl.signal.aborted) return;
             if ((err as { name?: string }).name === "AbortError") {
               // User aborted — clean up without retrying.
               setIsStreaming(false);
@@ -3439,6 +3495,7 @@ export default function ProjectWorkspacePage() {
                 setStreamReconnectAttempt(attempt);
                 const delay = STREAM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
                 await new Promise<void>((resolve) => setTimeout(resolve, delay));
+                if (!isCurrentRequest()) return;
                 if (ctrl.signal.aborted) {
                   setIsStreaming(false);
                   setStreamingText("");
@@ -3488,6 +3545,7 @@ export default function ProjectWorkspacePage() {
             await new Promise<void>((resolve) => setTimeout(resolve, delay));
 
             // Check if user aborted during the delay.
+            if (!isCurrentRequest()) return;
             if (ctrl.signal.aborted) {
               setIsStreaming(false);
               setStreamingText("");

@@ -74,7 +74,7 @@ describe("resolveBuilderComposerIntent", () => {
     ).toBeUndefined();
   });
 
-  it("preserves explicit local intent and does not force an initial message into build", () => {
+  it("does not treat a local hint as an explicitly selected control", () => {
     expect(
       resolveBuilderComposerIntent({
         messageText: "What does this do?",
@@ -83,7 +83,7 @@ describe("resolveBuilderComposerIntent", () => {
         hasCompletedTask: true,
         routingAgentIdentity: "main",
       }),
-    ).toBe("answer");
+    ).toBeUndefined();
     expect(
       resolveBuilderComposerIntent({
         messageText: "Maybe the header",
@@ -112,7 +112,7 @@ describe("resolveBuilderComposerIntent", () => {
     });
   });
 
-  it("does not downgrade a project-choice capture that also requests a real mutation", () => {
+  it("leaves a mixed project-choice and mutation request to semantic classification", () => {
     expect(
       resolveBuilderComposerIntent({
         messageText:
@@ -122,11 +122,67 @@ describe("resolveBuilderComposerIntent", () => {
         hasCompletedTask: true,
         routingAgentIdentity: "main",
       }),
-    ).toBe("mutate");
+    ).toBeUndefined();
+  });
+
+  it.each([
+    "Build this focused improvement in TeamNotebook while preserving the visual design.",
+    "Create a migration plan for the database.",
+    "Write a phased implementation plan for the dashboard.",
+    "Write a design document for the app.",
+    "Add missing steps to the project plan.",
+    "Implement the approved plan.",
+  ])("does not manufacture an explicit action for: %s", (messageText) => {
+    for (const localIntent of ["converse", "plan", "build"] as const) {
+      const intent = resolveBuilderComposerIntent({
+        messageText,
+        activeIntent: null,
+        localIntent,
+        hasCompletedTask: true,
+        routingAgentIdentity: "main",
+      });
+      expect(intent).toBeUndefined();
+      expect(mapIntentToSendOptions({ intent, hasImages: false })).toEqual({});
+    }
+  });
+
+  it.each([
+    ["build", "mutate"],
+    ["plan", "plan"],
+    ["review", "observe"],
+    ["explain", "answer"],
+  ] as const)("preserves the deliberately selected %s control", (activeIntent, expected) => {
+    expect(
+      resolveBuilderComposerIntent({
+        messageText: "Use the attached reference for this app.",
+        activeIntent,
+        localIntent: "plan",
+        hasCompletedTask: true,
+        routingAgentIdentity: "main",
+      }),
+    ).toBe(expected);
   });
 });
 
 describe("shouldShowBuilderUpgradeNudge", () => {
+  it("waits for an authoritative action instead of guessing from backend words", () => {
+    expect(
+      shouldShowBuilderUpgradeNudge({
+        messageText: "Add database authentication",
+        intent: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("respects an explicit no-change instruction even with a mutation hint", () => {
+    expect(
+      shouldShowBuilderUpgradeNudge({
+        messageText: "Do not change this project. Explain database authentication.",
+        intent: "mutate",
+      }),
+    ).toBe(false);
+  });
+
   it("does not advertise full-stack mode for a recorded rejection", () => {
     expect(
       shouldShowBuilderUpgradeNudge({

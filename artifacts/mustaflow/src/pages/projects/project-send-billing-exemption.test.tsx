@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectWorkspacePage from "./[id]";
 import * as confirmedTaskStop from "./components/confirmed-task-stop";
+import * as builderFollowup from "@/lib/builder-followup-submit";
 
 const testState = vi.hoisted(() => ({
   projectId: 47,
@@ -47,6 +48,8 @@ const testState = vi.hoisted(() => ({
     close: ReturnType<typeof vi.fn>;
   }>,
   queryClient: null as QueryClient | null,
+  guidanceRequest: null as { content: string; intent: "build" | undefined } | null,
+  builderMode: "static" as "static" | "agentic",
 }));
 
 vi.mock("wouter", () => ({
@@ -119,7 +122,7 @@ vi.mock("@workspace/api-client-react", () => ({
       name: "Run 8 recovery scratch",
       status: "ready",
       agentMode: "power",
-      builderMode: "static",
+      builderMode: testState.builderMode,
       projectFormat: "static",
       kind: "web",
     },
@@ -167,18 +170,22 @@ vi.mock("@/lib/builder-lazy", () => ({
 vi.mock("./components/queue-composer", () => ({
   QueueComposer: ({
     agentMode,
+    runInBackground,
+    onRunInBackgroundChange,
     onSingleSend,
     disabled,
     promptValue,
     onPromptValueChange,
   }: {
     agentMode: string;
+    runInBackground: boolean;
+    onRunInBackgroundChange: (enabled: boolean) => void;
     disabled?: boolean;
     promptValue?: string;
     onPromptValueChange?: (value: string) => void;
     onSingleSend: (
       content: string,
-      intent: "build",
+      intent: "build" | undefined,
       attachments: undefined,
       brainstormContext: undefined,
       clearComposer: () => void,
@@ -198,8 +205,9 @@ vi.mock("./components/queue-composer", () => ({
         disabled={disabled}
         onClick={() =>
           onSingleSend(
-            "Migrate the shared status API across the project",
-            "build",
+            testState.guidanceRequest?.content ??
+              "Migrate the shared status API across the project",
+            testState.guidanceRequest ? testState.guidanceRequest.intent : "build",
             undefined,
             undefined,
             testState.clearComposer,
@@ -207,6 +215,9 @@ vi.mock("./components/queue-composer", () => ({
         }
       >
         Send Power build
+      </button>
+      <button type="button" onClick={() => onRunInBackgroundChange(!runInBackground)}>
+        {runInBackground ? "Disable background work" : "Work in background"}
       </button>
     </div>
   ),
@@ -874,6 +885,326 @@ describe("project Stop with captured task 189 planning traffic", () => {
       "Analyze this project idea and create a structured plan",
     );
     expect(screen.getByTestId("real-send-path")).toBeEnabled();
+  });
+});
+
+describe("automatic backend guidance follows server authority", () => {
+  let originalFetch: typeof fetch;
+  let streamRequest = vi.fn<typeof fetch>();
+  let streamResponse: Response;
+  let deliver: (events: Array<Record<string, unknown>>) => void;
+  let completeRegular: (intent?: string) => void;
+
+  beforeEach(() => {
+    testState.sendMessageMutate.mockReset();
+    testState.sendMessageMutate.mockImplementation((_variables, callbacks) => {
+      completeRegular = (detectedIntent) => callbacks.onSuccess({ detectedIntent });
+    });
+    testState.clearComposer.mockReset();
+    testState.sendMessagePending = false;
+    testState.tasks = [];
+    testState.builderMode = "static";
+    testState.guidanceRequest = { content: "Add database authentication", intent: undefined };
+    testState.billing = { data: undefined, isLoading: false, isError: false };
+    localStorage.clear();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        media: "",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+    installCapturedTaskEventSource();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        deliver = (events) => {
+          controller.enqueue(
+            new TextEncoder().encode(
+              events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
+            ),
+          );
+          controller.close();
+        };
+      },
+    });
+    originalFetch = globalThis.fetch;
+    streamResponse = new Response(stream, { headers: { "Content-Type": "text/event-stream" } });
+    streamRequest = vi.fn<typeof fetch>().mockResolvedValue(streamResponse);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/messages/stream")) return streamRequest(input, init);
+        return originalFetch(input, init);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    testState.guidanceRequest = null;
+    testState.builderMode = "static";
+    vi.stubGlobal("fetch", originalFetch);
+  });
+
+  function expectNoGuidance() {
+    expect(screen.queryByRole("button", { name: "Upgrade to full-stack" })).not.toBeInTheDocument();
+  }
+
+  async function sendAutomaticRequest() {
+    await sendPowerBuild();
+    await waitFor(() => expect(streamRequest).toHaveBeenCalledTimes(1));
+    expectNoGuidance();
+    const body = JSON.parse(String(streamRequest.mock.calls[0]?.[1]?.body)) as Record<
+      string,
+      unknown
+    >;
+    expect(body).not.toHaveProperty("agentIntent");
+    expect(body.planMode).toBe(false);
+    return body;
+  }
+
+  async function emit(events: Array<Record<string, unknown>>) {
+    await act(async () => {
+      deliver(events);
+    });
+  }
+
+  async function finishRegular(intent?: string) {
+    await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      completeRegular(intent);
+    });
+  }
+
+  it("waits for the regular response's confirmed action and preserves one logical send", async () => {
+    renderPage();
+    const body = await sendAutomaticRequest();
+    await emit([
+      { type: "intent", intent: "mutate" },
+      { type: "fallback", intent: "mutate" },
+    ]);
+    expectNoGuidance();
+    await finishRegular("mutate");
+    expect(
+      await screen.findByRole("button", { name: "Upgrade to full-stack" }),
+    ).toBeInTheDocument();
+    expect(testState.sendMessageMutate.mock.calls[0][0]).toMatchObject({
+      id: 47,
+      data: {
+        content: "Add database authentication",
+        agentIntent: "mutate",
+        idempotencyKey: body.idempotencyKey,
+      },
+    });
+    expect(streamRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { label: "A to B", routeIds: [48], unmount: false },
+    { label: "A to B to A", routeIds: [48, 47], unmount: false },
+    { label: "unmount", routeIds: [], unmount: true },
+  ])("discards a delayed fallback after $label", async ({ routeIds, unmount }) => {
+    const guidance = vi.spyOn(builderFollowup, "shouldShowBuilderUpgradeNudge");
+    try {
+      testState.sendMessageMutate.mockImplementation((_variables, callbacks) => {
+        callbacks.onSuccess({
+          detectedIntent: "mutate",
+          assistantMessage: { plan: { kind: "queued", taskId: 999 } },
+        });
+      });
+      const view = renderPage();
+      await sendAutomaticRequest();
+      for (const id of routeIds) {
+        testState.projectId = id;
+        view.rerender(
+          <QueryClientProvider client={testState.queryClient!}>
+            <ProjectWorkspacePage />
+          </QueryClientProvider>,
+        );
+      }
+      if (unmount) view.unmount();
+      guidance.mockClear();
+      await emit([{ type: "fallback", intent: "mutate" }]);
+      expect(testState.sendMessageMutate).not.toHaveBeenCalled();
+      expect(guidance).not.toHaveBeenCalled();
+      expectNoGuidance();
+      expect(testState.eventSources.some((source) => source.url.includes("/tasks/999/"))).toBe(
+        false,
+      );
+      expect(streamRequest.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    } finally {
+      guidance.mockRestore();
+    }
+  });
+
+  it.each([
+    { label: "A to B", routeIds: [48], unmount: false },
+    { label: "A to B to A", routeIds: [48, 47], unmount: false },
+    { label: "unmount", routeIds: [], unmount: true },
+  ])("discards a delayed HTTP response after $label", async ({ routeIds, unmount }) => {
+    let releaseResponse!: (response: Response) => void;
+    streamRequest.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseResponse = resolve;
+        }),
+    );
+    const view = renderPage();
+    await sendAutomaticRequest();
+    for (const id of routeIds) {
+      testState.projectId = id;
+      view.rerender(
+        <QueryClientProvider client={testState.queryClient!}>
+          <ProjectWorkspacePage />
+        </QueryClientProvider>,
+      );
+    }
+    if (unmount) view.unmount();
+    await act(async () => {
+      deliver([{ type: "fallback", intent: "mutate" }]);
+      releaseResponse(streamResponse);
+    });
+    expect(testState.sendMessageMutate).not.toHaveBeenCalled();
+    expectNoGuidance();
+    expect(streamRequest.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it.each(["plan", "answer", "clarify", "observe", "unknown", undefined])(
+    "does not promote fallback intent over a regular %s response",
+    async (intent) => {
+      renderPage();
+      await sendAutomaticRequest();
+      await emit([{ type: "fallback", intent: "mutate" }]);
+      await finishRegular(intent);
+      expectNoGuidance();
+    },
+  );
+
+  it("stops processing a chunk after its first terminal fallback", async () => {
+    renderPage();
+    await sendAutomaticRequest();
+    await emit([
+      { type: "fallback", intent: "mutate" },
+      { type: "fallback", intent: "mutate" },
+    ]);
+    await finishRegular("mutate");
+    expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByRole("button", { name: "Upgrade to full-stack" }),
+    ).toBeInTheDocument();
+  });
+
+  it("covers the production fallback-only mutation sequence", async () => {
+    renderPage();
+    await sendAutomaticRequest();
+    await emit([{ type: "fallback", intent: "mutate" }]);
+    expectNoGuidance();
+    await finishRegular("mutate");
+    expect(
+      await screen.findByRole("button", { name: "Upgrade to full-stack" }),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["plan", "answer", "clarify", "observe", "unknown"])(
+    "does not offer guidance for a streamed %s result",
+    async (intent) => {
+      renderPage();
+      await sendAutomaticRequest();
+      await emit([{ type: "intent", intent }, { type: "done" }]);
+      expectNoGuidance();
+      expect(testState.sendMessageMutate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["agentic", "dismissed"])(
+    "does not offer redundant guidance for an %s project",
+    async (state) => {
+      if (state === "agentic") testState.builderMode = "agentic";
+      else localStorage.setItem("mf-upgrade-nudge-47", "1");
+      renderPage();
+      await sendAutomaticRequest();
+      await emit([{ type: "fallback", intent: "mutate" }]);
+      await finishRegular("mutate");
+      expectNoGuidance();
+    },
+  );
+
+  it("does not advertise an upgrade against an explicit no-change instruction", async () => {
+    testState.guidanceRequest = {
+      content: "Do not change this project. Explain database authentication.",
+      intent: undefined,
+    };
+    renderPage();
+    await sendAutomaticRequest();
+    await emit([{ type: "fallback", intent: "mutate" }]);
+    await finishRegular("mutate");
+    expectNoGuidance();
+  });
+
+  it("does not apply a late regular response to an unmounted workspace", async () => {
+    const guidance = vi.spyOn(builderFollowup, "shouldShowBuilderUpgradeNudge");
+    try {
+      const page = renderPage();
+      await sendAutomaticRequest();
+      await emit([{ type: "fallback", intent: "mutate" }]);
+      await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
+      guidance.mockClear();
+      page.unmount();
+      await act(async () => {
+        completeRegular("mutate");
+      });
+      expect(guidance).not.toHaveBeenCalled();
+    } finally {
+      guidance.mockRestore();
+    }
+  });
+
+  it.each([
+    { name: "mutation", intent: "mutate", show: true },
+    { name: "plan", intent: "plan", show: false },
+    { name: "answer", intent: "answer", show: false },
+    { name: "clarification", intent: "clarify", show: false },
+    { name: "observation", intent: "observe", show: false },
+    { name: "missing classification", intent: undefined, show: false },
+    { name: "unknown classification", intent: "unknown", show: false },
+    {
+      name: "explicit no-change",
+      intent: "mutate",
+      show: false,
+      content: "Do not change this project. Explain database authentication.",
+    },
+    {
+      name: "capture-only rejection",
+      intent: "mutate",
+      show: false,
+      content:
+        "Save this as a project rejection: never add a database or authentication unless I explicitly reverse it. Do not build or change files.",
+    },
+  ])("handles a background $name without a client override", async ({ intent, show, content }) => {
+    if (content) testState.guidanceRequest = { content, intent: undefined };
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Work in background" }));
+    await sendPowerBuild();
+    await waitFor(() => expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1));
+    expect(streamRequest).not.toHaveBeenCalled();
+    expectNoGuidance();
+    const request = testState.sendMessageMutate.mock.calls[0][0];
+    expect(request.data).toMatchObject({ background: true, planMode: false });
+    expect(request.data).not.toHaveProperty("agentIntent");
+    await finishRegular(intent);
+    if (show) {
+      expect(
+        await screen.findByRole("button", { name: "Upgrade to full-stack" }),
+      ).toBeInTheDocument();
+    } else {
+      expectNoGuidance();
+    }
   });
 });
 

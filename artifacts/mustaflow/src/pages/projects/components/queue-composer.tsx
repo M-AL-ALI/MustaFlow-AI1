@@ -514,24 +514,6 @@ export function QueueComposer({
     }
   }, [imagePrompt, generatingImage, projectId, attachments, uploadingCount]);
 
-  // Client-side intent heuristic — fast local keyword scan for immediate UI feedback.
-  // The authoritative routing still happens server-side; this is display-only.
-  const clientIntent = useMemo((): "converse" | "plan" | "build" | null => {
-    const text = rows[0]?.text?.trim() ?? "";
-    if (text.length < 4) return null;
-    const lower = text.toLowerCase();
-    const questionWords =
-      /^(what|how|why|where|when|who|which|can you|could you|do you|is there|explain|tell me|describe|show me|what does|what is|why does|does this)/;
-    if (questionWords.test(lower) || lower.endsWith("?")) return "converse";
-    const planWords =
-      /\b(plan|design|architect|outline|structure|diagram|blueprint|strategy|roadmap|spec|prototype)\b/;
-    if (planWords.test(lower)) return "plan";
-    const buildWords =
-      /\b(add|build|create|make|implement|fix|remove|delete|update|change|refactor|style|integrate|connect|deploy|enable|disable|install|generate|write)\b/;
-    if (buildWords.test(lower)) return "build";
-    return null;
-  }, [rows]);
-
   const isDesignIntent = useMemo(() => {
     const text = rows[0]?.text?.trim() ?? "";
     if (text.length < 4) return false;
@@ -1131,12 +1113,12 @@ export function QueueComposer({
       // Attachment-only send: the evidence never chooses the request's intent.
       const text = messages[0] ?? "Please review the attached evidence.";
       const pending = attachments;
-      // Pass the active developer intent (persisted badge) first; fall back to
-      // client-detected intent so the server skips the classifier when possible.
+      // Only a deliberately selected action is an explicit override. Ordinary
+      // messages are interpreted by the server, not a browser keyword scan.
       const detectedIntent: Parameters<typeof onSingleSend>[1] = resolveBuilderComposerIntent({
         messageText: text,
         activeIntent: activeIntent as BuilderComposerIntent | null,
-        localIntent: clientIntent,
+        localIntent: null,
         hasCompletedTask,
         routingAgentIdentity: routingHint?.agentIdentity,
       });
@@ -1192,7 +1174,6 @@ export function QueueComposer({
     variantMode,
     agentType,
     projectId,
-    clientIntent,
     activeIntent,
     onSingleSend,
     onBatchStarted,
@@ -1887,7 +1868,7 @@ export function QueueComposer({
         </div>
       )}
 
-      {!isBusy && issueCount > 0 && (
+      {!isBusy && (issueCount > 0 || (!activeIntent && !planMode)) && (
         <div className="mt-1.5 px-3 flex items-center gap-2 flex-wrap">
           {/* Fix Issues — only when issueCount > 0 */}
           {issueCount > 0 && (
@@ -1970,23 +1951,12 @@ export function QueueComposer({
             </Popover>
           )}
 
-          {/* Client-side intent hint badge — display-only, updates instantly as user types */}
-          {clientIntent && !planMode && (
+          {!activeIntent && !planMode && (
             <span
-              className={cn(
-                "flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border pointer-events-none select-none",
-                clientIntent === "converse"
-                  ? "border-blue-500/30 bg-blue-500/8 text-blue-400"
-                  : clientIntent === "plan"
-                    ? "border-secondary/30 bg-secondary/8 text-secondary"
-                    : "border-green-500/30 bg-green-500/8 text-green-400",
-              )}
+              className="px-2 py-0.5 text-[10px] text-muted-foreground"
+              title="Zero checks whether your request asks for an answer, a plan, or an app change before executing it."
             >
-              {clientIntent === "converse"
-                ? "I'll answer this"
-                : clientIntent === "plan"
-                  ? "I'll plan this"
-                  : "I'll build this"}
+              Action: Auto
             </span>
           )}
 

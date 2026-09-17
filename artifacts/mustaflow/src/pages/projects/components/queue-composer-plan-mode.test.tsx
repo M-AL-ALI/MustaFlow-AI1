@@ -7,9 +7,6 @@ vi.mock("@workspace/api-client-react", () => ({
   useUpdateProject: () => ({ mutate: fixture.update }),
   useUpdateMyPreferences: () => ({ mutate: vi.fn() }),
 }));
-vi.mock("@/lib/builder-followup-submit", () => ({
-  resolveBuilderComposerIntent: () => "build",
-}));
 vi.mock("./builder-mode-control", () => ({ BuilderModeControl: () => null }));
 vi.mock("./plan-templates-picker", () => ({ PlanTemplatesPicker: () => null }));
 vi.mock("./plan-history", () => ({ PlanHistoryPanel: () => null }));
@@ -53,6 +50,27 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("visible, explicit composer planning mode", () => {
+  it.each([
+    "Build this improvement while preserving the current visual design.",
+    "Create a migration plan for the database.",
+    "Write a phased implementation plan for the dashboard.",
+    "Write a design document for the app.",
+  ])("sends an automatic request without a keyword action override: %s", (message) => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Exit planning" }));
+    expect(screen.getByText("Action: Auto")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: message } });
+    fireEvent.click(screen.getByRole("button", { name: /^Send/ }));
+    expect(fixture.send).toHaveBeenCalledWith(
+      message,
+      undefined,
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
+    expect(screen.queryByText(/I'll (answer|plan|build) this/)).not.toBeInTheDocument();
+  });
+
   it("offers an exit when parent planning is true but the local identity is main", () => {
     render(<Harness />);
     expect(screen.getByText("Planning only")).toBeInTheDocument();

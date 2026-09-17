@@ -206,10 +206,9 @@ export function mapIntentToSendOptions({
 }
 
 /**
- * A completed Builder task turns the next Main Agent-routed message into a
- * refine build unless the prompt is explicitly conversational or planning.
- * This bypasses the streaming-classifier fallback and goes directly through
- * the task-creating messages mutation.
+ * Only a deliberately selected control is an explicit action override.
+ * Keyword hints and earlier tasks are not user authorization: automatic
+ * requests must reach the server's governed semantic intent judge unchanged.
  */
 export function resolveBuilderComposerIntent({
   messageText,
@@ -227,9 +226,8 @@ export function resolveBuilderComposerIntent({
   if (isExplicitNoProjectMutationRequest(messageText)) return "answer";
   if (isZeroProjectChoiceCaptureOnlyMessage(messageText)) return "answer";
   if (activeIntent) return toBuilderReceiptIntent(activeIntent);
-  if (localIntent === "converse" || localIntent === "plan" || localIntent === "build") {
-    return toBuilderReceiptIntent(localIntent);
-  }
+  // Retain these inputs for callers, but never promote a guess to a command.
+  void localIntent;
   void hasCompletedTask;
   void routingAgentIdentity;
   return undefined;
@@ -244,6 +242,7 @@ export function shouldShowBuilderUpgradeNudge({
   intent: BuilderComposerIntent | undefined;
 }): boolean {
   if (toBuilderReceiptIntent(intent ?? "converse") !== "mutate") return false;
+  if (isExplicitNoProjectMutationRequest(messageText)) return false;
   if (isZeroProjectChoiceCaptureOnlyMessage(messageText)) return false;
   const lower = messageText.toLowerCase();
   return BUILDER_UPGRADE_KEYWORDS.some((keyword) => lower.includes(keyword));
