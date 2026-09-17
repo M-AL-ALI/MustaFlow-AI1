@@ -52,6 +52,7 @@ const ready = {
 const blockedContracts: Array<
   [WorkspaceReadinessBlockedCause, keyof typeof WORKSPACE_READINESS_UNBLOCK_LABELS]
 > = [
+  ["architect_required", "retry_architect"],
   ["architect_failed", "retry_architect"],
   ["unresolved_findings", "resolve_findings"],
   ["validation_failed", "fix_validation"],

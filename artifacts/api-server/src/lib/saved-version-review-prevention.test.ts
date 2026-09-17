@@ -281,13 +281,25 @@ describe("the actual completion writer", () => {
     expect(gate({ id: 179 })).toEqual({ reviewSavedSnapshot: true, skipReason: null });
     expect(gate(undefined)).toEqual({ reviewSavedSnapshot: false, skipReason: "no-diff" });
   });
-  it("retains explicit opt-out, domain rewrite and genuine trivial-edit gates", () => {
+  it("retains explicit opt-out and domain rewrite without skipping saved-version reviews", () => {
     expect(gate({ id: 179 }, { enabled: false }).skipReason).toBe("disabled");
     expect(gate({ id: 179 }, { domain: true }).skipReason).toBe("domain-rewrite");
     expect(
       gate({ id: 179 }, { diff: { ...emptyDiff(), filesModified: ["style.css"], linesAdded: 1 } })
         .skipReason,
-    ).toBe("trivial-edit");
+    ).toBeNull();
+  });
+  it("reviews both small and substantive saved edits, retaining only the unversioned trivial gate", () => {
+    const diff = { ...emptyDiff(), filesModified: ["style.css"], linesAdded: 1 };
+    expect(gate({ id: 181 }, { diff })).toEqual({ reviewSavedSnapshot: true, skipReason: null });
+    expect(gate({ id: 181 }, { diff: { ...diff, linesAdded: 100 } })).toEqual({
+      reviewSavedSnapshot: true,
+      skipReason: null,
+    });
+    expect(gate(undefined, { diff })).toEqual({
+      reviewSavedSnapshot: false,
+      skipReason: "trivial-edit",
+    });
   });
   it("passes the saved version into dispatch and rejects unsuccessful dispatch", () => {
     expect(source).toContain("savedVersionId: reviewSavedSnapshot ? version?.id : undefined");

@@ -168,7 +168,19 @@ export function deriveWorkspaceReadiness(
   }
 
   const architect = facts.task.report?.architectReview;
-  if (!architect || architect.skipped) return unknown(context, "evidence_unavailable");
+  if (!architect) return unknown(context, "evidence_unavailable");
+  if (architect.skipped) {
+    return blockedWorkspaceReadiness({
+      schema: WORKSPACE_READINESS_SEMANTICS,
+      ...context,
+      state: "blocked",
+      cause: "architect_required",
+      unblock: "retry_architect",
+      evidence: {
+        receiptId: receipt("architect-skipped", [context.subject.taskId, architect.reviewedAt]),
+      },
+    });
+  }
   const architectReceipt = receipt("architect", [context.subject.taskId, architect.reviewedAt]);
   if (architect.verdict === "fail") {
     return blockedWorkspaceReadiness({

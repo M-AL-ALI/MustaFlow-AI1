@@ -39,6 +39,7 @@ export type WorkspaceReadinessReady = WorkspaceReadinessCommon & {
 };
 
 export const WORKSPACE_READINESS_BLOCKED_CAUSES = [
+  "architect_required",
   "architect_failed",
   "unresolved_findings",
   "validation_failed",
@@ -53,6 +54,10 @@ export const WORKSPACE_READINESS_BLOCKED_CAUSES = [
 export type WorkspaceReadinessBlockedCause = (typeof WORKSPACE_READINESS_BLOCKED_CAUSES)[number];
 
 type BlockedCauseContract = {
+  architect_required: {
+    unblock: "retry_architect";
+    evidence: { receiptId: string };
+  };
   architect_failed: {
     unblock: "retry_architect";
     evidence: { receiptId: string };
@@ -170,6 +175,9 @@ export function readyWorkspaceReadiness(
   return branded(input);
 }
 
+export function blockedWorkspaceReadiness(
+  input: WorkspaceReadinessBlockedInput<"architect_required">,
+): Extract<WorkspaceReadinessBlocked, { cause: "architect_required" }>;
 export function blockedWorkspaceReadiness(
   input: WorkspaceReadinessBlockedInput<"architect_failed">,
 ): Extract<WorkspaceReadinessBlocked, { cause: "architect_failed" }>;
@@ -317,6 +325,7 @@ function expectedUnblock(
   cause: WorkspaceReadinessBlockedCause,
 ): WorkspaceReadinessBlocked["unblock"] {
   switch (cause) {
+    case "architect_required":
     case "architect_failed":
       return "retry_architect";
     case "unresolved_findings":
@@ -407,6 +416,10 @@ export type WorkspaceReadinessPresentation = {
 };
 
 const BLOCKED_COPY: Record<WorkspaceReadinessBlockedCause, { title: string; message: string }> = {
+  architect_required: {
+    title: "Review has not run",
+    message: "Run a review of this saved version before continuing.",
+  },
   architect_failed: {
     title: "Review needs attention",
     message: "Run the architecture review again after addressing its findings.",

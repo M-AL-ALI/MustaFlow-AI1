@@ -5598,6 +5598,10 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       const checkpointSummary = assistantSummary;
 
       // Build changelog entry: combine action context with diff summary
+      if (diffSummary) {
+        const { persistedFileChangeReport } = await import("./persisted-file-change-report");
+        Object.assign(report, persistedFileChangeReport(diffSummary));
+      }
       const changelogLines: string[] = [];
       changelogLines.push(`**${nextVersionLabel}**`);
       if (kind === "build") {
@@ -6228,8 +6232,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       //   - Project opt-out (architectReviewEnabled=false) → skipped:"disabled".
       //   - Empty diff without a saved version -> skipped:"no-diff".
       //     A saved version still needs an executed review of its stored source.
-      //   - Trivial edit (≤ARCHITECT_LINE_THRESHOLD lines touched, no sensitive
-      //     paths) → skipped:"trivial-edit".
+      //   - Every saved version gets an executed review of its exact stored source.
+      //     Trivial-edit skipping applies only without a durable version to judge.
       //
       // Architect review is included in the published flat build price.
       {
@@ -6241,7 +6245,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           (diffSummary?.filesAdded.length ?? 0) +
           (diffSummary?.filesModified.length ?? 0) +
           (diffSummary?.filesRemoved.length ?? 0);
-        const reviewSavedSnapshot = totalFilesTouched === 0 && version?.id != null;
+        const reviewSavedSnapshot = version?.id != null;
         const linesTouched = (diffSummary?.linesAdded ?? 0) + (diffSummary?.linesRemoved ?? 0);
         // Heuristic: anything that materially affects auth, security, env,
         // database schema, secrets, or build manifests deserves a review even
@@ -6280,7 +6284,8 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
         else if (isDomainRewrite) skipReason = "domain-rewrite";
         else if (!isArchitectAutoFix && totalFilesTouched === 0 && !reviewSavedSnapshot)
           skipReason = "no-diff";
-        else if (!isArchitectAutoFix && isTrivialEdit) skipReason = "trivial-edit";
+        else if (!isArchitectAutoFix && isTrivialEdit && !reviewSavedSnapshot)
+          skipReason = "trivial-edit";
 
         if (skipReason) {
           report.architectReview = {
@@ -6333,7 +6338,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
               },
               savedVersionId: reviewSavedSnapshot ? version?.id : undefined,
               brief: reviewSavedSnapshot
-                ? `Review saved version #${version?.id} for task #${taskId}; assess its saved source despite the empty residual diff.`
+                ? `Review saved version #${version?.id} for task #${taskId}; assess its exact stored source and validation evidence, including unchanged files where relevant.`
                 : `Architect review for task #${taskId}`,
               reviewer: {
                 diff: reviewDiff,

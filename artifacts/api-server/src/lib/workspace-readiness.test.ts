@@ -88,6 +88,12 @@ function blockedCases(): WorkspaceReadinessBlocked[] {
   return [
     blockedWorkspaceReadiness({
       ...common,
+      cause: "architect_required",
+      unblock: "retry_architect",
+      evidence: { receiptId: "architect-skipped:41" },
+    }),
+    blockedWorkspaceReadiness({
+      ...common,
       cause: "architect_failed",
       unblock: "retry_architect",
       evidence: { receiptId: "architect:41" },
@@ -166,7 +172,7 @@ describe("WorkspaceReadiness foundation", () => {
     expect(true).toBe(true);
   });
 
-  it("constructs all nine causes with their typed unblock paths", () => {
+  it("constructs every blocked cause with its typed unblock path", () => {
     const values = blockedCases();
     expect(values.map((value) => value.cause)).toEqual(WORKSPACE_READINESS_BLOCKED_CAUSES);
     expect(new Set(values.map((value) => value.unblock))).toEqual(
@@ -257,6 +263,7 @@ describe("WorkspaceReadiness foundation", () => {
   it("derives every captured blocked cause and never treats a broken preview as ready", () => {
     const cases: Array<[string, (facts: WorkspaceReadinessFacts) => void]> = [
       ["staged_changes_pending", (facts) => (facts.task!.stagedChangesPending = true)],
+      ["architect_required", (facts) => (facts.task!.report!.architectReview!.skipped = true)],
       ["architect_failed", (facts) => (facts.task!.report!.architectReview!.verdict = "fail")],
       [
         "unresolved_findings",
@@ -307,6 +314,30 @@ describe("WorkspaceReadiness foundation", () => {
     });
   });
 
+  it("distinguishes a known skipped review from missing evidence without granting readiness", () => {
+    const facts = validFacts();
+    facts.task!.report!.architectReview!.skipped = true;
+    const skipped = deriveWorkspaceReadiness(context, facts);
+    expect(skipped).toMatchObject({
+      state: "blocked",
+      cause: "architect_required",
+      unblock: "retry_architect",
+    });
+    expect(presentWorkspaceReadiness(skipped, "preview")).toMatchObject({
+      title: "Review has not run",
+      canPublish: false,
+      canCelebrate: false,
+    });
+    expect(parseWorkspaceReadiness(JSON.parse(JSON.stringify(skipped)), context)).toMatchObject({
+      state: "blocked",
+      cause: "architect_required",
+    });
+    delete facts.task!.report!.architectReview;
+    expect(deriveWorkspaceReadiness(context, facts)).toMatchObject({
+      state: "unknown",
+      cause: "evidence_unavailable",
+    });
+  });
   it("reads through a select-only source and persists zero writes on every path", async () => {
     const facts = validFacts();
     const source: WorkspaceReadinessSource = {

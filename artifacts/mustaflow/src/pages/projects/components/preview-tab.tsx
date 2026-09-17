@@ -67,11 +67,8 @@ import {
   presentPreviewRecovery,
   type PreviewRecoveryError,
 } from "./preview-recovery-presentation";
-import {
-  fetchWorkspaceReadinessReceipt,
-  WORKSPACE_READINESS_UNBLOCK_LABELS,
-  type WorkspaceReadinessReceipt,
-} from "@/lib/workspace-readiness";
+import { useWorkspaceReadiness } from "@/hooks/use-workspace-readiness";
+import { WorkspaceReadinessStatus } from "./workspace-readiness-status";
 import { SharePreviewControl } from "./share-preview-control";
 import { pageRouteIsNavigable, webContainerPageUrl } from "./page-map-card-model";
 import { usePreviewNavigation } from "@/hooks/use-preview-navigation";
@@ -313,30 +310,16 @@ export function PreviewTab({
     code: string;
     message: string;
   } | null>(null);
-  const [workspaceReadiness, setWorkspaceReadiness] = useState<WorkspaceReadinessReceipt | null>(
-    null,
-  );
-
-  useEffect(() => {
-    let cancelled = false;
-    setWorkspaceReadiness(null);
-    if (readinessTerminal == null) return () => undefined;
-    void fetchWorkspaceReadinessReceipt({
-      projectId: project.id,
-      terminal: readinessTerminal,
-      env: "testing",
-      surface: "preview",
-    })
-      .then((receipt) => {
-        if (!cancelled) setWorkspaceReadiness(receipt);
-      })
-      .catch(() => {
-        if (!cancelled) setWorkspaceReadiness(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [project.id, readinessTerminal]);
+  const {
+    receipt: workspaceReadiness,
+    pending: workspaceReadinessPending,
+    recheck: recheckWorkspaceReadiness,
+  } = useWorkspaceReadiness({
+    projectId: project.id,
+    terminal: readinessTerminal,
+    env: "testing",
+    surface: "preview",
+  });
   const refreshTestEnvironment = useCallback(async () => {
     if (!project.containerId) return null;
     const response = await authFetch(`/api/projects/${project.id}/preview-env/status`);
@@ -3208,23 +3191,11 @@ export function PreviewTab({
         </div>
       </div>
 
-      {workspaceReadiness && (
-        <div
-          role="status"
-          aria-label="Workspace readiness"
-          className="shrink-0 border-b border-border bg-muted/40 px-3 py-2 text-xs text-foreground"
-          data-testid="preview-workspace-readiness"
-        >
-          <p className="mb-1 text-[10px] font-medium text-muted-foreground">Workspace readiness</p>
-          <p className="font-semibold">{workspaceReadiness.presentation.title}</p>
-          <p className="mt-0.5">{workspaceReadiness.presentation.message}</p>
-          {workspaceReadiness.presentation.unblock && (
-            <p className="mt-1 font-medium">
-              {WORKSPACE_READINESS_UNBLOCK_LABELS[workspaceReadiness.presentation.unblock]}
-            </p>
-          )}
-        </div>
-      )}
+      <WorkspaceReadinessStatus
+        receipt={workspaceReadiness}
+        pending={workspaceReadinessPending}
+        onRecheck={recheckWorkspaceReadiness}
+      />
 
       {/* Container waking/starting banner — Phase C server-side containers */}
       {/* Task #768: testing gate nudge — shown for full-stack projects whose draft is not yet test-approved */}
