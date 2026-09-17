@@ -461,8 +461,22 @@ router.patch(
     const [task] = await db
       .update(agentTasksTable)
       .set({ userFeedback: parsed.data.feedback })
-      .where(eq(agentTasksTable.id, params.data.taskId))
-      .returning();
+      .where(
+        and(
+          eq(agentTasksTable.id, params.data.taskId),
+          eq(agentTasksTable.projectId, params.data.id),
+        ),
+      )
+      // Feedback must not serialize saved drafts or other internal task data.
+      .returning({
+        id: agentTasksTable.id,
+        projectId: agentTasksTable.projectId,
+        title: agentTasksTable.title,
+        kind: agentTasksTable.kind,
+        status: agentTasksTable.status,
+        userFeedback: agentTasksTable.userFeedback,
+        createdAt: agentTasksTable.createdAt,
+      });
     if (!task) {
       res.status(404).json({ error: "Task not found" });
       return;

@@ -141,6 +141,7 @@ import {
 import { hasContainerLayerCredentials, isContainerLayerConfigured } from "./tenant-runtime";
 import { resolveProjectRuntimeManifest } from "./runtime-manifest";
 import {
+  ZeroCapabilityGapError,
   assertZeroGeneratedEligibility,
   inferZeroDeclaredCapabilities,
 } from "./zero-capability-eligibility";
@@ -7582,21 +7583,31 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
       const failureEvidence =
         err instanceof FailedDraftRecoveryError
           ? { code: err.code, message: err.message, evidence: null }
-          : modelRequestFailure !== undefined
-            ? modelRequestFailure.failureEvidence
-            : err instanceof ZeroGenerationKitchenError
-              ? { code: err.code, message: err.message, evidence: err.evidence }
-              : err instanceof ZeroSealedSourceContractError
-                ? {
-                    code: err.code,
-                    message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
-                    evidence: {
-                      stage: "source-contract",
-                      reasonCodes: [...err.reasons],
-                      ...(err.path === undefined ? {} : { path: err.path }),
-                    },
-                  }
-                : undefined;
+          : err instanceof ZeroCapabilityGapError
+            ? {
+                code: err.code,
+                message: err.message,
+                evidence: {
+                  stage: "capability-eligibility",
+                  identitySha256: err.result.identitySha256,
+                  reasons: err.result.reasons.map((reason) => ({ ...reason })),
+                },
+              }
+            : modelRequestFailure !== undefined
+              ? modelRequestFailure.failureEvidence
+              : err instanceof ZeroGenerationKitchenError
+                ? { code: err.code, message: err.message, evidence: err.evidence }
+                : err instanceof ZeroSealedSourceContractError
+                  ? {
+                      code: err.code,
+                      message: ZERO_SEALED_SOURCE_REPAIR_MESSAGE,
+                      evidence: {
+                        stage: "source-contract",
+                        reasonCodes: [...err.reasons],
+                        ...(err.path === undefined ? {} : { path: err.path }),
+                      },
+                    }
+                  : undefined;
       const sealedProjectRecovery =
         failureEvidence?.code === ZERO_SEALED_PROJECT_TYPE_INCOMPATIBLE
           ? {
@@ -7613,7 +7624,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
             : undefined;
       let draft: TaskReport["sealedFailedDraft"];
       if (
-        err instanceof ZeroSealedSourceContractError &&
+        (err instanceof ZeroSealedSourceContractError || err instanceof ZeroCapabilityGapError) &&
         !interruptedMutationCommitted &&
         sealedFailureFiles?.length &&
         interruptedPreRunFiles &&
