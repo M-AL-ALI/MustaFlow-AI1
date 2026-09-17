@@ -7,6 +7,7 @@ import ProjectWorkspacePage from "./[id]";
 import * as confirmedTaskStop from "./components/confirmed-task-stop";
 
 const testState = vi.hoisted(() => ({
+  projectId: 47,
   billing: {
     data: undefined as
       | {
@@ -49,8 +50,8 @@ const testState = vi.hoisted(() => ({
 }));
 
 vi.mock("wouter", () => ({
-  useParams: () => ({ id: "47" }),
-  useLocation: () => ["/projects/47", vi.fn()],
+  useParams: () => ({ id: String(testState.projectId) }),
+  useLocation: () => [`/projects/${testState.projectId}`, vi.fn()],
   Link: ({ href, children }: { href: string; children: ReactNode }) => (
     <a href={href}>{children}</a>
   ),
@@ -114,7 +115,7 @@ vi.mock("@workspace/api-client-react", () => ({
   useGetNabuflowBillingState: () => testState.billing,
   useGetProject: () => ({
     data: {
-      id: 47,
+      id: testState.projectId,
       name: "Run 8 recovery scratch",
       status: "ready",
       agentMode: "power",
@@ -169,10 +170,12 @@ vi.mock("./components/queue-composer", () => ({
     onSingleSend,
     disabled,
     promptValue,
+    onPromptValueChange,
   }: {
     agentMode: string;
     disabled?: boolean;
     promptValue?: string;
+    onPromptValueChange?: (value: string) => void;
     onSingleSend: (
       content: string,
       intent: "build",
@@ -183,6 +186,11 @@ vi.mock("./components/queue-composer", () => ({
   }) => (
     <div>
       <output data-testid="composer-value">{promptValue ?? ""}</output>
+      <input
+        aria-label="Draft text"
+        value={promptValue ?? ""}
+        onChange={(event) => onPromptValueChange?.(event.currentTarget.value)}
+      />
       <button
         type="button"
         data-testid="real-send-path"
@@ -304,6 +312,7 @@ function installCapturedTaskEventSource() {
 }
 
 afterEach(() => {
+  testState.projectId = 47;
   testState.sendMessagePending = false;
   testState.tasks = [];
   testState.messages = [
@@ -484,6 +493,170 @@ describe("project send — no confirmation dialog", () => {
       expect(testState.clearComposer).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("project request failure recovery", () => {
+  beforeEach(() => {
+    testState.sendMessageMutate.mockReset();
+    testState.clearComposer.mockReset();
+    testState.tasks = [];
+    testState.billing = { data: undefined, isLoading: false, isError: false };
+    localStorage.clear();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        media: "",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+    installCapturedTaskEventSource();
+  });
+
+  it("keeps a rejected request visible and restores text without sending again", async () => {
+    renderPage();
+    await sendPowerBuild();
+    await act(async () => {
+      testState.sendMessageMutate.mock.calls[0]?.[1].onError({
+        status: 403,
+        message: "<!doctype html>private-response-token",
+      });
+    });
+    expect(await screen.findByRole("alert", { name: "Request blocked" })).toHaveTextContent(
+      "HTTP 403",
+    );
+    expect(screen.queryByText(/private-response-token/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Request blocked")).toHaveLength(2);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Restore text" }));
+    expect(screen.getByTestId("composer-value")).toHaveTextContent(
+      "Migrate the shared status API across the project",
+    );
+    expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Restore text" })).toBeDisabled();
+  });
+
+  it("does not claim a network failure means no task was started", async () => {
+    renderPage();
+    await sendPowerBuild();
+    await act(async () => {
+      testState.sendMessageMutate.mock.calls[0]?.[1].onError(new Error("network unavailable"));
+    });
+    expect(await screen.findByRole("alert", { name: "Request not confirmed" })).toHaveTextContent(
+      "may still have started",
+    );
+    expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an older failure after a newer logical request", async () => {
+    renderPage();
+    await sendPowerBuild();
+    await sendPowerBuild();
+    expect(testState.sendMessageMutate).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      testState.sendMessageMutate.mock.calls[0]?.[1].onError({ status: 403 });
+    });
+    expect(screen.queryByRole("alert", { name: "Request blocked" })).not.toBeInTheDocument();
+    await act(async () => {
+      testState.sendMessageMutate.mock.calls[1]?.[1].onError({ status: 500 });
+    });
+    expect(await screen.findByRole("alert", { name: "Request not confirmed" })).toBeInTheDocument();
+  });
+});
+
+describe("request recovery across navigation and newer drafts", () => {
+  beforeEach(() => {
+    testState.projectId = 47;
+    testState.sendMessageMutate.mockReset();
+    testState.clearComposer.mockReset();
+    testState.tasks = [];
+    testState.billing = { data: undefined, isLoading: false, isError: false };
+    localStorage.clear();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        media: "",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }),
+    });
+    installCapturedTaskEventSource();
+  });
+
+  it("does not let an older success clear a newer failure or activate an older task", async () => {
+    renderPage();
+    await sendPowerBuild();
+    await sendPowerBuild();
+    await act(async () => {
+      testState.sendMessageMutate.mock.calls[1]?.[1].onError({ status: 500 });
+    });
+    expect(await screen.findByRole("alert", { name: "Request not confirmed" })).toBeInTheDocument();
+    await act(async () => {
+      testState.sendMessageMutate.mock.calls[0]?.[1].onSuccess({
+        assistantMessage: { plan: { kind: "queued", taskId: 999 } },
+      });
+    });
+    expect(screen.getByRole("alert", { name: "Request not confirmed" })).toBeInTheDocument();
+    expect(
+      testState.eventSources.some((source) => source.url.includes("/tasks/999/events/stream")),
+    ).toBe(false);
+    expect(testState.sendMessageMutate).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { label: "A to B", routeIds: [48] },
+    { label: "A to B to A", routeIds: [48, 47] },
+  ])("ignores old callbacks after $label", async ({ routeIds }) => {
+    const view = renderPage();
+    await sendPowerBuild();
+    const oldCallbacks = testState.sendMessageMutate.mock.calls[0]?.[1];
+    for (const id of routeIds) {
+      testState.projectId = id;
+      view.rerender(
+        <QueryClientProvider client={testState.queryClient!}>
+          <ProjectWorkspacePage />
+        </QueryClientProvider>,
+      );
+    }
+    await act(async () => {
+      oldCallbacks.onError({ status: 403 });
+      oldCallbacks.onSuccess({ assistantMessage: { plan: { kind: "queued", taskId: 999 } } });
+    });
+    expect(screen.queryByRole("alert", { name: "Request blocked" })).not.toBeInTheDocument();
+    expect(
+      testState.eventSources.some((source) => source.url.includes("/tasks/999/events/stream")),
+    ).toBe(false);
+    expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves newer draft B when request A fails without sending or overwriting B", async () => {
+    renderPage();
+    await sendPowerBuild();
+    const user = userEvent.setup();
+    const draft = screen.getByRole("textbox", { name: "Draft text" });
+    await user.type(draft, "A newer unsent draft that must remain");
+    await act(async () => {
+      testState.sendMessageMutate.mock.calls[0]?.[1].onError({ status: 403 });
+    });
+    expect(await screen.findByRole("alert", { name: "Request blocked" })).toHaveTextContent(
+      "Migrate the shared status API across the project",
+    );
+    expect(draft).toHaveValue("A newer unsent draft that must remain");
+    const restore = screen.getByRole("button", { name: "Restore text" });
+    expect(restore).toBeDisabled();
+    await user.click(restore);
+    expect(draft).toHaveValue("A newer unsent draft that must remain");
+    expect(testState.sendMessageMutate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("project Stop with captured task 189 planning traffic", () => {

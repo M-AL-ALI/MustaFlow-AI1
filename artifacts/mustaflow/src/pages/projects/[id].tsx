@@ -2,6 +2,10 @@ import { authFetch } from "@/lib/api-fetch";
 import { hasUsableZeroPlan, ZERO_PLAN_UNAVAILABLE_MESSAGE } from "@workspace/ora-contracts";
 import { latestBuilderPlan } from "@/lib/latest-builder-plan";
 import { useParams, Link, useLocation } from "wouter";
+import {
+  describeBuilderRequestFailure,
+  type BuilderRequestFailureNotice,
+} from "@/lib/builder-request-failure";
 import { useWebContainer } from "@/hooks/use-web-container";
 import {
   useGetProject,
@@ -1069,6 +1073,10 @@ export default function ProjectWorkspacePage() {
   >(null);
   const [activeTaskStreamHasReceipt, setActiveTaskStreamHasReceipt] = useState(false);
   const [editorRunReceipt, setEditorRunReceipt] = useState<EditorRunReceipt | null>(null);
+  const [requestFailure, setRequestFailure] = useState<
+    (BuilderRequestFailureNotice & { projectId: number; generation: number; prompt: string }) | null
+  >(null);
+  useEffect(() => setRequestFailure(null), [projectId]);
   const editorRunGenerationRef = useRef(0);
   const editorRunScopeRef = useRef({ projectId, taskId: activeTaskId });
   if (editorRunScopeRef.current.projectId !== projectId) {
@@ -2143,13 +2151,26 @@ export default function ProjectWorkspacePage() {
       : null,
     receipt: editorRunReceipt,
   };
-  const editorWorkStatus = getEditorWorkStatus({
+  const baseEditorWorkStatus = getEditorWorkStatus({
     ...editorRunContext,
     projectStatus: project?.status,
     requestPending:
       (sendMessage.isPending && sendMessage.variables?.id === projectId) ||
       (isStreaming && editorRequestProjectIdRef.current === projectId),
   });
+  const currentRequestFailure =
+    requestFailure?.projectId === projectId &&
+    requestFailure.generation === editorRunGenerationRef.current
+      ? requestFailure
+      : null;
+  const editorWorkStatus =
+    currentRequestFailure && baseEditorWorkStatus.tone !== "active"
+      ? {
+          ...baseEditorWorkStatus,
+          label: currentRequestFailure.title,
+          tone: currentRequestFailure.tone,
+        }
+      : baseEditorWorkStatus;
   // On refresh the originating mutation no longer exists, so the persisted task row keeps
   // the real workspace busy state until the replayed terminal event arrives.
   const hasRehydratedActiveRun =
@@ -2900,6 +2921,7 @@ export default function ProjectWorkspacePage() {
       const effectiveAgentIntent = opts?.agentIntent
         ? toBuilderReceiptIntent(opts.agentIntent)
         : undefined;
+      const requestGeneration = editorRunGenerationRef.current;
       sendMessage.mutate(
         {
           id: projectId,
@@ -2923,6 +2945,12 @@ export default function ProjectWorkspacePage() {
         },
         {
           onSuccess: (data) => {
+            if (
+              editorRunScopeRef.current.projectId !== projectId ||
+              editorRunGenerationRef.current !== requestGeneration
+            )
+              return;
+            setRequestFailure(null);
             setPendingBuildStartedAt(null);
             setCalmPhase("idle");
             pendingIsPlanRef.current = false;
@@ -2956,6 +2984,11 @@ export default function ProjectWorkspacePage() {
             opts?.onSuccess?.();
           },
           onError: (err) => {
+            if (
+              editorRunScopeRef.current.projectId !== projectId ||
+              editorRunGenerationRef.current !== requestGeneration
+            )
+              return;
             setPendingBuildStartedAt(null);
             setCalmPhase("idle");
             pendingIsPlanRef.current = false;
@@ -2966,6 +2999,15 @@ export default function ProjectWorkspacePage() {
             // raw failure when the cause is billing.
             const gate = parseNabuflowGateError(err);
             if (gate) setBillingBlock(gate);
+            else {
+              setRequestFailure({
+                ...describeBuilderRequestFailure(err),
+                projectId,
+                generation: requestGeneration,
+                prompt: content,
+              });
+              void queryClient.invalidateQueries({ queryKey: getListTasksQueryKey(projectId) });
+            }
           },
         },
       );
@@ -3016,6 +3058,7 @@ export default function ProjectWorkspacePage() {
       if (opts?.retryTaskId === undefined) setHistoryRetry(null);
       // A fresh attempt clears any previous billing block; the server re-gates.
       setBillingBlock(null);
+      setRequestFailure(null);
 
       // Generate a per-send idempotency key so the server can detect duplicate
       // POSTs caused by network blips (client timed out but server processed the
@@ -5151,6 +5194,53 @@ export default function ProjectWorkspacePage() {
                         compact
                       />
                     </div>
+                  )}
+
+                  {currentRequestFailure && (
+                    <section
+                      role="alert"
+                      aria-label={currentRequestFailure.title}
+                      className="mx-3 mt-2 rounded-xl border border-border bg-muted/30 p-3 text-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="font-semibold">{currentRequestFailure.title}</h3>
+                        <button
+                          type="button"
+                          aria-label="Dismiss request error"
+                          onClick={() => setRequestFailure(null)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {currentRequestFailure.description}
+                      </p>
+                      <details className="mt-2 text-xs">
+                        <summary className="cursor-pointer font-medium">Submitted request</summary>
+                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans">
+                          {currentRequestFailure.prompt}
+                        </pre>
+                      </details>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        disabled={isBusy || Boolean(prompt.trim())}
+                        onClick={() =>
+                          setPrompt((current) =>
+                            current.trim() ? current : currentRequestFailure.prompt,
+                          )
+                        }
+                      >
+                        Restore text
+                      </Button>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        Restores text only to an empty composer. Reattach files if needed; check the
+                        task queue before sending again.
+                      </p>
+                    </section>
                   )}
 
                   {/* Composer credit counter — persistent quiet label in the send-bar area.

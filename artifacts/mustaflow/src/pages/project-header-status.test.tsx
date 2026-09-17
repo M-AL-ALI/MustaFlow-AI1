@@ -190,7 +190,9 @@ function imageStopHarness(cancel: () => Promise<unknown> = async () => undefined
 
 describe("project header status truth", () => {
   it("distinguishes the last build result from the live runtime state", () => {
-    expect(source).toContain("const editorWorkStatus = getEditorWorkStatus({");
+    expect(source).toContain("const baseEditorWorkStatus = getEditorWorkStatus({");
+    expect(source).toContain('currentRequestFailure && baseEditorWorkStatus.tone !== "active"');
+    expect(source).toContain("label: currentRequestFailure.title,");
     expect(source).toContain("projectStatus: project?.status,");
     expect(source).toContain("receipt: editorRunReceipt,");
     expect(source).toContain("{editorWorkStatus.label}");
