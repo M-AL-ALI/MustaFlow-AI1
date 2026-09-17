@@ -19,6 +19,7 @@ import {
   buildDeterministicFallbackSuggestions,
   buildFailureFixSuggestions,
   generatePostBuildSuggestions,
+  postBuildSuggestionOutcome,
   type PostBuildSuggestion,
   type PostBuildSuggestionInput,
   type SuggestionDiagnostic,
@@ -411,12 +412,285 @@ describe("failed-build recovery stays grounded", () => {
         while (ancestor && !ts.isCatchClause(ancestor)) ancestor = ancestor.parent;
         expect(ancestor).toBeDefined();
       }
-      return outcome;
+      if (outcome === "failed") return outcome;
+      expect(ts.isCallExpression(property.initializer)).toBe(true);
+      if (!ts.isCallExpression(property.initializer))
+        throw new Error("Expected evidence classifier");
+      expect(property.initializer.expression.getText(parsed)).toBe("postBuildSuggestionOutcome");
+      return property.initializer.arguments
+        .map((argument) => argument.getText(parsed).replace(/\s+/g, "").replaceAll('"', ""))
+        .join("|");
     });
-    expect(outcomes.sort()).toEqual(["completed", "completed", "failed"]);
+    expect(outcomes.sort()).toEqual([
+      "failed",
+      "finalReport|finalReport.agentLoop?.completionKind??task.completionKind??finalized|applyTerminal.outcome",
+      "report|completionKind|terminal.outcome",
+    ]);
     expect(source).not.toContain("generateFixSuggestions(");
     expect(source).toContain("buildFailureFixSuggestions()");
     expect(source).toContain("modelFailureReport?.suggestions ??");
     expect(source).toContain("sealedProjectRecovery?.suggestions ??");
+  });
+});
+
+describe("build evidence controls next steps", () => {
+  const passed = {
+    filesChanged: ["src/routes/notes.ts"],
+    previewUpdated: true,
+    allChecksPassed: true,
+    validationReport: { passed: true },
+    architectReview: { verdict: "pass", findings: [] },
+  };
+
+  it("allows ideas after an explicitly finalized, passing build", () => {
+    expect(postBuildSuggestionOutcome(passed, "finalized")).toBe("completed");
+  });
+
+  it.each(["step_cap", "wall_clock_cap", "cancelled", "partial", "unknown"])(
+    "routes %s completion to evidence-led repair",
+    (kind) => expect(postBuildSuggestionOutcome(passed, kind)).toBe("needs_attention"),
+  );
+
+  it.each([
+    { completedWithErrors: true },
+    { completedWithWarnings: true },
+    { allChecksPassed: false },
+    { previewUpdated: false },
+    { warnings: ["Deferred check"] },
+    { warningChecks: ["typecheck"] },
+    { validationReport: { passed: false } },
+    { qualityGate: { passed: false } },
+    { qualityGate: { allPassed: false } },
+    { checkRunsSummary: { skipped: 1 } },
+    { checkRunsSummary: { failed: 1 } },
+    { checkRunsSummary: { warnings: 1 } },
+    { e2eResults: { failed: 1 } },
+    { e2eResults: { skipped: 1 } },
+    { architectReview: { verdict: "partial", findings: [] } },
+    { architectReview: { verdict: "pass", skipped: true } },
+    { architectReview: { verdict: "pass", findings: [{ severity: "critical" }] } },
+    { architectReview: { verdict: "pass", findings: [{ severity: "high" }] } },
+    { architectReview: { verdict: "pass", findings: [{ severity: "medium" }] } },
+  ])("does not equate saved files with successful validation: %j", (report) => {
+    expect(postBuildSuggestionOutcome({ ...passed, ...report }, "finalized")).toBe(
+      "needs_attention",
+    );
+  });
+
+  it.each([null, undefined, [], {}, "completed"])(
+    "does not infer success from missing report %j",
+    (report) => {
+      expect(postBuildSuggestionOutcome(report, "finalized")).toBe("needs_attention");
+    },
+  );
+
+  it("requires affirmative validation and respects the durable terminal outcome", () => {
+    expect(postBuildSuggestionOutcome({ filesChanged: [] }, "finalized")).toBe("needs_attention");
+    expect(postBuildSuggestionOutcome(passed, "finalized", "changed_with_issues")).toBe(
+      "needs_attention",
+    );
+    expect(postBuildSuggestionOutcome(passed, "finalized", "mutation_succeeded")).toBe("completed");
+  });
+
+  it("gives incomplete work a deterministic recovery action without a model call", async () => {
+    const test = harness();
+    const result = await generatePostBuildSuggestions(
+      { ...INPUT, buildOutcome: "needs_attention", assistantSummary: "RAW_PRIVATE_DIAGNOSTIC" },
+      test.dependencies,
+    );
+    expect(result).toEqual({ count: 1, source: "fallback" });
+    expect(test.createCompletion).not.toHaveBeenCalled();
+    expect(test.loadContext).not.toHaveBeenCalled();
+    expect(test.inserted[0]?.[0]).toMatchObject({
+      title: "Resolve build findings",
+      category: "fix",
+    });
+    expect(test.inserted[0]?.[0]?.prompt).toContain("task 901 in this project");
+    expect(test.inserted[0]?.[0]?.prompt).toContain("deferred");
+    expect(JSON.stringify([test.inserted, test.diagnostics])).not.toContain(
+      "RAW_PRIVATE_DIAGNOSTIC",
+    );
+    expect(test.inserted[0]![0]!.prompt.length).toBeLessThanOrEqual(1000);
+  });
+});
+
+describe("suggestions preserve the complete request and current infrastructure", () => {
+  it("retains late privacy and language requirements instead of the first 200 characters", async () => {
+    const test = harness();
+    test.createCompletion.mockResolvedValue(validCompletion());
+    const input = {
+      ...INPUT,
+      projectFormat: "static-html",
+      userPrompt:
+        "Inspect existing notes. ".repeat(40) +
+        " Keep English and Arabic. Never send unsaved drafts to the server.",
+      assistantSummary: "Existing Node server. ".repeat(30),
+      filePaths: [
+        ...Array.from({ length: 25 }, (_, i) => `src/page${i}.tsx`),
+        "nabuflow/runtime/fly-postgres.ts",
+      ],
+      activeIntegrations: "Legacy Fly Postgres label",
+    };
+    await generatePostBuildSuggestions(input, test.dependencies);
+    const request = test.createCompletion.mock.calls[0]![0];
+    const context = JSON.parse(String(request.messages[1]!.content));
+    expect(context.originalRequest).toBe(input.userPrompt);
+    expect(context.buildSummary).toBe(input.assistantSummary);
+    expect(context.filePaths).toEqual(input.filePaths);
+    expect(context.platformHint).not.toContain("static web app");
+    expect(String(request.messages[0]!.content)).toContain("Cloudflare");
+    expect(String(request.messages[0]!.content)).toContain("Neon");
+    expect(String(request.messages[0]!.content)).toContain("Fly is retired");
+    expect(test.inserted[0]?.[0]?.prompt).toContain("task 901's full original request");
+    expect(test.inserted[0]?.[0]?.prompt).toContain("data boundaries");
+  });
+
+  it.each(["request", "summary"])("uses deterministic fallback for oversized %s", async (kind) => {
+    const oversized =
+      kind === "request"
+        ? { userPrompt: "x".repeat(16001) }
+        : { assistantSummary: "x".repeat(25000) };
+    const test = harness();
+    const result = await generatePostBuildSuggestions(
+      { ...INPUT, ...oversized },
+      test.dependencies,
+    );
+    expect(result.source).toBe("fallback");
+    expect(test.createCompletion).not.toHaveBeenCalled();
+    expect(test.diagnostics[0]?.failure_category).toBe("context_too_large");
+    for (const diagnostic of test.diagnostics) expectApprovedDiagnosticShape(diagnostic);
+  });
+
+  it.each(["Fly", "Fly.io", "flyctl", "Fly Postgres"])(
+    "rejects retired provider suggestions mentioning %s",
+    async (provider) => {
+      const test = harness();
+      test.createCompletion.mockResolvedValue(
+        completion(
+          JSON.stringify({
+            suggestions: [
+              {
+                title: "Change database hosting",
+                description: "Move to another provider.",
+                category: "improvement",
+                prompt: `Deploy the database on ${provider}.`,
+              },
+            ],
+          }),
+        ),
+      );
+      const result = await generatePostBuildSuggestions(INPUT, test.dependencies);
+      expect(result.source).toBe("fallback");
+      expect(test.createCompletion).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(test.inserted)).not.toContain(provider);
+    },
+  );
+
+  it("keeps a safe suggestion when a sibling violates the provider constraint", async () => {
+    const test = harness();
+    const safe = JSON.parse(validCompletion().choices[0]!.message.content!).suggestions[0];
+    test.createCompletion.mockResolvedValue(
+      completion(
+        JSON.stringify({
+          suggestions: [
+            { ...safe, title: "Deploy on Fly", prompt: "Use Fly.io for hosting." },
+            { ...safe, title: "Polish the flyout menu" },
+          ],
+        }),
+      ),
+    );
+    expect(await generatePostBuildSuggestions(INPUT, test.dependencies)).toEqual({
+      count: 1,
+      source: "model",
+    });
+    expect(test.inserted[0]?.[0]?.title).toBe("Polish the flyout menu");
+  });
+
+  it("rejects an oversized prompt rather than silently removing its ending", async () => {
+    const test = harness();
+    const suggestion = JSON.parse(validCompletion().choices[0]!.message.content!).suggestions[0];
+    test.createCompletion.mockResolvedValue(
+      completion(
+        JSON.stringify({
+          suggestions: [
+            {
+              ...suggestion,
+              prompt: "x".repeat(1000) + " Never store unsaved drafts on the server.",
+            },
+          ],
+        }),
+      ),
+    );
+    expect((await generatePostBuildSuggestions(INPUT, test.dependencies)).source).toBe("fallback");
+    expect(test.createCompletion).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(test.inserted)).not.toContain("x".repeat(100));
+  });
+
+  it.each(["length", "content_filter", "tool_calls"])(
+    "does not persist a parseable but incomplete %s response",
+    async (reason) => {
+      const test = harness();
+      test.createCompletion.mockResolvedValue(
+        completion(validCompletion().choices[0]!.message.content, reason),
+      );
+      expect((await generatePostBuildSuggestions(INPUT, test.dependencies)).source).toBe(
+        "fallback",
+      );
+      expect(test.createCompletion).toHaveBeenCalledTimes(2);
+      expect(test.diagnostics.map((d) => d.failure_category)).toEqual([
+        "incomplete_response",
+        "incomplete_response",
+        "fallback_used",
+      ]);
+    },
+  );
+});
+
+describe("missing review evidence cannot become a feature recommendation", () => {
+  it.each([
+    undefined,
+    null,
+    {},
+    { verdict: "pass" },
+    { verdict: "pass", findings: [], skipped: true },
+  ])("requires an affirmative non-skipped review with findings for %j", (architectReview) => {
+    expect(
+      postBuildSuggestionOutcome(
+        {
+          filesChanged: ["src/routes/notes.ts"],
+          previewUpdated: true,
+          allChecksPassed: true,
+          qualityGate: { passed: true, allPassed: true },
+          architectReview,
+        },
+        "finalized",
+        "mutation_succeeded",
+      ),
+    ).toBe("needs_attention");
+  });
+
+  it("routes staged apply with an architect timeout to recovery without another model call", async () => {
+    const test = harness();
+    const report = {
+      filesChanged: ["src/routes/notes.ts"],
+      previewUpdated: true,
+      allChecksPassed: true,
+      qualityGate: { passed: true, allPassed: true },
+      architectReview: null,
+      agentLoop: { completionKind: "finalized" },
+    };
+    const outcome = postBuildSuggestionOutcome(
+      report,
+      report.agentLoop.completionKind,
+      "mutation_succeeded",
+    );
+    expect(
+      await generatePostBuildSuggestions({ ...INPUT, buildOutcome: outcome }, test.dependencies),
+    ).toEqual({ count: 1, source: "fallback" });
+    expect(test.createCompletion).not.toHaveBeenCalled();
+    expect(test.inserted[0]?.[0]).toMatchObject({
+      title: "Resolve build findings",
+      category: "fix",
+    });
   });
 });

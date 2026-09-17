@@ -63,7 +63,11 @@ import {
 import { formatWorkspaceToolsForAgent } from "@workspace/nabuflow-workspace-tools";
 import type { AgentMode } from "./ai";
 import { detectRequiredStack } from "./ai";
-import { buildFailureFixSuggestions, generatePostBuildSuggestions } from "./post-build-suggestions";
+import {
+  buildFailureFixSuggestions,
+  generatePostBuildSuggestions,
+  postBuildSuggestionOutcome,
+} from "./post-build-suggestions";
 import { logger } from "./logger";
 import { writeKnowledge, getInstalledBlueprintKnowledge, inferStyleForUser } from "./knowledge";
 import { generateEmbedding } from "./embeddings";
@@ -7171,7 +7175,7 @@ Stack: Drizzle ORM preferred; raw SQL via parameterized queries is acceptable. N
           assistantSummary,
           filePaths: snapshot.map((f) => f.path),
           activeIntegrations: knowledgeContext ?? "",
-          buildOutcome: "completed",
+          buildOutcome: postBuildSuggestionOutcome(report, completionKind, terminal.outcome),
         });
       });
 
@@ -9104,7 +9108,11 @@ export async function applyTaskAgentStaging(taskId: number, projectId: number): 
       assistantSummary,
       filePaths: snapshot.map((f) => f.path),
       activeIntegrations: "",
-      buildOutcome: "completed",
+      buildOutcome: postBuildSuggestionOutcome(
+        finalReport,
+        finalReport.agentLoop?.completionKind ?? task.completionKind ?? "finalized",
+        applyTerminal.outcome,
+      ),
     });
   });
 

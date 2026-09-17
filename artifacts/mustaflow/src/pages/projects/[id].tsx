@@ -38,6 +38,7 @@ import {
 } from "@/components/builder-mode-icon";
 import { WORKSPACE_TOOLS, type WorkspaceToolOpen } from "@workspace/nabuflow-workspace-tools";
 import { StreamingText, MarkdownMessage, TypingIndicator } from "./components/chat-history";
+import { TaskQueuedMessage } from "./components/task-queued-message";
 import { Button } from "@/components/ui/button";
 import {
   History,
@@ -4569,14 +4570,12 @@ export default function ProjectWorkspacePage() {
                             >
                               {msg.role === "assistant" && <ZeroAvatar className="mt-0.5" />}
                               {isTaskQueued ? (
-                                <button
-                                  onClick={() => setBackgroundPanelOpen(true)}
-                                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/40 bg-muted/30 text-[10px] text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors"
-                                >
-                                  <Layers2 className="h-3 w-3 text-primary/60 shrink-0" />
-                                  <span>Task queued in background</span>
-                                  <ChevronRight className="h-3 w-3 shrink-0 opacity-50" />
-                                </button>
+                                <TaskQueuedMessage
+                                  projectId={projectId}
+                                  taskId={(planPayload as { taskId?: unknown } | null)?.taskId}
+                                  tasks={tasksForFeed}
+                                  onOpenTask={openRecoveryTaskRun}
+                                />
                               ) : (
                                 <div
                                   className={cn(
