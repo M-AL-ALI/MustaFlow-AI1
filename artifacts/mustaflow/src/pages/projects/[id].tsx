@@ -1,4 +1,6 @@
 import { authFetch } from "@/lib/api-fetch";
+import { hasUsableZeroPlan, ZERO_PLAN_UNAVAILABLE_MESSAGE } from "@workspace/ora-contracts";
+import { latestBuilderPlan } from "@/lib/latest-builder-plan";
 import { useParams, Link, useLocation } from "wouter";
 import { useWebContainer } from "@/hooks/use-web-container";
 import {
@@ -2461,25 +2463,7 @@ export default function ProjectWorkspacePage() {
     return undefined;
   }, [messages]);
 
-  const latestPlan = useMemo<{
-    plan: StructuredPlan;
-    messageId: string | number;
-  } | null>(() => {
-    if (!messages) return null;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (!message || message.role !== "assistant" || !message.planMode || !message.plan) continue;
-      const payload = message.plan as ChatPlanPayload;
-      const kind =
-        payload && typeof payload === "object" ? (payload as { kind?: string }).kind : undefined;
-      if (kind === "report" || kind === "error" || kind === "converse") continue;
-      return {
-        plan: payload as StructuredPlan,
-        messageId: message.id,
-      };
-    }
-    return null;
-  }, [messages]);
+  const latestPlan = useMemo(() => latestBuilderPlan(messages), [messages]);
 
   useEffect(() => {
     if (!chatAtBottomRef.current) return;
@@ -2968,8 +2952,7 @@ export default function ProjectWorkspacePage() {
             if (tid && !wasBackground) setActiveTaskId(tid);
             // Auto-enable plan mode when the server detected a plan intent so
             // subsequent messages continue planning without a manual toggle.
-            if (opts?.retryTaskId === undefined && data?.assistantMessage?.planMode)
-              setPlanMode(true);
+            // A plan response does not change the user's next-request mode.
             opts?.onSuccess?.();
           },
           onError: (err) => {
@@ -4463,7 +4446,18 @@ export default function ProjectWorkspacePage() {
                           const isReport = payloadKind === "report";
                           const isError = payloadKind === "error";
                           const isTaskQueued = payloadKind === "task-queued";
-                          const isPlanCard = msg.planMode && msg.role === "assistant" && !isReport;
+                          const isPlanResponse =
+                            msg.planMode &&
+                            msg.role === "assistant" &&
+                            !isReport &&
+                            !isTaskQueued &&
+                            payloadKind !== "converse";
+                          const isPlanCard = isPlanResponse && hasUsableZeroPlan(planPayload);
+                          const isUnavailablePlan =
+                            isPlanResponse &&
+                            !isPlanCard &&
+                            !isError &&
+                            payloadKind !== "cancelled";
                           return (
                             <div
                               key={msg.id}
@@ -4588,7 +4582,11 @@ export default function ProjectWorkspacePage() {
                                         </div>
                                       )}
                                       <StreamingText
-                                        content={msg.content}
+                                        content={
+                                          isUnavailablePlan
+                                            ? ZERO_PLAN_UNAVAILABLE_MESSAGE
+                                            : msg.content
+                                        }
                                         messageId={msg.id}
                                         animate={
                                           msgIdx === visibleMsgs.length - 1 &&
@@ -5341,9 +5339,8 @@ export default function ProjectWorkspacePage() {
                         }
                         const hasImages =
                           attachments?.some((attachment) => attachment.kind === "image") ?? false;
-                        // Auto-activate plan mode when the client detected a plan intent
-                        // so the user never has to manually toggle it.
-                        if (!retry && intent === "plan") setPlanMode(true);
+                        // Intent applies to this request. Only the explicit planning
+                        // control should keep later requests in planning-only mode.
                         send(content, {
                           ...(attachments && attachments.length > 0 ? { attachments } : {}),
                           // Images and explicit build/plan intents use the regular task-creating

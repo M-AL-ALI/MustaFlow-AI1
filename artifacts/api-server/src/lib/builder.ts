@@ -32,7 +32,11 @@ import type {
   ZeroGeneratedDependencyPlan,
   ZeroGenerationTarget,
 } from "@workspace/tenant-runtime-contracts";
-import { isZeroProjectChoiceCaptureOnlyMessage } from "@workspace/ora-contracts";
+import {
+  isZeroProjectChoiceCaptureOnlyMessage,
+  hasCompleteGeneratedZeroPlan,
+  ZERO_PLAN_UNAVAILABLE_MESSAGE,
+} from "@workspace/ora-contracts";
 import {
   isZeroSealedGenerationTarget,
   prepareZeroSealedNodeSource,
@@ -369,6 +373,7 @@ Rules:
 - "complexityScore" must be an integer 1-10. Consider pages, data model, integrations, and interactivity.
 - "recommendedMode" must be one of: lite (score 1-2), eco (score 3-4), power (score 5-7), pro (score 8-10).
 - "estimatedBuildSeconds" is a realistic estimate: simple apps ~20s, medium ~40s, complex ~80s.
+- Never place private form drafts, credentials, or note contents in URLs, redirect values, or logs. Keep unsaved drafts in appropriately scoped client state; save only when the user requests it.
 - Be concrete and specific. Empty arrays for sections that don't apply.`;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2595,22 +2600,8 @@ export function applyCdnAutoUpgrades(files: BuilderFile[]): {
 }
 
 /** Validate that a plan response contains the required new fields and retry if key ones are missing */
-function validatePlanResponse(parsed: Record<string, unknown>): boolean {
-  const hasGoal = typeof parsed.goal === "string" && (parsed.goal as string).length > 0;
-  const hasApproach = typeof parsed.approach === "string" && (parsed.approach as string).length > 0;
-  const hasSitemap = Array.isArray(parsed.sitemap) && (parsed.sitemap as unknown[]).length > 0;
-  const hasComplexity =
-    typeof parsed.complexityScore === "number" &&
-    (parsed.complexityScore as number) >= 1 &&
-    (parsed.complexityScore as number) <= 10;
-  const validModes = ["lite", "eco", "power", "pro"];
-  const hasRecommendedMode =
-    typeof parsed.recommendedMode === "string" &&
-    validModes.includes(parsed.recommendedMode as string);
-  const hasEstimate =
-    typeof parsed.estimatedBuildSeconds === "number" &&
-    (parsed.estimatedBuildSeconds as number) > 0;
-  return hasGoal && hasApproach && hasSitemap && hasComplexity && hasRecommendedMode && hasEstimate;
+function validatePlanResponse(parsed: unknown): boolean {
+  return hasCompleteGeneratedZeroPlan(parsed);
 }
 
 export async function runBuildPipeline(args: {
@@ -4951,6 +4942,11 @@ const MOBILE_PLAN_SYSTEM_PROMPT = `You are the NabuFlow Mobile Planner. You plan
   "goal": string,
   "approach": string,
   "pages": string[],
+  "sitemap": [{ "name": string, "route": string, "purpose": string }],
+  "uxNotes": { "ScreenName": string },
+  "complexityScore": integer (1-10),
+  "recommendedMode": "lite"|"eco"|"power"|"pro",
+  "estimatedBuildSeconds": integer,
   "navigation": string[],
   "nativeFeatures": string[],
   "backend": string[],
@@ -4961,7 +4957,9 @@ const MOBILE_PLAN_SYSTEM_PROMPT = `You are the NabuFlow Mobile Planner. You plan
   "risks": string[],
   "testPlan": string[]
 }
-"pages" lists screens (e.g. "Home — feed of latest posts", "Profile — user settings and avatar"). Be specific. Empty arrays for sections that don't apply.`;
+"pages" lists screens (e.g. "Home — feed of latest posts", "Profile — user settings and avatar"). Include the matching nonempty sitemap and UX notes, a complexity score, recommended mode, and realistic positive build estimate.
+Never place private form drafts, credentials, or note contents in URLs, redirect values, or logs. Keep unsaved drafts in appropriately scoped client state; save only when the user requests it.
+Be specific. Empty arrays for sections that don't apply.`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Next.js 14 App Router builder prompts
@@ -7109,18 +7107,18 @@ export async function runPlanPipeline(args: {
 
     // Retry once if required fields are missing or the model proposed files
     // outside the project's authoritative architecture.
-    const fieldsMissing = plan ? !validatePlanResponse(plan) : false;
+    const fieldsMissing = !validatePlanResponse(plan);
     const architectureMismatch = plan
       ? !planMatchesProjectArchitecture(plan, projectStack, preserveProjectArchitecture)
       : false;
-    if (plan && (fieldsMissing || architectureMismatch)) {
+    if (fieldsMissing || architectureMismatch) {
       logger.info(
         { projectName, fieldsMissing, architectureMismatch, projectStack },
         "Plan needs one bounded correction",
       );
       messages.push({
         role: "assistant",
-        content: JSON.stringify(plan),
+        content: JSON.stringify(plan ?? {}),
       });
       messages.push({
         role: "user",
@@ -7151,6 +7149,12 @@ export async function runPlanPipeline(args: {
     // one cancelled terminal event instead of retrying or returning a fallback.
     if (signal?.aborted) throw error;
     plan = null;
+  }
+
+  // A completed model call is not a completed plan. Validate the corrected
+  // response too; null, partial JSON and metadata-only payloads must fail.
+  if (!validatePlanResponse(plan)) {
+    throw new Error(ZERO_PLAN_UNAVAILABLE_MESSAGE);
   }
 
   // Ensure backward compat: if sitemap exists but pages doesn't, derive pages from sitemap

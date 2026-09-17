@@ -86,6 +86,8 @@ import {
   failedTerminal,
   interruptedTerminal,
   planSucceededTerminal,
+  hasUsableZeroPlan,
+  ZERO_PLAN_UNAVAILABLE_MESSAGE,
   presentZeroTerminalV1,
   responseSucceededTerminal,
   isZeroProjectChoiceCaptureOnlyMessage,
@@ -1221,6 +1223,9 @@ router.post(
               deepReasoning,
               signal,
             });
+            if (!hasUsableZeroPlan(result.plan)) {
+              throw new Error(ZERO_PLAN_UNAVAILABLE_MESSAGE);
+            }
             if (
               supportProposal &&
               !(await supportMutationStillAuthorized({
@@ -1233,7 +1238,7 @@ router.post(
             return result;
           },
           commitCompleted: async (result) => {
-            return Boolean(planTask && result);
+            return Boolean(planTask && hasUsableZeroPlan(result.plan));
           },
           commitCanceled: async () => undefined,
           commitFailed: async () => Boolean(planTask),

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { hasUsableZeroPlan, ZERO_PLAN_UNAVAILABLE_MESSAGE } from "@workspace/ora-contracts";
 import { Button } from "@/components/ui/button";
 import {
   ServerCog,
@@ -472,7 +473,24 @@ function clearPersistedEdits(messageId: string | number | undefined) {
   }
 }
 
-export function PlanCard({
+export function PlanCard(props: Parameters<typeof ReadyPlanCard>[0]) {
+  if (!hasUsableZeroPlan(props.plan)) {
+    return (
+      <div role="status" className="rounded-xl border border-border bg-muted/20 p-4 text-sm">
+        <p className="font-medium text-foreground">Plan unavailable</p>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          {ZERO_PLAN_UNAVAILABLE_MESSAGE}
+        </p>
+      </div>
+    );
+  }
+  // A different message is a different editable artifact, never an update to
+  // the previous message's local state or pending persistence timer.
+  const identity = `${props.projectId}:${props.messageId ?? JSON.stringify(props.plan)}:${Boolean(props.readOnly)}`;
+  return <ReadyPlanCard key={identity} {...props} />;
+}
+
+function ReadyPlanCard({
   plan,
   projectId,
   initialAgentMode,

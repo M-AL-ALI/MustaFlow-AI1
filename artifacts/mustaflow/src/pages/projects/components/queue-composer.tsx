@@ -1331,6 +1331,21 @@ export function QueueComposer({
         </div>
 
         <div className="flex-1 bg-muted border border-border rounded-2xl rounded-tl-sm overflow-hidden">
+          {planMode && (
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs">
+              <span role="status" className="text-muted-foreground">
+                Planning only
+              </span>
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => setAgentType("main")}
+                className="font-medium text-foreground hover:underline disabled:opacity-50"
+              >
+                Exit planning
+              </button>
+            </div>
+          )}
           {rows.map((row, idx) => (
             <div
               key={row.id}
@@ -1755,14 +1770,10 @@ export function QueueComposer({
                     <DropdownMenuLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">
                       Plan
                     </DropdownMenuLabel>
-                    <DropdownMenuItem
-                      onSelect={() => setAgentType(agentType === "planning" ? "main" : "planning")}
-                    >
+                    <DropdownMenuItem onSelect={() => setAgentType(planMode ? "main" : "planning")}>
                       <CheckSquare className="mr-2 h-3.5 w-3.5" />
                       Plan first
-                      {agentType === "planning" && (
-                        <span className="ml-auto text-[10px] text-primary">on</span>
-                      )}
+                      {planMode && <span className="ml-auto text-[10px] text-primary">on</span>}
                     </DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => setShowPlanHistory(true)}>
                       <Clock className="mr-2 h-3.5 w-3.5" />
@@ -1770,6 +1781,7 @@ export function QueueComposer({
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => {
+                        setAgentType("main");
                         prefillSinglePrompt(
                           "Explain how this app works in plain language, including its pages, data flow, and important behavior.",
                         );
@@ -1795,6 +1807,7 @@ export function QueueComposer({
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => {
+                        setAgentType("main");
                         prefillSinglePrompt("Fix or improve this app: ");
                       }}
                     >

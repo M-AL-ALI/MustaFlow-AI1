@@ -4,6 +4,7 @@ export * from "./zero-prompt-queue-boundary";
 export * from "./zero-intent";
 export * from "./zero-project-choice-capture";
 export * from "./zero-terminal";
+export * from "./zero-plan-artifact";
 export * from "./workspace-readiness";
 export * from "./project-purge";
 export * from "./zero-memory-provenance";

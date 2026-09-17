@@ -4,6 +4,16 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(new URL("./messages.ts", import.meta.url), "utf8");
 
 describe("authoritative message intent wiring", () => {
+  it("rejects missing plan artifacts inside the cancellable run before committing success", () => {
+    const run = source.indexOf("const result = await runPlanPipeline({");
+    const guard = source.indexOf("if (!hasUsableZeroPlan(result.plan))", run);
+    const commit = source.indexOf("commitCompleted:", run);
+    expect(run).toBeGreaterThan(0);
+    expect(guard).toBeGreaterThan(run);
+    expect(guard).toBeLessThan(commit);
+    expect(source).toContain("return Boolean(planTask && hasUsableZeroPlan(result.plan));");
+  });
+
   it("uses the same durable receipt judge before both message route dispatches", () => {
     expect(source.match(/await persistAuthoritativeIntent\(\{/g)).toHaveLength(2);
     expect(source.match(/intentReceiptId: intentReceipt\.receiptId/g)).toHaveLength(2);
