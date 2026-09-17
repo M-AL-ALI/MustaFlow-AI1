@@ -37,6 +37,8 @@ import {
   type Provider,
 } from "./ai-provider-config";
 import { EmptyCompletionError, type EmptyCompletionDetails } from "./empty-completion";
+import { AnthropicStreamToolInput } from "./anthropic-stream-tool-input";
+import { IncompleteAgentModelResponseError } from "./agent-model-request";
 
 export { isDeepSeekAvailable, MODEL_DEFAULTS, VISION_MODEL };
 export { EmptyCompletionError } from "./empty-completion";
@@ -76,8 +78,8 @@ function getDeepSeekClient(): OpenAI {
  * streaming path has no such hard cut-off — it streams tokens as they arrive, so
  * the HTTP connection stays alive the whole time. For calls that exceed this
  * threshold we stream and accumulate the full response in memory, then return a
- * standard ChatCompletion-shaped object. Tool calls stay on the non-streaming path
- * because tool_use blocks arrive only at the end of the stream.
+ * standard ChatCompletion-shaped object. Builder tool calls with a progress
+ * observer use the SDK's complete-message stream accumulator in callAnthropic.
  */
 export const ANTHROPIC_STREAM_THRESHOLD_CHARS = 15_000;
 
@@ -305,6 +307,8 @@ export interface CreateChatCompletionParams {
   response_format?: { type: "json_object" } | { type: "text" };
   max_completion_tokens?: number;
   signal?: AbortSignal;
+  /** Internal builder watchdog notification; no prompt or output payload is exposed. */
+  onModelProgress?: () => void;
   /**
    * When true, disables Gemini 3's silent "thinking" phase by setting
    * thinkingBudget:0. Without this, Gemini 3 Flash Preview consumes the
@@ -340,6 +344,14 @@ export interface ZeroCallReceiptContext {
 }
 
 type BegunZeroCallReceipt = { callId: string } | null;
+
+/** A transport-complete response whose instructions must never be executed. */
+class CompletedModelResponseRejection {
+  constructor(
+    readonly error: IncompleteAgentModelResponseError,
+    readonly usage: NonNullable<ChatCompletion["usage"]>,
+  ) {}
+}
 
 async function beginResolvedZeroCallReceipt(
   params: Pick<CreateChatCompletionParams, "provider" | "model" | "taskId" | "zeroCall">,
@@ -404,6 +416,7 @@ export async function createChatCompletion(
   params: CreateChatCompletionParams,
 ): Promise<ChatCompletion> {
   const zeroReceipt = await beginResolvedZeroCallReceipt(params);
+  let result: ChatCompletion | CompletedModelResponseRejection;
   try {
     // Wrap AI provider calls with a per-provider circuit breaker + retry.
     // Each provider gets its own breaker so an Anthropic outage does not open
@@ -425,8 +438,8 @@ export async function createChatCompletion(
             ? deepseekCircuit
             : openaiCircuit;
 
-    const result = await circuit.call(() =>
-      withRetry(
+    result = await circuit.call(() =>
+      withRetry<ChatCompletion | CompletedModelResponseRejection>(
         () => {
           if (params.provider === "openai") {
             return openai.chat.completions.create(
@@ -444,8 +457,8 @@ export async function createChatCompletion(
           }
           if (params.provider === "anthropic") {
             // Route large tool-free calls through the streaming-accumulation path to
-            // avoid the SDK's built-in 10-minute non-streaming guard. Tool-call paths
-            // stay on non-streaming because tool_use blocks arrive at end of stream.
+            // avoid the SDK's built-in 10-minute non-streaming guard. Tool calls
+            // use callAnthropic, which can accumulate streamed tools for the builder.
             const hasTools = (params.tools?.length ?? 0) > 0;
             if (!hasTools) {
               const totalChars = params.messages.reduce(
@@ -501,11 +514,13 @@ export async function createChatCompletion(
       }
     }
     await finishResolvedZeroCallReceipt(zeroReceipt, {
-      status: "completed",
+      status: result instanceof CompletedModelResponseRejection ? "failed" : "completed",
       inputTokens: result.usage?.prompt_tokens ?? null,
       outputTokens: result.usage?.completion_tokens ?? null,
+      ...(result instanceof CompletedModelResponseRejection
+        ? { errorCode: "provider_response_incomplete" }
+        : {}),
     });
-    return result;
   } catch (error) {
     const interrupted =
       params.signal?.aborted === true ||
@@ -516,6 +531,10 @@ export async function createChatCompletion(
     });
     throw error;
   }
+  // Semantic rejection is outside transport resilience and after known usage is
+  // recorded. It cannot execute tools, replay accounting, or trip other callers.
+  if (result instanceof CompletedModelResponseRejection) throw result.error;
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -983,7 +1002,9 @@ async function* streamGemini(
   });
 }
 
-async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCompletion> {
+async function callAnthropic(
+  params: CreateChatCompletionParams,
+): Promise<ChatCompletion | CompletedModelResponseRejection> {
   const { anthropic } = await import("@workspace/integrations-anthropic-ai");
 
   // Split out system messages — Anthropic takes them as a separate field.
@@ -1092,9 +1113,54 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const res: any = await anthropic.messages.create(request as any, {
-    signal: params.signal,
-  });
+  let res: any;
+  let streamedToolInputs: Map<number, string> | undefined;
+  if (params.onModelProgress && anthropicTools.length > 0) {
+    // Never trust the SDK's permissively parsed final input as the wire JSON.
+    const toolInputs = new AnthropicStreamToolInput();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stream = anthropic.messages.stream(request as any, { signal: params.signal });
+    stream.on("streamEvent", (event) => {
+      if (params.signal?.aborted) return;
+      toolInputs.observe(event);
+      if (event.type !== "content_block_delta") return;
+      const delta = event.delta;
+      const output =
+        delta.type === "text_delta"
+          ? delta.text
+          : delta.type === "input_json_delta"
+            ? delta.partial_json
+            : delta.type === "thinking_delta"
+              ? delta.thinking
+              : "";
+      if (!output) return;
+      try {
+        params.onModelProgress?.();
+      } catch {
+        // An observer cannot replace the provider result or authorize a tool.
+      }
+    });
+    res = await stream.finalMessage();
+    params.signal?.throwIfAborted();
+    try {
+      streamedToolInputs = toolInputs.finish(res.content);
+    } catch (error) {
+      if (!(error instanceof IncompleteAgentModelResponseError)) throw error;
+      // finalMessage succeeded. Preserve its usage and circuit success without
+      // exposing the SDK's repaired arguments as an executable completion.
+      const promptTokens = res.usage?.input_tokens ?? 0;
+      const completionTokens = res.usage?.output_tokens ?? 0;
+      return new CompletedModelResponseRejection(error, {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      });
+    }
+  } else {
+    // Preserve non-builder callers and their existing transport.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    res = await anthropic.messages.create(request as any, { signal: params.signal });
+  }
 
   if (res.stop_reason === "max_tokens") {
     logger.warn(
@@ -1105,7 +1171,7 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
 
   let text = "";
   const outToolCalls: ChatCompletionMessageToolCall[] = [];
-  for (const block of res.content ?? []) {
+  for (const [index, block] of (res.content ?? []).entries()) {
     if (block.type === "text") text += block.text ?? "";
     else if (block.type === "tool_use") {
       outToolCalls.push({
@@ -1113,7 +1179,9 @@ async function callAnthropic(params: CreateChatCompletionParams): Promise<ChatCo
         type: "function",
         function: {
           name: block.name,
-          arguments: JSON.stringify(block.input ?? {}),
+          arguments: streamedToolInputs
+            ? (streamedToolInputs.get(index) ?? "")
+            : JSON.stringify(block.input ?? {}),
         },
       });
     }

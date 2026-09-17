@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AGENT_MODEL_RECOVERY_HINT,
   AGENT_MODEL_REQUEST_TIMEOUT_MS,
+  AGENT_MODEL_REQUEST_MAX_DURATION_MS,
   AgentModelRequestError,
   runAgentModelRequest,
   type AgentModelRequestOptions,
@@ -292,5 +293,157 @@ describe("bounded agent model-request recovery", () => {
     completeFirst("late incomplete candidate");
     await Promise.resolve();
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows productive streamed output beyond the old total-request deadline", async () => {
+    let progress!: () => void;
+    let complete!: (value: string) => void;
+    const request = vi
+      .fn<AgentModelRequestOptions<string>["request"]>()
+      .mockImplementation((_signal, notify) => {
+        progress = notify;
+        return new Promise<string>((resolve) => {
+          complete = resolve;
+        });
+      });
+    const input = options(request);
+    const result = runAgentModelRequest(input);
+    await vi.advanceTimersByTimeAsync(120_000);
+    progress();
+    await vi.advanceTimersByTimeAsync(120_000);
+    complete("complete tool response");
+    await expect(result).resolves.toBe("complete tool response");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(input.onRecovery).not.toHaveBeenCalled();
+    progress();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("still stops a stream that goes idle after producing output", async () => {
+    let progress!: () => void;
+    const input = options(
+      vi.fn((_signal: AbortSignal, notify: () => void) => {
+        progress = notify;
+        return new Promise<string>(() => {});
+      }),
+      { recovery: { used: true } },
+    );
+    const result = runAgentModelRequest(input).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(100_000);
+    progress();
+    await vi.advanceTimersByTimeAsync(AGENT_MODEL_REQUEST_TIMEOUT_MS);
+    expect(await result).toMatchObject({
+      code: "agent_model_request_timeout",
+      failureEvidence: {
+        evidence: {
+          progressEvents: 1,
+          timeoutKind: "idle",
+          requestElapsedMs: 280_000,
+        },
+      },
+    });
+    expect(input.request).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("enforces an absolute per-request ceiling despite continuous output", async () => {
+    let progress!: () => void;
+    const input = options(
+      vi.fn((_signal: AbortSignal, notify: () => void) => {
+        progress = notify;
+        return new Promise<string>(() => {});
+      }),
+      { deadlineAt: Date.now() + 1_200_000, recovery: { used: true } },
+    );
+    const result = runAgentModelRequest(input).catch((error: unknown) => error);
+    for (let index = 0; index < 5; index++) {
+      await vi.advanceTimersByTimeAsync(100_000);
+      progress();
+    }
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(await result).toMatchObject({
+      code: "agent_model_request_timeout",
+      failureEvidence: {
+        evidence: {
+          timeoutKind: "absolute",
+          requestMaxDurationMs: AGENT_MODEL_REQUEST_MAX_DURATION_MS,
+          requestElapsedMs: AGENT_MODEL_REQUEST_MAX_DURATION_MS,
+          progressEvents: 5,
+        },
+      },
+    });
+    progress();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not let progress consume the run's reserved cleanup time", async () => {
+    let progress!: () => void;
+    const input = options(
+      vi.fn((_signal: AbortSignal, notify: () => void) => {
+        progress = notify;
+        return new Promise<string>(() => {});
+      }),
+      { deadlineAt: Date.now() + 60_000 },
+    );
+    const result = runAgentModelRequest(input).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(20_000);
+    progress();
+    await vi.advanceTimersByTimeAsync(20_000);
+    progress();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await result).toMatchObject({
+      code: "agent_model_run_budget_exhausted",
+      failureEvidence: {
+        evidence: {
+          timeoutKind: "absolute",
+          requestMaxDurationMs: 55_000,
+          remainingMs: 5_000,
+        },
+      },
+    });
+    expect(input.onRecovery).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores late progress from a timed-out attempt while its retry is pending", async () => {
+    const progress: Array<() => void> = [];
+    const input = options(
+      vi.fn((_signal: AbortSignal, notify: () => void) => {
+        progress.push(notify);
+        return new Promise<string>(() => {});
+      }),
+    );
+    const result = runAgentModelRequest(input).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(AGENT_MODEL_REQUEST_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(150_000);
+    progress[0]();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(await result).toMatchObject({
+      code: "agent_model_request_timeout",
+      failureEvidence: { evidence: { attempt: 2, progressEvents: 0, timeoutKind: "idle" } },
+    });
+    expect(input.request).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("honors a caller stop after stream progress without retrying or reviving timers", async () => {
+    const controller = new AbortController();
+    let progress!: () => void;
+    const input = options(
+      vi.fn((_signal: AbortSignal, notify: () => void) => {
+        progress = notify;
+        return new Promise<string>(() => {});
+      }),
+      { signal: controller.signal },
+    );
+    const result = runAgentModelRequest(input).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(100_000);
+    progress();
+    const reason = new DOMException("Stopped by user", "AbortError");
+    controller.abort(reason);
+    expect(await result).toBe(reason);
+    progress();
+    expect(input.onRecovery).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

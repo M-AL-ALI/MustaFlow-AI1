@@ -1,6 +1,7 @@
 import type { TaskReport } from "@workspace/db";
 
 export const AGENT_MODEL_REQUEST_TIMEOUT_MS = 180_000;
+export const AGENT_MODEL_REQUEST_MAX_DURATION_MS = 600_000;
 const CLEANUP_RESERVE_MS = 5_000;
 const MIN_RECOVERY_REQUEST_MS = 1_000;
 
@@ -9,6 +10,7 @@ export const AGENT_MODEL_RECOVERY_HINT =
   "Continue from the existing conversation and workspace without dropping any user requirement. " +
   "Return exactly ONE small tool call next: one focused read, write, or patch. " +
   "Split large implementations into small modules and continue incrementally. " +
+  "For a small change to an existing file, prefer apply_patch over repeating the unchanged file. " +
   "Do not replace requested persistent backend storage with an in-memory store or mockup. " +
   "Keep the existing SDK, provider, eligibility, security, and build constraints. " +
   "Use the existing finalize/check gates; a file write alone is not a successful build.";
@@ -30,6 +32,10 @@ export type AgentModelRequestDiagnostic = {
   step: number;
   attempt: number;
   requestTimeoutMs: number;
+  requestMaxDurationMs?: number;
+  requestElapsedMs?: number;
+  progressEvents?: number;
+  timeoutKind?: "idle" | "absolute";
   elapsedMs: number;
   remainingMs: number;
   classification:
@@ -81,6 +87,16 @@ export class AgentModelRequestError extends Error {
         step: diagnostic.step,
         attempt: diagnostic.attempt,
         requestTimeoutMs: diagnostic.requestTimeoutMs,
+        ...(diagnostic.requestMaxDurationMs === undefined
+          ? {}
+          : { requestMaxDurationMs: diagnostic.requestMaxDurationMs }),
+        ...(diagnostic.requestElapsedMs === undefined
+          ? {}
+          : { requestElapsedMs: diagnostic.requestElapsedMs }),
+        ...(diagnostic.progressEvents === undefined
+          ? {}
+          : { progressEvents: diagnostic.progressEvents }),
+        ...(diagnostic.timeoutKind === undefined ? {} : { timeoutKind: diagnostic.timeoutKind }),
         elapsedMs: diagnostic.elapsedMs,
         remainingMs: diagnostic.remainingMs,
         classification: diagnostic.classification,
@@ -193,7 +209,8 @@ export type AgentModelRequestOptions<T> = {
   >;
   /** Shared across every model turn in one run, including successful recovery. */
   recovery: { used: boolean };
-  request: (signal: AbortSignal) => Promise<T>;
+  /** Notify only for actual model output, never keepalive pings or polling. */
+  request: (signal: AbortSignal, onProgress: () => void) => Promise<T>;
   isResponseComplete?: (response: T) => boolean;
   onRecovery: (hint: string, reason: "request-timeout" | "response-incomplete") => void;
   onDiagnostic?: (diagnostic: AgentModelRequestDiagnostic) => void;
@@ -232,7 +249,7 @@ function emitDiagnostic(
   }
 }
 
-class IncompleteAgentModelResponseError extends Error {}
+export class IncompleteAgentModelResponseError extends Error {}
 
 /** Stop awaiting even if a provider adapter ignores abort; consume any late rejection. */
 function requestWithinSignal<T>(
@@ -266,7 +283,7 @@ function requestWithinSignal<T>(
 }
 
 export async function runAgentModelRequest<T>(input: AgentModelRequestOptions<T>): Promise<T> {
-  // Only the timeout branch can continue, and it spends the one run-level recovery token first.
+  // Timeout/incomplete recovery spends the single run-level allowance before continuing.
   for (let attempt = 1; ; attempt++) {
     input.signal.throwIfAborted();
     const requestTimeoutMs = Math.max(
@@ -282,15 +299,51 @@ export async function runAgentModelRequest<T>(input: AgentModelRequestOptions<T>
       throw new AgentModelRequestError("agent_model_run_budget_exhausted", evidence);
     }
 
+    const requestStartedAt = Date.now();
+    const requestMaxDurationMs = Math.min(
+      AGENT_MODEL_REQUEST_MAX_DURATION_MS,
+      Math.max(0, Math.floor(input.deadlineAt - requestStartedAt - CLEANUP_RESERVE_MS)),
+    );
+    const absoluteDeadlineAt = requestStartedAt + requestMaxDurationMs;
     const deadline = new AbortController();
     const signal = AbortSignal.any([input.signal, deadline.signal]);
-    const timer = setTimeout(
-      () => deadline.abort(new DOMException("Model request deadline elapsed", "TimeoutError")),
-      requestTimeoutMs,
-    );
+    let active = true;
+    let progressEvents = 0;
+    let lastProgressAt = requestStartedAt;
+    let timeoutKind: "idle" | "absolute" | undefined;
+    const expire = (kind: "idle" | "absolute") => {
+      if (!active || signal.aborted) return;
+      timeoutKind = kind;
+      deadline.abort(new DOMException("Model request deadline elapsed", "TimeoutError"));
+    };
+    let idleTimer = setTimeout(() => expire("idle"), requestTimeoutMs);
+    const absoluteTimer = setTimeout(() => expire("absolute"), requestMaxDurationMs);
+    const onProgress = () => {
+      // A late event from an obsolete attempt must not revive its watchdog.
+      if (!active || signal.aborted) return;
+      const now = Date.now();
+      if (now >= absoluteDeadlineAt) {
+        expire("absolute");
+        return;
+      }
+      if (now - lastProgressAt >= requestTimeoutMs) {
+        expire("idle");
+        return;
+      }
+      progressEvents++;
+      lastProgressAt = now;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => expire("idle"), requestTimeoutMs);
+    };
     let requestError: unknown;
     try {
-      const response = await requestWithinSignal(input.request, signal);
+      const response = await requestWithinSignal(
+        (requestSignal) => input.request(requestSignal, onProgress),
+        signal,
+      );
+      // Keep deadlines authoritative even if a busy event loop delayed a timer.
+      if (Date.now() >= absoluteDeadlineAt) expire("absolute");
+      else if (Date.now() - lastProgressAt >= requestTimeoutMs) expire("idle");
       signal.throwIfAborted();
       if (input.isResponseComplete && !input.isResponseComplete(response)) {
         throw new IncompleteAgentModelResponseError();
@@ -299,7 +352,9 @@ export async function runAgentModelRequest<T>(input: AgentModelRequestOptions<T>
     } catch (error) {
       requestError = error;
     } finally {
-      clearTimeout(timer);
+      active = false;
+      clearTimeout(idleTimer);
+      clearTimeout(absoluteTimer);
     }
 
     // An explicit caller stop always wins, even when it races the local deadline.
@@ -327,6 +382,10 @@ export async function runAgentModelRequest<T>(input: AgentModelRequestOptions<T>
           : "run-budget-exhausted",
         recover,
       );
+      evidence.requestMaxDurationMs = requestMaxDurationMs;
+      evidence.requestElapsedMs = Math.max(0, Date.now() - requestStartedAt);
+      evidence.progressEvents = progressEvents;
+      if (timeoutKind) evidence.timeoutKind = timeoutKind;
       emitDiagnostic(input, evidence);
       if (recover) {
         input.recovery.used = true;

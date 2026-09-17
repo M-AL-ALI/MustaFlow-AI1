@@ -2673,7 +2673,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
           void safeEvent(input.onEvent, "model:request", JSON.stringify(diagnostic));
         },
         // Keep the same routed provider/model, tools, conversation, and token telemetry.
-        request: (requestSignal) =>
+        request: (requestSignal, onModelProgress) =>
           createChatCompletion({
             ...boundedAgentModelTurn(
               {
@@ -2683,6 +2683,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
                 tools: toolsForLoop,
                 tool_choice: "required",
                 signal: requestSignal,
+                onModelProgress,
                 taskId: input.taskId ?? undefined,
                 taskMode: input.agentMode,
                 zeroCall: {
